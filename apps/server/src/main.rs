@@ -308,7 +308,7 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                     Ok(current) => current,
                     Err(_) => break,
                 };
-                if Instant::now() >= principal.expires_at { break; }
+                if !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
                 if current > active.last_sent {
                     if !send(&mut socket, Message::Binary(head_hint(active.document, current).into())).await { break; }
                     active.last_sent = current;
@@ -319,11 +319,12 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 // Queueing is not authorization: check the current head/access again at send.
                 let allowed = matches!(frame.session.head(principal.identity).await,
                     Ok(current) if current == frame.version);
-                if !allowed || Instant::now() >= principal.expires_at { calculation = None; continue; }
+                if !allowed || !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
                 if !send(&mut socket, Message::Binary(frame.bytes.into())).await { break; }
             }
             _ = heartbeat.tick() => {
-                if last_pong.elapsed() >= Duration::from_secs(45) || Instant::now() >= principal.expires_at { break; }
+                if last_pong.elapsed() >= Duration::from_secs(45)
+                    || !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
                 if !send(&mut socket, Message::Ping(Vec::new().into())).await { break; }
             }
             message = socket.recv() => match message {
@@ -331,7 +332,7 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 Some(Ok(Message::Ping(bytes))) => { if !send(&mut socket, Message::Pong(bytes)).await { break; } },
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                 Some(Ok(Message::Binary(bytes))) => {
-                    if Instant::now() >= principal.expires_at { break; }
+                    if !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
                     match wire::decode_request(&bytes) {
                         Ok(wire::ClientRequest::Command(command)) => {
                             let result = documents::handle_command(&state, &principal, *command).await;

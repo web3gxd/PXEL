@@ -34,7 +34,10 @@ replace this hint, retaining the same confirmed-projection rule.
 
 Wire v1 gains additive request/response messages; durable event encoding is
 unchanged. Every subscription uses the existing bounded actor queue and
-per-send authorization. A real two-socket integration test covers both a live
+per-send authorization. The development session token hash is rechecked in
+PostgreSQL before socket commands and document payload sends; logout therefore
+stops that socket at its next activity. This does not provide the atomic
+document ACL revocation gate promised for the final phase. A real two-socket integration test covers both a live
 commit and a late subscriber; a two-tab Playwright test checks both directions
 at DPR 1 and 2. Cross-process immediacy, ordered ACL revocation, presence,
 canonical replay, slow-client byte accounting and convergence stress remain

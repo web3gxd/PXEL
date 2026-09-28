@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { test } from 'node:test';
 import {
   api,
@@ -50,6 +51,29 @@ test('another socket receives a coalescing head hint and reads canonical state',
   } finally {
     first.socket.close();
     second.socket.close();
+  }
+});
+
+test('revoked development session receives no later document head hint', async () => {
+  const revokedCookie = await login(base, 'local');
+  const writerCookie = await login(base, 'local');
+  const { snapshot } = await createDocument(base, writerCookie);
+  const observer = await connect(base, revokedCookie);
+  const writer = await connect(base, writerCookie);
+  const messages = [];
+  observer.socket.on('message', (data) => messages.push(data));
+  try {
+    const closed = once(observer.socket, 'close', { signal: AbortSignal.timeout(5000) });
+    subscribeDocument(observer, snapshot.document_id, snapshot.version);
+    const logout = await api(base, revokedCookie, '/api/dev/session', 'DELETE');
+    assert.equal(logout.status, 204);
+    const committed = await writer.send(setCommand(writer, snapshot, 88));
+    assert.equal(committed.case, 'committed');
+    await closed;
+    assert.equal(messages.length, 0);
+  } finally {
+    observer.socket.close();
+    writer.socket.close();
   }
 });
 

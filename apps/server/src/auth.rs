@@ -12,6 +12,7 @@ use uuid::Uuid;
 pub struct Principal {
     pub identity: AuthenticatedActor,
     pub expires_at: Instant,
+    session_token_hash: [u8; 32],
 }
 
 pub struct Auth {
@@ -88,7 +89,19 @@ impl Auth {
             .map(|session| Principal {
                 identity: session.identity,
                 expires_at: Instant::now() + Duration::from_secs(session.remaining_seconds),
+                session_token_hash: token_hash(token),
             }))
+    }
+
+    pub async fn active(&self, principal: &Principal) -> Result<bool, DatabaseError> {
+        if Instant::now() >= principal.expires_at {
+            return Ok(false);
+        }
+        Ok(self
+            .database
+            .find_development_session(principal.session_token_hash)
+            .await?
+            .is_some_and(|session| session.identity == principal.identity))
     }
 }
 
@@ -177,11 +190,14 @@ mod tests {
         headers.insert(header::COOKIE, HeaderValue::from_str(value)?);
         let cleanup_headers = headers.clone();
         let result: Result<(), Box<dyn std::error::Error>> = async {
-            let identity = auth
+            let principal = auth
                 .authenticate(&headers)
                 .await?
-                .ok_or("principal missing")?
-                .identity;
+                .ok_or("principal missing")?;
+            let identity = principal.identity;
+            if !auth.active(&principal).await? {
+                return Err("issued session is not active".into());
+            }
             for _ in 0..256 {
                 let repeated = auth.issue(&headers).await?.ok_or("session missing")?;
                 if repeated.split(';').next() != Some(value) {
@@ -214,6 +230,9 @@ mod tests {
             headers.remove(header::COOKIE);
             headers.insert(header::COOKIE, HeaderValue::from_str(value)?);
             auth.revoke(&headers).await?;
+            if auth.active(&principal).await? {
+                return Err("revoked socket principal remains active".into());
+            }
             if auth.authenticate(&headers).await?.is_some() {
                 return Err("revoked session accepted".into());
             }

@@ -7,6 +7,9 @@ idempotent receipt, journal replay и отдельный WebSocket response дл
 вызывает HTTP refresh (ADR-014). Live-подписки canonical operations, replay/live
 barrier, presence и отзыв подписок еще не реализованы; их семантический gate остается
 отдельным. Подробные результаты текущего среза находятся в RUNBOOK.
+Отзыв dev-auth cookie теперь обнаруживается перед следующей WebSocket-командой
+или отправкой document payload и закрывает соединение; это не заменяет
+упорядоченный `access_epoch` gate для изменения document ACL.
 
 ## Command, validation, event, projection
 

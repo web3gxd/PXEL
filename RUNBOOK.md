@@ -1,5 +1,35 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — Проверка действующей dev-сессии на WebSocket
+
+Фаза 3, security slice. Перед изменением прочитаны AGENTS, roadmap,
+collaboration contract, auth и PostgreSQL session adapter. Ранее logout отзывал
+cookie для новых HTTP/WS соединений, но уже открытый WS держал principal до
+истечения срока. Теперь `Principal` хранит только SHA-256 token hash, не token;
+`Auth::active` сверяет его с live-записью PostgreSQL и identity. Connection
+проверяет его перед command, subscription и calculation requests, перед
+document head/calculation payload send и на heartbeat. При отзыве соединение
+закрывается. Содержимое документа и credential не попадают в tracing.
+
+Изменены `apps/server/src/auth.rs`, `main.rs`, unit test, живой тест
+`tests/integration/document.test.mjs`, ADR-014, collaboration docs и RUNBOOK.
+Новый integration test использует разные cookies одного dev account:
+после DELETE одной сессии ее WS не получает следующий head hint от правки
+другой сессии. `pnpm test:integration` 17/17, `pnpm test:e2e` 14/14 dev,
+`pnpm test:recovery` 1/1, `just check` exit 0 (оба Clippy режима, Rust tests,
+native/WASM checks, proto drift, 48 Vitest, lint/typecheck/build).
+`cargo test --locked -p pxel-server --features dev-auth` 4/4 и targeted
+Clippy также прошли. После production build дополнительно прошел Playwright
+на built Axum assets/CSP: 14/14. SQLx metadata не менялась; remote CI/Linux
+не запускались.
+
+Ограничение: DB recheck и socket close не являются атомарным `access_epoch`
+send gate для изменения document ACL; гонка между check и фактической
+отправкой пока возможна. Это следующий security gate фазы 3 вместе с
+canonical replay/live barrier.
+
+---
+
 ## 2026-09-29 — Первый phase-3 slice: две вкладки и version hints
 
 Перед началом прочитаны AGENTS, roadmap, collaboration contract, действующий
