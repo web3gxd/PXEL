@@ -55,6 +55,11 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/if-function",
       "title": "IF function",
       "retrieved_at": "2026-09-28"
+    },
+    "ifs": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/ifs-function",
+      "title": "IFS function",
+      "retrieved_at": "2026-09-29"
     }
   },
   "cases": [
@@ -1427,6 +1432,78 @@
       "origin": "Sheet1!C1",
       "cells": {},
       "expected": { "type": "error", "value": "#VALUE!" },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+    },
+    {
+      "id": "ifs_second_true",
+      "formula": "=IFS(FALSE,1,TRUE,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 2 },
+      "provenance": { "sources": ["ifs"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "ifs_no_true",
+      "formula": "=IFS(FALSE,1,FALSE,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "error", "value": "#N/A" },
+      "provenance": { "sources": ["ifs"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "ifs_non_boolean_test",
+      "formula": "=IFS(1,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "error", "value": "#VALUE!" },
+      "provenance": { "sources": ["ifs"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "ifs_skips_unselected_result",
+      "formula": "=IFS(FALSE,1/0,TRUE,9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 9 },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+    },
+    {
+      "id": "ifs_empty_selected_result",
+      "formula": "=IFS(TRUE,)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 0 },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+    },
+    {
+      "id": "ifs_unpaired_test",
+      "formula": "=IFS(TRUE,1,FALSE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "error", "value": "#VALUE!" },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+    },
+    {
+      "id": "ifs_first_true_wins",
+      "formula": "=IFS(TRUE,1,TRUE,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 1 },
+      "provenance": { "sources": ["ifs"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "ifs_error_in_evaluated_condition",
+      "formula": "=IFS(#DIV/0!,1,TRUE,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "error", "value": "#DIV/0!" },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+    },
+    {
+      "id": "ifs_skips_later_condition",
+      "formula": "=IFS(TRUE,1,1/0,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 1 },
       "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
     }
   ]

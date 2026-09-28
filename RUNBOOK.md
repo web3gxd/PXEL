@@ -1,5 +1,46 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — IFS в общем формульном профиле
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-009, formula semantics, evaluator,
+общий fixture corpus и server integration tests. Цель — добавить следующий
+логический оператор через один native/WASM evaluator, сохранив ограниченный
+work budget и отсутствие доверия к клиентскому AST. IFS принимает 1–127 пар
+test/value: условия вычисляются слева направо, первый Boolean TRUE выбирает
+свой результат, дальнейшие пары не вычисляются; отсутствие TRUE даёт #N/A,
+небулевый вычисленный test даёт #VALUE!, ошибка test распространяется.
+Пропущенный выбранный результат даёт 0. Для ленивости/omission это проектный
+контракт, а не заявленная проверка в Excel. Верхняя граница 127 пар взята из
+официальной документации Microsoft; парсер отклоняет 128 пар контролируемым
+LimitExceeded до evaluator.
+
+Изменены evaluator и его тесты, девять shared fixtures с provenance,
+stateful native/browser WASM generator, живой server integration test,
+formula semantics/compatibility/WASM plan, презентация и RUNBOOK. Исходный
+красный corpus до реализации вернул #NAME? для первого IFS case. После
+исправления тест на 127/128 пар сначала выявил ошибку тестовых данных:
+строка из длинных FALSE дошла до parser argument limit на поздней позиции.
+Тест использует компактные FALSE-выражения `0=1`; 127 пар вычисляются, 128
+отклоняются typed parser error. Проверки: targeted Rust
+engine/corpus 12 tests и Clippy formula crate прошли; `just formula-parity`
+прошёл 92/92 scalar cases и 1000 книг/2000 patches с одинаковыми
+native/browser WASM normalized hashes. Эта серия на Windows 10.0.26100,
+Intel Ultra 9 185H, Chromium 153.0.8010.12: 142.3 мс суммарного Worker
+compute, 1392.33 мс roundtrip всего harness для 1.60 MB input; это не p95
+пользовательского ввода. Живой `pnpm test:integration` прошёл 23/23,
+включая durable IFS и пересчёт после изменения входа. Первый `just check`
+прошёл Rust Clippy/test/build, wasm32 check и protobuf drift, но остановился
+на Prettier в новом integration test. После форматирования повторный полный
+`just check` завершился с exit 0: Rust format/оба Clippy режима/tests/build,
+wasm32 check, protobuf drift, Prettier, ESLint, TS, 52 Vitest и production
+Vite build. `pnpm --filter @pxel/web presentation:check` прошёл 10 слайдов,
+навигацию и layout 1440×900/390×844. Новые E2E/recovery сценарии в этом
+срезе не запускались: интеграция проверена живым сервером, native/browser
+WASM parity отдельным harness. Excel golden verification, volatile context и
+полный gate фазы 2 остаются открытыми.
+
+---
+
 ## 2026-09-29 — COUNT и COUNTA в общем Rust-движке
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-013, formula semantics, evaluator,

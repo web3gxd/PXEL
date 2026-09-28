@@ -34,6 +34,13 @@ reported 144.6 ms Worker compute and 1278.89 ms harness roundtrip for 1.60 MB
 of input on Windows 10.0.26100, Intel Core Ultra 9 185H and Chromium
 153.0.8010.12. These are harness totals, not input-latency percentiles.
 
+The IFS slice expanded the shared corpus to 92 cases and the seeded stateful
+generator to ten formula shapes. `just formula-parity` passed 92/92 expected,
+native and browser WASM scalar results, plus 1000 books/2000 patches with
+matching normalized hashes. That Windows/Chromium run measured 142.3 ms Worker
+compute and 1392.33 ms total harness roundtrip over 1.60 MB input. These
+measurements are aggregate harness timings, not product latency percentiles.
+
 Actual browser suite: draft preview, invalid-to-valid recovery, cancel with
 unchanged durable version/hash, reload, server recalculation and missing-WASM
 failure passed at DPR 1/2. Twelve scenarios passed against built Vite assets

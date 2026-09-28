@@ -31,6 +31,25 @@ fn scalar_contract_and_lazy_if() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[test]
+fn ifs_selects_first_true_pair_without_evaluating_later_pairs()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (formula, expected) in [
+        ("=IFS(FALSE,1/0,TRUE,9)", Value::Number(9.0)),
+        ("=IFS(TRUE,1,1/0,2)", Value::Number(1.0)),
+        ("=IFS(FALSE,1,FALSE,2)", Value::Error(FormulaError::Na)),
+        ("=IFS(1,2)", Value::Error(FormulaError::Value)),
+        ("=IFS(TRUE,)", Value::Number(0.0)),
+    ] {
+        assert_eq!(eval(formula)?, expected, "{formula}");
+    }
+    let max_pairs = format!("=IFS({}TRUE,7)", "0=1,0,".repeat(126));
+    assert_eq!(eval(&max_pairs)?, Value::Number(7.0));
+    let too_many = format!("=IFS({}TRUE,7)", "0=1,0,".repeat(127));
+    assert!(parse(&too_many).is_err());
+    Ok(())
+}
+
 struct Ones;
 impl ReferenceResolver for Ones {
     fn resolve_cell(&self, _: &CellReference) -> Value {

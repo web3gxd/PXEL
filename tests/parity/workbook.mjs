@@ -36,6 +36,7 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=MAX(A1:B1)',
     '=COUNT(A1:B1)',
     '=COUNTA(A1:B1)',
+    '=IFS(A1>B1,A1,TRUE,B1)',
   ];
   const source = sources[next() % sources.length];
   const primitive = (value) => ({ type: 'number', value });

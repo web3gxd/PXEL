@@ -189,6 +189,8 @@ fn eval(
         Node::Call { name, arguments } => {
             if name == "IF" {
                 conditional(ast, arguments, resolver, budget, depth + 1)?
+            } else if name == "IFS" {
+                conditions(ast, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "SUM" | "AVERAGE" | "MIN" | "MAX") {
                 aggregate(ast, name, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "COUNT" | "COUNTA") {
@@ -205,6 +207,34 @@ fn eval(
             }
         }
     })
+}
+fn conditions(
+    ast: &Ast,
+    args: &[NodeId],
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Value, EvaluationError> {
+    let (pairs, remainder) = args.as_chunks::<2>();
+    if args.len() < 2 || args.len() > 254 || !remainder.is_empty() {
+        return Ok(Value::Error(FormulaError::Value));
+    }
+    for pair in pairs {
+        let condition = match eval(ast, pair[0], resolver, budget, depth)? {
+            Value::Boolean(value) => value,
+            Value::Error(error) => return Ok(Value::Error(error)),
+            _ => return Ok(Value::Error(FormulaError::Value)),
+        };
+        if condition {
+            let value = eval(ast, pair[1], resolver, budget, depth)?;
+            return Ok(if value == Value::Blank {
+                Value::Number(0.0)
+            } else {
+                value
+            });
+        }
+    }
+    Ok(Value::Error(FormulaError::Na))
 }
 fn count(
     ast: &Ast,
