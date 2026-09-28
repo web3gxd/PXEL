@@ -618,6 +618,22 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
     Some(v1::CanonicalOperation { kind: Some(kind) })
 }
 
+pub(crate) fn committed_message(event: &CommittedEvent) -> Option<v1::OperationCommitted> {
+    let EventPrincipal::User(actor_id) = event.principal else {
+        return None;
+    };
+    let operation = canonical(event.operation.clone())?;
+    Some(v1::OperationCommitted {
+        document_id: event.document_id.as_bytes().to_vec(),
+        operation_id: event.operation_id.as_bytes().to_vec(),
+        actor_id: actor_id.as_bytes().to_vec(),
+        committed_version: event.version.get(),
+        canonical_operation: Some(operation),
+        confirmed_state_hash: event.state_hash.to_vec(),
+        transformed: false,
+    })
+}
+
 pub async fn handle_command(
     state: &AppState,
     principal: &auth::Principal,
@@ -635,17 +651,13 @@ pub async fn handle_command(
     }
     .await;
     let payload = match result {
-        Ok(Submission::Committed {
-            event, actor_id, ..
-        }) => v1::server_envelope::Payload::Committed(v1::OperationCommitted {
-            document_id: event.document_id.as_bytes().to_vec(),
-            operation_id: event.operation_id.as_bytes().to_vec(),
-            actor_id: actor_id.as_bytes().to_vec(),
-            committed_version: event.version.get(),
-            canonical_operation: canonical(event.operation),
-            confirmed_state_hash: event.state_hash.to_vec(),
-            transformed: false,
-        }),
+        Ok(Submission::Committed { event, .. }) => match committed_message(&event) {
+            Some(message) => v1::server_envelope::Payload::Committed(message),
+            None => v1::server_envelope::Payload::Error(v1::ProtocolError {
+                code: v1::ErrorCode::ServerBusy.into(),
+                supported_protocol_version: wire::PROTOCOL_VERSION,
+            }),
+        },
         Ok(Submission::AlreadyCommitted(receipt)) => {
             v1::server_envelope::Payload::Receipt(v1::OperationReceipt {
                 document_id,

@@ -161,11 +161,20 @@ test('two browser tabs see each other’s committed cell after a head hint', asy
   try {
     await second.goto(page.url());
     await expect(second.getByTestId('connection-status')).toHaveText('Подключено');
+    let fullDocumentReads = 0;
+    second.on('request', (request) => {
+      if (
+        request.method() === 'GET' &&
+        /\/api\/documents\/[0-9a-f-]{36}$/.test(new URL(request.url()).pathname)
+      )
+        fullDocumentReads++;
+    });
     const firstBar = page.getByRole('textbox', { name: 'Значение ячейки' });
     await firstBar.fill('17');
     await firstBar.press('Enter');
     await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
     await expect(second.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('17');
+    expect(fullDocumentReads).toBe(0);
     const secondBar = second.getByRole('textbox', { name: 'Значение ячейки' });
     await secondBar.fill('23');
     await secondBar.press('Enter');

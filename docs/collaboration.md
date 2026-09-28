@@ -3,7 +3,8 @@
 Foundation accepted for phase 0. Ниже проектный контракт для фаз 1–4.
 Текущий код уже реализует bounded actor, CAS commit SetCellValue/SetCellFormula/ClearCell,
 idempotent receipt, journal replay и отдельный WebSocket response для расчета.
-Коалесцирующий авторизованный version hint уже уведомляет вторую вкладку и
+Коалесцирующий авторизованный version hint уже уведомляет вторую вкладку;
+следующий по версии canonical event применяется локально, gap или system event
 вызывает HTTP refresh (ADR-014). Live-подписки canonical operations, replay/live
 barrier, presence и отзыв подписок еще не реализованы; их семантический gate остается
 отдельным. Подробные результаты текущего среза находятся в RUNBOOK.

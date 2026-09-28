@@ -891,6 +891,35 @@ export class DocumentStore {
         throw new Error('Invalid document head hint');
       if (bytesUuid(hint.documentId) !== this.projection?.document_id) return;
       if (hint.headVersion > BigInt(this.projection.version)) {
+        const event = hint.latestOperation;
+        if (event && hint.headVersion === BigInt(this.projection.version) + 1n) {
+          if (
+            event.documentId.length !== 16 ||
+            bytesUuid(event.documentId) !== this.projection.document_id ||
+            event.operationId.length !== 16 ||
+            event.actorId.length !== 16 ||
+            event.committedVersion !== hint.headVersion ||
+            event.confirmedStateHash.length !== 32 ||
+            !event.canonicalOperation
+          )
+            throw new Error('Invalid canonical head event');
+          this.apply(event.canonicalOperation);
+          this.projection = {
+            ...this.projection,
+            version: String(hint.headVersion),
+            state_hash: [...event.confirmedStateHash]
+              .map((byte) => byte.toString(16).padStart(2, '0'))
+              .join(''),
+          };
+          this.restartCalculation();
+          this.syncPreview();
+          this.notify();
+          if (BigInt(this.projection.version) >= this.headRefreshVersion) {
+            clearTimeout(this.headRefreshTimer);
+            this.headRefreshAttempts = 0;
+          }
+          return;
+        }
         if (hint.headVersion > this.headRefreshVersion) this.headRefreshVersion = hint.headVersion;
         await this.refreshHead();
       }

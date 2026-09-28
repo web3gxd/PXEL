@@ -16,7 +16,7 @@ use axum::{
 };
 use prost::Message as ProstMessage;
 use serde::Serialize;
-use spreadsheet_collab::{DocumentSession, SessionDirectory};
+use spreadsheet_collab::{DocumentSession, HeadUpdate, SessionDirectory};
 use spreadsheet_domain::workbook::{DocumentId, DocumentVersion};
 use spreadsheet_storage::{LocalFilesystemBlobStore, PgDatabase};
 use spreadsheet_wire_protocol::{self as wire, v1};
@@ -47,11 +47,11 @@ struct Status {
 struct HeadSubscription {
     document: DocumentId,
     session: DocumentSession,
-    updates: watch::Receiver<DocumentVersion>,
+    updates: watch::Receiver<HeadUpdate>,
     last_sent: DocumentVersion,
 }
 
-async fn next_head(subscription: &mut Option<HeadSubscription>) -> Option<DocumentVersion> {
+async fn next_head(subscription: &mut Option<HeadSubscription>) -> Option<HeadUpdate> {
     let Some(active) = subscription.as_mut() else {
         return std::future::pending().await;
     };
@@ -59,16 +59,22 @@ async fn next_head(subscription: &mut Option<HeadSubscription>) -> Option<Docume
         *subscription = None;
         return None;
     }
-    Some(*active.updates.borrow_and_update())
+    Some(active.updates.borrow_and_update().clone())
 }
 
-fn head_hint(document: DocumentId, version: DocumentVersion) -> Vec<u8> {
+fn head_hint(document: DocumentId, update: &HeadUpdate) -> Vec<u8> {
+    let latest_operation = update
+        .event
+        .as_ref()
+        .filter(|event| event.document_id == document && event.version == update.version)
+        .and_then(|event| documents::committed_message(event));
     v1::ServerEnvelope {
         protocol_version: wire::PROTOCOL_VERSION,
         payload: Some(v1::server_envelope::Payload::DocumentHeadChanged(
             v1::DocumentHeadChanged {
                 document_id: document.as_bytes().to_vec(),
-                head_version: version.get(),
+                head_version: update.version.get(),
+                latest_operation,
             },
         )),
     }
@@ -300,17 +306,18 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
     let mut head_subscription: Option<HeadSubscription> = None;
     loop {
         tokio::select! {
-            version = next_head(&mut head_subscription) => {
-                let Some(version) = version else { continue; };
+            update = next_head(&mut head_subscription) => {
+                let Some(update) = update else { continue; };
                 let Some(active) = head_subscription.as_mut() else { continue; };
-                if version <= active.last_sent { continue; }
+                if update.version <= active.last_sent { continue; }
                 let current = match active.session.head(principal.identity).await {
                     Ok(current) => current,
                     Err(_) => break,
                 };
                 if !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
                 if current > active.last_sent {
-                    if !send(&mut socket, Message::Binary(head_hint(active.document, current).into())).await { break; }
+                    let payload = if update.version == current { update } else { HeadUpdate { version: current, event: None } };
+                    if !send(&mut socket, Message::Binary(head_hint(active.document, &payload).into())).await { break; }
                     active.last_sent = current;
                 }
             }
@@ -373,8 +380,10 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 Err(_) => break,
                             };
                             if request.last_seen_version > current.get() { break; }
+                            let update = updates.borrow().clone();
+                            let payload = if update.version == current { update } else { HeadUpdate { version: current, event: None } };
                             if current.get() > request.last_seen_version
-                                && !send(&mut socket, Message::Binary(head_hint(document, current).into())).await { break; }
+                                && !send(&mut socket, Message::Binary(head_hint(document, &payload).into())).await { break; }
                             head_subscription = Some(HeadSubscription {
                                 document,
                                 session,

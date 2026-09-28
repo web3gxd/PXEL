@@ -1,5 +1,47 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — Fast path для следующего canonical event
+
+После phase-3 version hint измеримый риск стал виден в самой схеме: каждая
+удаленная правка вызывала HTTP-загрузку всей sparse projection. Цель среза —
+применять одиночный соседний по версии canonical event без полной загрузки,
+сохраняя fallback при gap и system events. Прочитаны AGENTS, roadmap,
+ADR-014, actor/wire/client код. Инварианты: server order, отсутствие partial
+apply, confirmed/pending separation, slow-client coalescing, per-send auth.
+
+Actor watch теперь хранит только последнюю `HeadUpdate {version,event}`;
+после durable commit публикуется immutable user event, после replay/system
+advance — только head без event. Additive wire field `latest_operation` в
+`DocumentHeadChanged` использует существующий `OperationCommitted` DTO;
+storage envelope не менялся. Сервер проверяет ACL и действующую dev-сессию
+перед отправкой. Browser применяет event лишь при `head_version = confirmed+1`,
+валидирует IDs/version/hash, сохраняет optimistic queue отдельно и обновляет
+server calculation generation. При gap, system event или отсутствии payload
+читается каноническая HTTP projection. Подробное решение — ADR-014.
+
+Изменены proto/generated descriptor и TS, collab watch/тесты,
+server documents/main, browser store/e2e/unit, integration test, README,
+collaboration/ADR-014 и RUNBOOK. `pnpm proto:generate`, Rust all-targets check,
+Clippy all-features, `pnpm typecheck`, `pnpm test` 49/49,
+`pnpm test:integration` 17/17 и двухвкладочный Playwright DPR1/2 2/2
+прошли. Browser test дополнительно зафиксировал **0 full-document GET**
+после удаленной одиночной правки. Затем прошли `pnpm test:e2e` 14/14 dev,
+`pnpm test:recovery` 1/1, `just check` exit 0 (оба Clippy режима, Rust
+workspace tests, native/WASM checks, proto drift, 49 Vitest, lint/typecheck,
+production build), `pnpm --filter @pxel/web presentation:check` на двух
+viewport и `pnpm test:e2e` 14/14 на built Axum assets/CSP.
+После self-review сборщик `OperationCommitted` стал возвращать `None` для
+непредставимой в текущем wire операции, чтобы будущая команда вызвала resync,
+а не пустой canonical payload. Добавлен тест coalesced gap с непригодным
+последним событием: клиент игнорирует его и берет версию 3 из HTTP. После этой
+точечной правки прошли `pnpm test` 50/50, Rust Clippy all-targets/all-features;
+полный `just check` выше относится к состоянию непосредственно до неё.
+Нет измерений p95/байтов сети; единичный тест доказывает только отсутствие
+лишнего GET в данном сценарии. Фаза 3 не принята: durable replay/live barrier,
+ACL epoch, presence и convergence stress остаются открытыми.
+
+---
+
 ## 2026-09-29 — Проверка действующей dev-сессии на WebSocket
 
 Фаза 3, security slice. Перед изменением прочитаны AGENTS, roadmap,

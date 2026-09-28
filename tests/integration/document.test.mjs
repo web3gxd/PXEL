@@ -31,6 +31,9 @@ test('another socket receives a coalescing head hint and reads canonical state',
     const hint = await update;
     assert.equal(hint.case, 'documentHeadChanged');
     assert.equal(hint.value.headVersion, 2n);
+    assert.equal(hint.value.latestOperation.committedVersion, 2n);
+    assert.equal(hint.value.latestOperation.canonicalOperation.kind.case, 'setCellValue');
+    assert.equal(hint.value.latestOperation.canonicalOperation.kind.value.value.kind.value, 42);
     assert.equal(
       Buffer.from(hint.value.documentId).toString('hex'),
       snapshot.document_id.replaceAll('-', ''),

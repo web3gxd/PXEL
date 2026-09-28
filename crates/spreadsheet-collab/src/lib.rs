@@ -49,6 +49,12 @@ pub enum Submission {
     AlreadyCommitted(CommitReceipt),
 }
 
+#[derive(Clone)]
+pub struct HeadUpdate {
+    pub version: DocumentVersion,
+    pub event: Option<Arc<CommittedEvent>>,
+}
+
 enum Request {
     ReadHead {
         identity: AuthenticatedActor,
@@ -75,7 +81,7 @@ enum Request {
 pub struct DocumentSession {
     sender: mpsc::Sender<Request>,
     calculated: watch::Receiver<Option<Arc<CalculatedState>>>,
-    head_updates: watch::Receiver<DocumentVersion>,
+    head_updates: watch::Receiver<HeadUpdate>,
 }
 
 impl DocumentSession {
@@ -84,7 +90,7 @@ impl DocumentSession {
     pub async fn watch_head(
         &self,
         identity: AuthenticatedActor,
-    ) -> Result<watch::Receiver<DocumentVersion>, SessionError> {
+    ) -> Result<watch::Receiver<HeadUpdate>, SessionError> {
         let receiver = self.head_updates.clone();
         self.authorized_head(identity).await?;
         Ok(receiver)
@@ -248,7 +254,10 @@ impl<J: OperationJournal + Clone + Send + Sync + 'static> SessionDirectory
         }
         let (sender, receiver) = mpsc::channel(QUEUE_CAPACITY);
         let (calculation, calculated) = CalculationHandle::start(self.calculation_slots.clone());
-        let (head_sender, head_updates) = watch::channel(DocumentVersion::ZERO);
+        let (head_sender, head_updates) = watch::channel(HeadUpdate {
+            version: DocumentVersion::ZERO,
+            event: None,
+        });
         let session = DocumentSession {
             sender,
             calculated,
@@ -271,7 +280,7 @@ async fn run<J: OperationJournal>(
     document: DocumentId,
     mut receiver: mpsc::Receiver<Request>,
     calculation: CalculationHandle,
-    head_sender: watch::Sender<DocumentVersion>,
+    head_sender: watch::Sender<HeadUpdate>,
 ) {
     let mut workbook = Arc::new(Workbook::empty(document));
     while let Ok(Some(request)) =
@@ -296,6 +305,12 @@ async fn run<J: OperationJournal>(
                 reply,
             } => {
                 let result = submit(&journal, identity, &mut workbook, command, &calculation).await;
+                if let Ok(Submission::Committed { event, .. }) = &result {
+                    head_sender.send_replace(HeadUpdate {
+                        version: event.version,
+                        event: Some(Arc::new((**event).clone())),
+                    });
+                }
                 let _ = reply.send(result);
             }
             Request::AdvanceContext {
@@ -316,8 +331,11 @@ async fn run<J: OperationJournal>(
                 let _ = reply.send(result);
             }
         }
-        if *head_sender.borrow() != workbook.version() {
-            head_sender.send_replace(workbook.version());
+        if head_sender.borrow().version != workbook.version() {
+            head_sender.send_replace(HeadUpdate {
+                version: workbook.version(),
+                event: None,
+            });
         }
     }
     calculation.stop();

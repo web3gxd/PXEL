@@ -156,6 +156,9 @@ message SubscribeDocument {
 message DocumentHeadChanged {
   bytes document_id = 1;
   uint64 head_version = 2;
+  // Only the immediately latest user event, when available. Clients with a
+  // version gap must resync instead of applying this event out of order.
+  OperationCommitted latest_operation = 3;
 }
 
 message CalculatedValue {

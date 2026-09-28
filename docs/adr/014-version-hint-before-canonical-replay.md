@@ -17,11 +17,14 @@ An authenticated socket may send `SubscribeDocument(document_id,
 last_seen_version)`. The document actor registers a coalescing Tokio watch
 receiver **before** an authorization/head read. It sends `DocumentHeadChanged`
 immediately when the server head exceeds the supplied version, or later after
-a committed actor event. The send path rechecks the current ACL and head; the
-hint contains only opaque document ID and version. Slow receivers coalesce
-versions, never block the actor and never receive document content through this
-message. The client performs an authorized HTTP projection read and keeps the
-confirmed/pending separation. On reconnect it resubscribes with its last
+a committed actor event. The send path rechecks the current ACL and head. The
+hint contains opaque document ID/version and, when available, the latest
+canonical user operation with its state hash. A client exactly one version
+behind may apply that operation to its confirmed cache; a version gap, system
+event or missing operation requires an authorized HTTP projection read. Slow
+receivers coalesce versions, never block the actor and resync after a gap.
+Pending local edits stay separate from confirmed content. On reconnect the
+client resubscribes with its last
 confirmed version; an initial head check closes the subscribe/commit race.
 
 This is a version invalidation channel, **not** an operation replay protocol or

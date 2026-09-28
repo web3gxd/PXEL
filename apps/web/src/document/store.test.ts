@@ -109,6 +109,49 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('applies an immediately next canonical head event without downloading the workbook', async () => {
+    const { store } = await connectedStore();
+    const fetchMock = vi.fn(async () => {
+      throw new Error('Unexpected full projection read');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'documentHeadChanged',
+          value: {
+            documentId: uuidBytes(documentId),
+            headVersion: 2n,
+            latestOperation: {
+              documentId: uuidBytes(documentId),
+              operationId: uuidBytes(uuidV7()),
+              actorId: uuidBytes(documentId),
+              committedVersion: 2n,
+              confirmedStateHash: new Uint8Array(32),
+              canonicalOperation: {
+                kind: {
+                  case: 'setCellValue',
+                  value: {
+                    address: {
+                      sheetId: uuidBytes(sheetId),
+                      rowId: uuidBytes(rowId),
+                      columnId: uuidBytes(columnId),
+                    },
+                    value: { kind: { case: 'number', value: 42 } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(store.projection?.version).toBe('2');
+    expect(store.display({ row: 0, column: 0 })).toBe('42');
+    expect(fetchMock).not.toHaveBeenCalled();
+    store.disconnected();
+  });
   it('refreshes canonical content when a remote head hint arrives', async () => {
     const { store } = await connectedStore();
     const next = projection();
@@ -131,6 +174,33 @@ describe('document projection and pending intents', () => {
     );
     expect(store.projection?.version).toBe('2');
     expect(store.display({ row: 0, column: 0 })).toBe('42');
+    store.disconnected();
+  });
+  it('resynchronizes from the server when a coalesced hint skips a version', async () => {
+    const { store } = await connectedStore();
+    const next = projection();
+    next.version = '3';
+    next.sheets[0]!.cells = [
+      { row_id: rowId, column_id: columnId, value: { type: 'number', value: 77 } },
+    ];
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => next }));
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'documentHeadChanged',
+          value: {
+            documentId: uuidBytes(documentId),
+            headVersion: 3n,
+            latestOperation: { committedVersion: 3n },
+          },
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.projection?.version).toBe('3');
+    expect(store.display({ row: 0, column: 0 })).toBe('77');
     store.disconnected();
   });
   it('retries a temporarily failed remote head refresh without resending a user command', async () => {

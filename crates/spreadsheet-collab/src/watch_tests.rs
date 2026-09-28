@@ -17,6 +17,12 @@ fn state(version: u64) -> Result<Arc<CalculatedState>, DomainError> {
         ),
     }))
 }
+fn head_update(version: u64) -> Result<HeadUpdate, DomainError> {
+    Ok(HeadUpdate {
+        version: DocumentVersion::new(version)?,
+        event: None,
+    })
+}
 
 #[tokio::test]
 async fn head_authorizes_without_requiring_a_calculated_result()
@@ -24,7 +30,7 @@ async fn head_authorizes_without_requiring_a_calculated_result()
     let identity = identity()?;
     let (sender, mut requests) = mpsc::channel(1);
     let (_output, calculated) = watch::channel(None);
-    let (_head_sender, head_updates) = watch::channel(DocumentVersion::ZERO);
+    let (_head_sender, head_updates) = watch::channel(head_update(0)?);
     let session = DocumentSession {
         sender,
         calculated,
@@ -51,7 +57,7 @@ async fn watch_registers_before_authorization_and_keeps_current_result()
     let identity = identity()?;
     let (sender, mut requests) = mpsc::channel(1);
     let (output, calculated) = watch::channel(Some(state(1)?));
-    let (_head_sender, head_updates) = watch::channel(DocumentVersion::ZERO);
+    let (_head_sender, head_updates) = watch::channel(head_update(0)?);
     let session = DocumentSession {
         sender,
         calculated,
@@ -91,7 +97,7 @@ async fn watch_never_returns_cached_content_when_authorization_fails()
     let identity = identity()?;
     let (sender, mut requests) = mpsc::channel(1);
     let (_output, calculated) = watch::channel(Some(state(1)?));
-    let (_head_sender, head_updates) = watch::channel(DocumentVersion::ZERO);
+    let (_head_sender, head_updates) = watch::channel(head_update(0)?);
     let session = DocumentSession {
         sender,
         calculated,
@@ -119,7 +125,7 @@ async fn head_watcher_registers_before_authorization_and_coalesces_versions()
     let identity = identity()?;
     let (sender, mut requests) = mpsc::channel(1);
     let (_output, calculated) = watch::channel(None);
-    let (head_sender, head_updates) = watch::channel(DocumentVersion::ZERO);
+    let (head_sender, head_updates) = watch::channel(head_update(0)?);
     let session = DocumentSession {
         sender,
         calculated,
@@ -129,14 +135,14 @@ async fn head_watcher_registers_before_authorization_and_coalesces_versions()
     let Some(Request::ReadHead { reply, .. }) = requests.recv().await else {
         return Err("missing authorization request".into());
     };
-    head_sender.send_replace(DocumentVersion::new(2)?);
-    head_sender.send_replace(DocumentVersion::new(3)?);
+    head_sender.send_replace(head_update(2)?);
+    head_sender.send_replace(head_update(3)?);
     assert!(reply.send(Ok(DocumentVersion::new(3)?)).is_ok());
     let mut updates = registration.await??;
     tokio::time::timeout(Duration::from_secs(1), updates.changed()).await??;
-    assert_eq!(updates.borrow_and_update().get(), 3);
-    head_sender.send_replace(DocumentVersion::new(4)?);
+    assert_eq!(updates.borrow_and_update().version.get(), 3);
+    head_sender.send_replace(head_update(4)?);
     tokio::time::timeout(Duration::from_secs(1), updates.changed()).await??;
-    assert_eq!(updates.borrow_and_update().get(), 4);
+    assert_eq!(updates.borrow_and_update().version.get(), 4);
     Ok(())
 }
