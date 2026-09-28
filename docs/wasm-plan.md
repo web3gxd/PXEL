@@ -41,6 +41,16 @@ matching normalized hashes. That Windows/Chromium run measured 142.3 ms Worker
 compute and 1392.33 ms total harness roundtrip over 1.60 MB input. These
 measurements are aggregate harness timings, not product latency percentiles.
 
+The IFERROR slice expanded the corpus to 99 cases and the stateful generator
+to eleven shapes. A first run exposed a one-ULP _harness_ mismatch for division:
+native/WASM semantic hashes agreed, but the native example parsed its own JSON
+result into `serde_json::Value` before serializing it again. The runner now
+validates and retains each result as `RawValue`, preserving its numeric JSON
+without a second decimal-to-binary conversion. The unchanged exact comparison
+passed 99 scalar cases and 1000 books/2000 patches. This run measured 132.3 ms
+Worker compute and 1244.06 ms total roundtrip over 1.60 MB input on the same
+Windows/Chromium machine. No numeric tolerance was introduced.
+
 Actual browser suite: draft preview, invalid-to-valid recovery, cancel with
 unchanged durable version/hash, reload, server recalculation and missing-WASM
 failure passed at DPR 1/2. Twelve scenarios passed against built Vite assets

@@ -50,6 +50,23 @@ fn ifs_selects_first_true_pair_without_evaluating_later_pairs()
     Ok(())
 }
 
+#[test]
+fn iferror_does_not_turn_work_exhaustion_into_a_fallback() -> Result<(), Box<dyn std::error::Error>>
+{
+    let ast = parse("=IFERROR(SUM(A1:A100000),7)")?.ast;
+    assert_eq!(
+        evaluate(&ast, &Ones, &mut EvaluationBudget::new(100)),
+        Err(EvaluationError::CalculationLimitExceeded)
+    );
+    let mut cancelled = EvaluationBudget::default();
+    cancelled.cancel();
+    assert_eq!(
+        evaluate(&ast, &Ones, &mut cancelled),
+        Err(EvaluationError::Cancelled)
+    );
+    Ok(())
+}
+
 struct Ones;
 impl ReferenceResolver for Ones {
     fn resolve_cell(&self, _: &CellReference) -> Value {

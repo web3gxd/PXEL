@@ -37,6 +37,7 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=COUNT(A1:B1)',
     '=COUNTA(A1:B1)',
     '=IFS(A1>B1,A1,TRUE,B1)',
+    '=IFERROR(A1/B1,0)',
   ];
   const source = sources[next() % sources.length];
   const primitive = (value) => ({ type: 'number', value });
@@ -158,11 +159,13 @@ try {
   const start = performance.now();
   const actual = await page.evaluate((items) => window.run(items), requests);
   assert.equal(actual.results.length, 1000);
-  assert.deepEqual(
-    actual.results,
-    expected,
-    'Stateful native/WASM results and hashes must match at every step',
-  );
+  for (let index = 0; index < expected.length; index++) {
+    assert.deepEqual(
+      actual.results[index],
+      expected[index],
+      `Stateful native/WASM results and hashes must match for workbook ${index}: native hashes ${expected[index].map((step) => step.normalized_result_hash)}, WASM hashes ${actual.results[index].map((step) => step.normalized_result_hash)}`,
+    );
+  }
   assert.equal(loads, 1);
   const report = {
     schema_version: 1,

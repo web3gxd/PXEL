@@ -60,6 +60,11 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/ifs-function",
       "title": "IFS function",
       "retrieved_at": "2026-09-29"
+    },
+    "iferror": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/iferror-function",
+      "title": "IFERROR function",
+      "retrieved_at": "2026-09-29"
     }
   },
   "cases": [
@@ -1504,6 +1509,62 @@
       "origin": "Sheet1!C1",
       "cells": {},
       "expected": { "type": "number", "value": 1 },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+    },
+    {
+      "id": "iferror_catches_division_by_zero",
+      "formula": "=IFERROR(1/0,7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 7 },
+      "provenance": { "sources": ["iferror"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "iferror_preserves_nonerror",
+      "formula": "=IFERROR(4,7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 4 },
+      "provenance": { "sources": ["iferror"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "iferror_skips_unused_fallback",
+      "formula": "=IFERROR(4,1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 4 },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+    },
+    {
+      "id": "iferror_propagates_fallback_error",
+      "formula": "=IFERROR(1/0,2/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "error", "value": "#DIV/0!" },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+    },
+    {
+      "id": "iferror_empty_value_is_empty_text",
+      "formula": "=IFERROR(,7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "text", "value": "" },
+      "provenance": { "sources": ["iferror"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "iferror_empty_fallback_is_empty_text",
+      "formula": "=IFERROR(1/0,)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "text", "value": "" },
+      "provenance": { "sources": ["iferror"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "iferror_wrong_arity",
+      "formula": "=IFERROR(1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "error", "value": "#VALUE!" },
       "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
     }
   ]

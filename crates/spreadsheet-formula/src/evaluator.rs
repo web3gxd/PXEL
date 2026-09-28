@@ -191,6 +191,8 @@ fn eval(
                 conditional(ast, arguments, resolver, budget, depth + 1)?
             } else if name == "IFS" {
                 conditions(ast, arguments, resolver, budget, depth + 1)?
+            } else if name == "IFERROR" {
+                if_error(ast, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "SUM" | "AVERAGE" | "MIN" | "MAX") {
                 aggregate(ast, name, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "COUNT" | "COUNTA") {
@@ -235,6 +237,28 @@ fn conditions(
         }
     }
     Ok(Value::Error(FormulaError::Na))
+}
+fn if_error(
+    ast: &Ast,
+    args: &[NodeId],
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Value, EvaluationError> {
+    let [value, fallback] = args else {
+        return Ok(Value::Error(FormulaError::Value));
+    };
+    let value = eval(ast, *value, resolver, budget, depth)?;
+    let chosen = if matches!(value, Value::Error(_)) {
+        eval(ast, *fallback, resolver, budget, depth)?
+    } else {
+        value
+    };
+    Ok(if chosen == Value::Blank {
+        Value::Text(String::new())
+    } else {
+        chosen
+    })
 }
 fn count(
     ast: &Ast,

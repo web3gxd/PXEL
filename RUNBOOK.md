@@ -1,5 +1,43 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — IFERROR и исправление точности differential harness
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-009, текущие evaluator/fixtures,
+native/browser parity runner и официальный контракт Microsoft IFERROR. Цель —
+продолжить фазу 2 одной функцией с серверным и browser WASM вычислением.
+IFERROR вычисляет первый аргумент, возвращает его без вычисления fallback,
+если spreadsheet error нет; при error вычисляет fallback. Выбранный Blank
+становится Text("") по Microsoft Support. Resource errors evaluator
+(cancellation/work limit/resolver failure) не перехватываются. Аргументов
+строго два; прочая arity даёт профильную #VALUE!, не Excel golden claim.
+
+Изменены evaluator, unit test на budget/cancellation, семь shared fixtures,
+stateful parity formula shape, server integration test, docs, presentation
+и RUNBOOK. `just formula-parity` сначала прошёл 99 scalar cases, но строгий
+stateful compare нашёл one-ULP отличие для деления `-2.75/62.625` после
+patch. Native и WASM domain hashes при этом совпадали на каждом шаге:
+причина была в native example runner, который повторно парсил уже
+сериализованный JSON результата в `serde_json::Value`; второй decimal parse
+менял отображаемый f64. Runner теперь проверяет JSON через `RawValue` и
+сохраняет его без второго decimal-to-binary преобразования. Exact assertion
+не ослаблен. После исправления `just formula-parity` прошёл 99/99 scalar
+fixtures и 1000 seeded books/2000 patches. Отчет этого запуска: Chromium
+153.0.8010.12, Windows 10.0.26100, Intel Ultra 9 185H, 1.60 MB входа,
+132.3 мс суммарного Worker compute и 1244.06 мс harness roundtrip; это
+не p95 UI или commit. Живой `pnpm test:integration` прошёл 24/24,
+включая durable IFERROR и последующий валидный пересчёт. Prettier применён
+к затронутым JS/JSON/Markdown/HTML файлам. Первый `just check` выявил только
+rustfmt отклонение в новом unit test; после `cargo fmt --all` повторный
+`just check` завершился с exit 0: Rust format/оба Clippy режима/tests/build,
+wasm32 check, protobuf drift, Prettier, ESLint, TS, 52 Vitest и Vite
+production build. Presentation check прошёл 10 слайдов, навигацию и layout
+1440×900/390×844. Новые E2E/recovery сценарии в этом срезе не запускались;
+browser WASM проверен отдельным harness.
+Excel golden verification, логические AND/OR/NOT, volatile context и phase-2
+gate остаются открытыми.
+
+---
+
 ## 2026-09-29 — IFS в общем формульном профиле
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-009, formula semantics, evaluator,

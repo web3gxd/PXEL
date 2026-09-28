@@ -471,6 +471,44 @@ test('IFS commits and recalculates the selected branch after input changes', asy
   }
 });
 
+test('IFERROR replacement is durable and leaves a later valid result intact', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 1, { sequence: 1 }))).case,
+      'committed',
+    );
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 0, { column: 1, sequence: 2 }))).case,
+      'committed',
+    );
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, snapshot, '=IFERROR(A1/B1,9)', { column: 2, sequence: 3 }),
+        )
+      ).case,
+      'committed',
+    );
+    const column = snapshot.sheets[0].columns[2];
+    const valueAt = async (version) => {
+      const state = await calculation(base, cookie, snapshot.document_id, version);
+      assert.equal(state.status, 'complete');
+      return state.values.find((cell) => cell.column_id === column)?.value;
+    };
+    assert.deepEqual(await valueAt(4), { type: 'number', value: 9 });
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 2, { column: 1, sequence: 4 }))).case,
+      'committed',
+    );
+    assert.deepEqual(await valueAt(5), { type: 'number', value: 0.5 });
+  } finally {
+    client.socket.close();
+  }
+});
+
 test(
   'formula text is server-bound, durable and deduplicated independently of AST',
   { timeout: 30000 },

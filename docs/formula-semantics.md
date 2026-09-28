@@ -38,7 +38,7 @@ Phase 2 `^` ограничен integer exponent [-1024,1024]. Алгоритм: 
 
 `=`; numbers/strings/booleans; unary/binary operators; Excel precedence; parentheses; A1/$A$1/A$1/$A1; bounded ranges; quoted sheet names с doubled apostrophe; cross-sheet references; function calls. Canonical function names English. Locale adapter token-aware: decimal/argument separators не заменяются внутри strings или quoted names. UTF-8 parser spans переводятся в UTF-16 UI offsets явно.
 
-Текущий реализованный срез: SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, IF, IFS и arithmetic/comparisons. Остальные logical, math, text, date, lookup, criteria groups добавляются последовательно после specs/fixtures. Array literals, dynamic spill, structured/3D/external refs, UDF/LET/LAMBDA и iterative cycles пока вне профиля.
+Текущий реализованный срез: SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, IF, IFS, IFERROR и arithmetic/comparisons. Остальные logical, math, text, date, lookup, criteria groups добавляются последовательно после specs/fixtures. Array literals, dynamic spill, structured/3D/external refs, UDF/LET/LAMBDA и iterative cycles пока вне профиля.
 
 | Функция   | Arity | Начальный контракт                                                                                                                                  |
 | --------- | ----: | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -49,8 +49,11 @@ Phase 2 `^` ограничен integer exponent [-1024,1024]. Алгоритм: 
 | COUNTA    | 1–255 | Любое nonblank значение, включая Text(""), Boolean и cell error, считается; Blank/omitted не считается                                              |
 | IF        |   2–3 | Scalar lazy branch; logical test coercion, omitted/empty arguments — отдельные fixtures                                                             |
 | IFS       | 2–254 | 1–127 пар test/value; первый Boolean TRUE выбирает результат; иной вычисленный test → VALUE, отсутствие TRUE → N/A; Blank выбранного результата → 0 |
+| IFERROR   |     2 | Первый аргумент возвращается без вычисления fallback, если нет spreadsheet Error; иначе возвращается fallback. Blank выбранного значения → Text("") |
 
 IFS вычисляет условия слева направо и только результат первой TRUE-пары; более поздние условия и пропущенные результаты не вычисляет. Ошибка вычисленного условия распространяется. Это проектный контракт для ленивости и Blank; фактические Excel results ещё не внесены как golden fixtures. Максимум 127 пар следует из [описания Microsoft IFS](https://support.microsoft.com/en-us/excel/functions/ifs-function).
+
+IFERROR перехватывает только spreadsheet Error values. Ограничение вычисления, отмена и неисправность resolver остаются typed engine errors и не заменяются fallback. Выбранный Blank даёт пустой Text по [описанию Microsoft IFERROR](https://support.microsoft.com/en-us/excel/functions/iferror-function). Array-formula behavior вне профиля.
 
 Coercion не сводится к универсальному to_number. Operators, direct arguments, references и ranges имеют отдельные rules. Blank и Text("") различаются. Ошибка выбранной ветви IF распространяется; невыбранная не вычисляется. Начальная static dependency analysis обеих ветвей может консервативно считать cycle; такое отличие явно тестируется и документируется до acceptance.
 
@@ -58,7 +61,7 @@ COUNT/COUNTA посещают диапазон в row-major порядке с т
 
 Контрактные ожидания, еще не Excel-verified fixtures: `=1+2*3` →7; `=-2^2` →4; `=1/0` →DIV/0; blank A1 +1 →1; SUM над [1,"x",2] →3; AVERAGE пустого range →DIV/0; IF(FALSE,1/0,7) →7; неизвестная FOO →NAME; A1↔B1 →CYCLE. Каждый fixture позднее хранит provenance и verified_in_excel flag.
 
-Источники для fixtures: [Excel precedence](https://support.microsoft.com/en-us/excel/calculation-operators-and-precedence-in-excel), [SUM](https://support.microsoft.com/en-us/excel/functions/sum-function), [AVERAGE](https://support.microsoft.com/en-us/excel/functions/average-function), [COUNT](https://support.microsoft.com/en-us/excel/functions/count-function), [COUNTA](https://support.microsoft.com/en-gb/excel/functions/counta-function), [IF](https://support.microsoft.com/en-us/excel/functions/if-function), [IFS](https://support.microsoft.com/en-us/excel/functions/ifs-function).
+Источники для fixtures: [Excel precedence](https://support.microsoft.com/en-us/excel/calculation-operators-and-precedence-in-excel), [SUM](https://support.microsoft.com/en-us/excel/functions/sum-function), [AVERAGE](https://support.microsoft.com/en-us/excel/functions/average-function), [COUNT](https://support.microsoft.com/en-us/excel/functions/count-function), [COUNTA](https://support.microsoft.com/en-gb/excel/functions/counta-function), [IF](https://support.microsoft.com/en-us/excel/functions/if-function), [IFS](https://support.microsoft.com/en-us/excel/functions/ifs-function), [IFERROR](https://support.microsoft.com/en-us/excel/functions/iferror-function).
 
 ## Dependency graph и budgets
 
