@@ -1,6 +1,7 @@
 # Native/WASM integration plan
 
-Status: stateful product Worker integrated, 2026-09-29; phase 2 remains open.
+Status: stateful product Worker integrated, 2026-09-29; local phase-2 base
+gate passed. Volatile-function parity and broader compatibility remain open.
 The original fixture adapter evidence below is historical and narrower than
 the current product implementation. ADR-011 defines the current boundary.
 

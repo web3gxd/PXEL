@@ -1,5 +1,35 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — локальный функциональный gate базовой фазы 2
+
+Перед фиксацией gate повторно прочитаны AGENTS, roadmap и критерии фазы 2,
+сверены реальные parser/dependency/native+WASM/server tests и отдельный
+Criterion benchmark. Контракт phase-2 base slice: A1/formula bar,
+SUM/AVERAGE/MIN/MAX/IF, инкрементальный граф, cycle typed error и общий
+native/browser WASM result hash. Последний `just check` прошёл полностью,
+`just formula-parity` — 99/99 scalar fixtures, 1000 seeded workbooks и 2000
+patches. Живой server integration suite — 24/24; E2E из предыдущего среза
+после IFERROR не повторялся, поскольку UI flow не менялся. Parser fuzz-like
+100 000 bounded arbitrary inputs, canonicalization property, removal of old
+dependency edges, only-one-of-10k independent recalculation и iterative
+10k chain проходят Rust tests. Reverse range lookup ранее измерен как
+269–343 ns для 100 000 disjoint ranges (Criterion, те условия в записи ниже).
+
+Новый `cargo bench --locked -p spreadsheet-formula --bench calculation --
+calculate_10000_bound_formula_chain --sample-size 10 --measurement-time 1
+--warm-up-time 1` завершился: Criterion interval 41.822–42.905 ms для
+создания CalculationProjection из подготовленной книги и полного расчета
+10 000 последовательно зависимых формул, optimized build, Windows
+10.0.26100, Intel Ultra 9 185H, 22 logical CPUs, 15.6 GiB RAM. Книга
+собирается вне измеряемого участка; число evaluated_cells проверяется 10 000.
+Это не p95 ввода, commit или браузерного открытия. Локальный функциональный
+gate базовой фазы 2 принят; обновлены roadmap и презентация. Excel golden
+verification, AND/OR/NOT, volatile-функции, расширенный профиль, Linux/Compose
+и remote CI не входят в этот закрытый gate и остаются открытыми. Переход к
+фазе 3 не означает их готовность.
+
+---
+
 ## 2026-09-29 — IFERROR и исправление точности differential harness
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-009, текущие evaluator/fixtures,
