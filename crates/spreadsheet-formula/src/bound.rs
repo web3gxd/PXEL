@@ -152,15 +152,12 @@ fn project(formula: &bound::Formula, workbook: &Workbook) -> Result<syntax::Ast,
             bound::Node::Boolean(b) => syntax::Node::Boolean(*b),
             bound::Node::Error(e) => syntax::Node::Error(error(*e)),
             bound::Node::Missing => syntax::Node::Missing,
-            bound::Node::Cell(r) => project_cell(workbook, r).map_or(
-                syntax::Node::Error(syntax::FormulaError::Ref),
-                syntax::Node::Cell,
-            ),
-            bound::Node::Range(r) => project_range(workbook, r)?.map_or(
-                syntax::Node::Error(syntax::FormulaError::Ref),
-                syntax::Node::Range,
-            ),
-            bound::Node::InvalidReference(_) => syntax::Node::Error(syntax::FormulaError::Ref),
+            bound::Node::Cell(r) => {
+                project_cell(workbook, r).map_or(syntax::Node::InvalidReference, syntax::Node::Cell)
+            }
+            bound::Node::Range(r) => project_range(workbook, r)?
+                .map_or(syntax::Node::InvalidReference, syntax::Node::Range),
+            bound::Node::InvalidReference(_) => syntax::Node::InvalidReference,
             bound::Node::Unary { op, operand } => syntax::Node::Unary {
                 op: unary(*op),
                 operand: syntax::NodeId(operand.0 as usize),

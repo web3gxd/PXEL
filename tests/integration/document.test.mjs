@@ -388,6 +388,51 @@ test(
   },
 );
 
+test('COUNT and COUNTA bind as durable formulas and calculate distinct reference rules', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 4, { sequence: 1 }))).case,
+      'committed',
+    );
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, '5', { column: 1, sequence: 2 }))).case,
+      'committed',
+    );
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, snapshot, '=COUNT(A1:B1)', { column: 2, sequence: 3 }),
+        )
+      ).case,
+      'committed',
+    );
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, snapshot, '=COUNTA(A1:B1)', { column: 3, sequence: 4 }),
+        )
+      ).case,
+      'committed',
+    );
+    const state = await calculation(base, cookie, snapshot.document_id, 5);
+    assert.equal(state.status, 'complete');
+    const result = new Map(state.values.map((cell) => [cell.column_id, cell.value]));
+    assert.deepEqual(result.get(snapshot.sheets[0].columns[2]), { type: 'number', value: 1 });
+    assert.deepEqual(result.get(snapshot.sheets[0].columns[3]), { type: 'number', value: 2 });
+    const restored = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(restored.version, '5');
+    assert.equal(
+      restored.sheets[0].cells.filter((cell) => cell.value.type === 'formula').length,
+      2,
+    );
+  } finally {
+    client.socket.close();
+  }
+});
+
 test(
   'formula text is server-bound, durable and deduplicated independently of AST',
   { timeout: 30000 },

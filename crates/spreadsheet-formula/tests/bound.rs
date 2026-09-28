@@ -165,6 +165,59 @@ fn ranges_keep_reference_coercion_and_blank_cells_and_calculated_errors() -> Res
     Ok(())
 }
 #[test]
+fn count_functions_distinguish_numeric_and_nonblank_references() -> ResultTest {
+    let w = book(false)?;
+    for (name, expected) in [("COUNT", 3.0), ("COUNTA", 5.0)] {
+        assert_eq!(
+            evaluate_bound(
+                &aggregate(name)?,
+                &w,
+                &BTreeMap::new(),
+                &mut EvaluationBudget::default()
+            )?,
+            Value::Number(expected)
+        );
+    }
+    let cached = BTreeMap::from([(address(5, 20)?, Value::Error(FormulaError::Na))]);
+    assert_eq!(
+        evaluate_bound(
+            &aggregate("COUNT")?,
+            &w,
+            &cached,
+            &mut EvaluationBudget::default()
+        )?,
+        Value::Number(3.0)
+    );
+    assert_eq!(
+        evaluate_bound(
+            &aggregate("COUNTA")?,
+            &w,
+            &cached,
+            &mut EvaluationBudget::default()
+        )?,
+        Value::Number(6.0)
+    );
+    for name in ["COUNT", "COUNTA"] {
+        let missing = formula(vec![
+            d::Node::Cell(target(99)?),
+            d::Node::Call {
+                name: d::FunctionName::new(name.into())?,
+                arguments: vec![d::NodeId(0)],
+            },
+        ])?;
+        assert_eq!(
+            evaluate_bound(
+                &missing,
+                &w,
+                &BTreeMap::new(),
+                &mut EvaluationBudget::default()
+            )?,
+            Value::Error(FormulaError::Ref)
+        );
+    }
+    Ok(())
+}
+#[test]
 fn missing_stable_targets_produce_ref_and_missing_origin_is_invalid() -> ResultTest {
     let w = book(false)?;
     let f = formula(vec![d::Node::Cell(target(99)?)])?;

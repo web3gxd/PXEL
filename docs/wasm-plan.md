@@ -21,11 +21,18 @@ visibly. Document disposal terminates the Worker, ordinary WS reconnect does not
 
 Actual `tests/parity/workbook.mjs`: 1000 seeded single-sheet workbooks, 2000
 preview patches, 3000 result sets/hashes agree between native and browser WASM.
-The corpus covers primitive changes and seven arithmetic/aggregate/IF shapes;
+The corpus covers primitive changes and nine arithmetic/aggregate/IF shapes;
 it is not evidence for structural edits, multiple sheets or full Excel parity.
 Seed 1347962188, Chromium 153.0.8010.12, Windows 10.0.26100, Ultra 9 185H.
 One run: Worker compute 170.7 ms, harness roundtrip 1293.15 ms including 1.60 MB
 input transfer; not a per-keystroke latency percentile. Report `.local/workbook-parity.json`.
+
+The 2026-09-29 COUNT/COUNTA extension reran the same harness: 83 scalar
+fixtures matched expected/native/browser WASM results, and 1000 seeded books
+with 2000 patches matched again across nine formula shapes. This single run
+reported 144.6 ms Worker compute and 1278.89 ms harness roundtrip for 1.60 MB
+of input on Windows 10.0.26100, Intel Core Ultra 9 185H and Chromium
+153.0.8010.12. These are harness totals, not input-latency percentiles.
 
 Actual browser suite: draft preview, invalid-to-valid recovery, cancel with
 unchanged durable version/hash, reload, server recalculation and missing-WASM

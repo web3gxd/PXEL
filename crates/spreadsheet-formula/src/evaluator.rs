@@ -152,6 +152,7 @@ fn eval(
         }
         Node::Boolean(b) => Value::Boolean(*b),
         Node::Error(e) => Value::Error(*e),
+        Node::InvalidReference => Value::Error(FormulaError::Ref),
         Node::Missing => Value::Blank,
         Node::Cell(reference) => {
             budget.charge()?;
@@ -190,10 +191,90 @@ fn eval(
                 conditional(ast, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "SUM" | "AVERAGE" | "MIN" | "MAX") {
                 aggregate(ast, name, arguments, resolver, budget, depth + 1)?
+            } else if matches!(name.as_str(), "COUNT" | "COUNTA") {
+                count(
+                    ast,
+                    name == "COUNTA",
+                    arguments,
+                    resolver,
+                    budget,
+                    depth + 1,
+                )?
             } else {
                 Value::Error(FormulaError::Name)
             }
         }
+    })
+}
+fn count(
+    ast: &Ast,
+    counta: bool,
+    args: &[NodeId],
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Value, EvaluationError> {
+    if args.is_empty() || args.len() > 255 {
+        return Ok(Value::Error(FormulaError::Value));
+    }
+    let mut total = 0u64;
+    for arg in args {
+        match ast.nodes.get(arg.0).ok_or(EvaluationError::InvalidAst)? {
+            Node::InvalidReference => return Ok(Value::Error(FormulaError::Ref)),
+            Node::Range(range) => {
+                budget.charge()?;
+                if range.start.sheet != range.end.sheet || range.cell_count() > MAX_RANGE_CELLS {
+                    return Err(EvaluationError::CalculationLimitExceeded);
+                }
+                if range.start.row >= 1_048_576
+                    || range.end.row >= 1_048_576
+                    || range.start.column >= 16_384
+                    || range.end.column >= 16_384
+                {
+                    return Err(EvaluationError::InvalidAst);
+                }
+                let mut visits = 0u64;
+                resolver.visit_range(range, &mut |value| {
+                    budget.charge()?;
+                    visits = visits.saturating_add(1);
+                    if visits > range.cell_count() {
+                        return Err(EvaluationError::InvalidResolverResult);
+                    }
+                    if countable(&value, counta, true)? {
+                        total += 1;
+                    }
+                    Ok(())
+                })?;
+                if visits != range.cell_count() {
+                    return Err(EvaluationError::InvalidResolverResult);
+                }
+            }
+            Node::Cell(_) => {
+                let value = eval(ast, *arg, resolver, budget, depth)?;
+                if countable(&value, counta, true)? {
+                    total += 1;
+                }
+            }
+            _ => {
+                let value = eval(ast, *arg, resolver, budget, depth)?;
+                if countable(&value, counta, false)? {
+                    total += 1;
+                }
+            }
+        }
+    }
+    Ok(Value::Number(total as f64))
+}
+fn countable(value: &Value, counta: bool, reference: bool) -> Result<bool, EvaluationError> {
+    Ok(match value {
+        Value::Blank => false,
+        Value::Number(_) | Value::DateTime { .. } => true,
+        Value::Text(text) => {
+            counta || (!reference && text.trim().parse::<f64>().is_ok_and(f64::is_finite))
+        }
+        Value::Boolean(_) => counta || !reference,
+        Value::Error(_) => counta,
+        Value::Array { .. } => return Err(EvaluationError::UnsupportedCompatibilityFeature),
     })
 }
 fn conditional(

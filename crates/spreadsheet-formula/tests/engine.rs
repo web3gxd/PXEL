@@ -65,16 +65,18 @@ impl ReferenceResolver for FailedRange {
 #[test]
 fn range_resource_failure_is_never_hidden_by_a_spreadsheet_error()
 -> Result<(), Box<dyn std::error::Error>> {
-    let ast = parse("=SUM(A1:A2)")?.ast;
-    for error in [
-        EvaluationError::Cancelled,
-        EvaluationError::CalculationLimitExceeded,
-        EvaluationError::InvalidResolverResult,
-    ] {
-        assert_eq!(
-            evaluate(&ast, &FailedRange(error), &mut EvaluationBudget::default()),
-            Err(error)
-        );
+    for function in ["SUM", "COUNT", "COUNTA"] {
+        let ast = parse(&format!("={function}(A1:A2)"))?.ast;
+        for error in [
+            EvaluationError::Cancelled,
+            EvaluationError::CalculationLimitExceeded,
+            EvaluationError::InvalidResolverResult,
+        ] {
+            assert_eq!(
+                evaluate(&ast, &FailedRange(error), &mut EvaluationBudget::default()),
+                Err(error)
+            );
+        }
     }
     Ok(())
 }

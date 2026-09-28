@@ -38,20 +38,24 @@ Phase 2 `^` ограничен integer exponent [-1024,1024]. Алгоритм: 
 
 `=`; numbers/strings/booleans; unary/binary operators; Excel precedence; parentheses; A1/$A$1/A$1/$A1; bounded ranges; quoted sheet names с doubled apostrophe; cross-sheet references; function calls. Canonical function names English. Locale adapter token-aware: decimal/argument separators не заменяются внутри strings или quoted names. UTF-8 parser spans переводятся в UTF-16 UI offsets явно.
 
-Phase 2: SUM, AVERAGE, MIN, MAX, IF и arithmetic/comparisons. COUNT/COUNTA, logical, math, text, date, lookup, criteria groups добавляются последовательно по исходному порядку после specs/fixtures. Array literals, dynamic spill, structured/3D/external refs, UDF/LET/LAMBDA и iterative cycles пока вне профиля.
+Текущий реализованный срез: SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, IF и arithmetic/comparisons. Logical, math, text, date, lookup, criteria groups добавляются последовательно после specs/fixtures. Array literals, dynamic spill, structured/3D/external refs, UDF/LET/LAMBDA и iterative cycles пока вне профиля.
 
-| Функция   | Arity | Начальный контракт                                                                                                              |
-| --------- | ----: | ------------------------------------------------------------------------------------------------------------------------------- |
-| SUM       | 1–255 | Range text/bool/blank игнорируются; zero учитывается; scalar coercion отдельно; ошибки распространяются в фиксированном порядке |
-| AVERAGE   | 1–255 | Numeric count; empty numeric set → DIV/0; direct/range coercion отдельны                                                        |
-| MIN / MAX | 1–255 | Empty numeric set → 0; range text/bool игнорируются; direct arguments требуют отдельной таблицы                                 |
-| IF        |   2–3 | Scalar lazy branch; logical test coercion, omitted/empty arguments — отдельные fixtures                                         |
+| Функция   | Arity | Начальный контракт                                                                                                                                  |
+| --------- | ----: | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SUM       | 1–255 | Range text/bool/blank игнорируются; zero учитывается; scalar coercion отдельно; ошибки распространяются в фиксированном порядке                     |
+| AVERAGE   | 1–255 | Numeric count; empty numeric set → DIV/0; direct/range coercion отдельны                                                                            |
+| MIN / MAX | 1–255 | Empty numeric set → 0; range text/bool игнорируются; direct arguments требуют отдельной таблицы                                                     |
+| COUNT     | 1–255 | Range/cell refs: только Number/DateTime; direct Number/DateTime, Boolean и finite numeric Text считаются; Blank и обычные error values игнорируются |
+| COUNTA    | 1–255 | Любое nonblank значение, включая Text(""), Boolean и cell error, считается; Blank/omitted не считается                                              |
+| IF        |   2–3 | Scalar lazy branch; logical test coercion, omitted/empty arguments — отдельные fixtures                                                             |
 
 Coercion не сводится к универсальному to_number. Operators, direct arguments, references и ranges имеют отдельные rules. Blank и Text("") различаются. Ошибка выбранной ветви IF распространяется; невыбранная не вычисляется. Начальная static dependency analysis обеих ветвей может консервативно считать cycle; такое отличие явно тестируется и документируется до acceptance.
 
+COUNT/COUNTA посещают диапазон в row-major порядке с теми же 100 000-cell/work-budget лимитами и проверкой числа реально посещённых ячеек. Обычная ошибка, записанная в ячейке, для COUNT пропускается, для COUNTA считается. Сломанный stable-ID target проецируется в отдельный `InvalidReference` и возвращает `#REF!`, а не маскируется как пустая ячейка. Для вложенного выражения, которое возвращает ошибку, текущий профиль применяет правило direct argument; provenance структурной ошибки во вложенном выражении ещё не сохраняется и требует отдельного compatibility fixture перед структурными операциями. Лимит 1–255 — профиль PXEL; утверждение о полной Excel parity по arity не делается.
+
 Контрактные ожидания, еще не Excel-verified fixtures: `=1+2*3` →7; `=-2^2` →4; `=1/0` →DIV/0; blank A1 +1 →1; SUM над [1,"x",2] →3; AVERAGE пустого range →DIV/0; IF(FALSE,1/0,7) →7; неизвестная FOO →NAME; A1↔B1 →CYCLE. Каждый fixture позднее хранит provenance и verified_in_excel flag.
 
-Источники для будущих fixtures: [Excel precedence](https://support.microsoft.com/en-us/excel/calculation-operators-and-precedence-in-excel), [SUM](https://support.microsoft.com/en-us/excel/functions/sum-function), [AVERAGE](https://support.microsoft.com/en-us/excel/functions/average-function), [IF](https://support.microsoft.com/en-us/excel/functions/if-function).
+Источники для fixtures: [Excel precedence](https://support.microsoft.com/en-us/excel/calculation-operators-and-precedence-in-excel), [SUM](https://support.microsoft.com/en-us/excel/functions/sum-function), [AVERAGE](https://support.microsoft.com/en-us/excel/functions/average-function), [COUNT](https://support.microsoft.com/en-us/excel/functions/count-function), [COUNTA](https://support.microsoft.com/en-gb/excel/functions/counta-function), [IF](https://support.microsoft.com/en-us/excel/functions/if-function).
 
 ## Dependency graph и budgets
 

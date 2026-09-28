@@ -41,6 +41,16 @@
       "title": "MAX function",
       "retrieved_at": "2026-09-28"
     },
+    "count": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/count-function",
+      "title": "COUNT function",
+      "retrieved_at": "2026-09-29"
+    },
+    "counta": {
+      "url": "https://support.microsoft.com/en-gb/excel/functions/counta-function",
+      "title": "COUNTA function",
+      "retrieved_at": "2026-09-29"
+    },
     "if": {
       "url": "https://support.microsoft.com/en-us/excel/functions/if-function",
       "title": "IF function",
@@ -1358,6 +1368,66 @@
         "basis": "project_contract",
         "verified_in_excel": false
       }
+    },
+    {
+      "id": "count_direct_coercion_and_error",
+      "formula": "=COUNT(1,TRUE,\"2\",\"word\",#DIV/0!)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 3 },
+      "provenance": { "sources": ["count"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "count_reference_types",
+      "formula": "=COUNT(A1:A6)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": { "type": "number", "value": 0 },
+        "Sheet1!A2": { "type": "number", "value": 7 },
+        "Sheet1!A3": { "type": "text", "value": "8" },
+        "Sheet1!A4": { "type": "boolean", "value": true },
+        "Sheet1!A5": { "type": "error", "value": "#DIV/0!" }
+      },
+      "expected": { "type": "number", "value": 2 },
+      "provenance": { "sources": ["count"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "counta_range_counts_error_and_empty_text",
+      "formula": "=COUNTA(A1:A6)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": { "type": "number", "value": 0 },
+        "Sheet1!A2": { "type": "text", "value": "" },
+        "Sheet1!A3": { "type": "boolean", "value": false },
+        "Sheet1!A4": { "type": "error", "value": "#N/A" },
+        "Sheet1!A5": { "type": "text", "value": "x" }
+      },
+      "expected": { "type": "number", "value": 5 },
+      "provenance": { "sources": ["counta"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "counta_direct_values",
+      "formula": "=COUNTA(\"\",#DIV/0!,TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 3 },
+      "provenance": { "sources": ["counta"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "count_zero_arguments",
+      "formula": "=COUNT()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "error", "value": "#VALUE!" },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+    },
+    {
+      "id": "counta_zero_arguments",
+      "formula": "=COUNTA()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "error", "value": "#VALUE!" },
+      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
     }
   ]
 }

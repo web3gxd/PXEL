@@ -18,7 +18,7 @@ impl ReferenceResolver for Range {
     }
 }
 fn benchmarks(c: &mut Criterion) {
-    for function in ["SUM", "AVERAGE", "MIN", "MAX"] {
+    for function in ["SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA"] {
         let parsed = match parse(&format!("={function}(A1:A100000)")) {
             Ok(value) => value,
             Err(_) => {

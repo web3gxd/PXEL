@@ -77,6 +77,7 @@ fn print(
         }
         Node::Boolean(b) => append(out, if *b { "TRUE" } else { "FALSE" })?,
         Node::Error(e) => append(out, e.code())?,
+        Node::InvalidReference => append(out, FormulaError::Ref.code())?,
         Node::Missing => (),
         Node::Cell(cell) => append(out, &reference(cell, true)?)?,
         Node::Range(range) => {

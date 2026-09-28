@@ -1,5 +1,51 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — COUNT и COUNTA в общем Rust-движке
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-013, formula semantics, evaluator,
+bound bridge, fixtures и benchmark harness. Цель — продолжить phase-2 function
+profile по исходному порядку. Инварианты: один evaluator native/WASM,
+структурный `#REF!` не маскируется пустым значением, прямые аргументы и ссылки
+имеют разные coercion rules, calculation budget и cancellation остаются
+обязательными, production logs не содержат формул.
+
+COUNT считает числовые ссылки, а в прямых аргументах также Boolean и finite
+numeric Text; обычные errors пропускаются. COUNTA считает все nonblank значения,
+включая Text("") и error values. Оба имеют профильную arity 1–255 и
+row-major обход до 100 000 ячеек. Проекция bound AST теперь различает
+`InvalidReference` и literal `#REF!`: прямой сломанный target не превращается
+в нулевой COUNT. Корпус дополнен шестью случаями и ссылками на официальные
+описания Microsoft; все новые expected values имеют `verified_in_excel=false`.
+Добавлены native bound tests, range resource-error test для обеих функций,
+две формулы в stateful parity generator и Criterion benches. Обновлены
+formula semantics, compatibility, WASM plan, презентация и RUNBOOK.
+
+До реализации `cargo test --locked -p spreadsheet-formula --test corpus`
+падал на первом новом COUNT fixture с `#NAME?`; после реализации весь crate
+suite и Clippy прошли. `just formula-parity` прошел 83/83 scalar fixtures и
+1000 seeded books/2000 patches с одинаковым native/browser WASM hash.
+Criterion `cargo bench --locked -p spreadsheet-formula --bench scalar -- COUNT
+--sample-size 20 --measurement-time 2` на Windows 10.0.26100, Intel Core
+Ultra 9 185H, 22 logical processors, 15.6 GiB RAM, release build:
+COUNT_range_100k 238.99–259.77 µs, COUNTA_range_100k 238.98–244.43 µs
+(Criterion confidence intervals, 20 samples). Диапазон состоит из 100 000
+числовых единиц; это изолированная функция, не p95 ввода или полный
+document recalculation. Официальный performance threshold на этом Windows
+стенде не утверждается. После этого полный `just check` завершился с exit 0:
+оба Clippy режима, весь Rust workspace, wasm32 check, protobuf drift,
+форматирование, ESLint, TS, 52 Vitest и Vite production build. Живой сервер
+прошел `pnpm test:integration` 22/22, включая durable COUNT/COUNTA formula,
+`pnpm test:e2e` 14/14 при DPR 1/2 и `pnpm test:recovery` 1/1 после hard
+restart. Презентация: 10 слайдов, навигация и layout 1440×900/390×844
+прошли `presentation:check`. Эти функциональные проверки не дают p95 продукта.
+
+Ограничение: семантика вложенного выражения со структурно поврежденной ссылкой
+и одновременно error value требует отдельного provenance/compatibility
+fixture до phase-4 delete/move. Volatile context native/WASM, расширенные
+группы функций и phase-2 gate остаются открытыми.
+
+---
+
 ## 2026-09-29 — Bounded durable replay до live-подписки
 
 Перед срезом прочитаны AGENTS, roadmap, collaboration contract, ADR-014 и

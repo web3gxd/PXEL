@@ -85,6 +85,8 @@ pub enum Node {
     Text(String),
     Boolean(bool),
     Error(FormulaError),
+    /// Projection-only deleted/invalid bound target; never emitted by the parser.
+    InvalidReference,
     Missing,
     Cell(CellReference),
     Range(RangeReference),

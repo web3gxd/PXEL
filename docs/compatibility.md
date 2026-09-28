@@ -1,6 +1,6 @@
 # Совместимость
 
-Статус: целевой профиль, не отчет о реализованных функциях. В фазе 0 нет formula engine, XLSX import/export и document editing. Формулы подтверждаются перед фазой 2, XLSX profile — перед фазой 6.
+Статус: матрица целевого профиля с фактически реализованным первым набором формул. Работающий редактор и движок есть; phase 2 gate еще не закрыт. XLSX import/export остаются целью фазы 6.
 
 Google Sheets задает пользовательскую модель мгновенного редактирования и collaboration. Excel — целевая совместимость формул/файлов в явно ограниченном профиле, не источник runtime architecture. Excel/LibreOffice headless, готовые spreadsheet/formula/collaboration engines не входят в runtime.
 
@@ -10,7 +10,7 @@ Google Sheets задает пользовательскую модель мгн�
 
 | Статус целевого профиля      | Formula feature                                                                                                                      |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Supported после phase 2 gate | Literals, basic operators, A1/mixed references, bounded ranges, SUM/AVERAGE/MIN/MAX/IF                                               |
+| Supported после phase 2 gate | Literals, basic operators, A1/mixed references, bounded ranges, SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/IF                                  |
 | Partially supported          | Integer-only exponent first; static dependency treatment IF; range caps; date system semantics до ввода date functions               |
 | Preserved but not editable   | Unknown function при распознаваемом normalized AST: source/AST сохраняются, canonical result NAME; UI показывает unsupported feature |
 | Dropped with warning         | Импортированные calculated caches не считаются canonical values; могут показываться только как untrusted preview                     |

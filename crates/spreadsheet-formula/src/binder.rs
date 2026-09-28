@@ -76,6 +76,9 @@ pub fn bind(
                 syntax::FormulaError::Spill => bound::FormulaError::Spill,
                 syntax::FormulaError::Cycle => bound::FormulaError::Cycle,
             }),
+            syntax::Node::InvalidReference => {
+                return Err(bound::FormulaValidationError::InvalidStructure.into());
+            }
             syntax::Node::Cell(cell) => match reference(cell) {
                 Ok(cell) => bound::Node::Cell(cell),
                 Err(error) => bound::Node::InvalidReference(error),

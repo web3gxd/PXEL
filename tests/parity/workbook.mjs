@@ -34,6 +34,8 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=A1*B1',
     '=MIN(A1:B1)',
     '=MAX(A1:B1)',
+    '=COUNT(A1:B1)',
+    '=COUNTA(A1:B1)',
   ];
   const source = sources[next() % sources.length];
   const primitive = (value) => ({ type: 'number', value });
