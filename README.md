@@ -45,6 +45,15 @@ just dev
 Откройте <http://127.0.0.1:5173>. Ctrl+C останавливает оба процесса приложения.
 PostgreSQL остается запущенным; `docker compose down` останавливает его с сохранением volume.
 
+Локальная проверка совместной работы использует отдельные dev accounts.
+`GET /api/dev/identity` показывает opaque actor/workspace IDs текущей сессии.
+Владелец книги может вызвать `POST /api/documents/{id}/permissions` с
+`{"action":"grant","change_id":"<uuidv7>","target_user_id":"<uuidv7>","role":"viewer"}`
+или `action="revoke"` без `role`. Grant приглашает существующего пользователя
+в workspace; при следующем dev login он передает `X-PXEL-DEV-WORKSPACE` с ID
+workspace владельца. ACL-команда требует cookie, разрешённый Origin и роль
+owner; в production dev login отключен. Пользовательского sharing dialog пока нет.
+
 Без Docker: установите PostgreSQL 18.6 binaries и задайте `PXEL_PG_BIN`, затем
 вместо `infra-up` выполните `just infra-native`. Команда создает отдельный cluster
 в `.local/postgres`; существующие системные службы PostgreSQL не изменяются.

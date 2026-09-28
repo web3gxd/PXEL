@@ -9,3 +9,5 @@ pub use postgres::{DatabaseError, PgDatabase};
 mod development_sessions;
 mod journal;
 pub use development_sessions::DevelopmentSession;
+mod permissions;
+pub use permissions::{PermissionError, PermissionReceipt, PermissionRole};

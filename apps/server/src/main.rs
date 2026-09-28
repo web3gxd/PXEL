@@ -1,6 +1,7 @@
 mod auth;
 mod calculation_stream;
 mod config;
+mod delivery;
 mod documents;
 
 use axum::{
@@ -16,7 +17,7 @@ use axum::{
 };
 use prost::Message as ProstMessage;
 use serde::Serialize;
-use spreadsheet_application::journal::OperationJournal;
+use spreadsheet_application::journal::{DocumentAccess, OperationJournal};
 use spreadsheet_collab::{DocumentSession, HeadUpdate, SessionDirectory};
 use spreadsheet_domain::workbook::{DocumentId, DocumentVersion};
 use spreadsheet_storage::{LocalFilesystemBlobStore, PgDatabase};
@@ -38,6 +39,7 @@ struct AppState {
     calculation_encoders: Arc<Semaphore>,
     rate: Mutex<(Instant, u32)>,
     sessions: spreadsheet_collab::InProcessSessionDirectory<PgDatabase>,
+    delivery: delivery::DeliveryGates,
 }
 
 #[derive(Serialize)]
@@ -48,19 +50,68 @@ struct Status {
 struct HeadSubscription {
     document: DocumentId,
     session: DocumentSession,
+    gate: Arc<delivery::DeliveryGate>,
+    ticket: DocumentAccess,
+    access_changes: watch::Receiver<u64>,
     updates: watch::Receiver<HeadUpdate>,
     last_sent: DocumentVersion,
 }
 
-async fn next_head(subscription: &mut Option<HeadSubscription>) -> Option<HeadUpdate> {
+#[derive(Clone, Copy)]
+struct DocumentDelivery<'a> {
+    document: DocumentId,
+    gate: &'a delivery::DeliveryGate,
+    ticket: DocumentAccess,
+}
+
+enum SubscriptionEvent {
+    Head(HeadUpdate),
+    AccessChanged,
+    Closed,
+}
+
+async fn next_subscription_event(
+    subscription: &mut Option<HeadSubscription>,
+) -> Option<SubscriptionEvent> {
     let Some(active) = subscription.as_mut() else {
         return std::future::pending().await;
     };
-    if active.updates.changed().await.is_err() {
+    let event = tokio::select! {
+        changed = active.access_changes.changed() => {
+            if changed.is_ok() { SubscriptionEvent::AccessChanged } else { SubscriptionEvent::Closed }
+        }
+        changed = active.updates.changed() => {
+            if changed.is_ok() { SubscriptionEvent::Head(active.updates.borrow_and_update().clone()) }
+            else { SubscriptionEvent::Closed }
+        }
+    };
+    if matches!(event, SubscriptionEvent::Closed) {
         *subscription = None;
         return None;
     }
-    Some(active.updates.borrow_and_update().clone())
+    Some(event)
+}
+
+async fn send_document_payload(
+    socket: &mut WebSocket,
+    state: &AppState,
+    principal: &auth::Principal,
+    delivery: DocumentDelivery<'_>,
+    payload: Vec<u8>,
+) -> bool {
+    let _send = delivery.gate.lock.read().await;
+    let access = state
+        .database
+        .access(principal.identity, delivery.document)
+        .await;
+    if !matches!(access, Ok(current)
+        if current.document_access_epoch == delivery.ticket.document_access_epoch
+        && current.membership_access_epoch == delivery.ticket.membership_access_epoch)
+        || !matches!(state.auth.active(principal).await, Ok(true))
+    {
+        return false;
+    }
+    send(socket, Message::Binary(payload.into())).await
 }
 
 const MAX_REPLAY_EVENTS: u64 = 128;
@@ -71,13 +122,13 @@ async fn send_replay(
     state: &AppState,
     principal: &auth::Principal,
     session: &DocumentSession,
-    document: DocumentId,
+    delivery: DocumentDelivery<'_>,
     after: DocumentVersion,
     barrier: DocumentVersion,
 ) -> Result<bool, ()> {
     let gap = barrier.get().checked_sub(after.get()).ok_or(())?;
     if gap > MAX_REPLAY_EVENTS {
-        return send_replay_fallback(socket, state, principal, session, document, barrier).await;
+        return send_replay_fallback(socket, state, principal, session, delivery, barrier).await;
     }
     let mut cursor = after.get();
     let mut sent_bytes = 0usize;
@@ -87,7 +138,7 @@ async fn send_replay(
             .database
             .load_events(
                 principal.identity,
-                document,
+                delivery.document,
                 DocumentVersion::new(cursor).map_err(|_| ())?,
                 limit,
             )
@@ -102,11 +153,11 @@ async fn send_replay(
                 return Err(());
             }
             if documents::committed_message(&event).is_none() {
-                return send_replay_fallback(socket, state, principal, session, document, barrier)
+                return send_replay_fallback(socket, state, principal, session, delivery, barrier)
                     .await;
             }
             let payload = head_hint(
-                document,
+                delivery.document,
                 &HeadUpdate {
                     version: event.version,
                     event: Some(Arc::new(event)),
@@ -115,12 +166,11 @@ async fn send_replay(
             // Bound encoded bytes in addition to each journal read batch.
             sent_bytes = sent_bytes.checked_add(payload.len()).ok_or(())?;
             if sent_bytes > MAX_REPLAY_BYTES {
-                return send_replay_fallback(socket, state, principal, session, document, barrier)
+                return send_replay_fallback(socket, state, principal, session, delivery, barrier)
                     .await;
             }
             if !matches!(session.head(principal.identity).await, Ok(head) if head >= barrier)
-                || !matches!(state.auth.active(principal).await, Ok(true))
-                || !send(socket, Message::Binary(payload.into())).await
+                || !send_document_payload(socket, state, principal, delivery, payload).await
             {
                 return Err(());
             }
@@ -134,22 +184,21 @@ async fn send_replay_fallback(
     state: &AppState,
     principal: &auth::Principal,
     session: &DocumentSession,
-    document: DocumentId,
+    delivery: DocumentDelivery<'_>,
     barrier: DocumentVersion,
 ) -> Result<bool, ()> {
     if !matches!(session.head(principal.identity).await, Ok(head) if head >= barrier)
-        || !matches!(state.auth.active(principal).await, Ok(true))
-        || !send(
+        || !send_document_payload(
             socket,
-            Message::Binary(
-                head_hint(
-                    document,
-                    &HeadUpdate {
-                        version: barrier,
-                        event: None,
-                    },
-                )
-                .into(),
+            state,
+            principal,
+            delivery,
+            head_hint(
+                delivery.document,
+                &HeadUpdate {
+                    version: barrier,
+                    event: None,
+                },
             ),
         )
         .await
@@ -164,7 +213,7 @@ async fn send_replay_complete(
     state: &AppState,
     principal: &auth::Principal,
     session: &DocumentSession,
-    document: DocumentId,
+    delivery: DocumentDelivery<'_>,
     barrier: DocumentVersion,
     resync_required: bool,
 ) -> bool {
@@ -177,14 +226,14 @@ async fn send_replay_complete(
         protocol_version: wire::PROTOCOL_VERSION,
         payload: Some(v1::server_envelope::Payload::ReplayComplete(
             v1::ReplayComplete {
-                document_id: document.as_bytes().to_vec(),
+                document_id: delivery.document.as_bytes().to_vec(),
                 barrier_version: barrier.get(),
                 resync_required,
             },
         )),
     }
     .encode_to_vec();
-    send(socket, Message::Binary(payload.into())).await
+    send_document_payload(socket, state, principal, delivery, payload).await
 }
 
 fn head_hint(document: DocumentId, update: &HeadUpdate) -> Vec<u8> {
@@ -237,6 +286,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         auth: auth::Auth::new(config.dev_auth, database.clone()),
         sessions: spreadsheet_collab::InProcessSessionDirectory::new(database.clone()),
+        delivery: delivery::DeliveryGates::default(),
         database,
         blobs,
         origins: config.allowed_origins,
@@ -259,8 +309,13 @@ async fn main() -> anyhow::Result<()> {
             "/api/dev/session",
             post(dev_session).delete(revoke_dev_session),
         )
+        .route("/api/dev/identity", get(dev_identity))
         .route("/api/documents", post(documents::create))
         .route("/api/documents/{id}", get(documents::get_document))
+        .route(
+            "/api/documents/{id}/permissions",
+            post(documents::change_permission),
+        )
         .route(
             "/api/documents/{id}/recalculate",
             post(documents::recalculate),
@@ -295,6 +350,29 @@ async fn ready(State(state): State<Arc<AppState>>) -> Response {
             }),
         )
             .into_response(),
+    }
+}
+
+async fn dev_identity(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if !auth::valid_origin(&headers, &state.origins) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match state.auth.authenticate(&headers).await {
+        Ok(Some(principal)) => {
+            #[derive(Serialize)]
+            struct IdentityView {
+                actor_id: String,
+                workspace_id: String,
+            }
+            Json(IdentityView {
+                actor_id: Uuid::from_bytes(*principal.identity.actor_id.as_bytes()).to_string(),
+                workspace_id: Uuid::from_bytes(*principal.identity.workspace_id.as_bytes())
+                    .to_string(),
+            })
+            .into_response()
+        }
+        Ok(None) => StatusCode::UNAUTHORIZED.into_response(),
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
 
@@ -431,8 +509,13 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
     let mut head_subscription: Option<HeadSubscription> = None;
     loop {
         tokio::select! {
-            update = next_head(&mut head_subscription) => {
-                let Some(update) = update else { continue; };
+            event = next_subscription_event(&mut head_subscription) => {
+                let Some(event) = event else { continue; };
+                let update = match event {
+                    SubscriptionEvent::Head(update) => update,
+                    SubscriptionEvent::AccessChanged => break,
+                    SubscriptionEvent::Closed => continue,
+                };
                 let Some(active) = head_subscription.as_mut() else { continue; };
                 if update.version <= active.last_sent { continue; }
                 let current = match active.session.head(principal.identity).await {
@@ -441,8 +524,13 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 };
                 if !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
                 if current > active.last_sent {
+                    let delivery = DocumentDelivery {
+                        document: active.document,
+                        gate: &active.gate,
+                        ticket: active.ticket,
+                    };
                     let replay = send_replay(
-                        &mut socket, &state, &principal, &active.session, active.document,
+                        &mut socket, &state, &principal, &active.session, delivery,
                         active.last_sent, current,
                     ).await;
                     if replay.is_err() { break; }
@@ -454,8 +542,11 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 // Queueing is not authorization: check the current head/access again at send.
                 let allowed = matches!(frame.session.head(principal.identity).await,
                     Ok(current) if current == frame.version);
-                if !allowed || !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
-                if !send(&mut socket, Message::Binary(frame.bytes.into())).await { break; }
+                if !allowed || !send_document_payload(
+                    &mut socket, &state, &principal,
+                    DocumentDelivery { document: frame.document, gate: &frame.gate, ticket: frame.ticket },
+                    frame.bytes,
+                ).await { break; }
             }
             _ = heartbeat.tick() => {
                 if last_pong.elapsed() >= Duration::from_secs(45)
@@ -470,8 +561,23 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                     if !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
                     match wire::decode_request(&bytes) {
                         Ok(wire::ClientRequest::Command(command)) => {
+                            let document = command.document_id.as_slice().try_into().ok()
+                                .and_then(|bytes| DocumentId::from_bytes(bytes).ok());
+                            let authorization = if let Some(document) = document {
+                                state.database.access(principal.identity, document).await.ok()
+                            } else { None };
                             let result = documents::handle_command(&state, &principal, *command).await;
-                            if !send(&mut socket, Message::Binary(result.encode_to_vec().into())).await { break; }
+                            let payload = result.encode_to_vec();
+                            let delivered = if let (Some(document), Some(ticket)) = (document, authorization) {
+                                let gate = state.delivery.get(document).await;
+                                send_document_payload(
+                                    &mut socket, &state, &principal,
+                                    DocumentDelivery { document, gate: &gate, ticket }, payload,
+                                ).await
+                            } else {
+                                send(&mut socket, Message::Binary(payload.into())).await
+                            };
+                            if !delivered { break; }
                         }
                         Ok(wire::ClientRequest::Calculation(request)) => {
                             if !rate_allowed(&state).await { break; }
@@ -507,24 +613,36 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 Ok(current) => current,
                                 Err(_) => break,
                             };
+                            let gate = state.delivery.get(document).await;
+                            let ticket = match state.database.access(principal.identity, document).await {
+                                Ok(ticket) => ticket,
+                                Err(_) => break,
+                            };
+                            let access_changes = gate.watch();
                             if request.last_seen_version > current.get() { break; }
                             let after = match DocumentVersion::new(request.last_seen_version) {
                                 Ok(version) => version,
                                 Err(_) => break,
                             };
                             let resync_required = match send_replay(
-                                &mut socket, &state, &principal, &session, document, after, current,
+                                &mut socket, &state, &principal, &session,
+                                DocumentDelivery { document, gate: &gate, ticket },
+                                after, current,
                             ).await {
                                 Ok(value) => value,
                                 Err(()) => break,
                             };
                             if !send_replay_complete(
-                                &mut socket, &state, &principal, &session, document, current,
-                                resync_required,
+                                &mut socket, &state, &principal, &session,
+                                DocumentDelivery { document, gate: &gate, ticket },
+                                current, resync_required,
                             ).await { break; }
                             head_subscription = Some(HeadSubscription {
                                 document,
                                 session,
+                                gate,
+                                ticket,
+                                access_changes,
                                 updates,
                                 last_sent: current,
                             });

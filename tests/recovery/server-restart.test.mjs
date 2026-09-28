@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { test } from 'node:test';
 import {
+  api,
   calculation,
   releaseSessions,
   formulaCommand,
@@ -13,11 +14,12 @@ import {
   getDocument,
   login,
   setCommand,
+  uuid7,
 } from '../helpers/client.mjs';
 
 test(
   'hard server restart replays content and resolves a discarded ACK by operation identity',
-  { timeout: 40000 },
+  { timeout: 60000 },
   async () => {
     const base = 'http://127.0.0.1:18082';
     let child;
@@ -81,6 +83,22 @@ test(
         const before = await calculation(base, cookie, snapshot.document_id, 3);
         assert.equal(before.status, 'complete');
         assert.deepEqual(before.values[0].value, { type: 'number', value: 5 });
+        const ownerIdentity = await (await api(base, cookie, '/api/dev/identity')).json();
+        const recipientAccount = 'recovery_acl_' + uuid7().replaceAll('-', '').slice(-12);
+        const recipientHome = await login(base, recipientAccount);
+        const recipientIdentity = await (
+          await api(base, recipientHome, '/api/dev/identity')
+        ).json();
+        const aclPath = `/api/documents/${snapshot.document_id}/permissions`;
+        const grant = await api(base, cookie, aclPath, 'POST', {
+          action: 'grant',
+          change_id: uuid7(),
+          target_user_id: recipientIdentity.actor_id,
+          role: 'viewer',
+        });
+        assert.equal(grant.status, 200);
+        const recipient = await login(base, recipientAccount, ownerIdentity.workspace_id);
+        assert.equal((await getDocument(base, recipient, snapshot.document_id)).version, '3');
         client.socket.terminate();
         await kill();
         await start();
@@ -95,6 +113,20 @@ test(
         assert.equal(after.status, 'complete');
         assert.equal(after.calculated_state_hash, before.calculated_state_hash);
         assert.deepEqual(after.values, before.values);
+        assert.equal((await getDocument(base, recipient, snapshot.document_id)).version, '3');
+        const revoked = await api(base, cookie, aclPath, 'POST', {
+          action: 'revoke',
+          change_id: uuid7(),
+          target_user_id: recipientIdentity.actor_id,
+        });
+        assert.equal(revoked.status, 200);
+        await kill();
+        await start();
+        assert.ok(
+          [403, 404].includes(
+            (await api(base, recipient, '/api/documents/' + snapshot.document_id)).status,
+          ),
+        );
       } finally {
         client.socket.terminate();
       }

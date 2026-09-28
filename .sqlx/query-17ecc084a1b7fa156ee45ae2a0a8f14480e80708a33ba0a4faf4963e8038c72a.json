@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO document_permissions(workspace_id,document_id,user_id,role) VALUES($1,$2,$3,$4) ON CONFLICT(document_id,user_id) DO UPDATE SET role=EXCLUDED.role",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "17ecc084a1b7fa156ee45ae2a0a8f14480e80708a33ba0a4faf4963e8038c72a"
+}

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use spreadsheet_application::journal::{JournalError, OperationJournal};
 use spreadsheet_collab::{SessionDirectory, SessionError, Submission};
 use spreadsheet_domain::workbook::*;
+use spreadsheet_storage::{PermissionError, PermissionRole};
 use spreadsheet_wire_protocol::{self as wire, v1};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -39,6 +40,100 @@ pub struct RecalculateReceipt {
     committed_version: String,
     current_head_version: String,
     canonical_event_hash: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PermissionChangeRequest {
+    Grant {
+        change_id: String,
+        target_user_id: String,
+        role: PermissionRoleInput,
+    },
+    Revoke {
+        change_id: String,
+        target_user_id: String,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionRoleInput {
+    Editor,
+    Viewer,
+}
+
+#[derive(Serialize)]
+pub struct PermissionChangeView {
+    change_id: String,
+    access_epoch: u64,
+    newly_committed: bool,
+}
+
+pub async fn change_permission(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<PermissionChangeRequest>,
+) -> Result<Json<PermissionChangeView>, ApiError> {
+    if !auth::valid_origin(&headers, &state.origins) {
+        return Err(ApiError(StatusCode::FORBIDDEN, "origin_denied"));
+    }
+    if !crate::rate_allowed(&state).await {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limited"));
+    }
+    let principal = principal(&state, &headers).await?;
+    let document = DocumentId::from_bytes(parse_id(&id)?).map_err(domain_error)?;
+    let (change_id, target, role) = match input {
+        PermissionChangeRequest::Grant {
+            change_id,
+            target_user_id,
+            role,
+        } => (
+            change_id,
+            target_user_id,
+            Some(match role {
+                PermissionRoleInput::Editor => PermissionRole::Editor,
+                PermissionRoleInput::Viewer => PermissionRole::Viewer,
+            }),
+        ),
+        PermissionChangeRequest::Revoke {
+            change_id,
+            target_user_id,
+        } => (change_id, target_user_id, None),
+    };
+    let change_id =
+        AuthorizationChangeId::from_bytes(parse_id(&change_id)?).map_err(domain_error)?;
+    let target = ActorId::from_bytes(parse_id(&target)?).map_err(domain_error)?;
+    let gate = state.delivery.get(document).await;
+    let _write = tokio::time::timeout(std::time::Duration::from_secs(3), gate.lock.write())
+        .await
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "send_gate_busy"))?;
+    let receipt = state
+        .database
+        .change_permission(principal.identity, document, target, change_id, role)
+        .await
+        .map_err(|error| match error {
+            PermissionError::Unauthorized | PermissionError::OwnerImmutable => {
+                ApiError(StatusCode::FORBIDDEN, "unauthorized")
+            }
+            PermissionError::NotFound => ApiError(StatusCode::NOT_FOUND, "not_found"),
+            PermissionError::IdempotencyConflict => {
+                ApiError(StatusCode::CONFLICT, "idempotency_conflict")
+            }
+            PermissionError::Conflict => ApiError(StatusCode::CONFLICT, "retryable_conflict"),
+            PermissionError::Unavailable | PermissionError::Corrupt => {
+                ApiError(StatusCode::SERVICE_UNAVAILABLE, "unavailable")
+            }
+        })?;
+    if receipt.newly_committed {
+        gate.committed_epoch(receipt.access_epoch);
+    }
+    Ok(Json(PermissionChangeView {
+        change_id: id_string(receipt.change_id.as_bytes()),
+        access_epoch: receipt.access_epoch,
+        newly_committed: receipt.newly_committed,
+    }))
 }
 
 pub async fn recalculate(

@@ -65,9 +65,29 @@ impl Auth {
             .transpose()
             .map_err(|_| DatabaseError::InvalidConfiguration)?
             .unwrap_or("local");
+        let requested_workspace = headers
+            .get("x-pxel-dev-workspace")
+            .map(|value| {
+                let text = value
+                    .to_str()
+                    .map_err(|_| DatabaseError::InvalidConfiguration)?;
+                let id = Uuid::parse_str(text).map_err(|_| DatabaseError::InvalidConfiguration)?;
+                if id.get_version_num() != 7 {
+                    return Err(DatabaseError::InvalidConfiguration);
+                }
+                WorkspaceId::from_bytes(*id.as_bytes())
+                    .map_err(|_| DatabaseError::InvalidConfiguration)
+            })
+            .transpose()?;
         let session = self
             .database
-            .issue_development_account_session(token_hash(&token), actor, workspace, account)
+            .issue_development_account_session_in_workspace(
+                token_hash(&token),
+                actor,
+                workspace,
+                account,
+                requested_workspace,
+            )
             .await?;
         Ok(Some(cookie(&token, session.remaining_seconds)))
     }

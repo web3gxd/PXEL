@@ -1,10 +1,18 @@
 # Persistence и recovery
 
-Статус foundation: ACCEPTED FOR PHASE 0. В phase 0 проверяются migrations/readiness и LocalFilesystemBlobStore. Document commit начинается в фазе 1, snapshots в фазе 5; ниже будущие контракты, а не заявленная реализация.
+Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
+operations реализованы локально; snapshots относятся к фазе 5. Ниже
+смешаны действующие контракты журнала и отдельно названные будущие требования.
 
 ## PostgreSQL authority
 
 Метаданные tenant/users/memberships/documents/ACL и append-only operation log живут в PostgreSQL. Workbook не сохраняется единым JSON. Tables появляются с use cases; import/export jobs и snapshot metadata не создают видимость работающих функций до соответствующей фазы.
+
+Document ACL grant/revoke хранится отдельно от authored workbook log:
+`documents.access_epoch` и `document_permissions` меняются в одной
+транзакции с append-only `audit_events` schema 1. Повтор `change_id` дает
+оригинальный receipt; новый intent с тем же ID отклоняется. ACL изменение не
+расходует document version и не попадает в calculation dependencies.
 
 Event envelope имеет payload schema version, document_id, operation_id, committed_version, authenticated principal, command fingerprint, canonical event bytes/checksum и prepared state hash. Уникальны `(document_id,committed_version)` и `(document_id,operation_id)`. UUIDv7 генерируется с глобальной уникальностью; partition-friendly DB constraint scoped к документу. Один batch получает одну версию.
 

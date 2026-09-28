@@ -61,6 +61,7 @@ identity!(
     ActorId,
     WorkspaceId,
     OperationId,
+    AuthorizationChangeId,
     CalculationContextId
 );
 

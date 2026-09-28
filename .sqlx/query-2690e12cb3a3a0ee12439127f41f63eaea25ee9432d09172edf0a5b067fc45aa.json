@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT actor_id,target_user_id,new_role,access_epoch,document_id FROM audit_events WHERE event_id=$1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "actor_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "target_user_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "target_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "new_role",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "new_role"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "access_epoch",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "access_epoch"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "document_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "document_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2690e12cb3a3a0ee12439127f41f63eaea25ee9432d09172edf0a5b067fc45aa"
+}

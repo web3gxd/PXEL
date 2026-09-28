@@ -655,3 +655,77 @@ test(
     }
   },
 );
+
+test('owner grant and revoke fence a second user subscription at access epoch', async () => {
+  const suffix = uuid7().replaceAll('-', '').slice(-16);
+  const owner = await login(base, 'acl_owner_' + suffix);
+  const readerAccount = 'acl_reader_' + suffix;
+  const readerHome = await login(base, readerAccount);
+  const ownerIdentity = await (await api(base, owner, '/api/dev/identity')).json();
+  const readerIdentity = await (await api(base, readerHome, '/api/dev/identity')).json();
+  const { snapshot } = await createDocument(base, owner);
+  assert.ok(
+    [403, 404].includes(
+      (await api(base, readerHome, '/api/documents/' + snapshot.document_id)).status,
+    ),
+  );
+  const path = `/api/documents/${snapshot.document_id}/permissions`;
+  const grant = {
+    action: 'grant',
+    change_id: uuid7(),
+    target_user_id: readerIdentity.actor_id,
+    role: 'viewer',
+  };
+  const granted = await api(base, owner, path, 'POST', grant);
+  assert.equal(granted.status, 200);
+  assert.deepEqual(await granted.json(), {
+    change_id: grant.change_id,
+    access_epoch: 1,
+    newly_committed: true,
+  });
+  const retry = await api(base, owner, path, 'POST', grant);
+  assert.equal(retry.status, 200);
+  assert.equal((await retry.json()).newly_committed, false);
+  assert.equal((await api(base, owner, path, 'POST', { ...grant, role: 'editor' })).status, 409);
+  const readerCookie = await login(base, readerAccount, ownerIdentity.workspace_id);
+  assert.equal((await getDocument(base, readerCookie, snapshot.document_id)).version, '1');
+  assert.equal(
+    (await api(base, readerCookie, path, 'POST', { ...grant, change_id: uuid7() })).status,
+    403,
+  );
+  const reader = await connect(base, readerCookie);
+  const writer = await connect(base, owner);
+  try {
+    const [barrier] = await receiveFrames(reader, 1, () =>
+      subscribeDocument(reader, snapshot.document_id, 1),
+    );
+    assert.equal(barrier.case, 'replayComplete');
+    const denied = await reader.send(setCommand(reader, snapshot, 'viewer cannot write'));
+    assert.equal(denied.case, 'rejected');
+    const update = nextFrame(reader);
+    assert.equal((await writer.send(setCommand(writer, snapshot, 11))).case, 'committed');
+    assert.equal((await update).value.headVersion, 2n);
+    const closed = once(reader.socket, 'close', { signal: AbortSignal.timeout(5000) });
+    const revoke = {
+      action: 'revoke',
+      change_id: uuid7(),
+      target_user_id: readerIdentity.actor_id,
+    };
+    const revoked = await api(base, owner, path, 'POST', revoke);
+    assert.equal(revoked.status, 200);
+    assert.equal((await revoked.json()).access_epoch, 2);
+    await closed;
+    assert.ok(
+      [403, 404].includes(
+        (await api(base, readerCookie, '/api/documents/' + snapshot.document_id)).status,
+      ),
+    );
+    assert.equal(
+      (await writer.send(setCommand(writer, snapshot, 12, { sequence: 2 }))).case,
+      'committed',
+    );
+  } finally {
+    reader.socket.terminate();
+    writer.socket.terminate();
+  }
+});

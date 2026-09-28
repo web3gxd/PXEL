@@ -58,6 +58,18 @@ impl PgDatabase {
         workspace: WorkspaceId,
         account: &str,
     ) -> Result<DevelopmentSession, DatabaseError> {
+        self.issue_development_account_session_in_workspace(hash, actor, workspace, account, None)
+            .await
+    }
+
+    pub async fn issue_development_account_session_in_workspace(
+        &self,
+        hash: [u8; 32],
+        actor: ActorId,
+        workspace: WorkspaceId,
+        account: &str,
+        requested_workspace: Option<WorkspaceId>,
+    ) -> Result<DevelopmentSession, DatabaseError> {
         if account.is_empty()
             || account.len() > 32
             || !account
@@ -123,11 +135,22 @@ impl PgDatabase {
             .await?;
             (actor, workspace)
         };
+        let session_workspace = requested_workspace.unwrap_or(workspace);
+        let membership = sqlx::query!(
+            "SELECT user_id FROM memberships WHERE workspace_id=$1 AND user_id=$2",
+            Uuid::from_bytes(*session_workspace.as_bytes()),
+            Uuid::from_bytes(*actor.as_bytes())
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        if membership.is_none() {
+            return Err(DatabaseError::InvalidConfiguration);
+        }
         sqlx::query!(
             "INSERT INTO development_sessions(token_hash,user_id,workspace_id) VALUES($1,$2,$3)",
             &hash[..],
             Uuid::from_bytes(*actor.as_bytes()),
-            Uuid::from_bytes(*workspace.as_bytes())
+            Uuid::from_bytes(*session_workspace.as_bytes())
         )
         .execute(&mut *tx)
         .await?;
@@ -135,7 +158,7 @@ impl PgDatabase {
         Ok(DevelopmentSession {
             identity: AuthenticatedActor {
                 actor_id: actor,
-                workspace_id: workspace,
+                workspace_id: session_workspace,
             },
             remaining_seconds: 3600,
         })

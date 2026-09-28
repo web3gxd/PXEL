@@ -1,6 +1,7 @@
 //! One bounded, cancellable calculation response per WebSocket connection.
-use crate::{AppState, auth};
+use crate::{AppState, auth, delivery::DeliveryGate};
 use prost::Message;
+use spreadsheet_application::journal::{DocumentAccess, OperationJournal};
 use spreadsheet_collab::{
     DocumentSession, SessionDirectory,
     calculation::{COMPATIBILITY_PROFILE, CalculatedState, CalculationOutcome, ENGINE_VERSION},
@@ -16,6 +17,9 @@ pub struct Frame {
     pub bytes: Vec<u8>,
     pub session: DocumentSession,
     pub version: DocumentVersion,
+    pub document: DocumentId,
+    pub gate: Arc<DeliveryGate>,
+    pub ticket: DocumentAccess,
 }
 pub struct Stream {
     receiver: mpsc::Receiver<Frame>,
@@ -48,6 +52,12 @@ pub async fn start(
     let session = state
         .sessions
         .session(principal.identity, document)
+        .await
+        .map_err(|_| ())?;
+    let gate = state.delivery.get(document).await;
+    let ticket = state
+        .database
+        .access(principal.identity, document)
         .await
         .map_err(|_| ())?;
     let mut updates = session
@@ -111,6 +121,9 @@ pub async fn start(
                         bytes,
                         session: session.clone(),
                         version,
+                        document,
+                        gate: gate.clone(),
+                        ticket,
                     })
                     .await
                     .is_err()
@@ -132,6 +145,9 @@ pub async fn start(
                     bytes: failure(document, version, requested_context.as_ref(), 5),
                     session: session.clone(),
                     version,
+                    document,
+                    gate: gate.clone(),
+                    ticket,
                 }),
             )
             .await;

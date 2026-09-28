@@ -1,5 +1,59 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — document ACL epoch и WebSocket payload send gate
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-014/015, collaboration,
+threat model, текущие storage/actor/WebSocket/auth/migrations и тесты.
+Цель фазы 3: владелец может дать существующему пользователю editor/viewer
+доступ и отозвать его так, чтобы после durable ответа об отзыве старый
+подписчик не начинал новых document payload sends. Инварианты: PostgreSQL
+authoritative, ACL изменение не входит в authored operation log, не повышает
+document content version, `access_epoch` и append-only audit атомарны;
+отправка проверяет server-issued principal и исходный epoch под gate.
+
+Добавлены `POST /api/documents/{id}/permissions` с UUIDv7 change_id и
+grant/revoke, две миграции для append-only `audit_events` schema 1,
+идемпотентная owner-only транзакция изменения прав и `access_epoch`, а также
+process-local per-document delivery gate. Grant существующего user при
+необходимости добавляет membership в workspace; ACL конкретного документа
+по-прежнему обязателен. `GET /api/dev/identity` и разрешенный workspace
+header для dev login позволяют проверить двух разных пользователей локально;
+production dev-auth остается выключенным. WebSocket replay, calculation и
+command ACK теперь держат read gate от финальной DB ACL/epoch проверки до
+bounded send. ACL transaction держит write gate; после COMMIT публикует epoch,
+что закрывает старые подписки. Receipt повторного change_id не сигналит новый
+epoch. Weak registry не удерживает неактивные gates. Созданы ADR-016,
+документация, README, SQLx metadata, интеграционный и recovery сценарии;
+презентация отражает только этот проверенный срез.
+
+Проверено: `cargo sqlx migrate run` применил миграции 202609290002/003;
+storage test доказал grant→editor→revoke, один audit record на intent,
+collision, запрет изменения owner и append-only trigger. Gate unit test
+доказал, что write ждет in-flight read. Live targeted integration и полный
+`pnpm test:integration` прошли 25/25: два разных аккаунта, viewer не пишет,
+replay/live update, owner-only ACL, повтор/коллизия, subscription close после
+revoke до следующей правки. `pnpm test:recovery` прошёл 1/1 с hard restarts
+после grant/revoke; `pnpm test:e2e` прошёл 14/14. `cargo sqlx prepare` обновил
+offline metadata; `SQLX_OFFLINE=true cargo build --locked --workspace` и
+`just sqlx-check` прошли. Первый `just check` остановился на Clippy
+too_many_arguments после расширения replay API; общий DocumentDelivery
+устранил это без lint suppression. После рефакторинга Rust Clippy/test/build,
+wasm32 check, protobuf drift, Prettier, ESLint, TS, 52 Vitest и Vite build
+прошли полным `just check` с exit 0. После последнего replay API-рефакторинга
+повторно прошли живые `pnpm test:integration` 25/25, `pnpm test:recovery`
+1/1 и `pnpm test:e2e` 14/14. Проверка презентации прошла 10 слайдов,
+навигацию и layout 1440×900/390×844. После дополнительной проверки
+`rows_affected`/owner invariant и документации финальный `just check`
+повторно завершился с exit 0. Ни один latency p95 в этом срезе не измерялся.
+
+Ограничения: gate действует в одном server process; direct SQL вне control
+lane, membership revocation, presence, dedicated outbound byte queue,
+convergence stress и production auth не реализованы. Sharing panel в UI
+пока нет. Linux/Compose/remote CI не проверялись в этом срезе. Фаза 3 не
+закрыта.
+
+---
+
 ## 2026-09-29 — локальный функциональный gate базовой фазы 2
 
 Перед фиксацией gate повторно прочитаны AGENTS, roadmap и критерии фазы 2,

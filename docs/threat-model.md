@@ -8,22 +8,22 @@
 
 Trust boundaries: browser→transport; transport→server AuthContext; command→validated operation; application→PostgreSQL; parent→XLSX worker; snapshot bytes→validated domain state. Внешний auth/provider не является источником document ACL; viewer/editor/owner проверяются сервером.
 
-| Угроза                           | Контроль и этап                                                                                             |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Cross-tenant document access     | Tenant-aware queries и ACL каждой команды/subscription/history/export; phase 1                              |
-| Forged actor_id                  | Server principal, mismatch rejection; command boundary phase 1                                              |
-| Subscription после revoke        | access_epoch, ordered control lane, payload send gate и queue invalidation; phase 3                         |
-| Duplicate/stale writer           | Operation receipt, payload fingerprint, CAS head, unique versions; phase 1                                  |
-| Partial durable state / lost ACK | Candidate preapply, one transaction, uncertain commit resolution, replay; phase 1                           |
-| Malformed/huge frame             | WS/HTTP byte caps, schema/decode caps, unknown version rejection; phase 0 handshake, расширяется с commands |
-| Slow consumer / queue exhaustion | Bounded queues+bytes, deadlines, disconnect, fair admission; actor/subscriptions phases 1/3                 |
-| Cross-site WS/session use        | Exact Origin allowlist, no query-string credentials; cookie mode требует CSRF token/SameSite policy         |
-| Document content in logs         | Allowlist structured fields, отсутствие Debug payload/body; tests/review с phase 0                          |
-| XSS / formula content            | Plain text DOM rendering, CSP, no arbitrary HTML or executable macros; editor phase 1                       |
-| Filesystem traversal             | Opaque validated BlobKey, private root, no symlink escape; phase 0                                          |
-| Snapshot corruption              | Schema/length/checksum/domain hash verification, ACTIVE generations fallback; phase 5                       |
-| XLSX CPU/RAM/code exploitation   | Separate restricted process, budgets, no network relationships/credentials, parent IR validation; phase 6   |
-| Dependency compromise            | License/advisory/source check, lockfiles, no blind major upgrades; ongoing                                  |
+| Угроза                           | Контроль и этап                                                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Cross-tenant document access     | Tenant-aware queries и ACL каждой команды/subscription/history/export; phase 1                                     |
+| Forged actor_id                  | Server principal, mismatch rejection; command boundary phase 1                                                     |
+| Subscription после revoke        | document access_epoch и process-local payload send gate проверены; distributed fencing и membership revoke открыты |
+| Duplicate/stale writer           | Operation receipt, payload fingerprint, CAS head, unique versions; phase 1                                         |
+| Partial durable state / lost ACK | Candidate preapply, one transaction, uncertain commit resolution, replay; phase 1                                  |
+| Malformed/huge frame             | WS/HTTP byte caps, schema/decode caps, unknown version rejection; phase 0 handshake, расширяется с commands        |
+| Slow consumer / queue exhaustion | Bounded queues+bytes, deadlines, disconnect, fair admission; actor/subscriptions phases 1/3                        |
+| Cross-site WS/session use        | Exact Origin allowlist, no query-string credentials; cookie mode требует CSRF token/SameSite policy                |
+| Document content in logs         | Allowlist structured fields, отсутствие Debug payload/body; tests/review с phase 0                                 |
+| XSS / formula content            | Plain text DOM rendering, CSP, no arbitrary HTML or executable macros; editor phase 1                              |
+| Filesystem traversal             | Opaque validated BlobKey, private root, no symlink escape; phase 0                                                 |
+| Snapshot corruption              | Schema/length/checksum/domain hash verification, ACTIVE generations fallback; phase 5                              |
+| XLSX CPU/RAM/code exploitation   | Separate restricted process, budgets, no network relationships/credentials, parent IR validation; phase 6          |
+| Dependency compromise            | License/advisory/source check, lockfiles, no blind major upgrades; ongoing                                         |
 
 ## Development authentication
 

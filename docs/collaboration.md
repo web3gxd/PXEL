@@ -6,11 +6,11 @@ idempotent receipt, journal replay и отдельный WebSocket response дл
 Авторизованная подписка теперь воспроизводит до 128 canonical user events из
 PostgreSQL до `ReplayComplete`, а затем догоняет live head из того же журнала
 (ADR-015). Системное событие или больший gap требует HTTP projection resync.
-Presence и атомарный отзыв ACL-подписок еще не реализованы; полный семантический
-gate фазы 3 остается открытым. Подробные результаты находятся в RUNBOOK.
-Отзыв dev-auth cookie теперь обнаруживается перед следующей WebSocket-командой
-или отправкой document payload и закрывает соединение; это не заменяет
-упорядоченный `access_epoch` gate для изменения document ACL.
+Документный grant/revoke теперь использует durable `access_epoch` и
+process-local payload send gate (ADR-016). Два разных dev-пользователя,
+закрытие подписки и restart recovery проверены. Presence, membership revoke,
+distributed fencing и полный семантический gate фазы 3 остаются открытыми.
+Подробные результаты находятся в RUNBOOK.
 
 ## Command, validation, event, projection
 
@@ -72,6 +72,17 @@ Document access_epoch и membership access_epoch образуют server-issued 
 ACL change идет через строго упорядоченную authorization control lane. Общий порядок блокировок: membership control gate → document gate → DB membership/document rows; ordinary commit пользуется тем же порядком. Membership revoke охватывает все активные document gates этого principal в детерминированном порядке. Обход этого пути прямым административным SQL не является поддерживаемым API.
 
 Перед ACL transaction control lane закрывает payload send gate затронутых подписок. Очередной write не может начать отправку под старым ticket. Уже начатая отправка имеет bounded timeout; она линейризуется до revocation. Затем transaction меняет ACL, увеличивает epochs, пишет durable authorization control event/outbox. После COMMIT старые queued payloads удаляются, подписка закрывается или требует reauthorization, gate старого epoch не открывается. Rollback может возобновить прежний gate только после проверки epoch.
+
+Реализованный MVP-срез относится к document ACL: `POST /api/documents/{id}/permissions`
+принимает `action=grant|revoke`, UUIDv7 `change_id` и target user ID. Grant
+поддерживает роли editor/viewer и при необходимости добавляет существующего
+пользователя в workspace. Изменение role/epoch и schema-1 append-only audit
+атомарны в PostgreSQL. Отдельного distributed outbox пока нет; он нужен до
+multi-process fanout. Повтор исходного intent возвращает прежний receipt,
+коллизия ID отклоняется. Текущий in-process gate держит read lock на время
+финальной проверки epoch и отправки каждого document frame, write lock — на
+время ACL transaction. Это не распределенный control lane для нескольких
+server processes и не реализация membership revoke.
 
 Writer проверяет текущий ticket непосредственно перед каждым новым payload send под gate; проверка при enqueue недостаточна. Bytes, уже переданные OS/socket до revoke, невозможно отозвать. ACK revoke означает, что дальнейшие sends под старым epoch не начнутся. Crash закрывает connections; новые подписки читают durable epochs. Будущий multi-process fanout требует acknowledged invalidation/fencing, а не только PostgreSQL NOTIFY.
 

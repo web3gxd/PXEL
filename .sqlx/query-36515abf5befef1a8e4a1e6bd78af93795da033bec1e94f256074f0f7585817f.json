@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET access_epoch=$1 WHERE document_id=$2 AND access_epoch=$3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "36515abf5befef1a8e4a1e6bd78af93795da033bec1e94f256074f0f7585817f"
+}

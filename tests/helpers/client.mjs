@@ -46,10 +46,14 @@ export function uuid7() {
   ].join('-');
 }
 export const bytes = (id) => Buffer.from(id.replaceAll('-', ''), 'hex');
-export async function login(base, account = 'local') {
+export async function login(base, account = 'local', workspace) {
   const response = await fetch(base + '/api/dev/session', {
     method: 'POST',
-    headers: { Origin: origin, 'X-PXEL-DEV-ACCOUNT': account },
+    headers: {
+      Origin: origin,
+      'X-PXEL-DEV-ACCOUNT': account,
+      ...(workspace ? { 'X-PXEL-DEV-WORKSPACE': workspace } : {}),
+    },
     signal: AbortSignal.timeout(5000),
   });
   assert.equal(response.status, 204);
