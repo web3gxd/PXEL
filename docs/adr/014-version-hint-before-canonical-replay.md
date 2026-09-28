@@ -1,6 +1,6 @@
 # ADR-014: Coalescing document version hints before canonical replay
 
-Date: 2026-09-29. Status: implemented as an interim phase-3 slice.
+Date: 2026-09-29. Status: superseded by ADR-015 for bounded replay; retained as history.
 
 ## Context
 

@@ -881,6 +881,18 @@ export class DocumentStore {
   }
   async receive(envelope: ServerEnvelope) {
     const payload = envelope.payload;
+    if (payload.case === 'replayComplete') {
+      const marker = payload.value;
+      if (marker.documentId.length !== 16 || marker.barrierVersion > 9223372036854775807n)
+        throw new Error('Invalid replay barrier');
+      if (bytesUuid(marker.documentId) !== this.projection?.document_id) return;
+      if (marker.barrierVersion > BigInt(this.projection.version)) {
+        if (marker.barrierVersion > this.headRefreshVersion)
+          this.headRefreshVersion = marker.barrierVersion;
+        await this.refreshHead();
+      }
+      return;
+    }
     if (payload.case === 'documentHeadChanged') {
       const hint = payload.value;
       if (

@@ -152,6 +152,87 @@ describe('document projection and pending intents', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     store.disconnected();
   });
+  it('uses the replay barrier to repair a missing event', async () => {
+    const { store } = await connectedStore();
+    const next = projection();
+    next.version = '3';
+    next.sheets[0]!.cells = [
+      { row_id: rowId, column_id: columnId, value: { type: 'number', value: 73 } },
+    ];
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => next }));
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'replayComplete',
+          value: {
+            documentId: uuidBytes(documentId),
+            barrierVersion: 3n,
+            resyncRequired: true,
+          },
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.projection?.version).toBe('3');
+    expect(store.display({ row: 0, column: 0 })).toBe('73');
+    store.disconnected();
+  });
+  it('applies ordered replay events without a full projection read', async () => {
+    const { store } = await connectedStore();
+    const fetchMock = vi.fn(async () => {
+      throw new Error('Unexpected full projection read');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    for (let version = 2; version <= 4; version++) {
+      await store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'documentHeadChanged',
+            value: {
+              documentId: uuidBytes(documentId),
+              headVersion: BigInt(version),
+              latestOperation: {
+                documentId: uuidBytes(documentId),
+                operationId: uuidBytes(uuidV7()),
+                actorId: uuidBytes(documentId),
+                committedVersion: BigInt(version),
+                confirmedStateHash: new Uint8Array(32),
+                canonicalOperation: {
+                  kind: {
+                    case: 'setCellValue',
+                    value: {
+                      address: {
+                        sheetId: uuidBytes(sheetId),
+                        rowId: uuidBytes(rowId),
+                        columnId: uuidBytes(columnId),
+                      },
+                      value: { kind: { case: 'number', value: version * 10 } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      );
+    }
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'replayComplete',
+          value: { documentId: uuidBytes(documentId), barrierVersion: 4n },
+        },
+      }),
+    );
+    expect(store.projection?.version).toBe('4');
+    expect(store.display({ row: 0, column: 0 })).toBe('40');
+    expect(fetchMock).not.toHaveBeenCalled();
+    store.disconnected();
+  });
   it('refreshes canonical content when a remote head hint arrives', async () => {
     const { store } = await connectedStore();
     const next = projection();

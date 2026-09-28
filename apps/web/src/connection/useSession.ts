@@ -102,6 +102,7 @@ export function useSession(document?: DocumentStore) {
                 'rejected',
                 'calculationCommitted',
                 'documentHeadChanged',
+                'replayComplete',
               ].includes(envelope.payload.case ?? '')
             )
               throw new SessionProtocolError('invalid_message');

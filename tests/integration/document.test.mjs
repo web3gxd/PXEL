@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   api,
   bytes,
+  decodeFrame,
   connect,
   createDocument,
   formulaCommand,
@@ -12,20 +13,25 @@ import {
   getDocument,
   login,
   nextFrame,
+  receiveFrames,
   setCommand,
   subscribeDocument,
   uuid7,
 } from '../helpers/client.mjs';
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
 
-test('another socket receives a coalescing head hint and reads canonical state', async () => {
+test('another socket receives a canonical live event and late subscriber replays it', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);
   const first = await connect(base, cookie);
   const second = await connect(base, cookie);
   try {
+    const [barrier] = await receiveFrames(second, 1, () =>
+      subscribeDocument(second, snapshot.document_id, snapshot.version),
+    );
+    assert.equal(barrier.case, 'replayComplete');
+    assert.equal(barrier.value.barrierVersion, 1n);
     const update = nextFrame(second);
-    subscribeDocument(second, snapshot.document_id, snapshot.version);
     const committed = await first.send(setCommand(first, snapshot, 42));
     assert.equal(committed.case, 'committed');
     const hint = await update;
@@ -43,17 +49,145 @@ test('another socket receives a coalescing head hint and reads canonical state',
     assert.equal(current.sheets[0].cells[0].value.value, 42);
     const returning = await connect(base, cookie);
     try {
-      const missed = nextFrame(returning);
-      subscribeDocument(returning, snapshot.document_id, 1);
-      const resumed = await missed;
+      const [resumed, complete] = await receiveFrames(returning, 2, () =>
+        subscribeDocument(returning, snapshot.document_id, 1),
+      );
       assert.equal(resumed.case, 'documentHeadChanged');
       assert.equal(resumed.value.headVersion, 2n);
+      assert.equal(complete.case, 'replayComplete');
+      assert.equal(complete.value.barrierVersion, 2n);
+      assert.equal(complete.value.resyncRequired, false);
     } finally {
       returning.socket.close();
     }
   } finally {
     first.socket.close();
     second.socket.close();
+  }
+});
+
+test('late subscriber receives every missed version in order before the replay barrier', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const writer = await connect(base, cookie);
+  const reader = await connect(base, cookie);
+  try {
+    for (let index = 1; index <= 3; index++) {
+      const result = await writer.send(
+        setCommand(writer, snapshot, index * 10, { sequence: index }),
+      );
+      assert.equal(result.case, 'committed');
+      assert.equal(result.value.committedVersion, BigInt(index + 1));
+    }
+    const frames = await receiveFrames(reader, 4, () =>
+      subscribeDocument(reader, snapshot.document_id, 1),
+    );
+    assert.deepEqual(
+      frames.slice(0, 3).map((frame) => frame.value.headVersion),
+      [2n, 3n, 4n],
+    );
+    assert.ok(frames.slice(0, 3).every((frame) => frame.case === 'documentHeadChanged'));
+    assert.deepEqual(
+      frames.slice(0, 3).map((frame) => frame.value.latestOperation.committedVersion),
+      [2n, 3n, 4n],
+    );
+    assert.equal(frames[3].case, 'replayComplete');
+    assert.equal(frames[3].value.barrierVersion, 4n);
+    assert.equal(frames[3].value.resyncRequired, false);
+    const live = nextFrame(reader);
+    const final = await writer.send(setCommand(writer, snapshot, 40, { sequence: 4 }));
+    assert.equal(final.case, 'committed');
+    const update = await live;
+    assert.equal(update.case, 'documentHeadChanged');
+    assert.equal(update.value.headVersion, 5n);
+    assert.equal(update.value.latestOperation.committedVersion, 5n);
+  } finally {
+    writer.socket.close();
+    reader.socket.close();
+  }
+});
+
+test('commit during replay is delivered after the captured barrier without a gap', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const writer = await connect(base, cookie);
+  const reader = await connect(base, cookie);
+  try {
+    for (let index = 1; index <= 50; index++) {
+      const result = await writer.send(setCommand(writer, snapshot, index, { sequence: index }));
+      assert.equal(result.case, 'committed');
+    }
+    let racingCommit;
+    const frames = await receiveFrames(reader, 52, () => {
+      reader.socket.once('message', () => {
+        racingCommit = writer.send(setCommand(writer, snapshot, 51, { sequence: 51 }));
+      });
+      subscribeDocument(reader, snapshot.document_id, 1);
+    });
+    assert.equal((await racingCommit).case, 'committed');
+    assert.deepEqual(
+      frames.slice(0, 50).map((frame) => frame.value.headVersion),
+      Array.from({ length: 50 }, (_, index) => BigInt(index + 2)),
+    );
+    assert.equal(frames[50].case, 'replayComplete');
+    assert.equal(frames[50].value.barrierVersion, 51n);
+    assert.equal(frames[51].case, 'documentHeadChanged');
+    assert.equal(frames[51].value.headVersion, 52n);
+  } finally {
+    writer.socket.close();
+    reader.socket.close();
+  }
+});
+
+test('system calculation event requests a projection resync at the replay barrier', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const response = await api(
+    base,
+    cookie,
+    `/api/documents/${snapshot.document_id}/recalculate`,
+    'POST',
+    { operation_id: uuid7() },
+  );
+  assert.equal(response.status, 200);
+  const reader = await connect(base, cookie);
+  try {
+    const [hint, marker] = await receiveFrames(reader, 2, () =>
+      subscribeDocument(reader, snapshot.document_id, 1),
+    );
+    assert.equal(hint.case, 'documentHeadChanged');
+    assert.equal(hint.value.headVersion, 2n);
+    assert.equal(hint.value.latestOperation, undefined);
+    assert.equal(marker.case, 'replayComplete');
+    assert.equal(marker.value.barrierVersion, 2n);
+    assert.equal(marker.value.resyncRequired, true);
+  } finally {
+    reader.socket.close();
+  }
+});
+
+test('replay above the event cap requests one bounded projection resync', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const writer = await connect(base, cookie);
+  const reader = await connect(base, cookie);
+  try {
+    for (let index = 1; index <= 129; index++) {
+      const result = await writer.send(setCommand(writer, snapshot, index, { sequence: index }));
+      assert.equal(result.case, 'committed');
+    }
+    const [hint, marker] = await receiveFrames(reader, 2, () =>
+      subscribeDocument(reader, snapshot.document_id, 1),
+    );
+    assert.equal(hint.case, 'documentHeadChanged');
+    assert.equal(hint.value.headVersion, 130n);
+    assert.equal(hint.value.latestOperation, undefined);
+    assert.equal(marker.case, 'replayComplete');
+    assert.equal(marker.value.barrierVersion, 130n);
+    assert.equal(marker.value.resyncRequired, true);
+  } finally {
+    writer.socket.close();
+    reader.socket.close();
   }
 });
 
@@ -73,7 +207,7 @@ test('revoked development session receives no later document head hint', async (
     const committed = await writer.send(setCommand(writer, snapshot, 88));
     assert.equal(committed.case, 'committed');
     await closed;
-    assert.equal(messages.length, 0);
+    assert.ok(messages.every((data) => decodeFrame(data).case === 'replayComplete'));
   } finally {
     observer.socket.close();
     writer.socket.close();

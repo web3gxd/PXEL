@@ -1,5 +1,60 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — Bounded durable replay до live-подписки
+
+Перед срезом прочитаны AGENTS, roadmap, collaboration contract, ADR-014 и
+текущий actor/wire/client код. Цель — не перечитывать всю книгу при нескольких
+пропущенных user events и закрыть гонку между replay и live. Инварианты:
+авторитетный порядок PostgreSQL, последовательные версии, durable-before-push,
+отдельные confirmed/pending states, повторная авторизация перед отправкой и
+bounded backpressure. Риск: system event пока не представлен публичным wire
+event, а отзыв ACL еще не упорядочен через access_epoch.
+
+Добавлен `ReplayComplete` в wire v1. При Subscribe сервер сначала регистрирует
+actor watch, затем фиксирует авторизованный barrier и читает журнал
+`(last_seen,barrier]`. До 128 canonical user events / 1 MiB отправляются по
+версии. После барьера watch будит socket, а пропущенные live events снова
+читаются из PostgreSQL, поэтому coalescing не пропускает версии. При system
+event, превышении лимита или непредставимом event отправляется version-only
+hint и `resync_required`; браузер получает HTTP projection. Клиент проверяет
+барьер и применяет лишь соседние canonical версии. Decision — ADR-015;
+ADR-014 сохранен как история. Слайд дорожной карты уточнен: replay ограничен,
+фаза 3 не завершена.
+
+Изменены server WS, wire proto/generated Rust+TS и descriptor, browser store/
+connection, integration helper и tests, client unit tests, collaboration docs,
+ADR-014/015, README, презентация и RUNBOOK. Живые integration tests покрыли три
+пропущенные версии, commit во время отправки 50 событий, live после барьера,
+system-event fallback, gap >128 и logout. `pnpm test:integration` 21/21; `pnpm
+test:e2e` 14/14 (до последней узкой race fix, которая меняла только
+отсечение событий после barrier); `pnpm test` 52/52; `pnpm proto:check`,
+Rust fmt и targeted Clippy all-targets/all-features прошли. Финальный
+`just check` завершился с exit 0: оба Clippy режима, все Rust tests,
+native/WASM checks, proto drift, форматирование, lint/typecheck, 52 Vitest
+и production build. `pnpm --filter @pxel/web presentation:check` прошел
+10 слайдов в 1440×900 и 390×844. Первая попытка `pnpm proto:check` после изменения
+комментариев proto выявила drift descriptor; повторная генерация устранила
+его, повторный check прошел. Первая попытка recovery test после `just check`
+не подняла сервер: production build переписал локальный binary без dev-auth.
+После `cargo build --locked -p pxel-server --features dev-auth` повторный
+`pnpm test:recovery` прошел 1/1. Причина связана с порядком сборок test
+harness, а не с ошибкой восстановления документа.
+После self-review journal fetch разбит на порции максимум по восемь events:
+прежний запрос мог материализовать 128 payload до проверки 1 MiB outbound
+cap. Для окончательной правки повторно прошли targeted Rust Clippy, сборка
+server с dev-auth, `pnpm test:recovery` 1/1, `pnpm test:integration` 21/21,
+`pnpm test:e2e` 14/14 и проверка презентации на двух viewport. Полный
+`just check` выше относится к состоянию до этого ограниченного изменения;
+остальные Rust/TS modules в нем не менялись.
+
+Ограничения: это еще не полный gate фазы 3. Нет atomic access_epoch revoke,
+presence, byte-bounded outbound queue metrics, cross-process prompt fanout и
+100×1000 convergence stress. Системный event требует projection resync.
+Никаких p95 latency из функциональных тестов не выводится. Следующий срез —
+ACL access_epoch/send gate и затем presence/convergence harness.
+
+---
+
 ## 2026-09-29 — Статус презентации
 
 По замечанию пользователя титульный слайд уточнен: текущий результат назван

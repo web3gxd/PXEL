@@ -86,6 +86,38 @@ function receive(socket) {
   });
 }
 export const nextFrame = (client) => receive(client.socket);
+export function decodeFrame(data) {
+  const envelope = fromBinary(serverSchema, data);
+  assert.equal(envelope.protocolVersion, 1);
+  return envelope.payload;
+}
+export function receiveFrames(client, count, action) {
+  return new Promise((resolve, reject) => {
+    const frames = [];
+    const timer = setTimeout(() => finish(new Error('Document frames timed out')), 15000);
+    const onMessage = (data, binary) => {
+      try {
+        assert.equal(binary, true);
+        frames.push(decodeFrame(data));
+        if (frames.length === count) finish();
+      } catch (error) {
+        finish(error);
+      }
+    };
+    function finish(error) {
+      clearTimeout(timer);
+      client.socket.off('message', onMessage);
+      if (error) reject(error);
+      else resolve(frames);
+    }
+    client.socket.on('message', onMessage);
+    try {
+      action();
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
 export function subscribeDocument(client, documentId, lastSeenVersion) {
   client.socket.send(
     toBinary(

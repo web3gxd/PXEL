@@ -3,11 +3,11 @@
 Foundation accepted for phase 0. Ниже проектный контракт для фаз 1–4.
 Текущий код уже реализует bounded actor, CAS commit SetCellValue/SetCellFormula/ClearCell,
 idempotent receipt, journal replay и отдельный WebSocket response для расчета.
-Коалесцирующий авторизованный version hint уже уведомляет вторую вкладку;
-следующий по версии canonical event применяется локально, gap или system event
-вызывает HTTP refresh (ADR-014). Live-подписки canonical operations, replay/live
-barrier, presence и отзыв подписок еще не реализованы; их семантический gate остается
-отдельным. Подробные результаты текущего среза находятся в RUNBOOK.
+Авторизованная подписка теперь воспроизводит до 128 canonical user events из
+PostgreSQL до `ReplayComplete`, а затем догоняет live head из того же журнала
+(ADR-015). Системное событие или больший gap требует HTTP projection resync.
+Presence и атомарный отзыв ACL-подписок еще не реализованы; полный семантический
+gate фазы 3 остается открытым. Подробные результаты находятся в RUNBOOK.
 Отзыв dev-auth cookie теперь обнаруживается перед следующей WebSocket-командой
 или отправкой document payload и закрывает соединение; это не заменяет
 упорядоченный `access_epoch` gate для изменения document ACL.

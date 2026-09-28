@@ -16,6 +16,7 @@ use axum::{
 };
 use prost::Message as ProstMessage;
 use serde::Serialize;
+use spreadsheet_application::journal::OperationJournal;
 use spreadsheet_collab::{DocumentSession, HeadUpdate, SessionDirectory};
 use spreadsheet_domain::workbook::{DocumentId, DocumentVersion};
 use spreadsheet_storage::{LocalFilesystemBlobStore, PgDatabase};
@@ -60,6 +61,130 @@ async fn next_head(subscription: &mut Option<HeadSubscription>) -> Option<HeadUp
         return None;
     }
     Some(active.updates.borrow_and_update().clone())
+}
+
+const MAX_REPLAY_EVENTS: u64 = 128;
+const MAX_REPLAY_BYTES: usize = 1024 * 1024;
+
+async fn send_replay(
+    socket: &mut WebSocket,
+    state: &AppState,
+    principal: &auth::Principal,
+    session: &DocumentSession,
+    document: DocumentId,
+    after: DocumentVersion,
+    barrier: DocumentVersion,
+) -> Result<bool, ()> {
+    let gap = barrier.get().checked_sub(after.get()).ok_or(())?;
+    if gap > MAX_REPLAY_EVENTS {
+        return send_replay_fallback(socket, state, principal, session, document, barrier).await;
+    }
+    let mut cursor = after.get();
+    let mut sent_bytes = 0usize;
+    while cursor < barrier.get() {
+        let limit = barrier.get().saturating_sub(cursor).min(8) as u32;
+        let events = state
+            .database
+            .load_events(
+                principal.identity,
+                document,
+                DocumentVersion::new(cursor).map_err(|_| ())?,
+                limit,
+            )
+            .await
+            .map_err(|_| ())?;
+        if events.is_empty() {
+            return Err(());
+        }
+        for event in events {
+            cursor = cursor.checked_add(1).ok_or(())?;
+            if event.version.get() != cursor || cursor > barrier.get() {
+                return Err(());
+            }
+            if documents::committed_message(&event).is_none() {
+                return send_replay_fallback(socket, state, principal, session, document, barrier)
+                    .await;
+            }
+            let payload = head_hint(
+                document,
+                &HeadUpdate {
+                    version: event.version,
+                    event: Some(Arc::new(event)),
+                },
+            );
+            // Bound encoded bytes in addition to each journal read batch.
+            sent_bytes = sent_bytes.checked_add(payload.len()).ok_or(())?;
+            if sent_bytes > MAX_REPLAY_BYTES {
+                return send_replay_fallback(socket, state, principal, session, document, barrier)
+                    .await;
+            }
+            if !matches!(session.head(principal.identity).await, Ok(head) if head >= barrier)
+                || !matches!(state.auth.active(principal).await, Ok(true))
+                || !send(socket, Message::Binary(payload.into())).await
+            {
+                return Err(());
+            }
+        }
+    }
+    Ok(false)
+}
+
+async fn send_replay_fallback(
+    socket: &mut WebSocket,
+    state: &AppState,
+    principal: &auth::Principal,
+    session: &DocumentSession,
+    document: DocumentId,
+    barrier: DocumentVersion,
+) -> Result<bool, ()> {
+    if !matches!(session.head(principal.identity).await, Ok(head) if head >= barrier)
+        || !matches!(state.auth.active(principal).await, Ok(true))
+        || !send(
+            socket,
+            Message::Binary(
+                head_hint(
+                    document,
+                    &HeadUpdate {
+                        version: barrier,
+                        event: None,
+                    },
+                )
+                .into(),
+            ),
+        )
+        .await
+    {
+        return Err(());
+    }
+    Ok(true)
+}
+
+async fn send_replay_complete(
+    socket: &mut WebSocket,
+    state: &AppState,
+    principal: &auth::Principal,
+    session: &DocumentSession,
+    document: DocumentId,
+    barrier: DocumentVersion,
+    resync_required: bool,
+) -> bool {
+    if !matches!(session.head(principal.identity).await, Ok(head) if head >= barrier)
+        || !matches!(state.auth.active(principal).await, Ok(true))
+    {
+        return false;
+    }
+    let payload = v1::ServerEnvelope {
+        protocol_version: wire::PROTOCOL_VERSION,
+        payload: Some(v1::server_envelope::Payload::ReplayComplete(
+            v1::ReplayComplete {
+                document_id: document.as_bytes().to_vec(),
+                barrier_version: barrier.get(),
+                resync_required,
+            },
+        )),
+    }
+    .encode_to_vec();
+    send(socket, Message::Binary(payload.into())).await
 }
 
 fn head_hint(document: DocumentId, update: &HeadUpdate) -> Vec<u8> {
@@ -316,8 +441,11 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 };
                 if !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
                 if current > active.last_sent {
-                    let payload = if update.version == current { update } else { HeadUpdate { version: current, event: None } };
-                    if !send(&mut socket, Message::Binary(head_hint(active.document, &payload).into())).await { break; }
+                    let replay = send_replay(
+                        &mut socket, &state, &principal, &active.session, active.document,
+                        active.last_sent, current,
+                    ).await;
+                    if replay.is_err() { break; }
                     active.last_sent = current;
                 }
             }
@@ -380,10 +508,20 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 Err(_) => break,
                             };
                             if request.last_seen_version > current.get() { break; }
-                            let update = updates.borrow().clone();
-                            let payload = if update.version == current { update } else { HeadUpdate { version: current, event: None } };
-                            if current.get() > request.last_seen_version
-                                && !send(&mut socket, Message::Binary(head_hint(document, &payload).into())).await { break; }
+                            let after = match DocumentVersion::new(request.last_seen_version) {
+                                Ok(version) => version,
+                                Err(_) => break,
+                            };
+                            let resync_required = match send_replay(
+                                &mut socket, &state, &principal, &session, document, after, current,
+                            ).await {
+                                Ok(value) => value,
+                                Err(()) => break,
+                            };
+                            if !send_replay_complete(
+                                &mut socket, &state, &principal, &session, document, current,
+                                resync_required,
+                            ).await { break; }
                             head_subscription = Some(HeadSubscription {
                                 document,
                                 session,
