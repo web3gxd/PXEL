@@ -1,0 +1,16 @@
+[package]
+name = "spreadsheet-collab"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+spreadsheet-domain.workspace = true
+spreadsheet-application.workspace = true
+spreadsheet-formula.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

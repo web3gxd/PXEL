@@ -1,0 +1,28 @@
+{
+  "name": "pxel",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "pnpm --filter @pxel/web build",
+    "typecheck": "pnpm --filter @pxel/web typecheck",
+    "lint": "pnpm --filter @pxel/web lint",
+    "test": "pnpm --filter @pxel/web test",
+    "test:e2e": "pnpm --filter @pxel/web test:e2e",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "proto:generate": "node scripts/proto.mjs",
+    "proto:check": "node scripts/proto.mjs --check",
+    "test:integration": "node --test tests/integration/server.test.mjs tests/integration/document.test.mjs",
+    "test:recovery": "node --test tests/recovery/server-restart.test.mjs"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "1.73.0",
+    "@bufbuild/protoc-gen-es": "2.15.0",
+    "prettier": "3.9.9",
+    "ws": "8.22.0"
+  }
+}

@@ -1,0 +1,6 @@
+version: v2
+plugins:
+  - local: protoc-gen-es
+    out: apps/web/src/generated
+    opt:
+      - target=ts

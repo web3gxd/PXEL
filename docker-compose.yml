@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650
+    environment:
+      POSTGRES_USER: pxel
+      POSTGRES_DB: pxel
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    command:
+      - postgres
+      - -c
+      - synchronous_commit=on
+      - -c
+      - fsync=on
+      - -c
+      - full_page_writes=on
+    secrets:
+      - db_password
+    ports:
+      - '127.0.0.1:${PXEL_DB_PORT:-55432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pxel -d pxel']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+    mem_limit: 1g
+secrets:
+  db_password:
+    file: ./.local/db-password
+volumes:
+  postgres-data:

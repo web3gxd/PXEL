@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PXEL — 10 направлений знака</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f6f7f4;
+        color: #25342b;
+        font-family: 'Segoe UI', sans-serif;
+      }
+      main {
+        max-width: 1160px;
+        padding: 56px 32px 36px;
+        margin: auto;
+      }
+      header {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 32px;
+        align-items: end;
+        border-bottom: 1px solid #ced9ce;
+        padding-bottom: 32px;
+        margin-bottom: 32px;
+      }
+      .eyebrow {
+        font:
+          600 11px/1.5 Consolas,
+          monospace;
+        letter-spacing: 2px;
+        color: #17664b;
+      }
+      h1 {
+        font-size: clamp(30px, 5vw, 54px);
+        font-weight: 500;
+        letter-spacing: -2px;
+        margin: 14px 0;
+      }
+      header p {
+        max-width: 600px;
+        font-size: 15px;
+        line-height: 1.6;
+        margin: 0;
+        color: #65715f;
+      }
+      .reference {
+        min-width: 145px;
+        padding: 18px;
+        border: 1px solid #d7dfd5;
+        border-radius: 12px;
+      }
+      .reference div {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 22px;
+        letter-spacing: -1px;
+      }
+      .reference small {
+        display: block;
+        color: #65715f;
+        margin-top: 12px;
+        font-size: 11px;
+        letter-spacing: 0;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px;
+      }
+      article {
+        border: 1px solid #d8e1d6;
+        border-radius: 14px;
+        overflow: hidden;
+        background: white;
+      }
+      .previews {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+      .previews > div {
+        height: 176px;
+        display: grid;
+        place-items: center;
+      }
+      .light {
+        background: #eef2eb;
+      }
+      .dark {
+        background: #1c2922;
+      }
+      .copy {
+        padding: 21px 23px 18px;
+      }
+      .caption {
+        display: flex;
+        gap: 12px;
+        align-items: baseline;
+      }
+      .caption > span {
+        font:
+          12px Consolas,
+          monospace;
+        color: #73806f;
+      }
+      h2 {
+        font-size: 19px;
+        letter-spacing: -0.5px;
+        font-weight: 600;
+        margin: 0;
+      }
+      .caption a {
+        margin-left: auto;
+        font:
+          11px Consolas,
+          monospace;
+        color: #17664b;
+        text-decoration: none;
+        padding: 5px;
+      }
+      a:focus-visible {
+        outline: 2px solid #17664b;
+        outline-offset: 4px;
+      }
+      .copy p {
+        color: #65715f;
+        font-size: 13px;
+        line-height: 1.6;
+        min-height: 42px;
+        margin: 12px 0 20px;
+      }
+      .sizes {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        padding-top: 14px;
+        border-top: 1px solid #edf0e9;
+        min-height: 48px;
+      }
+      .sizes span {
+        font-size: 10px;
+        color: #73806f;
+        margin-right: auto;
+      }
+      footer {
+        padding: 28px 0;
+        font-size: 12px;
+        line-height: 1.7;
+        color: #65715f;
+      }
+      footer strong {
+        font-weight: 600;
+        color: #25342b;
+      }
+      @media (max-width: 650px) {
+        main {
+          padding: 28px 16px;
+        }
+        header {
+          grid-template-columns: 1fr;
+          gap: 20px;
+        }
+        .reference {
+          max-width: 190px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .previews > div {
+          height: 150px;
+        }
+      }
+      @media print {
+        article {
+          break-inside: avoid;
+        }
+        .grid {
+          gap: 12px;
+        }
+        main {
+          padding: 0;
+        }
+        .previews > div {
+          height: 100px;
+        }
+        .previews img {
+          width: 56px;
+          height: 56px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">PXEL / ИССЛЕДОВАНИЕ ЗНАКА / 01</div>
+          <h1>Из одной ячейки.</h1>
+          <p>
+            Десять направлений, выросших из исходного знака. Сохраняем изумрудный цвет, ясную
+            геометрию и светлый акцент. Это варианты для выбора, не замена бренда в редакторе.
+          </p>
+        </div>
+        <aside class="reference">
+          <div><img src="reference.svg" alt="Исходный знак" width="37" height="37" />PXEL.</div>
+          <small>Исходный знак · ориентир</small>
+        </aside>
+      </header>
+      <section class="grid" aria-label="Десять вариантов логотипа">
+        <article>
+          <div class="previews">
+            <div class="light">
+              <img src="01-quartet.svg" alt="Квартет" width="80" height="80" />
+            </div>
+            <div class="dark"><img src="01-quartet.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>01</span>
+              <h2>Квартет</h2>
+              <a href="01-quartet.svg" download aria-label="Скачать Квартет SVG">SVG ↗</a>
+            </div>
+            <p>Ближе всего к исходному. Четыре ячейки, одна выделена; чуть больше воздуха.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span
+              ><img src="01-quartet.svg" alt="" width="16" height="16" /><img
+                src="01-quartet.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="01-quartet.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="previews">
+            <div class="light">
+              <img src="02-active-cell.svg" alt="Активная ячейка" width="80" height="80" />
+            </div>
+            <div class="dark"><img src="02-active-cell.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>02</span>
+              <h2>Активная ячейка</h2>
+              <a href="02-active-cell.svg" download aria-label="Скачать Активная ячейка SVG"
+                >SVG ↗</a
+              >
+            </div>
+            <p>Три ячейки и рамка с маркером выделения.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span
+              ><img src="02-active-cell.svg" alt="" width="16" height="16" /><img
+                src="02-active-cell.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="02-active-cell.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="previews">
+            <div class="light">
+              <img src="03-pixel-p.svg" alt="Пиксель P" width="80" height="80" />
+            </div>
+            <div class="dark"><img src="03-pixel-p.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>03</span>
+              <h2>Пиксель P</h2>
+              <a href="03-pixel-p.svg" download aria-label="Скачать Пиксель P SVG">SVG ↗</a>
+            </div>
+            <p>Буква P из пяти модулей. Имя продукта, собранное из ячеек.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span
+              ><img src="03-pixel-p.svg" alt="" width="16" height="16" /><img
+                src="03-pixel-p.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="03-pixel-p.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="previews">
+            <div class="light"><img src="04-window.svg" alt="Окно" width="80" height="80" /></div>
+            <div class="dark"><img src="04-window.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>04</span>
+              <h2>Окно</h2>
+              <a href="04-window.svg" download aria-label="Скачать Окно SVG">SVG ↗</a>
+            </div>
+            <p>Общая таблица с полосой заголовков и выделенной областью.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span><img src="04-window.svg" alt="" width="16" height="16" /><img
+                src="04-window.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="04-window.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="previews">
+            <div class="light">
+              <img src="05-sheets.svg" alt="Два листа" width="80" height="80" />
+            </div>
+            <div class="dark"><img src="05-sheets.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>05</span>
+              <h2>Два листа</h2>
+              <a href="05-sheets.svg" download aria-label="Скачать Два листа SVG">SVG ↗</a>
+            </div>
+            <p>Смещенные листы: книга и совместная работа.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span><img src="05-sheets.svg" alt="" width="16" height="16" /><img
+                src="05-sheets.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="05-sheets.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="previews">
+            <div class="light">
+              <img src="06-crosspoint.svg" alt="Пересечение" width="80" height="80" />
+            </div>
+            <div class="dark"><img src="06-crosspoint.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>06</span>
+              <h2>Пересечение</h2>
+              <a href="06-crosspoint.svg" download aria-label="Скачать Пересечение SVG">SVG ↗</a>
+            </div>
+            <p>Строка встречает столбец. В центре — выбранная ячейка.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span
+              ><img src="06-crosspoint.svg" alt="" width="16" height="16" /><img
+                src="06-crosspoint.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="06-crosspoint.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="previews">
+            <div class="light">
+              <img src="07-open-grid.svg" alt="Открытая сетка" width="80" height="80" />
+            </div>
+            <div class="dark"><img src="07-open-grid.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>07</span>
+              <h2>Открытая сетка</h2>
+              <a href="07-open-grid.svg" download aria-label="Скачать Открытая сетка SVG">SVG ↗</a>
+            </div>
+            <p>Знак без контейнера для размещения рядом с текстом.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span
+              ><img src="07-open-grid.svg" alt="" width="16" height="16" /><img
+                src="07-open-grid.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="07-open-grid.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="previews">
+            <div class="light">
+              <img src="08-pixel-x.svg" alt="Пиксель X" width="80" height="80" />
+            </div>
+            <div class="dark"><img src="08-pixel-x.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>08</span>
+              <h2>Пиксель X</h2>
+              <a href="08-pixel-x.svg" download aria-label="Скачать Пиксель X SVG">SVG ↗</a>
+            </div>
+            <p>Пять квадратов образуют X. Выразительный вариант иконки.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span
+              ><img src="08-pixel-x.svg" alt="" width="16" height="16" /><img
+                src="08-pixel-x.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="08-pixel-x.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="previews">
+            <div class="light">
+              <img src="09-corner.svg" alt="Угол диапазона" width="80" height="80" />
+            </div>
+            <div class="dark"><img src="09-corner.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>09</span>
+              <h2>Угол диапазона</h2>
+              <a href="09-corner.svg" download aria-label="Скачать Угол диапазона SVG">SVG ↗</a>
+            </div>
+            <p>Две стороны диапазона и один пиксель. Простой силуэт.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span><img src="09-corner.svg" alt="" width="16" height="16" /><img
+                src="09-corner.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="09-corner.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="previews">
+            <div class="light"><img src="10-ribbon.svg" alt="Строки" width="80" height="80" /></div>
+            <div class="dark"><img src="10-ribbon.svg" alt="" width="80" height="80" /></div>
+          </div>
+          <div class="copy">
+            <div class="caption">
+              <span>10</span>
+              <h2>Строки</h2>
+              <a href="10-ribbon.svg" download aria-label="Скачать Строки SVG">SVG ↗</a>
+            </div>
+            <p>Три полосы и акцентная ячейка: ритм табличных данных.</p>
+            <div class="sizes">
+              <span>В интерфейсе</span><img src="10-ribbon.svg" alt="" width="16" height="16" /><img
+                src="10-ribbon.svg"
+                alt=""
+                width="24"
+                height="24"
+              /><img src="10-ribbon.svg" alt="" width="32" height="32" />
+            </div>
+          </div>
+        </article>
+      </section>
+      <footer>
+        <strong>Ближе к исходному:</strong> 01 и 02. <strong>Более самостоятельные:</strong> 03 и
+        08.<br />Каждый знак показан на светлом и темном фоне, затем в размерах 16, 24 и 32 px. SVG
+        доступны отдельно; шрифты и внешние ресурсы не загружаются.
+      </footer>
+    </main>
+  </body>
+</html>

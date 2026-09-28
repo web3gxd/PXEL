@@ -1,0 +1,24 @@
+[package]
+name = "spreadsheet-domain"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+thiserror.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+proptest = "=1.11.0"
+criterion = "=0.8.2"
+
+[[bench]]
+name = "workbook"
+harness = false
+required-features = ["test-support"]
+
+[lints]
+workspace = true

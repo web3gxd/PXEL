@@ -1,0 +1,15 @@
+/.tools/
+/.local/
+/.unsnooze/
+/target/
+/apps/web/src/generated/wasm/
+node_modules/
+dist/
+test-results/
+playwright-report/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo

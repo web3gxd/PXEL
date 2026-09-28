@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT head_version, access_epoch, state FROM documents WHERE workspace_id=$1 AND document_id=$2 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "head_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "documents",
+            "name": "head_version"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "access_epoch",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "documents",
+            "name": "access_epoch"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "documents",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "954d51c1b5b78dc9ed379b72834273a280c49e68a8e4b696895af63d7bd1af67"
+}

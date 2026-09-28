@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>PXEL — продукт и инженерная основа</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script defer src="./slides.js"></script>
+  </head>
+  <body>
+    <div class="deck-chrome" aria-label="Навигация по презентации">
+      <a class="deck-mark" href="#s01" aria-label="К началу презентации">
+        <span class="mark-grid" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        PXEL
+      </a>
+      <span class="deck-label">Продукт · архитектура · доказательства</span>
+      <div class="deck-nav">
+        <button id="prev" type="button" aria-label="Предыдущий слайд">←</button>
+        <output id="counter" aria-live="polite">01 / 10</output>
+        <button id="next" type="button" aria-label="Следующий слайд">→</button>
+      </div>
+    </div>
+    <div class="progress" aria-hidden="true"><span id="progress-line"></span></div>
+
+    <main id="slides">
+      <section class="slide cover" id="s01" aria-labelledby="cover-title">
+        <div class="eyebrow">Инженерный обзор · 29 сентября 2026</div>
+        <div class="cover-grid" aria-hidden="true"></div>
+        <div class="cover-copy">
+          <p class="kicker">
+            <span class="live-dot"></span> Локально работающий MVP · разработка продолжается
+          </p>
+          <h1 id="cover-title">Таблицы,<br /><em>которыми</em><br />управляем мы.</h1>
+          <p class="lead">
+            PXEL — собственный совместный редактор таблиц: быстрый Canvas-интерфейс, Rust-движок
+            формул и журнал операций в PostgreSQL.
+          </p>
+        </div>
+        <div class="cover-side">
+          <div class="side-rule"></div>
+          <span>01 / 10</span>
+          <p>От работающего экрана<br />до того, что происходит<br />после COMMIT.</p>
+        </div>
+        <div class="slide-footer">
+          <span>Нажмите ↓ или →</span><span>PXEL / PRODUCT BRIEF</span>
+        </div>
+      </section>
+
+      <section class="slide" id="s02" aria-labelledby="product-title">
+        <div class="eyebrow">01 — Продукт сегодня</div>
+        <div class="two-col product-layout">
+          <div>
+            <h2 id="product-title">Таблица уже<br /><em>редактируется.</em></h2>
+            <p class="section-intro">
+              Документ создается в браузере. Значения и формулы вводятся через сетку и строку
+              формул; после перезагрузки они восстанавливаются из PostgreSQL.
+            </p>
+            <ul class="feature-list">
+              <li>
+                <b>Canvas-сетка</b><span>Рисуется viewport, не DOM-элемент для каждой ячейки.</span>
+              </li>
+              <li>
+                <b>Мгновенный ввод</b
+                ><span>Локальное состояние отделено от подтвержденного сервером.</span>
+              </li>
+              <li>
+                <b>Формулы</b
+                ><span>Результат сервера приходит отдельно; WASM показывает preview.</span>
+              </li>
+              <li>
+                <b>Надежное сохранение</b><span>ACK идет после durable PostgreSQL commit.</span>
+              </li>
+            </ul>
+          </div>
+          <div class="editor-illustration" aria-label="Схема редактора, не снимок экрана">
+            <div class="editor-top">
+              <span class="document-icon">▦</span> Бюджет · 2026 <small>● Подключено</small>
+            </div>
+            <div class="editor-menu">
+              Файл &nbsp;&nbsp; Правка &nbsp;&nbsp; Вид &nbsp;&nbsp; Вставка &nbsp;&nbsp; Формат
+            </div>
+            <div class="editor-formula">
+              <b>ƒx</b><span>=SUM(B2:B4)</span><small>подтверждено сервером</small>
+            </div>
+            <div class="fake-grid" aria-hidden="true">
+              <span class="head"></span><span class="head">A</span><span class="head">B</span
+              ><span class="head">C</span> <span class="head">1</span><span>Статья</span
+              ><span>Расход</span><span>Итого</span> <span class="head">2</span><span>Команда</span
+              ><span>120</span><span></span> <span class="head">3</span><span>Серверы</span
+              ><span>80</span><span></span> <span class="head">4</span><span>Дизайн</span
+              ><span>50</span><span></span> <span class="head">5</span><span>Всего</span
+              ><span class="selected">=SUM(B2:B4)</span><span class="computed">250</span>
+              <span class="head">6</span><span></span><span></span><span></span>
+            </div>
+            <div class="editor-bottom"><span>▦ &nbsp; Лист 1</span><span>Сохранено · v5</span></div>
+            <span class="illustration-caption"
+              >Схема интерфейса; числа приведены для объяснения.</span
+            >
+          </div>
+        </div>
+        <div class="slide-footer">
+          <span>Работает: создание · ввод · формулы · две вкладки · reload</span
+          ><span>02 / 10</span>
+        </div>
+      </section>
+
+      <section class="slide dark" id="s03" aria-labelledby="arch-title">
+        <div class="eyebrow">02 — Что под капотом</div>
+        <h2 id="arch-title">Один документ.<br /><em>Один порядок.</em></h2>
+        <p class="section-intro narrow">
+          Браузер отвечает за скорость, сервер — за каноническое состояние, PostgreSQL — за
+          долговечность.
+        </p>
+        <div class="architecture">
+          <div class="arch-node browser">
+            <span class="node-index">01 / БРАУЗЕР</span>
+            <strong>Canvas + React</strong>
+            <p>Viewport, выделение, редактор и очередь неподтвержденных действий.</p>
+            <div class="node-tag">WASM Worker → preview</div>
+          </div>
+          <div class="arch-connector">
+            <span>protobuf<br />WebSocket</span><b>⇄</b>
+          </div>
+          <div class="arch-node server">
+            <span class="node-index">02 / СЕРВЕР</span>
+            <strong>Rust / Axum</strong>
+            <p>Document actor последовательно проверяет команды и назначает версии.</p>
+            <div class="node-tag">Rust worker → канонический расчет</div>
+          </div>
+          <div class="arch-connector">
+            <span>CAS +<br />transaction</span><b>⇄</b>
+          </div>
+          <div class="arch-node database">
+            <span class="node-index">03 / ИСТОЧНИК ИСТИНЫ</span>
+            <strong>PostgreSQL</strong>
+            <p>Append-only события, права доступа и head_version.</p>
+            <div class="node-tag">Replay → восстановление</div>
+          </div>
+        </div>
+        <div class="arch-note">
+          Один Rust-движок формул работает нативно и в браузере через WebAssembly.
+        </div>
+        <div class="slide-footer">
+          <span>Модульный монолит · четкие границы crates</span><span>03 / 10</span>
+        </div>
+      </section>
+
+      <section class="slide" id="s04" aria-labelledby="commit-title">
+        <div class="eyebrow">03 — Надежность изменений</div>
+        <h2 id="commit-title">Сохранено — значит<br /><em>зафиксировано.</em></h2>
+        <div class="commit-track">
+          <div>
+            <span class="track-no">01</span><strong>Команда</strong>
+            <p>Клиент отправляет intent с operation_id и base_version.</p>
+          </div>
+          <div>
+            <span class="track-no">02</span><strong>Кандидат</strong>
+            <p>Сервер проверяет права, нормализует действие и считает новый hash.</p>
+          </div>
+          <div>
+            <span class="track-no">03</span><strong>CAS + COMMIT</strong>
+            <p>PostgreSQL атомарно повышает head_version и добавляет событие.</p>
+          </div>
+          <div>
+            <span class="track-no">04</span><strong>Публикация</strong>
+            <p>После COMMIT actor меняет проекцию и отправляет ACK.</p>
+          </div>
+        </div>
+        <div class="callout">
+          <b>Повтор без двойной записи</b
+          ><span
+            >Одинаковый operation_id возвращает receipt. После сбоя сервер восстанавливает документ
+            из журнала.</span
+          >
+        </div>
+        <div class="slide-footer">
+          <span>Проверено: 100 повторов → одна версия · hard restart → replay</span
+          ><span>04 / 10</span>
+        </div>
+      </section>
+
+      <section class="slide formula-slide" id="s05" aria-labelledby="formula-title">
+        <div class="eyebrow">04 — Формульный движок</div>
+        <h2 id="formula-title">Одна семантика.<br /><em>Два исполнения.</em></h2>
+        <div class="formula-layout">
+          <div class="formula-card">
+            <div class="sample-formula">=SUM(A1:A100)</div>
+            <div class="formula-route">
+              <span>lexer</span><b>→</b><span>parser</span><b>→</b><span>bound AST</span><b>→</b
+              ><span>graph</span><b>→</b><span>result</span>
+            </div>
+            <p>
+              Ссылка A1 превращается в стабильные ID. Изменение ячейки помечает только зависимые
+              узлы.
+            </p>
+          </div>
+          <div class="formula-detail">
+            <div class="engine-pair">
+              <div><span>SERVER</span><b>Rust native</b><small>Канонический результат</small></div>
+              <div><span>BROWSER</span><b>Rust → WASM</b><small>Быстрый preview</small></div>
+            </div>
+            <p>
+              В профиле сейчас: арифметика и сравнение, A1-ссылки, диапазоны, SUM, AVERAGE, MIN,
+              MAX, IF. Циклы дают типизированное значение ошибки.
+            </p>
+            <p class="subtle">
+              Excel-совместимость заявляется только для проверенного подмножества; битовое
+              совпадение со всем Excel не обещается.
+            </p>
+          </div>
+        </div>
+        <div class="slide-footer">
+          <span>Parser никогда не доверяет AST, присланному клиентом</span><span>05 / 10</span>
+        </div>
+      </section>
+
+      <section class="slide data-slide" id="s06" aria-labelledby="proof-title">
+        <div class="eyebrow">05 — Проверки и цифры</div>
+        <h2 id="proof-title">Измерено.<br /><em>С оговорками.</em></h2>
+        <div class="metric-wall">
+          <div class="metric hero-metric">
+            <strong>1 000</strong><span>сгенерированных книг</span>
+            <p>
+              Native и настоящий browser WASM дали одинаковые normalized hashes для 2 000 patches.
+            </p>
+          </div>
+          <div class="metric">
+            <strong>77 / 77</strong><span>формульных fixtures</span>
+            <p>Проверены native/browser результаты и hash; Excel verification пока не заявлена.</p>
+          </div>
+          <div class="metric">
+            <strong>9.62–12.89 <small>мс</small></strong
+            ><span>цепочка 10 000: dirty + schedule</span>
+            <p>Criterion, release, один Windows стенд; это не полный пересчет.</p>
+          </div>
+          <div class="metric">
+            <strong>0.70–0.73 <small>мс</small></strong
+            ><span>SUM по 100 000 значениям</span>
+            <p>Изолированный aggregate benchmark, не задержка ввода в UI.</p>
+          </div>
+        </div>
+        <p class="metric-footnote">
+          Замеры не являются p95 продукта. Условия и команды: <a href="../RUNBOOK.md">RUNBOOK</a> и
+          <a href="../docs/wasm-plan.md">WASM plan</a>.
+        </p>
+        <div class="slide-footer">
+          <span>Факты отделены от целевых показателей</span><span>06 / 10</span>
+        </div>
+      </section>
+
+      <section class="slide" id="s07" aria-labelledby="context-title">
+        <div class="eyebrow">06 — Новый срез: воспроизводимый расчет</div>
+        <div class="context-layout">
+          <div>
+            <h2 id="context-title">Время и случайность<br /><em>получат историю.</em></h2>
+            <p class="section-intro">
+              Контекст вычисления теперь записывается отдельным системным событием. Он содержит
+              эпоху, время, смещение, seed и версии движка.
+            </p>
+          </div>
+          <div class="context-sequence">
+            <div><span>СОБЫТИЕ</span><code>AdvanceCalculationEpoch</code></div>
+            <div><span>ПРИНЦИПАЛ</span><code>System ≠ User</code></div>
+            <div><span>ХРАНЕНИЕ</span><code>schema 3 · PostgreSQL</code></div>
+            <div><span>ВОССТАНОВЛЕНИЕ</span><code>PostgreSQL replay</code></div>
+          </div>
+        </div>
+        <div class="context-warning">
+          Replay из PostgreSQL проверен; snapshots пока не реализованы. RAND/NOW/TODAY пока не
+          включены: сначала нужен общий native/WASM контекст и differential corpus.
+        </div>
+        <div class="slide-footer">
+          <span>Старые schema 1/2 и их hash goldens сохранены</span><span>07 / 10</span>
+        </div>
+      </section>
+
+      <section class="slide dark" id="s08" aria-labelledby="why-title">
+        <div class="eyebrow">07 — Зачем PXEL</div>
+        <h2 id="why-title">Наше преимущество —<br /><em>контроль.</em></h2>
+        <div class="why-grid">
+          <div>
+            <span>01</span>
+            <h3>Свой контур</h3>
+            <p>
+              Архитектура не требует зарубежного SaaS и допускает self-hosted развертывание внутри
+              российского контура.
+            </p>
+          </div>
+          <div>
+            <span>02</span>
+            <h3>Свои правила</h3>
+            <p>
+              Порядок правок, журнал, формульная семантика и совместимость версионируются в нашем
+              коде.
+            </p>
+          </div>
+          <div>
+            <span>03</span>
+            <h3>Одна логика</h3>
+            <p>
+              Rust-ядро одинаково для серверного расчета и браузерного preview. Различия ловит общий
+              корпус fixtures.
+            </p>
+          </div>
+        </div>
+        <p class="honest-note">
+          Google Sheets — зрелый продукт с гораздо большим набором функций. PXEL сейчас выбирают за
+          управляемую архитектуру и путь к собственному развертыванию; функциональное равенство еще
+          впереди.
+        </p>
+        <div class="slide-footer">
+          <span>Дифференциация по контролю, не выдуманному превосходству в скорости</span
+          ><span>08 / 10</span>
+        </div>
+      </section>
+
+      <section class="slide roadmap-slide" id="s09" aria-labelledby="roadmap-title">
+        <div class="eyebrow">08 — Дорожная карта</div>
+        <h2 id="roadmap-title">По фазам.<br /><em>С проверкой каждого шага.</em></h2>
+        <div class="roadmap-grid">
+          <div class="done"><b>00</b><span>Основа</span><small>локально проверена</small></div>
+          <div class="done"><b>01</b><span>Ввод + журнал</span><small>рабочий срез</small></div>
+          <div class="doing">
+            <b>02</b><span>Формулы</span><small>в работе: context и parity</small>
+          </div>
+          <div class="doing">
+            <b>03</b><span>Два пользователя</span
+            ><small>version hint есть; replay, presence, revoke впереди</small>
+          </div>
+          <div><b>04</b><span>Структура</span><small>строки, колонки, undo</small></div>
+          <div><b>05</b><span>Snapshots</span><small>S3 + recovery</small></div>
+          <div><b>06</b><span>XLSX</span><small>импорт и экспорт</small></div>
+        </div>
+        <p class="roadmap-note">
+          Для фазы 3 и далее проектный контракт есть; acceptance criteria еще не пройдены.
+          Linux/Compose/remote CI — отдельные открытые gates.
+        </p>
+        <div class="slide-footer">
+          <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>
+        </div>
+      </section>
+
+      <section class="slide closing" id="s10" aria-labelledby="closing-title">
+        <div class="eyebrow">09 — Дальше</div>
+        <h2 id="closing-title">Таблица —<br /><em>наша система.</em></h2>
+        <p class="lead">
+          Сейчас главное: завершить формульный контекст и перейти к настоящей совместной сессии с
+          replay, правами и convergence tests. Затем — структура, snapshots и XLSX.
+        </p>
+        <div class="closing-links">
+          <a href="../README.md"><span>Начать локально</span><b>README ↗</b></a>
+          <a href="../RUNBOOK.md"><span>Все факты и команды</span><b>RUNBOOK ↗</b></a>
+          <a href="../docs/architecture.md"><span>Архитектура</span><b>DOCS ↗</b></a>
+          <a href="../design/logos/index.html"><span>10 знаков на выбор</span><b>LOGOS ↗</b></a>
+        </div>
+        <div class="last-line">
+          PXEL <span>История каждой ячейки начинается с надежной записи.</span>
+        </div>
+        <div class="slide-footer">
+          <span>Слайды отражают проверенное состояние на 29.09.2026</span><span>10 / 10</span>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

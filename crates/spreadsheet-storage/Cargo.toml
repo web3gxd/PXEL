@@ -1,0 +1,26 @@
+[package]
+name = "spreadsheet-storage"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+bytes.workspace = true
+futures-util.workspace = true
+sha2.workspace = true
+spreadsheet-application.workspace = true
+spreadsheet-domain.workspace = true
+spreadsheet-storage-codec.workspace = true
+uuid.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
+
+
+
+[dev-dependencies]
+spreadsheet-formula.workspace = true

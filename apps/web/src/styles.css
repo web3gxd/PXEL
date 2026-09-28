@@ -1,0 +1,484 @@
+@import url('./tokens.css');
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  font-family: 'Segoe UI', 'Aptos', sans-serif;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+button {
+  font: inherit;
+  color: inherit;
+}
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+button:disabled {
+  cursor: default;
+}
+.workspace {
+  height: 100dvh;
+  min-width: 360px;
+  display: flex;
+  flex-direction: column;
+}
+.app-header {
+  display: flex;
+  align-items: center;
+  min-height: 91px;
+  padding: 17px 26px 14px 22px;
+  gap: 26px;
+  background: var(--surface);
+}
+.document-heading {
+  min-width: 0;
+}
+.document-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 530;
+  letter-spacing: -0.45px;
+  white-space: nowrap;
+}
+.preview-badge {
+  color: var(--secondary);
+  font-size: 10px;
+  letter-spacing: 0.25px;
+  border: 1px solid #d9dfd7;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+.document-menu {
+  display: flex;
+  gap: 17px;
+  padding-top: 10px;
+}
+.document-menu button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--secondary);
+  font-size: 12px;
+}
+.connection-area {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--secondary);
+  font-size: 12px;
+}
+.connection-dot {
+  height: 6px;
+  width: 6px;
+  background: #84958a;
+  border-radius: 50%;
+}
+.connection-online {
+  color: var(--accent);
+}
+.connection-online .connection-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px #17664b0c;
+}
+.connection-offline,
+.connection-unauthorized,
+.connection-incompatible {
+  color: #9a502b;
+}
+.connection-offline .connection-dot,
+.connection-unauthorized .connection-dot,
+.connection-incompatible .connection-dot {
+  background: #b26d42;
+}
+.retry-button {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.retry-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  height: 43px;
+  min-height: 43px;
+  padding: 0 15px;
+  margin: 0 12px 10px;
+  border-radius: 7px;
+  background: #eaf0e8;
+  gap: 10px;
+  overflow: hidden;
+}
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-width: 29px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  border-radius: 4px;
+  color: #778478;
+  flex-shrink: 0;
+}
+.tool strong {
+  font-size: 16px;
+  font-weight: 700;
+}
+.tool em {
+  font-family: Georgia, serif;
+  font-size: 17px;
+}
+.tool-separator {
+  background: #d4ded2;
+  width: 1px;
+  height: 17px;
+  flex-shrink: 0;
+}
+.zoom-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 12px;
+  color: #657467;
+}
+.tiny-chevron {
+  font-size: 16px;
+  line-height: 10px;
+}
+.number-tools .tool {
+  font-size: 13px;
+}
+.font-tool {
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 12px;
+}
+.size-tool {
+  border: 1px solid #d3ddcf;
+  border-radius: 4px;
+  height: 24px;
+  min-width: 31px;
+}
+.strikethrough {
+  text-decoration: line-through;
+  font-size: 15px;
+}
+.text-color {
+  font-size: 15px;
+  border-bottom: 2px solid #7c9381;
+  line-height: 19px;
+  padding: 0 2px;
+}
+.view-mode {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  color: #627664;
+  padding-right: 5px;
+  white-space: nowrap;
+}
+.formula-bar {
+  height: 35px;
+  min-height: 35px;
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: white;
+}
+.cell-address {
+  width: 105px;
+  padding-left: 24px;
+  border-right: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--secondary);
+  height: 20px;
+  line-height: 20px;
+}
+.formula-symbol {
+  width: 43px;
+  text-align: center;
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 20px;
+  color: #8b968d;
+}
+.formula-symbol span {
+  font-size: 13px;
+}
+.formula-placeholder {
+  color: #89938a;
+  font-size: 12px;
+  padding-left: 4px;
+}
+.grid-surface {
+  flex: 1;
+  min-height: 80px;
+  position: relative;
+  background: #fff;
+  overflow: hidden;
+}
+.grid-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #c7d0c5 #f6f7f4;
+}
+.grid-extent {
+  pointer-events: none;
+}
+.grid-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+.grid-scroll:focus-visible {
+  outline-offset: -2px;
+}
+.grid-surface:has(.grid-scroll:focus-visible)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+}
+.canvas-error {
+  position: absolute;
+  top: 40%;
+  left: 15%;
+  right: 15%;
+  text-align: center;
+  background: white;
+  padding: 24px;
+  border: 1px solid var(--line);
+}
+.sheet-footer {
+  min-height: 45px;
+  height: 45px;
+  padding: 0 22px 0 15px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.sheet-navigation {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: 12px;
+}
+.sheet-navigation > .tool {
+  align-self: center;
+}
+.sheet-list-icon {
+  display: flex;
+  align-items: center;
+  color: #82907f;
+  padding-right: 11px;
+}
+.sheet-tab {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 9px;
+  font-weight: 600;
+  color: var(--accent);
+  background: #e8efe5;
+  box-shadow: inset 0 -2px 0 var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.sheet-summary {
+  font-size: 11px;
+  color: var(--secondary);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.summary-separator {
+  margin: 0 9px;
+  color: #acb5a8;
+}
+.footer-wordmark {
+  color: #9caa98;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.sr-only {
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (max-width: 1060px) {
+  .extra-tools {
+    display: none;
+  }
+  .app-header {
+    gap: 20px;
+  }
+}
+@media (max-width: 800px) {
+  .preview-badge,
+  .number-tools,
+  .footer-wordmark {
+    display: none;
+  }
+  .app-header {
+    padding: 15px 15px 12px;
+    gap: 15px;
+  }
+  .connection {
+    font-size: 11px;
+  }
+  .document-menu {
+    gap: 12px;
+  }
+  .sheet-footer {
+    padding-right: 15px;
+    gap: 10px;
+  }
+  .sheet-summary {
+    font-size: 10px;
+  }
+}
+@media (max-width: 580px) {
+  .app-header {
+    min-height: 105px;
+    align-items: flex-start;
+    position: relative;
+    padding-top: 16px;
+  }
+  h1 {
+    font-size: 16px;
+  }
+  .document-menu {
+    gap: 12px;
+    padding-top: 13px;
+  }
+  .document-menu button {
+    font-size: 10px;
+  }
+  .connection-area {
+    position: absolute;
+    right: 16px;
+    bottom: 10px;
+  }
+  .toolbar {
+    margin: 0;
+    border-radius: 0;
+    height: 39px;
+    min-height: 39px;
+    gap: 7px;
+    padding: 0 9px;
+  }
+  .font-tool,
+  .size-tool,
+  .view-mode,
+  .toolbar > .tool-separator:nth-of-type(n + 2) {
+    display: none;
+  }
+  .formula-placeholder {
+    font-size: 11px;
+  }
+  .cell-address {
+    width: 65px;
+  }
+  .sheet-summary {
+    display: none;
+  }
+  .sheet-footer {
+    min-height: 42px;
+  }
+}
+
+.create-document {
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.create-document:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.formula-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  font: inherit;
+  padding: 6px 12px;
+  color: var(--ink);
+}
+.cell-editor {
+  position: absolute;
+  z-index: 3;
+  resize: none;
+  overflow: hidden;
+  border: 2px solid var(--accent);
+  background: white;
+  color: var(--ink);
+  font:
+    13px 'Segoe UI',
+    sans-serif;
+  padding: 3px 5px;
+  outline: none;
+  border-radius: 0;
+}
+.document-error {
+  padding: 8px 18px;
+  color: #8c3328;
+  background: #fff0e9;
+  font-size: 12px;
+}

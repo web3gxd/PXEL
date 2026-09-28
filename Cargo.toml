@@ -1,0 +1,57 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/spreadsheet-domain",
+    "crates/spreadsheet-application",
+    "crates/spreadsheet-wire-protocol",
+    "crates/spreadsheet-storage",
+    "crates/spreadsheet-storage-codec",
+    "crates/spreadsheet-collab",
+    "crates/spreadsheet-formula",
+    "crates/spreadsheet-wasm",
+    "apps/server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+spreadsheet-domain = { path = "crates/spreadsheet-domain", version = "=0.1.0" }
+spreadsheet-application = { path = "crates/spreadsheet-application", version = "=0.1.0" }
+spreadsheet-wire-protocol = { path = "crates/spreadsheet-wire-protocol", version = "=0.1.0" }
+spreadsheet-storage = { path = "crates/spreadsheet-storage", version = "=0.1.0" }
+spreadsheet-storage-codec = { path = "crates/spreadsheet-storage-codec", version = "=0.1.0" }
+spreadsheet-collab = { path = "crates/spreadsheet-collab", version = "=0.1.0" }
+spreadsheet-formula = { path = "crates/spreadsheet-formula", version = "=0.1.0" }
+anyhow = "=1.0.104"
+axum = { version = "=0.8.9", features = ["ws"] }
+bytes = "=1.12.1"
+futures-util = { version = "=0.3.34", features = ["sink"] }
+prost = "=0.14.4"
+prost-build = "=0.14.4"
+prost-types = "=0.14.4"
+serde = { version = "=1.0.229", features = ["derive"] }
+sha2 = "=0.11.0"
+sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "migrate", "macros", "uuid"] }
+thiserror = "=2.0.21"
+tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower = { version = "=0.5.3", features = ["util", "limit"] }
+tower-http = { version = "=0.7.1", features = ["set-header", "limit", "timeout", "fs"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "json"] }
+uuid = { version = "=1.26.1", features = ["v7"] }
+tempfile = "=3.27.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

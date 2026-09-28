@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO development_sessions(token_hash,user_id,workspace_id) VALUES($1,$2,$3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "72d74324fefd632ef1c1241bc3f8fc58e5806748a10dc9f2accd25f9972354fd"
+}

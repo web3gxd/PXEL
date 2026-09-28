@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO document_permissions(workspace_id,document_id,user_id,role) VALUES($1,$2,$3,'owner')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab381f5148d1dd7c381f41dbd818ac36083ee7fe5f67891cc37e8e507eeecf65"
+}

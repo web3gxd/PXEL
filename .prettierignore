@@ -1,0 +1,14 @@
+.tools
+.local
+.unsnooze
+pxel-dev-v01
+target
+node_modules
+pnpm-lock.yaml
+apps/web/dist
+apps/web/src/generated
+**/test-results
+**/playwright-report
+coverage
+Cargo.lock
+.sqlx

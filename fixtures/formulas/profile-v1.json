@@ -1,0 +1,1363 @@
+{
+  "schema_version": 1,
+  "profile": "pxel-excel-subset-v1",
+  "verified_in_excel": false,
+  "excel_environment": null,
+  "sources": {
+    "operators": {
+      "url": "https://support.microsoft.com/en-us/excel/calculation-operators-and-precedence-in-excel",
+      "title": "Calculation operators and precedence in Excel",
+      "retrieved_at": "2026-09-28"
+    },
+    "sum": {
+      "url": "https://learn.microsoft.com/en-us/office/vba/api/excel.worksheetfunction.sum",
+      "title": "WorksheetFunction.Sum method (Excel)",
+      "retrieved_at": "2026-09-28"
+    },
+    "sum_example": {
+      "url": "https://support.microsoft.com/en-us/excel/use-the-sum-function-to-sum-numbers-in-a-range",
+      "title": "Use the SUM function to sum numbers in a range",
+      "retrieved_at": "2026-09-28"
+    },
+    "average": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/average-function",
+      "title": "AVERAGE function",
+      "caveat": "Direct boolean/text coercion conflicts with WorksheetFunction.Average documentation.",
+      "retrieved_at": "2026-09-28"
+    },
+    "average_vba": {
+      "url": "https://learn.microsoft.com/en-us/office/vba/api/excel.worksheetfunction.average",
+      "title": "WorksheetFunction.Average method (Excel)",
+      "caveat": "Supports counted direct logical/numeric-text arguments, unlike current Support article. VBA argument-count limits do not define worksheet arity.",
+      "retrieved_at": "2026-09-28"
+    },
+    "min": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/min-function",
+      "title": "MIN function",
+      "retrieved_at": "2026-09-28"
+    },
+    "max": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/max-function",
+      "title": "MAX function",
+      "retrieved_at": "2026-09-28"
+    },
+    "if": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/if-function",
+      "title": "IF function",
+      "retrieved_at": "2026-09-28"
+    }
+  },
+  "cases": [
+    {
+      "id": "precedence_multiply",
+      "formula": "=1+2*3",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "precedence_parentheses",
+      "formula": "=(1+2)*3",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 9
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "precedence_unary_power",
+      "formula": "=-2^2",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 4
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "precedence_negated_power",
+      "formula": "=-(2^2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -4
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "power_left_associative",
+      "formula": "=2^3^2",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 64
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "power_negative_integer",
+      "formula": "=2^-3",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0.125
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "power_fractional_outside_profile",
+      "formula": "=4^0.5",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "diagnostic",
+        "value": "UnsupportedCompatibilityFeature"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "power_exponent_limit",
+      "formula": "=2^1025",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "diagnostic",
+        "value": "UnsupportedCompatibilityFeature"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "divide_zero",
+      "formula": "=1/0",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "nonfinite_result",
+      "formula": "=1e308*1e308",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "negative_zero_normalized",
+      "formula": "=-0",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "arithmetic_numeric_text",
+      "formula": "=\"1\"+\"2\"",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "documented",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "arithmetic_reference_numeric_text",
+      "formula": "=A1+2",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "3"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 5
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "arithmetic_blank",
+      "formula": "=A1+1",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "arithmetic_boolean",
+      "formula": "=TRUE+2",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "arithmetic_invalid_text",
+      "formula": "=\"word\"+1",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "compare_numbers",
+      "formula": "=3>2",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "compare_equal",
+      "formula": "=2=2",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "compare_not_equal",
+      "formula": "=2<>2",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "compare_less_equal",
+      "formula": "=2<=2",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "compare_greater_equal",
+      "formula": "=2>=3",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["operators"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "compare_numeric_text_not_coerced",
+      "formula": "=1=\"1\"",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "compare_ascii_casefold",
+      "formula": "=\"abc\"=\"ABC\"",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "sum_numbers",
+      "formula": "=SUM(1,2,3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 6
+      },
+      "provenance": {
+        "sources": ["sum"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "sum_direct_coercion",
+      "formula": "=SUM(TRUE,\"5\",2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 8
+      },
+      "provenance": {
+        "sources": ["sum"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "sum_reference_filters",
+      "formula": "=SUM(A1:A6)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "9"
+        },
+        "Sheet1!A3": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!A6": {
+          "type": "number",
+          "value": 0
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 4
+      },
+      "provenance": {
+        "sources": ["sum"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "sum_single_reference_text",
+      "formula": "=SUM(A1)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "5"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["sum"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "sum_empty_range",
+      "formula": "=SUM(A1:A2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["sum"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "sum_invalid_direct_text",
+      "formula": "=SUM(\"word\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["sum"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "sum_error_propagates",
+      "formula": "=SUM(A1:A2)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "error",
+          "value": "#N/A"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["sum"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "sum_fixed_order",
+      "formula": "=SUM(1e16,1,-1e16)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      },
+      "notes": "Left-to-right binary64 reduction; no Excel bitwise result claimed."
+    },
+    {
+      "id": "sum_arity_zero",
+      "formula": "=SUM()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      },
+      "notes": "Strict 1..255 profile arity; not a claim about Excel acceptance of SUM()."
+    },
+    {
+      "id": "average_numbers",
+      "formula": "=AVERAGE(2,4,6)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 4
+      },
+      "provenance": {
+        "sources": ["average"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "average_reference_filters_zero_counts",
+      "formula": "=AVERAGE(A1:A6)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "9"
+        },
+        "Sheet1!A3": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!A6": {
+          "type": "number",
+          "value": 0
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1.3333333333333333
+      },
+      "provenance": {
+        "sources": ["average"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "average_empty_range",
+      "formula": "=AVERAGE(A1:A2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["average"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "average_zero_not_blank",
+      "formula": "=AVERAGE(A1:A2)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 0
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["average"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "average_direct_coercion_disputed",
+      "formula": "=AVERAGE(TRUE,\"5\",3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["average", "average_vba"],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      },
+      "notes": "Official sources conflict; counted direct arguments chosen provisionally, requires actual Excel verification."
+    },
+    {
+      "id": "average_invalid_direct_text",
+      "formula": "=AVERAGE(\"word\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["average"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "average_error_propagates",
+      "formula": "=AVERAGE(A1:A2)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "error",
+          "value": "#N/A"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["average"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "average_arity_zero",
+      "formula": "=AVERAGE()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "min_numbers",
+      "formula": "=MIN(2,4,6)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["min"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "min_reference_filters",
+      "formula": "=MIN(A1:A6)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "9"
+        },
+        "Sheet1!A3": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!A6": {
+          "type": "number",
+          "value": 0
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["min"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "min_empty_range",
+      "formula": "=MIN(A1:A2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["min"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "min_direct_coercion",
+      "formula": "=MIN(TRUE,\"5\",3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["min"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "min_invalid_direct_text",
+      "formula": "=MIN(\"word\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["min"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "min_error_propagates",
+      "formula": "=MIN(A1:A2)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "error",
+          "value": "#N/A"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["min"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "min_arity_zero",
+      "formula": "=MIN()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      },
+      "notes": "Strict 1..255 profile arity; empty argument-list behavior not claimed Excel-compatible."
+    },
+    {
+      "id": "max_numbers",
+      "formula": "=MAX(2,4,6)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 6
+      },
+      "provenance": {
+        "sources": ["max"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "max_reference_filters",
+      "formula": "=MAX(A1:A6)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "9"
+        },
+        "Sheet1!A3": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!A6": {
+          "type": "number",
+          "value": 0
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["max"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "max_empty_range",
+      "formula": "=MAX(A1:A2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["max"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "max_direct_coercion",
+      "formula": "=MAX(TRUE,\"5\",3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 5
+      },
+      "provenance": {
+        "sources": ["max"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "max_invalid_direct_text",
+      "formula": "=MAX(\"word\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["max"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "max_error_propagates",
+      "formula": "=MAX(A1:A2)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "error",
+          "value": "#N/A"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["max"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "max_arity_zero",
+      "formula": "=MAX()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      },
+      "notes": "Strict 1..255 profile arity; empty argument-list behavior not claimed Excel-compatible."
+    },
+    {
+      "id": "if_true",
+      "formula": "=IF(TRUE,7,9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": ["if"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_false",
+      "formula": "=IF(FALSE,7,9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 9
+      },
+      "provenance": {
+        "sources": ["if"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_lazy_false",
+      "formula": "=IF(FALSE,1/0,7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": ["if"],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_lazy_true",
+      "formula": "=IF(TRUE,7,1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": ["if"],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_selected_error",
+      "formula": "=IF(TRUE,1/0,7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["if"],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_omitted_false",
+      "formula": "=IF(FALSE,7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["if"],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      },
+      "notes": "Absent third argument differs from present empty argument."
+    },
+    {
+      "id": "if_empty_false",
+      "formula": "=IF(FALSE,7,)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["if"],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_empty_true",
+      "formula": "=IF(TRUE,,7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["if"],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_empty_text",
+      "formula": "=IF(TRUE,\"\",7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["if"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_blank_test",
+      "formula": "=IF(A1,7,9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 9
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_numeric_test",
+      "formula": "=IF(-2,7,9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_invalid_text_test",
+      "formula": "=IF(\"word\",7,9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_too_few_arguments",
+      "formula": "=IF(TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_too_many_arguments",
+      "formula": "=IF(TRUE,1,2,3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "unknown_function",
+      "formula": "=NOT_IMPLEMENTED(1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NAME?"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "absolute_reference",
+      "formula": "=$A$1+1",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "quoted_sheet_reference",
+      "formula": "='Sales 2026'!A1+1",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sales 2026!A1": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "escaped_sheet_reference",
+      "formula": "='O''Brien'!A1+1",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "O'Brien!A1": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "power_zero_zero",
+      "formula": "=0^0",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "power_zero_negative",
+      "formula": "=0^-1",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "power_zero_positive",
+      "formula": "=0^2",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "power_overflow_integer_limit",
+      "formula": "=2^1024",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "if_selected_blank_reference",
+      "formula": "=IF(TRUE,A1,7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,273 @@
+syntax = "proto3";
+
+package pxel.wire.v1;
+
+// Additive v1 messages; unsupported payloads are rejected atomically.
+message ClientEnvelope {
+  uint32 protocol_version = 1;
+  oneof payload {
+    ClientHello hello = 2;
+    DocumentCommand command = 3;
+    RequestCalculation request_calculation = 4;
+    SubscribeDocument subscribe_document = 5;
+  }
+}
+
+message ClientHello {
+  bytes client_instance_id = 1;
+  string client_name = 2;
+}
+
+message ServerEnvelope {
+  uint32 protocol_version = 1;
+  oneof payload {
+    ServerWelcome welcome = 2;
+    ProtocolError error = 3;
+    OperationCommitted committed = 4;
+    OperationRejected rejected = 5;
+    OperationReceipt receipt = 6;
+    CalculationCommitted calculation_committed = 7;
+    DocumentHeadChanged document_head_changed = 8;
+  }
+}
+
+message ServerWelcome {
+  bytes session_id = 1;
+  bytes actor_id = 2;
+  uint32 heartbeat_interval_ms = 3;
+  uint32 max_message_bytes = 4;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_UNSUPPORTED_PROTOCOL = 1;
+  ERROR_CODE_INVALID_MESSAGE = 2;
+  ERROR_CODE_AUTH_REQUIRED = 3;
+  ERROR_CODE_SERVER_BUSY = 4;
+}
+
+message ProtocolError {
+  ErrorCode code = 1;
+  uint32 supported_protocol_version = 2;
+}
+
+message CellAddress {
+  bytes sheet_id = 1;
+  bytes row_id = 2;
+  bytes column_id = 3;
+}
+
+message CellValue {
+  oneof kind {
+    bool blank = 1;
+    double number = 2;
+    string text = 3;
+    bool boolean = 4;
+  }
+}
+
+message SetCellValue {
+  CellAddress address = 1;
+  CellValue value = 2;
+}
+
+message ClearCell {
+  CellAddress address = 1;
+}
+
+message CanonicalOperation {
+  oneof kind {
+    SetCellValue set_cell_value = 1;
+    ClearCell clear_cell = 2;
+    SetCellFormula set_cell_formula = 3;
+  }
+}
+
+message DocumentCommand {
+  bytes operation_id = 1;
+  bytes document_id = 2;
+  bytes actor_id = 3;
+  uint64 base_version = 4;
+  uint64 client_sequence = 5;
+  CanonicalOperation operation = 6;
+  // Exactly one of legacy operation or formula_command must be present.
+  // Client ASTs are never accepted as canonical input.
+  SetCellFormulaCommand formula_command = 7;
+}
+
+message SetCellFormulaCommand {
+  CellAddress address = 1;
+  string source = 2;
+}
+
+message OperationCommitted {
+  bytes document_id = 1;
+  bytes operation_id = 2;
+  bytes actor_id = 3;
+  uint64 committed_version = 4;
+  CanonicalOperation canonical_operation = 5;
+  bytes confirmed_state_hash = 6;
+  bool transformed = 7;
+}
+
+message OperationReceipt {
+  bytes document_id = 1;
+  bytes operation_id = 2;
+  uint64 committed_version = 3;
+  bytes canonical_event_hash = 4;
+  uint64 current_head_version = 5;
+}
+
+enum RejectionCode {
+  REJECTION_CODE_UNSPECIFIED = 0;
+  REJECTION_CODE_UNAUTHORIZED = 1;
+  REJECTION_CODE_NOT_FOUND = 2;
+  REJECTION_CODE_INVALID_COMMAND = 3;
+  REJECTION_CODE_BASE_VERSION_AHEAD = 4;
+  REJECTION_CODE_RETRYABLE_CONFLICT = 5;
+  REJECTION_CODE_IDEMPOTENCY_CONFLICT = 6;
+  REJECTION_CODE_QUEUE_FULL = 7;
+  REJECTION_CODE_UNAVAILABLE = 8;
+  REJECTION_CODE_DELETED_TARGET = 9;
+  REJECTION_CODE_REBASE_WINDOW_EXCEEDED = 10;
+  REJECTION_CODE_INVALID_FORMULA = 11;
+}
+
+message OperationRejected {
+  bytes document_id = 1;
+  bytes operation_id = 2;
+  RejectionCode code = 3;
+  bool retryable = 4;
+  bool resync_required = 5;
+}
+
+// Explicit asynchronous calculation request; does not mutate document history.
+message RequestCalculation {
+  bytes document_id = 1;
+  uint64 input_version = 2;
+}
+
+// Coalescing invalidation only. The client reads the canonical projection over
+// authorized HTTP; this is not an operation replay or a durable event.
+message SubscribeDocument {
+  bytes document_id = 1;
+  uint64 last_seen_version = 2;
+}
+message DocumentHeadChanged {
+  bytes document_id = 1;
+  uint64 head_version = 2;
+}
+
+message CalculatedValue {
+  oneof kind {
+    bool blank = 1;
+    double number = 2;
+    string text = 3;
+    bool boolean = 4;
+    FormulaError error = 5;
+  }
+}
+message CalculatedCell {
+  CellAddress address = 1;
+  CalculatedValue value = 2;
+}
+enum CalculationErrorCode {
+  // Zero means no failure; an explicit nonzero code denotes a failed result.
+  CALCULATION_ERROR_CODE_UNSPECIFIED = 0;
+  CALCULATION_ERROR_CODE_LIMIT_EXCEEDED = 1;
+  CALCULATION_ERROR_CODE_CANCELLED = 2;
+  CALCULATION_ERROR_CODE_UNAVAILABLE = 3;
+  CALCULATION_ERROR_CODE_INVALID_PROJECTION = 4;
+  CALCULATION_ERROR_CODE_TIMEOUT = 5;
+}
+// v1 sends a complete result set across ordered chunks, each <=256 KiB.
+// Publish atomically only after is_final. Hash is present only on final success.
+// Legacy documents without a persisted context use epoch=0 and document ID.
+message CalculationCommitted {
+  bytes document_id = 1;
+  uint64 input_version = 2;
+  uint64 calculation_epoch = 3;
+  string formula_engine_version = 4;
+  string compatibility_profile = 5;
+  bytes context_id = 6;
+  uint32 patch_sequence = 7;
+  bool is_final = 8;
+  bytes calculated_state_hash = 9;
+  repeated CalculatedCell cells = 10;
+  bool full_snapshot = 11;
+  CalculationErrorCode error_code = 12;
+}
+
+// Independent public formula DTOs; never import the persisted event schema.
+message SetCellFormula { CellAddress address = 1; BoundFormula formula = 2; }
+message BoundFormula {
+ string source = 1;
+ string canonical = 2;
+ BoundAst ast = 3;
+ CellAddress origin = 4;
+ uint64 bound_at_version = 5;
+ CompatibilityProfile compatibility_profile = 6;
+}
+enum CompatibilityProfile { COMPATIBILITY_PROFILE_UNSPECIFIED = 0; COMPATIBILITY_PROFILE_EXCEL_SUBSET_V1 = 1; }
+message BoundAst { uint32 schema_version = 1; uint32 root = 2; repeated FormulaNode nodes = 3; }
+message FormulaNode {
+ oneof kind {
+  double number = 1;
+  string text = 2;
+  bool boolean = 3;
+  FormulaError error = 4;
+  bool missing = 5;
+  BoundCellReference cell = 6;
+  BoundRangeReference range = 7;
+  ReferenceError invalid_reference = 8;
+  UnaryNode unary = 9;
+  BinaryNode binary = 10;
+  CallNode call = 11;
+ }
+}
+message AxisReferenceMode { oneof kind { bool absolute = 1; sint64 relative_delta = 2; } }
+message BoundCellReference {
+ bytes sheet_id = 1;
+ bytes row_id = 2;
+ bytes column_id = 3;
+ AxisReferenceMode row_mode = 4;
+ AxisReferenceMode column_mode = 5;
+}
+message BoundRangeReference { BoundCellReference start = 1; BoundCellReference end = 2; }
+message UnaryNode { UnaryOperator operator = 1; uint32 operand = 2; }
+message BinaryNode { BinaryOperator operator = 1; uint32 left = 2; uint32 right = 3; }
+message CallNode { string name = 1; repeated uint32 arguments = 2; }
+enum UnaryOperator { UNARY_OPERATOR_UNSPECIFIED = 0; UNARY_OPERATOR_PLUS = 1; UNARY_OPERATOR_MINUS = 2; UNARY_OPERATOR_PERCENT = 3; }
+enum BinaryOperator {
+ BINARY_OPERATOR_UNSPECIFIED = 0;
+ BINARY_OPERATOR_ADD = 1;
+ BINARY_OPERATOR_SUBTRACT = 2;
+ BINARY_OPERATOR_MULTIPLY = 3;
+ BINARY_OPERATOR_DIVIDE = 4;
+ BINARY_OPERATOR_POWER = 5;
+ BINARY_OPERATOR_CONCAT = 6;
+ BINARY_OPERATOR_EQUAL = 7;
+ BINARY_OPERATOR_NOT_EQUAL = 8;
+ BINARY_OPERATOR_LESS = 9;
+ BINARY_OPERATOR_LESS_EQUAL = 10;
+ BINARY_OPERATOR_GREATER = 11;
+ BINARY_OPERATOR_GREATER_EQUAL = 12;
+}
+enum FormulaError {
+ FORMULA_ERROR_UNSPECIFIED = 0;
+ FORMULA_ERROR_NULL = 1;
+ FORMULA_ERROR_DIV0 = 2;
+ FORMULA_ERROR_VALUE = 3;
+ FORMULA_ERROR_REF = 4;
+ FORMULA_ERROR_NAME = 5;
+ FORMULA_ERROR_NUM = 6;
+ FORMULA_ERROR_NA = 7;
+ FORMULA_ERROR_SPILL = 8;
+ FORMULA_ERROR_CYCLE = 9;
+}
+enum ReferenceError {
+ REFERENCE_ERROR_UNSPECIFIED = 0;
+ REFERENCE_ERROR_DELETED_TARGET = 1;
+ REFERENCE_ERROR_OUT_OF_BOUNDS = 2;
+ REFERENCE_ERROR_MISSING_SHEET = 3;
+}

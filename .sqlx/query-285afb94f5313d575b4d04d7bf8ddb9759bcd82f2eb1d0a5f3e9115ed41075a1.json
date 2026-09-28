@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO development_accounts(account,user_id,workspace_id) VALUES($1,$2,$3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "285afb94f5313d575b4d04d7bf8ddb9759bcd82f2eb1d0a5f3e9115ed41075a1"
+}

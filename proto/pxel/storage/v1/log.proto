@@ -1,0 +1,122 @@
+syntax = "proto3";
+package pxel.storage.v1;
+message EventEnvelope {
+ uint32 schema_version = 1;
+ bytes document_id = 2;
+ bytes operation_id = 3;
+ bytes actor_id = 4;
+ uint64 committed_version = 5;
+ bytes state_hash = 6;
+ Operation operation = 7;
+ EventPrincipalKind principal_kind = 8;
+}
+enum EventPrincipalKind {
+ EVENT_PRINCIPAL_KIND_UNSPECIFIED = 0;
+ EVENT_PRINCIPAL_KIND_USER = 1;
+ EVENT_PRINCIPAL_KIND_SYSTEM = 2;
+}
+message Operation {
+ oneof kind {
+  CreateWorkbook create_workbook = 1;
+  SetCellValue set_cell_value = 2;
+  CellAddress clear_cell = 3;
+  SetCellFormula set_cell_formula = 4;
+  AdvanceCalculationEpoch advance_calculation_epoch = 5;
+ }
+}
+message AdvanceCalculationEpoch {
+ bytes context_id = 1;
+ uint64 calculation_epoch = 2;
+ int64 effective_timestamp_utc_ms = 3;
+ sint32 utc_offset_minutes = 4;
+ sint32 civil_day_since_unix_epoch = 5;
+ bytes random_seed = 6;
+ string engine_version = 7;
+ string compatibility_profile = 8;
+ CalculationReason reason = 9;
+}
+enum CalculationReason {
+ CALCULATION_REASON_UNSPECIFIED = 0;
+ CALCULATION_REASON_OPEN = 1;
+ CALCULATION_REASON_EXPLICIT = 2;
+ CALCULATION_REASON_TIMER = 3;
+ CALCULATION_REASON_VOLATILE_DEPENDENCY = 4;
+ CALCULATION_REASON_ENGINE_UPGRADE = 5;
+}
+message CreateWorkbook { bytes sheet_id = 1; string name = 2; repeated bytes rows = 3; repeated bytes columns = 4; }
+message CellAddress { bytes sheet_id = 1; bytes row_id = 2; bytes column_id = 3; }
+message SetCellValue { CellAddress address = 1; CellValue value = 2; }
+message CellValue { oneof kind { bool blank = 1; double number = 2; string text = 3; bool boolean = 4; } }
+
+message SetCellFormula { CellAddress address = 1; BoundFormula formula = 2; }
+message BoundFormula {
+ string source = 1;
+ string canonical = 2;
+ BoundAst ast = 3;
+ CellAddress origin = 4;
+ uint64 bound_at_version = 5;
+ CompatibilityProfile compatibility_profile = 6;
+}
+enum CompatibilityProfile { COMPATIBILITY_PROFILE_UNSPECIFIED = 0; COMPATIBILITY_PROFILE_EXCEL_SUBSET_V1 = 1; }
+message BoundAst { uint32 schema_version = 1; uint32 root = 2; repeated FormulaNode nodes = 3; }
+message FormulaNode {
+ oneof kind {
+  double number = 1;
+  string text = 2;
+  bool boolean = 3;
+  FormulaError error = 4;
+  bool missing = 5;
+  BoundCellReference cell = 6;
+  BoundRangeReference range = 7;
+  ReferenceError invalid_reference = 8;
+  UnaryNode unary = 9;
+  BinaryNode binary = 10;
+  CallNode call = 11;
+ }
+}
+message AxisReferenceMode { oneof kind { bool absolute = 1; sint64 relative_delta = 2; } }
+message BoundCellReference {
+ bytes sheet_id = 1;
+ bytes row_id = 2;
+ bytes column_id = 3;
+ AxisReferenceMode row_mode = 4;
+ AxisReferenceMode column_mode = 5;
+}
+message BoundRangeReference { BoundCellReference start = 1; BoundCellReference end = 2; }
+message UnaryNode { UnaryOperator operator = 1; uint32 operand = 2; }
+message BinaryNode { BinaryOperator operator = 1; uint32 left = 2; uint32 right = 3; }
+message CallNode { string name = 1; repeated uint32 arguments = 2; }
+enum UnaryOperator { UNARY_OPERATOR_UNSPECIFIED = 0; UNARY_OPERATOR_PLUS = 1; UNARY_OPERATOR_MINUS = 2; UNARY_OPERATOR_PERCENT = 3; }
+enum BinaryOperator {
+ BINARY_OPERATOR_UNSPECIFIED = 0;
+ BINARY_OPERATOR_ADD = 1;
+ BINARY_OPERATOR_SUBTRACT = 2;
+ BINARY_OPERATOR_MULTIPLY = 3;
+ BINARY_OPERATOR_DIVIDE = 4;
+ BINARY_OPERATOR_POWER = 5;
+ BINARY_OPERATOR_CONCAT = 6;
+ BINARY_OPERATOR_EQUAL = 7;
+ BINARY_OPERATOR_NOT_EQUAL = 8;
+ BINARY_OPERATOR_LESS = 9;
+ BINARY_OPERATOR_LESS_EQUAL = 10;
+ BINARY_OPERATOR_GREATER = 11;
+ BINARY_OPERATOR_GREATER_EQUAL = 12;
+}
+enum FormulaError {
+ FORMULA_ERROR_UNSPECIFIED = 0;
+ FORMULA_ERROR_NULL = 1;
+ FORMULA_ERROR_DIV0 = 2;
+ FORMULA_ERROR_VALUE = 3;
+ FORMULA_ERROR_REF = 4;
+ FORMULA_ERROR_NAME = 5;
+ FORMULA_ERROR_NUM = 6;
+ FORMULA_ERROR_NA = 7;
+ FORMULA_ERROR_SPILL = 8;
+ FORMULA_ERROR_CYCLE = 9;
+}
+enum ReferenceError {
+ REFERENCE_ERROR_UNSPECIFIED = 0;
+ REFERENCE_ERROR_DELETED_TARGET = 1;
+ REFERENCE_ERROR_OUT_OF_BOUNDS = 2;
+ REFERENCE_ERROR_MISSING_SHEET = 3;
+}

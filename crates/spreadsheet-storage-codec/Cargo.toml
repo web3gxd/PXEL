@@ -1,0 +1,20 @@
+[package]
+name = "spreadsheet-storage-codec"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+[dependencies]
+spreadsheet-domain.workspace = true
+prost.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+[build-dependencies]
+prost.workspace = true
+prost-types.workspace = true
+prost-build.workspace = true
+[lints]
+workspace = true
+
+[dev-dependencies]
+proptest = "=1.11.0"
+spreadsheet-wire-protocol.workspace = true

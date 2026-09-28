@@ -1,0 +1,54 @@
+# Roadmap и gates
+
+Статус: пользователь разрешил продолжать все оставшиеся стадии, 2026-09-28.
+Локальные проверки фазы 0 пройдены; реализация продолжается последовательными
+срезами по ADR-008. Linux/Compose/remote CI остаются открытым deployment gate.
+Каждая новая фаза проверяет собственные acceptance criteria; разрешение продолжать
+не означает, что будущие функции или совместимость уже подтверждены.
+
+| Фаза | Минимальный рабочий срез                                                                                                                            | Gate                                                                                                                                                             |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Workspace, quality tooling, PostgreSQL migrations, Axum health/readiness, dev-auth boundary, protobuf handshake, пустой Canvas, local BlobStore, CI | Команды старта и quality checks работают; браузер получает Welcome и рисует сетку; BlobStore contract проходит; действительные ограничения окружения перечислены |
+| 1    | Создать документ → SetCellValue через actor → durable CAS event → projection → reload/restart                                                       | Значение/IDs восстановлены из БД; duplicate не создает вторую версию; ACL и crash до/после commit протестированы                                                 |
+| 2    | Formula text → parser/binder → incremental engine → server calculation + WASM preview                                                               | Fixtures и parity проходят; независимые формулы не пересчитываются; cycle дает typed value; chain 10k измерена                                                   |
+| 3    | Два клиента, pending queue, subscriptions, reconnect/barrier, presence, revoke                                                                      | После canonical replay hashes совпадают; stale calc не применяется; slow consumer не блокирует документ; ACL epoch закрывает старые подписки                     |
+| 4    | Structural insert/delete, reference transforms, copy/paste/batch, guarded compensating undo                                                         | Вставки детерминированы; удаленные IDs дают typed errors; undo не затирает чужую правку; cut/move проходят отдельный compatibility gate                          |
+| 5    | Versioned binary snapshots, S3 adapter, activation state machine, recovery/history                                                                  | Snapshot+tail равен full replay; corrupted snapshot дает fallback; crash matrix и BlobStore S3 contracts проходят                                                |
+| 6    | Изолированный XLSX reader → IR → document; export → reimport                                                                                        | Поддерживаемые значения/formulas/styles сохраняются; unsupported features явно отражены в report; hostile files ограничены                                       |
+
+SortRange не входит в ранний MVP. Будущий отдельный срез реализует atomic permutation содержимого только выбранного прямоугольника; SortSheet рассматривается отдельно. Ранее предложенная сортировка полных строк под именем SortRange отменена.
+
+## Объем фазы 0
+
+1. Проверить доступность candidate versions, licenses и runtime; закрепить реальный toolchain и lock-файлы, сохранив отчет об отклонениях.
+2. Создать только используемые domain/application/wire/storage/server crates, frontend workspace и quality commands.
+3. Поднять PostgreSQL и выполнить migrations. Health проверяет процесс; readiness проверяет действительные зависимости и schema.
+4. Проверить binary Hello/Welcome/Rejected между Rust и TS. Неизвестные versions/payloads отвергаются полностью. Origin/size/auth boundary работают до upgrade/обработки сообщения.
+5. Показать пустую viewport Canvas-сетку. Не реализовывать editing, document commits, formulas или collaboration под видом skeleton.
+6. Реализовать LocalFilesystemBlobStore с checksums, ограниченными keys, атомарной публикацией и tests. Не запускать S3 service.
+7. Выполнить CI-equivalent commands и browser tests; перечислить реальные прошедшие/не запущенные checks в RUNBOOK.
+
+Одна команда `just infra-up` должна поднимать PostgreSQL и применять migrations. Одна команда `just dev` должна запускать backend/frontend после подготовки dependencies. Linux-first команда допускает Docker/WSL на Windows; если host prerequisites недоступны, это blocker конкретного gate, а не повод объявить его пройденным.
+
+## Измеримые gates первых фаз
+
+**Phase 0:** clean migration succeeds; health 200; readiness 200 при доступной БД и 503 при потере БД с восстановлением после ее возвращения; invalid origin/version/frame rejected; Playwright Welcome + Canvas при DPR 1/2, keyboard focus и ограниченное число DOM nodes; production build без dev-auth; format, lint, typecheck, unit, build, protobuf generation/drift checks. First usable grid measured отдельно, initial target p95 <1 s после готовности данных. Shared CI не падает на этом latency threshold.
+
+**Phase 1:** create/edit/reload/restart; 100 одинаковых retries → одна запись/версия; payload collision → IdempotencyConflict; два конкурентных CAS writers не пропускают versions; candidate failure до transaction не пишет event; lost ACK восстанавливается receipt+replay; viewer/чужой tenant не меняют документ. 100k sparse cells не создают 100k DOM nodes. Commit p95 <50 ms измеряется только на описанном durable reference стенде.
+
+**Phase 2:** lexer/parser/coercion fixtures и snapshots; 100k bounded arbitrary parser inputs без panic; canonicalization idempotence; A1+B1, SUM/AVERAGE/MIN/MAX/IF; старые dependency edges удаляются; одна измененная формула из 10k независимых не считает остальные; chain 10k не переполняет stack; bounded range lookup измерен; native/browser общие fixtures и 1000 seeded workbooks дают одинаковый normalized result hash. Excel golden fixtures имеют provenance, неподтвержденные ожидания не называются Excel-verified.
+
+**Phase 3:** 100 seeded сценариев по 1000 commands с duplicates/delays/disconnect/restart, hashes после replay совпадают; simultaneous same-property edits следуют server order; pending p95 <16 ms и доставка второму клиенту p95 <100 ms на фиксированном стенде; presence не входит в durable log; revoke прерывает новые payload sends; replay/live race покрыта тестом.
+
+## Отложенные задачи с критериями завершения
+
+| Задача          | Причина и зависимость                                 | Критерий завершения                                                                        |
+| --------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| AUTH-PROD       | Phase 0 dev auth не является production identity      | Выбран self-hosted provider, audited auth/CSRF/session integration до production           |
+| CALC-CONTRACT   | Формулы не входят в phase 0                           | Подтверждены semantics и fixture corpus до фазы 2                                          |
+| COLLAB-CONTRACT | Протокол команд пока отсутствует                      | Подтверждены rebase/revoke/barrier contracts до фазы 3                                     |
+| S3-CONTRACT     | Snapshots появятся только в фазе 5                    | Один BlobStore suite проходит filesystem, Garage candidate и российский S3                 |
+| XLSX-ISOLATION  | Недоверенный parser появится в фазе 6                 | Worker process sandbox, resource limits и malicious corpus проходят Linux/Windows adapters |
+| SORT-RECTANGLE  | Full-row sort нарушает ожидания выделенного диапазона | Отдельный ADR, transformation fixtures и atomic rectangle tests перед добавлением          |
+
+Ни одна запись этой roadmap сама по себе не означает реализованную или протестированную возможность.

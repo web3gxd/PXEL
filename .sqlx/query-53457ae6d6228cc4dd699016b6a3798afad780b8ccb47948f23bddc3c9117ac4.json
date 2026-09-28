@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET state='quarantined' WHERE document_id=$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "53457ae6d6228cc4dd699016b6a3798afad780b8ccb47948f23bddc3c9117ac4"
+}

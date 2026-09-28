@@ -1,0 +1,707 @@
+use crate::{AppState, auth};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+};
+use serde::{Deserialize, Serialize};
+use spreadsheet_application::journal::{JournalError, OperationJournal};
+use spreadsheet_collab::{SessionDirectory, SessionError, Submission};
+use spreadsheet_domain::workbook::*;
+use spreadsheet_wire_protocol::{self as wire, v1};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateRequest {
+    document_id: String,
+    operation_id: String,
+}
+
+#[derive(Serialize)]
+pub struct Created {
+    document_id: String,
+    version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecalculateRequest {
+    operation_id: String,
+}
+
+#[derive(Serialize)]
+pub struct RecalculateReceipt {
+    operation_id: String,
+    committed_version: String,
+    current_head_version: String,
+    canonical_event_hash: String,
+}
+
+pub async fn recalculate(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<RecalculateRequest>,
+) -> Result<Json<RecalculateReceipt>, ApiError> {
+    if !auth::valid_origin(&headers, &state.origins) {
+        return Err(ApiError(StatusCode::FORBIDDEN, "origin_denied"));
+    }
+    if !crate::rate_allowed(&state).await {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limit"));
+    }
+    let principal = principal(&state, &headers).await?;
+    let document_id = DocumentId::from_bytes(parse_id(&id)?).map_err(domain_error)?;
+    let operation_id =
+        OperationId::from_bytes(parse_id(&input.operation_id)?).map_err(domain_error)?;
+    let milliseconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "clock_unavailable"))?
+        .as_millis();
+    let timestamp = i64::try_from(milliseconds)
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "clock_unavailable"))?;
+    let civil_day = i32::try_from(timestamp.div_euclid(86_400_000))
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "clock_unavailable"))?;
+    let mut seed = [0_u8; 32];
+    seed[..16].copy_from_slice(Uuid::new_v4().as_bytes());
+    seed[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+    let context = CalculationContext::new(
+        CalculationContextId::from_bytes(*Uuid::now_v7().as_bytes()).map_err(domain_error)?,
+        1,
+        timestamp,
+        0,
+        civil_day,
+        seed,
+        spreadsheet_collab::calculation::ENGINE_VERSION.into(),
+        spreadsheet_collab::calculation::COMPATIBILITY_PROFILE.into(),
+        CalculationReason::Explicit,
+    )
+    .map_err(domain_error)?;
+    let session = state
+        .sessions
+        .session(principal.identity, document_id)
+        .await
+        .map_err(session_api_error)?;
+    let receipt = session
+        .advance_context(principal.identity, operation_id, context)
+        .await
+        .map_err(session_api_error)?;
+    Ok(Json(RecalculateReceipt {
+        operation_id: id_string(receipt.operation_id.as_bytes()),
+        committed_version: receipt.committed_version.get().to_string(),
+        current_head_version: receipt.current_head_version.get().to_string(),
+        canonical_event_hash: receipt
+            .canonical_event_hash
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    }))
+}
+
+pub struct ApiError(pub StatusCode, pub &'static str);
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        #[derive(Serialize)]
+        struct ErrorBody {
+            code: &'static str,
+        }
+        (self.0, Json(ErrorBody { code: self.1 })).into_response()
+    }
+}
+
+async fn principal(state: &AppState, headers: &HeaderMap) -> Result<auth::Principal, ApiError> {
+    state
+        .auth
+        .authenticate(headers)
+        .await
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "unavailable"))?
+        .ok_or(ApiError(StatusCode::UNAUTHORIZED, "unauthorized"))
+}
+
+fn parse_id(value: &str) -> Result<[u8; 16], ApiError> {
+    let id = Uuid::parse_str(value)
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid_identity"))?;
+    if id.get_version_num() != 7 {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "invalid_identity"));
+    }
+    Ok(*id.as_bytes())
+}
+
+fn domain_error(_: DomainError) -> ApiError {
+    ApiError(StatusCode::BAD_REQUEST, "invalid_command")
+}
+fn journal_error(error: JournalError) -> ApiError {
+    match error {
+        JournalError::Unauthorized => ApiError(StatusCode::FORBIDDEN, "unauthorized"),
+        JournalError::NotFound => ApiError(StatusCode::NOT_FOUND, "not_found"),
+        JournalError::Conflict => ApiError(StatusCode::CONFLICT, "retryable_conflict"),
+        JournalError::IdempotencyConflict => ApiError(StatusCode::CONFLICT, "idempotency_conflict"),
+        _ => ApiError(StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
+    }
+}
+
+pub async fn create(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(input): Json<CreateRequest>,
+) -> Result<(StatusCode, Json<Created>), ApiError> {
+    if !auth::valid_origin(&headers, &state.origins) {
+        return Err(ApiError(StatusCode::FORBIDDEN, "origin_denied"));
+    }
+    if !crate::rate_allowed(&state).await {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limit"));
+    }
+    let principal = principal(&state, &headers).await?;
+    let document_id =
+        DocumentId::from_bytes(parse_id(&input.document_id)?).map_err(domain_error)?;
+    let operation_id =
+        OperationId::from_bytes(parse_id(&input.operation_id)?).map_err(domain_error)?;
+    let sheet = SheetSeed {
+        id: SheetId::from_bytes(*Uuid::now_v7().as_bytes()).map_err(domain_error)?,
+        name: "Лист 1".into(),
+        rows: (0..1000)
+            .map(|_| RowId::from_bytes(*Uuid::now_v7().as_bytes()))
+            .collect::<Result<_, _>>()
+            .map_err(domain_error)?,
+        columns: (0..26)
+            .map(|_| ColumnId::from_bytes(*Uuid::now_v7().as_bytes()))
+            .collect::<Result<_, _>>()
+            .map_err(domain_error)?,
+    };
+    let version = DocumentVersion::new(1).map_err(domain_error)?;
+    let operation = Operation::CreateWorkbook { sheet };
+    let candidate = Workbook::empty(document_id)
+        .candidate(&operation, version)
+        .map_err(domain_error)?;
+    let event = CommittedEvent {
+        document_id,
+        operation_id,
+        principal: EventPrincipal::User(principal.identity.actor_id),
+        version,
+        operation,
+        state_hash: candidate.hash(),
+    };
+    let receipt = state
+        .database
+        .create(principal.identity, event)
+        .await
+        .map_err(journal_error)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(Created {
+            document_id: id_string(document_id.as_bytes()),
+            version: receipt.current_head_version.get().to_string(),
+        }),
+    ))
+}
+
+#[derive(Serialize)]
+pub struct DocumentView {
+    document_id: String,
+    version: String,
+    state_hash: String,
+    calculation_context: Option<CalculationContextView>,
+    sheets: Vec<SheetView>,
+}
+#[derive(Serialize)]
+struct CalculationContextView {
+    context_id: String,
+    epoch: String,
+}
+#[derive(Serialize)]
+struct SheetView {
+    id: String,
+    name: String,
+    rows: Vec<String>,
+    columns: Vec<String>,
+    cells: Vec<CellView>,
+}
+#[derive(Serialize)]
+struct CellView {
+    row_id: String,
+    column_id: String,
+    value: JsonValue,
+}
+#[derive(Serialize)]
+#[serde(tag = "type", content = "value", rename_all = "lowercase")]
+enum JsonValue {
+    Blank,
+    Number(f64),
+    Text(String),
+    Boolean(bool),
+    Formula(JsonFormula),
+}
+
+#[derive(Serialize)]
+struct JsonFormula {
+    source: String,
+    canonical: String,
+    ast_schema: u32,
+    compatibility_profile: &'static str,
+    bound_at_version: String,
+}
+
+pub async fn get_document(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<DocumentView>, ApiError> {
+    if !crate::rate_allowed(&state).await {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limit"));
+    }
+    let principal = principal(&state, &headers).await?;
+    let id = DocumentId::from_bytes(parse_id(&id)?).map_err(domain_error)?;
+    let session = state
+        .sessions
+        .session(principal.identity, id)
+        .await
+        .map_err(session_api_error)?;
+    let workbook = session
+        .read(principal.identity)
+        .await
+        .map_err(session_api_error)?;
+    let sheets = workbook
+        .sheets()
+        .iter()
+        .map(|sheet| SheetView {
+            id: id_string(sheet.id().as_bytes()),
+            name: sheet.name().to_owned(),
+            rows: sheet
+                .rows()
+                .iter()
+                .map(|id| id_string(id.as_bytes()))
+                .collect(),
+            columns: sheet
+                .columns()
+                .iter()
+                .map(|id| id_string(id.as_bytes()))
+                .collect(),
+            cells: sheet
+                .cells()
+                .iter()
+                .map(|(address, value)| CellView {
+                    row_id: id_string(address.row.as_bytes()),
+                    column_id: id_string(address.column.as_bytes()),
+                    value: match value {
+                        CellContent::Value(CellValue::Blank) => JsonValue::Blank,
+                        CellContent::Value(CellValue::Number(n)) => JsonValue::Number(*n),
+                        CellContent::Value(CellValue::Text(s)) => JsonValue::Text(s.clone()),
+                        CellContent::Value(CellValue::Boolean(b)) => JsonValue::Boolean(*b),
+                        CellContent::Formula(formula) => JsonValue::Formula(JsonFormula {
+                            source: formula.source().to_owned(),
+                            canonical: formula.canonical().to_owned(),
+                            ast_schema: formula.ast().schema_version(),
+                            compatibility_profile: formula.profile().identifier(),
+                            bound_at_version: formula.bound_at_version().get().to_string(),
+                        }),
+                    },
+                })
+                .collect(),
+        })
+        .collect();
+    Ok(Json(DocumentView {
+        document_id: id_string(id.as_bytes()),
+        version: workbook.version().get().to_string(),
+        state_hash: workbook
+            .hash()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        calculation_context: workbook
+            .calculation_context()
+            .map(|context| CalculationContextView {
+                context_id: id_string(context.context_id().as_bytes()),
+                epoch: context.epoch().to_string(),
+            }),
+        sheets,
+    }))
+}
+
+fn session_api_error(error: SessionError) -> ApiError {
+    match error {
+        SessionError::Journal(error) => journal_error(error),
+        SessionError::QueueFull => ApiError(StatusCode::TOO_MANY_REQUESTS, "queue_full"),
+        _ => ApiError(StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
+    }
+}
+
+#[derive(Serialize)]
+struct CalculationView {
+    document_id: String,
+    input_version: String,
+    engine_version: &'static str,
+    compatibility_profile: &'static str,
+    calculation_epoch: String,
+    context_id: String,
+    status: &'static str,
+    calculated_state_hash: Option<String>,
+    values: Vec<CalculatedCellView>,
+    error_code: Option<&'static str>,
+    evaluated_cells: usize,
+}
+#[derive(Serialize)]
+struct CalculatedCellView {
+    sheet_id: String,
+    row_id: String,
+    column_id: String,
+    value: CalculatedValue,
+}
+#[derive(Serialize)]
+#[serde(tag = "type", content = "value", rename_all = "lowercase")]
+enum CalculatedValue {
+    Blank,
+    Number(f64),
+    Text(String),
+    Boolean(bool),
+    Error(&'static str),
+    DateTime {
+        serial: f64,
+        system: &'static str,
+    },
+    Array {
+        rows: u32,
+        columns: u32,
+        values: Vec<CalculatedValue>,
+    },
+}
+impl From<&spreadsheet_formula::Value> for CalculatedValue {
+    fn from(value: &spreadsheet_formula::Value) -> Self {
+        use spreadsheet_formula::Value;
+        match value {
+            Value::Blank => Self::Blank,
+            Value::Number(n) => Self::Number(*n),
+            Value::Text(text) => Self::Text(text.clone()),
+            Value::Boolean(value) => Self::Boolean(*value),
+            Value::Error(error) => Self::Error(error.code()),
+            Value::DateTime { serial, system } => Self::DateTime {
+                serial: *serial,
+                system: match system {
+                    spreadsheet_formula::DateSystem::Excel1900 => "1900",
+                    spreadsheet_formula::DateSystem::Excel1904 => "1904",
+                },
+            },
+            Value::Array {
+                rows,
+                columns,
+                values,
+            } => Self::Array {
+                rows: *rows,
+                columns: *columns,
+                values: values.iter().map(Self::from).collect(),
+            },
+        }
+    }
+}
+
+pub async fn get_calculation(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    if !crate::rate_allowed(&state).await {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limit"));
+    }
+    let principal = principal(&state, &headers).await?;
+    let id = DocumentId::from_bytes(parse_id(&id)?).map_err(domain_error)?;
+    let session = state
+        .sessions
+        .session(principal.identity, id)
+        .await
+        .map_err(session_api_error)?;
+    let Some(calculated) = session
+        .calculated(principal.identity)
+        .await
+        .map_err(session_api_error)?
+    else {
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({"status":"pending"})),
+        )
+            .into_response());
+    };
+    // Large result encoding runs outside the async executor. Canonical input is immutable.
+    let encoder = state
+        .calculation_encoders
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError(StatusCode::TOO_MANY_REQUESTS, "calculation_encoding_busy"))?;
+    let body = tokio::task::spawn_blocking(move || {
+        let _encoder = encoder;
+        use spreadsheet_collab::calculation::{
+            COMPATIBILITY_PROFILE, CalculationOutcome, ENGINE_VERSION,
+        };
+        let mut view = CalculationView {
+            document_id: id_string(calculated.document_id.as_bytes()),
+            input_version: calculated.input_version.get().to_string(),
+            engine_version: ENGINE_VERSION,
+            compatibility_profile: COMPATIBILITY_PROFILE,
+            calculation_epoch: calculated
+                .context
+                .as_ref()
+                .map_or(0, CalculationContext::epoch)
+                .to_string(),
+            context_id: calculated.context.as_ref().map_or_else(
+                || id_string(calculated.document_id.as_bytes()),
+                |context| id_string(context.context_id().as_bytes()),
+            ),
+            status: "failed",
+            calculated_state_hash: None,
+            values: Vec::new(),
+            error_code: None,
+            evaluated_cells: 0,
+        };
+        match &calculated.outcome {
+            CalculationOutcome::Complete {
+                results,
+                hash,
+                evaluated_cells,
+            } => {
+                view.status = "complete";
+                view.calculated_state_hash =
+                    Some(hash.iter().map(|byte| format!("{byte:02x}")).collect());
+                view.evaluated_cells = *evaluated_cells;
+                view.values = results
+                    .iter()
+                    .map(|(address, value)| CalculatedCellView {
+                        sheet_id: id_string(address.sheet.as_bytes()),
+                        row_id: id_string(address.row.as_bytes()),
+                        column_id: id_string(address.column.as_bytes()),
+                        value: value.into(),
+                    })
+                    .collect();
+            }
+            CalculationOutcome::Failed(error) => {
+                use spreadsheet_formula::{EvaluationError, calculation::CalculationError};
+                view.error_code = Some(match error {
+                    CalculationError::DependencyLimit
+                    | CalculationError::Evaluation(EvaluationError::CalculationLimitExceeded) => {
+                        "CalculationLimitExceeded"
+                    }
+                    CalculationError::Evaluation(EvaluationError::Cancelled) => "Cancelled",
+                    CalculationError::Evaluation(
+                        EvaluationError::UnsupportedCompatibilityFeature,
+                    ) => "UnsupportedCompatibilityFeature",
+                    _ => "CalculationFailed",
+                });
+            }
+        }
+        serde_json::to_vec(&view)
+    })
+    .await
+    .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "calculation_unavailable"))?
+    .map_err(|_| {
+        ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "calculation_encoding_failed",
+        )
+    })?;
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+        .into_response())
+}
+fn id_string(bytes: &[u8; 16]) -> String {
+    Uuid::from_bytes(*bytes).to_string()
+}
+fn bytes_id(bytes: &[u8]) -> Result<[u8; 16], SessionError> {
+    bytes.try_into().map_err(|_| SessionError::InvalidCommand)
+}
+
+fn address(input: Option<v1::CellAddress>) -> Result<CellAddress, SessionError> {
+    let input = input.ok_or(SessionError::InvalidCommand)?;
+    Ok(CellAddress {
+        sheet: SheetId::from_bytes(bytes_id(&input.sheet_id)?)?,
+        row: RowId::from_bytes(bytes_id(&input.row_id)?)?,
+        column: ColumnId::from_bytes(bytes_id(&input.column_id)?)?,
+    })
+}
+
+fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
+    if input.operation.is_some() == input.formula_command.is_some() {
+        return Err(SessionError::InvalidCommand);
+    }
+    let operation = if let Some(formula) = input.formula_command {
+        CommandPayload::SetCellFormula {
+            address: address(formula.address)?,
+            source: FormulaSource::new(formula.source).map_err(|_| SessionError::InvalidFormula)?,
+        }
+    } else {
+        match input
+            .operation
+            .and_then(|op| op.kind)
+            .ok_or(SessionError::InvalidCommand)?
+        {
+            v1::canonical_operation::Kind::SetCellValue(set) => {
+                let value = match set
+                    .value
+                    .and_then(|value| value.kind)
+                    .ok_or(SessionError::InvalidCommand)?
+                {
+                    v1::cell_value::Kind::Blank(true) => CellValue::Blank,
+                    v1::cell_value::Kind::Blank(false) => return Err(SessionError::InvalidCommand),
+                    v1::cell_value::Kind::Number(n) => CellValue::Number(n),
+                    v1::cell_value::Kind::Text(s) => CellValue::Text(s),
+                    v1::cell_value::Kind::Boolean(b) => CellValue::Boolean(b),
+                }
+                .normalized()?;
+                CommandPayload::SetCellValue {
+                    address: address(set.address)?,
+                    value,
+                }
+            }
+            v1::canonical_operation::Kind::ClearCell(clear) => CommandPayload::ClearCell {
+                address: address(clear.address)?,
+            },
+            v1::canonical_operation::Kind::SetCellFormula(_) => {
+                return Err(SessionError::InvalidCommand);
+            }
+        }
+    };
+    let operation_id = bytes_id(&input.operation_id)?;
+    let document_id = bytes_id(&input.document_id)?;
+    if Uuid::from_bytes(operation_id).get_version_num() != 7
+        || Uuid::from_bytes(document_id).get_version_num() != 7
+    {
+        return Err(SessionError::InvalidCommand);
+    }
+    Ok(Command {
+        operation_id: OperationId::from_bytes(operation_id)?,
+        document_id: DocumentId::from_bytes(document_id)?,
+        actor_id: ActorId::from_bytes(bytes_id(&input.actor_id)?)?,
+        base_version: DocumentVersion::new(input.base_version)?,
+        client_sequence: input.client_sequence,
+        operation,
+    })
+}
+
+fn wire_address(value: CellAddress) -> v1::CellAddress {
+    v1::CellAddress {
+        sheet_id: value.sheet.as_bytes().to_vec(),
+        row_id: value.row.as_bytes().to_vec(),
+        column_id: value.column.as_bytes().to_vec(),
+    }
+}
+fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
+    let kind = match operation {
+        Operation::SetCellValue { address, value } => {
+            v1::canonical_operation::Kind::SetCellValue(v1::SetCellValue {
+                address: Some(wire_address(address)),
+                value: Some(v1::CellValue {
+                    kind: Some(match value {
+                        CellValue::Blank => v1::cell_value::Kind::Blank(true),
+                        CellValue::Number(n) => v1::cell_value::Kind::Number(n),
+                        CellValue::Text(s) => v1::cell_value::Kind::Text(s),
+                        CellValue::Boolean(b) => v1::cell_value::Kind::Boolean(b),
+                    }),
+                }),
+            })
+        }
+        Operation::ClearCell { address } => {
+            v1::canonical_operation::Kind::ClearCell(v1::ClearCell {
+                address: Some(wire_address(address)),
+            })
+        }
+        Operation::CreateWorkbook { .. } | Operation::AdvanceCalculationEpoch { .. } => {
+            return None;
+        }
+        Operation::SetCellFormula { address, formula } => {
+            v1::canonical_operation::Kind::SetCellFormula(Box::new(v1::SetCellFormula {
+                address: Some(wire_address(address)),
+                formula: Some(wire::formula::encode_formula(&formula)),
+            }))
+        }
+    };
+    Some(v1::CanonicalOperation { kind: Some(kind) })
+}
+
+pub async fn handle_command(
+    state: &AppState,
+    principal: &auth::Principal,
+    input: v1::DocumentCommand,
+) -> v1::ServerEnvelope {
+    let document_id = input.document_id.clone();
+    let operation_id = input.operation_id.clone();
+    let result = async {
+        let command = command(input)?;
+        let session = state
+            .sessions
+            .session(principal.identity, command.document_id)
+            .await?;
+        session.submit(principal.identity, command).await
+    }
+    .await;
+    let payload = match result {
+        Ok(Submission::Committed {
+            event, actor_id, ..
+        }) => v1::server_envelope::Payload::Committed(v1::OperationCommitted {
+            document_id: event.document_id.as_bytes().to_vec(),
+            operation_id: event.operation_id.as_bytes().to_vec(),
+            actor_id: actor_id.as_bytes().to_vec(),
+            committed_version: event.version.get(),
+            canonical_operation: canonical(event.operation),
+            confirmed_state_hash: event.state_hash.to_vec(),
+            transformed: false,
+        }),
+        Ok(Submission::AlreadyCommitted(receipt)) => {
+            v1::server_envelope::Payload::Receipt(v1::OperationReceipt {
+                document_id,
+                operation_id: receipt.operation_id.as_bytes().to_vec(),
+                committed_version: receipt.committed_version.get(),
+                canonical_event_hash: receipt.canonical_event_hash.to_vec(),
+                current_head_version: receipt.current_head_version.get(),
+            })
+        }
+        Err(error) => {
+            let code = match error {
+                SessionError::ActorMismatch | SessionError::Journal(JournalError::Unauthorized) => {
+                    v1::RejectionCode::Unauthorized
+                }
+                SessionError::BaseVersionAhead => v1::RejectionCode::BaseVersionAhead,
+                SessionError::RebaseWindowExceeded => v1::RejectionCode::RebaseWindowExceeded,
+                SessionError::InvalidFormula => v1::RejectionCode::InvalidFormula,
+                SessionError::Journal(JournalError::NotFound) => v1::RejectionCode::NotFound,
+                SessionError::Journal(JournalError::IdempotencyConflict) => {
+                    v1::RejectionCode::IdempotencyConflict
+                }
+                SessionError::Journal(JournalError::Conflict) => {
+                    v1::RejectionCode::RetryableConflict
+                }
+                SessionError::QueueFull => v1::RejectionCode::QueueFull,
+                SessionError::Domain(
+                    DomainError::MissingSheet
+                    | DomainError::MissingRow
+                    | DomainError::MissingColumn,
+                ) => v1::RejectionCode::DeletedTarget,
+                SessionError::InvalidCommand | SessionError::Domain(_) => {
+                    v1::RejectionCode::InvalidCommand
+                }
+                _ => v1::RejectionCode::Unavailable,
+            };
+            v1::server_envelope::Payload::Rejected(v1::OperationRejected {
+                document_id,
+                operation_id,
+                code: code.into(),
+                retryable: matches!(
+                    code,
+                    v1::RejectionCode::RetryableConflict
+                        | v1::RejectionCode::QueueFull
+                        | v1::RejectionCode::Unavailable
+                ),
+                resync_required: matches!(
+                    code,
+                    v1::RejectionCode::BaseVersionAhead
+                        | v1::RejectionCode::RetryableConflict
+                        | v1::RejectionCode::RebaseWindowExceeded
+                ),
+            })
+        }
+    };
+    v1::ServerEnvelope {
+        protocol_version: wire::PROTOCOL_VERSION,
+        payload: Some(payload),
+    }
+}
