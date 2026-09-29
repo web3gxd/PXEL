@@ -1,5 +1,46 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — первый структурный срез: автоматическое расширение строк
+
+Перед этапом прочитаны AGENTS, roadmap, ADR-002, collaboration contract и
+код domain/actor/journal/Canvas. Цель — провести одну настоящую структурную
+операцию через durable commit, replay, два клиента и браузер, не меняя смысл
+существующих A1-ссылок. Инварианты: stable IDs, CAS/идемпотентность, отсутствие
+пустых Cell records, confirmed state отдельно от pending и строгий отказ от
+устаревшего formula binding после изменения оси. Риск — stale formula base и
+дорогая перезагрузка projection; оба ограничения зафиксированы в ADR-019.
+
+Добавлен `ExtendRows`: 1–1,000 новых UUIDv7 row IDs за команду, максимум
+100,000 строк; actor сериализует concurrent append, PostgreSQL хранит event
+schema 4, protobuf wire v1 расширен аддитивно. Новая миграция разрешает schema
+4 для user events. Domain hash включает порядок ID, replay восстанавливает
+`last_axis_change_version`. Старая formula base получает typed
+`RebaseWindowExceeded`. Canvas автоматически отправляет команду у последних
+20 строк; после подтверждения и удалённого структурного hint браузер берет
+авторизованную projection. Это не optimistic axis preview.
+
+Изменены domain/formula/collab/storage-codec/storage/server, оба protobuf
+контракта и generated TS, frontend store/Canvas, migration, integration,
+recovery и browser tests; обновлены ADR-019, roadmap, collaboration contract и
+презентация. Первый `just check` остановился на Rust formatting; `cargo fmt`
+исправил форматирование без изменения поведения. Первая проверка integration
+до миграции и расширения диапазона schema в journal отклоняла event; оба
+несоответствия исправлены, тест сохранен. В итоговой проверке `just check`
+прошёл exit 0: Rust fmt/Clippy/tests/build, wasm32, proto drift, WASM build,
+Prettier, ESLint, TypeScript, 55 Vitest и Vite build. Живой
+`pnpm test:integration` прошёл 28/28, `pnpm test:recovery` прошёл 1/1 после
+остановки локального сервера, `pnpm test:e2e` прошёл 20/20 при DPR 1/2.
+Первый повтор recovery не дошёл до теста: Windows запретил линкеру заменить
+исполняемый файл работающего dev-сервера. Неверная root-команда
+`pnpm presentation:check` была заменена на
+`pnpm --filter @pxel/web presentation:check`; проверка прошла 10 слайдов на
+desktop/mobile. Сетевой
+cross-host, официальный release latency threshold и Linux/Compose CI в этом
+срезе не запускались. Полный gate фазы 4 не закрыт: arbitrary insert/delete,
+ссылочные преобразования, batch copy/paste и guarded undo впереди.
+
+---
+
 ## 2026-09-29 — Canvas с 100,000 синтетических ячеек
 
 Перед срезом прочитаны AGENTS, roadmap, testing, существующий Canvas

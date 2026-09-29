@@ -21,6 +21,52 @@ fn seed() -> Result<(Workbook, CellAddress), DomainError> {
 }
 
 #[test]
+fn row_extension_preserves_stable_cells_and_replays_atomically() -> Result<(), DomainError> {
+    let (book, address) = seed()?;
+    let filled = book.candidate(
+        &Operation::SetCellValue {
+            address,
+            value: CellValue::Number(7.0),
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let first = RowId::from_bytes([7; 16])?;
+    let second = RowId::from_bytes([8; 16])?;
+    let operation = Operation::ExtendRows {
+        sheet: address.sheet,
+        rows: vec![first, second],
+    };
+    let extended = filled.candidate(&operation, DocumentVersion::new(3)?)?;
+    assert_eq!(extended.sheets()[0].rows(), &[address.row, first, second]);
+    assert_eq!(extended.sheets()[0].row_position(address.row), Some(0));
+    assert_eq!(extended.sheets()[0].row_position(second), Some(2));
+    assert_eq!(extended.sheets()[0].cells(), filled.sheets()[0].cells());
+    assert_eq!(extended.last_axis_change_version().get(), 3);
+    assert_eq!(filled.last_axis_change_version().get(), 1);
+    assert!(matches!(
+        filled.candidate(
+            &Operation::ExtendRows {
+                sheet: address.sheet,
+                rows: vec![first, first],
+            },
+            DocumentVersion::new(3)?,
+        ),
+        Err(DomainError::InvalidAxis)
+    ));
+    let mut replay = filled.clone();
+    replay.apply_event(&CommittedEvent {
+        document_id: filled.document_id(),
+        operation_id: OperationId::from_bytes([9; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([10; 16])?),
+        version: DocumentVersion::new(3)?,
+        operation,
+        state_hash: extended.hash(),
+    })?;
+    assert_eq!(replay.hash(), extended.hash());
+    Ok(())
+}
+
+#[test]
 fn cells_are_sparse_and_blank_removes_storage() -> Result<(), DomainError> {
     let (book, address) = seed()?;
     assert!(book.sheets()[0].cells().is_empty());

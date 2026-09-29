@@ -298,6 +298,10 @@ pub enum Operation {
     CreateWorkbook {
         sheet: SheetSeed,
     },
+    ExtendRows {
+        sheet: SheetId,
+        rows: Vec<RowId>,
+    },
     SetCellValue {
         address: CellAddress,
         value: CellValue,
@@ -317,6 +321,10 @@ pub enum Operation {
 pub enum CommandPayload {
     CreateWorkbook {
         sheet: SheetSeed,
+    },
+    ExtendRows {
+        sheet: SheetId,
+        rows: Vec<RowId>,
     },
     SetCellValue {
         address: CellAddress,
@@ -437,12 +445,30 @@ impl Sheet {
         }
         Ok(())
     }
+    fn validate_row_extension(&self, new_rows: &[RowId]) -> Result<(), DomainError> {
+        if new_rows.is_empty() || new_rows.len() > 1_000 {
+            return Err(DomainError::LimitExceeded);
+        }
+        if self.rows.len().saturating_add(new_rows.len()) > MAX_ROWS {
+            return Err(DomainError::LimitExceeded);
+        }
+        let mut seen = BTreeSet::new();
+        if new_rows
+            .iter()
+            .any(|row| self.row_positions.contains_key(row) || !seen.insert(*row))
+        {
+            return Err(DomainError::InvalidAxis);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
 pub struct Workbook {
     document_id: DocumentId,
     version: DocumentVersion,
+    // Derived by replay; not part of the canonical authored hash.
+    last_axis_change_version: DocumentVersion,
     sheets: Vec<Sheet>,
     calculation_context: Option<CalculationContext>,
     // Derived from cell contents; never persisted or included in canonical hashes.
@@ -454,6 +480,7 @@ impl Workbook {
         Self {
             document_id,
             version: DocumentVersion::ZERO,
+            last_axis_change_version: DocumentVersion::ZERO,
             sheets: Vec::new(),
             calculation_context: None,
             text_bytes: 0,
@@ -465,6 +492,9 @@ impl Workbook {
     }
     pub const fn version(&self) -> DocumentVersion {
         self.version
+    }
+    pub const fn last_axis_change_version(&self) -> DocumentVersion {
+        self.last_axis_change_version
     }
     pub fn sheets(&self) -> &[Sheet] {
         &self.sheets
@@ -520,6 +550,7 @@ impl Workbook {
         let mut workbook = Self {
             document_id,
             version,
+            last_axis_change_version: version,
             sheets: vec![Sheet::from_seed(&seed)?],
             calculation_context: None,
             text_bytes: 0,
@@ -568,6 +599,12 @@ impl Workbook {
         let mut next = self.clone();
         next.apply_operation(operation, budgets)?;
         next.version = next_version;
+        if matches!(
+            operation,
+            Operation::CreateWorkbook { .. } | Operation::ExtendRows { .. }
+        ) {
+            next.last_axis_change_version = next_version;
+        }
         Ok(next)
     }
     /// Atomic preview-only patch over immutable axes. Does not establish server
@@ -590,6 +627,7 @@ impl Workbook {
         for operation in operations {
             let address = match operation {
                 Operation::CreateWorkbook { .. } => return Err(DomainError::VersionConflict),
+                Operation::ExtendRows { .. } => return Err(DomainError::VersionConflict),
                 Operation::AdvanceCalculationEpoch { .. } => {
                     return Err(DomainError::VersionConflict);
                 }
@@ -614,6 +652,14 @@ impl Workbook {
         // projection. Replacements subtract their former allocation in constant time.
         Ok(match operation {
             Operation::CreateWorkbook { .. } => (self.text_bytes, self.ast_memory_bytes),
+            Operation::ExtendRows { sheet, rows } => {
+                self.sheets
+                    .iter()
+                    .find(|current| current.id == *sheet)
+                    .ok_or(DomainError::MissingSheet)?
+                    .validate_row_extension(rows)?;
+                (self.text_bytes, self.ast_memory_bytes)
+            }
             Operation::AdvanceCalculationEpoch { context } => {
                 let expected_epoch = self
                     .calculation_context
@@ -655,6 +701,18 @@ impl Workbook {
                     return Err(DomainError::VersionConflict);
                 }
                 self.sheets.push(Sheet::from_seed(sheet)?);
+            }
+            Operation::ExtendRows { sheet, rows } => {
+                let target = self
+                    .sheets
+                    .iter_mut()
+                    .find(|current| current.id == *sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                target.validate_row_extension(rows)?;
+                for row in rows {
+                    target.row_positions.insert(*row, target.rows.len() as u32);
+                    target.rows.push(*row);
+                }
             }
             Operation::SetCellValue { address, value } => {
                 let normalized = value.normalized()?;

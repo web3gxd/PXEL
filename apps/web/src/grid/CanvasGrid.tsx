@@ -58,13 +58,25 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
     };
     const observer = new ResizeObserver(schedule);
     observer.observe(scroller);
-    scroller.addEventListener('scroll', schedule, { passive: true });
+    const onScroll = () => {
+      schedule();
+      const sheet = document?.sheet;
+      if (
+        sheet &&
+        GRID.columnHeaderHeight +
+          sheet.rows.length * GRID.rowHeight -
+          (scroller.scrollTop + scroller.clientHeight) <=
+          20 * GRID.rowHeight
+      )
+        document?.extendRows();
+    };
+    scroller.addEventListener('scroll', onScroll, { passive: true });
     watchDpr();
     const unsubscribe = document?.subscribe(schedule);
     return () => {
       unsubscribe?.();
       observer.disconnect();
-      scroller.removeEventListener('scroll', schedule);
+      scroller.removeEventListener('scroll', onScroll);
       dprQuery.removeEventListener('change', watchDpr);
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
@@ -84,6 +96,7 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
       column: Math.max(0, Math.min(document.sheet.columns.length - 1, column)),
     };
     document.select(next);
+    if (next.row >= document.sheet.rows.length - 20) document.extendRows();
     const scroller = scrollRef.current;
     if (!scroller) return;
     const x = next.column * GRID.columnWidth,
@@ -150,8 +163,12 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           className="grid-extent"
           aria-hidden="true"
           style={{
-            width: GRID.rowHeaderWidth + GRID.columnCount * GRID.columnWidth,
-            height: GRID.columnHeaderHeight + GRID.rowCount * GRID.rowHeight,
+            width:
+              GRID.rowHeaderWidth +
+              (document?.sheet?.columns.length ?? GRID.columnCount) * GRID.columnWidth,
+            height:
+              GRID.columnHeaderHeight +
+              (document?.sheet?.rows.length ?? GRID.rowCount) * GRID.rowHeight,
           }}
         />
       </div>

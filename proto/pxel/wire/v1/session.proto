@@ -102,7 +102,15 @@ message CanonicalOperation {
     SetCellValue set_cell_value = 1;
     ClearCell clear_cell = 2;
     SetCellFormula set_cell_formula = 3;
+    ExtendRows extend_rows = 4;
   }
+}
+
+// Appends at the current end. Rows have stable identities; stale commands
+// serialize in server order and never reinterpret a positional anchor.
+message ExtendRows {
+  bytes sheet_id = 1;
+  repeated bytes rows = 2;
 }
 
 message DocumentCommand {

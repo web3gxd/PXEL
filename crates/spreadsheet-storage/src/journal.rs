@@ -255,6 +255,10 @@ impl OperationJournal for PgDatabase {
                 address: *address,
                 value: value.clone(),
             },
+            Operation::ExtendRows { sheet, rows } => CommandPayload::ExtendRows {
+                sheet: *sheet,
+                rows: rows.clone(),
+            },
             Operation::ClearCell { address } => CommandPayload::ClearCell { address: *address },
             Operation::SetCellFormula { address, formula } => {
                 if formula.origin() != *address
@@ -394,7 +398,7 @@ impl OperationJournal for PgDatabase {
         let mut events = Vec::with_capacity(rows.len());
         let mut expected = after.get();
         for r in rows {
-            if !matches!(r.schema_version, 1..=3) {
+            if !matches!(r.schema_version, 1..=4) {
                 return Err(JournalError::UnsupportedSchema);
             }
             if codec::checksum(&r.payload).as_slice() != r.payload_checksum {

@@ -7,6 +7,7 @@ import {
   decodeFrame,
   connect,
   createDocument,
+  extendRowsCommand,
   formulaCommand,
   calculation,
   requestCalculation,
@@ -139,6 +140,57 @@ test('concurrent writes to one cell follow server version order and replay the w
         newer.value.latestOperation.canonicalOperation.kind.value.value.kind.value,
         winner,
       );
+    } finally {
+      returning.socket.close();
+    }
+  } finally {
+    first.socket.close();
+    second.socket.close();
+  }
+});
+
+test('concurrent row extensions append stable IDs in server order and survive replay', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const first = await connect(base, cookie);
+  const second = await connect(base, cookie);
+  try {
+    const leftIds = [uuid7(), uuid7()];
+    const rightIds = [uuid7(), uuid7()];
+    const leftCommand = extendRowsCommand(first, snapshot, leftIds, { sequence: 1 });
+    const rightCommand = extendRowsCommand(second, snapshot, rightIds, { sequence: 1 });
+    const [left, right] = await Promise.all([first.send(leftCommand), second.send(rightCommand)]);
+    assert.equal(left.case, 'committed');
+    assert.equal(right.case, 'committed');
+    assert.deepEqual(
+      [left.value.committedVersion, right.value.committedVersion].sort((a, b) => Number(a - b)),
+      [2n, 3n],
+    );
+    const expected = [
+      ...snapshot.sheets[0].rows,
+      ...(left.value.committedVersion === 2n ? leftIds : rightIds),
+      ...(left.value.committedVersion === 3n ? leftIds : rightIds),
+    ];
+    const current = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(current.version, '3');
+    assert.deepEqual(current.sheets[0].rows, expected);
+    const retry = await first.send(leftCommand);
+    assert.equal(retry.case, 'receipt');
+    assert.equal(retry.value.committedVersion, left.value.committedVersion);
+    const staleFormula = await first.send(formulaCommand(first, snapshot, '=A1', { sequence: 2 }));
+    assert.equal(staleFormula.case, 'rejected');
+    assert.equal(staleFormula.value.code, 10);
+    const returning = await connect(base, cookie);
+    try {
+      const [older, newer, barrier] = await receiveFrames(returning, 3, () =>
+        subscribeDocument(returning, snapshot.document_id, 1),
+      );
+      assert.equal(older.value.headVersion, 2n);
+      assert.equal(newer.value.headVersion, 3n);
+      assert.equal(older.value.latestOperation.canonicalOperation.kind.case, 'extendRows');
+      assert.equal(newer.value.latestOperation.canonicalOperation.kind.case, 'extendRows');
+      assert.equal(barrier.case, 'replayComplete');
+      assert.equal(barrier.value.barrierVersion, 3n);
     } finally {
       returning.socket.close();
     }

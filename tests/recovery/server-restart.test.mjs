@@ -11,6 +11,7 @@ import {
   formulaCommand,
   connect,
   createDocument,
+  extendRowsCommand,
   getDocument,
   login,
   setCommand,
@@ -126,6 +127,24 @@ test(
           [403, 404].includes(
             (await api(base, recipient, '/api/documents/' + snapshot.document_id)).status,
           ),
+        );
+        const structureWriter = await connect(base, cookie);
+        const beforeExtension = await getDocument(base, cookie, snapshot.document_id);
+        const appendedRow = uuid7();
+        const extension = await structureWriter.send(
+          extendRowsCommand(structureWriter, beforeExtension, [appendedRow], { sequence: 3 }),
+        );
+        assert.equal(extension.case, 'committed');
+        assert.equal(extension.value.committedVersion, 4n);
+        structureWriter.socket.terminate();
+        await kill();
+        await start();
+        const structuralRecovery = await getDocument(base, cookie, snapshot.document_id);
+        assert.equal(structuralRecovery.version, '4');
+        assert.equal(structuralRecovery.sheets[0].rows.at(-1), appendedRow);
+        assert.equal(
+          structuralRecovery.state_hash,
+          Buffer.from(extension.value.confirmedStateHash).toString('hex'),
         );
       } finally {
         client.socket.terminate();

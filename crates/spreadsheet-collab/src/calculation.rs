@@ -88,6 +88,7 @@ impl CalculationHandle {
                 pending.changed.insert(*address);
             }
             Operation::CreateWorkbook { .. } => pending.rebuild = true,
+            Operation::ExtendRows { .. } => pending.rebuild = true,
             Operation::AdvanceCalculationEpoch { .. } => pending.rebuild = true,
         }
         if pending.changed.len() > 100_000 {

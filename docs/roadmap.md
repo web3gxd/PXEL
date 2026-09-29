@@ -33,6 +33,12 @@ Browser E2E при DPR 1/2 проверил, что отключенная вк�
 может использовать HTTP projection refresh; тест не доказывает исключительно
 operation replay. Он прошел в двух полных suites 18/18 после ограничения
 параллелизма Playwright до четырех workers из-за dev rate limit 64/s.
+Первый ограниченный срез фазы 4 реализован отдельно (ADR-019): `ExtendRows`
+добавляет до 1,000 stable row IDs за одну durable operation, автоматически
+срабатывает у нижней границы Canvas и восстанавливается после restart.
+Два клиента, idempotent retry, replay и stale-formula rejection проверены.
+Это не закрывает фазу 4: insert/delete, reference transformation, copy/paste
+и компенсирующий undo ещё не реализованы.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

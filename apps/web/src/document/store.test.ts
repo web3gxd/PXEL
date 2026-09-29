@@ -5,6 +5,7 @@ import { ClientEnvelopeSchema, ServerEnvelopeSchema } from '../generated/pxel/wi
 import type { FormulaError } from '../generated/pxel/wire/v1/session_pb';
 import {
   DocumentStore,
+  bytesUuid,
   decodeProjection,
   displayValue,
   parseInput,
@@ -147,6 +148,43 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('queues one bounded row extension and refreshes axes after commit', async () => {
+    const { store, sent } = await connectedStore();
+    expect(store.extendRows()).toBe(true);
+    expect(store.extendRows()).toBe(false);
+    expect(store.sheet?.rows).toHaveLength(1);
+    expect(store.pending).toHaveLength(1);
+    const payload = fromBinary(ClientEnvelopeSchema, sent[0] ?? new Uint8Array()).payload;
+    if (payload.case !== 'command' || payload.value.operation?.kind.case !== 'extendRows')
+      throw new Error('Missing row extension command');
+    const appended = payload.value.operation.kind.value.rows.map(bytesUuid);
+    expect(appended).toHaveLength(1000);
+    expect(new Set(appended).size).toBe(1000);
+    const next = projection();
+    next.version = '2';
+    next.sheets[0]!.rows.push(...appended);
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => next }));
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: payload.value.operationId,
+            committedVersion: 2n,
+            canonicalOperation: payload.value.operation,
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.sheet?.rows).toHaveLength(1001);
+    expect(store.pending).toHaveLength(0);
+    store.disconnected();
+  });
   it('applies an immediately next canonical head event without downloading the workbook', async () => {
     const { store } = await connectedStore();
     const fetchMock = vi.fn(async () => {
@@ -293,6 +331,44 @@ describe('document projection and pending intents', () => {
     );
     expect(store.projection?.version).toBe('2');
     expect(store.display({ row: 0, column: 0 })).toBe('42');
+    store.disconnected();
+  });
+  it('uses a full authorized refresh for a structural axis event', async () => {
+    const { store } = await connectedStore();
+    const appended = uuidV7();
+    const next = projection();
+    next.version = '2';
+    next.sheets[0]!.rows.push(appended);
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => next }));
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'documentHeadChanged',
+          value: {
+            documentId: uuidBytes(documentId),
+            headVersion: 2n,
+            latestOperation: {
+              documentId: uuidBytes(documentId),
+              operationId: uuidBytes(uuidV7()),
+              actorId: uuidBytes(uuidV7()),
+              committedVersion: 2n,
+              confirmedStateHash: new Uint8Array(32),
+              canonicalOperation: {
+                kind: {
+                  case: 'extendRows',
+                  value: { sheetId: uuidBytes(sheetId), rows: [uuidBytes(appended)] },
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.projection?.version).toBe('2');
+    expect(store.sheet?.rows.at(-1)).toBe(appended);
     store.disconnected();
   });
   it('resynchronizes from the server when a coalesced hint skips a version', async () => {

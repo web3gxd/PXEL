@@ -45,6 +45,10 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                     .map(|i| i.as_bytes().to_vec())
                     .collect(),
             }),
+            Operation::ExtendRows { sheet, rows } => Kind::ExtendRows(v1::ExtendRows {
+                sheet_id: sheet.as_bytes().to_vec(),
+                rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
+            }),
             Operation::SetCellFormula { address, formula } => {
                 Kind::SetCellFormula(v1::SetCellFormula {
                     address: Some(addr(address)),
@@ -126,6 +130,30 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                     .collect::<Result<_, _>>()?,
             },
         },
+        Kind::ExtendRows(extension) => {
+            if extension.rows.is_empty() || extension.rows.len() > 1_000 {
+                return Err(CodecError::Invalid);
+            }
+            let rows: Vec<RowId> = extension
+                .rows
+                .iter()
+                .map(|value| RowId::from_bytes(id(value)?).map_err(|_| CodecError::Invalid))
+                .collect::<Result<_, _>>()?;
+            if rows
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != rows.len()
+            {
+                return Err(CodecError::Invalid);
+            }
+            Operation::ExtendRows {
+                sheet: SheetId::from_bytes(id(&extension.sheet_id)?)
+                    .map_err(|_| CodecError::Invalid)?,
+                rows,
+            }
+        }
         Kind::SetCellFormula(v) => {
             let address = decode_addr(v.address.ok_or(CodecError::Invalid)?)?;
             let formula = formula_codec::decode(v.formula.ok_or(CodecError::Invalid)?)?;
@@ -153,6 +181,7 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::ExtendRows { .. } => 4,
         Operation::AdvanceCalculationEpoch { .. } => 3,
         Operation::SetCellFormula { .. } => 2,
         _ => 1,
@@ -185,7 +214,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=3) {
+    if !matches!(e.schema_version, 1..=4) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -201,11 +230,11 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         e.actor_id.as_slice(),
         &operation,
     ) {
-        (1 | 2, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
+        (1 | 2 | 4, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2, 0, actor, _) => {
+        (1 | 2 | 4, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -258,6 +287,14 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
             h.update((sheet.columns.len() as u64).to_le_bytes());
             for id in &sheet.columns {
                 h.update(id.as_bytes())
+            }
+        }
+        Operation::ExtendRows { sheet, rows } => {
+            h.update([5]);
+            h.update(sheet.as_bytes());
+            h.update((rows.len() as u64).to_le_bytes());
+            for row in rows {
+                h.update(row.as_bytes());
             }
         }
         Operation::SetCellFormula { address, formula } => {
@@ -313,6 +350,13 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
                 sheet: sheet.clone(),
             },
         )?,
+        CommandPayload::ExtendRows { sheet, rows } => semantic_operation(
+            &mut h,
+            &Operation::ExtendRows {
+                sheet: *sheet,
+                rows: rows.clone(),
+            },
+        )?,
         CommandPayload::SetCellValue { address, value } => semantic_operation(
             &mut h,
             &Operation::SetCellValue {
@@ -364,6 +408,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::CreateWorkbook { .. })
         | (EventPrincipal::System, Operation::SetCellValue { .. })
         | (EventPrincipal::System, Operation::SetCellFormula { .. })
+        | (EventPrincipal::System, Operation::ExtendRows { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
         (EventPrincipal::System, _) => h.update(b"PXEL-EVENT-SYSTEM-1"),

@@ -49,7 +49,8 @@ export type RemotePresence = {
   anchor: Position;
   focus: Position;
 };
-type Pending = {
+type PendingCell = {
+  kind: 'cell';
   id: string;
   row: string;
   column: string;
@@ -57,6 +58,13 @@ type Pending = {
   bytes: Uint8Array;
   attempts: number;
 };
+type PendingExtension = {
+  kind: 'extendRows';
+  id: string;
+  bytes: Uint8Array;
+  attempts: number;
+};
+type Pending = PendingCell | PendingExtension;
 export function uuidBytes(id: string) {
   return Uint8Array.from(id.replaceAll('-', '').match(/../g) ?? [], (pair) => parseInt(pair, 16));
 }
@@ -294,7 +302,7 @@ export class DocumentStore {
     if (!row || !column) return undefined;
     for (let i = this.pending.length - 1; i >= 0; i--) {
       const op = this.pending[i];
-      if (op?.row === row && op.column === column) return op.value;
+      if (op?.kind === 'cell' && op.row === row && op.column === column) return op.value;
     }
     return this.confirmed.get(key(row, column));
   }
@@ -317,7 +325,9 @@ export class DocumentStore {
     if (
       !row ||
       !column ||
-      this.pending.some((pending) => pending.row === row && pending.column === column)
+      this.pending.some(
+        (pending) => pending.kind === 'cell' && pending.row === row && pending.column === column,
+      )
     )
       return displayValue(value);
     if (
@@ -346,7 +356,8 @@ export class DocumentStore {
       return parseInput(edit.text);
     for (let i = this.pending.length - 1; i >= 0; i--) {
       const pending = this.pending[i];
-      if (pending?.row === row && pending.column === column) return pending.value;
+      if (pending?.kind === 'cell' && pending.row === row && pending.column === column)
+        return pending.value;
     }
     return this.confirmed.get(key(row, column)) ?? { type: 'blank' };
   }
@@ -354,7 +365,11 @@ export class DocumentStore {
     const sheet = this.sheet,
       projection = this.projection;
     if (!sheet || !projection) return;
-    const overlay = new Set(this.pending.map((pending) => key(pending.row, pending.column)));
+    const overlay = new Set(
+      this.pending
+        .filter((pending): pending is PendingCell => pending.kind === 'cell')
+        .map((pending) => key(pending.row, pending.column)),
+    );
     if (this.editing) {
       const row = sheet.rows[this.editing.position.row],
         column = sheet.columns[this.editing.position.column];
@@ -838,9 +853,50 @@ export class DocumentStore {
       this.notify();
       return false;
     }
-    this.pending.push({ id, row, column, value, bytes, attempts: 0 });
+    this.pending.push({ kind: 'cell', id, row, column, value, bytes, attempts: 0 });
     this.syncPreview();
     this.error = '';
+    this.notify();
+    this.flush();
+    return true;
+  }
+  extendRows() {
+    const sheet = this.sheet,
+      projection = this.projection,
+      actor = this.actor;
+    if (
+      !sheet ||
+      !projection ||
+      !actor ||
+      sheet.rows.length >= 100_000 ||
+      this.pending.some((pending) => pending.kind === 'extendRows') ||
+      this.pending.length >= 128
+    )
+      return false;
+    const rows = Array.from({ length: Math.min(1_000, 100_000 - sheet.rows.length) }, uuidV7);
+    const id = uuidV7();
+    const message = create(ClientEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'command',
+        value: {
+          operationId: uuidBytes(id),
+          documentId: uuidBytes(projection.document_id),
+          actorId: actor,
+          baseVersion: BigInt(projection.version),
+          clientSequence: ++this.sequence,
+          operation: {
+            kind: {
+              case: 'extendRows',
+              value: { sheetId: uuidBytes(sheet.id), rows: rows.map(uuidBytes) },
+            },
+          },
+        },
+      },
+    });
+    const bytes = toBinary(ClientEnvelopeSchema, message);
+    if (bytes.byteLength > 1_048_576) return false;
+    this.pending.push({ kind: 'extendRows', id, bytes, attempts: 0 });
     this.notify();
     this.flush();
     return true;
@@ -867,6 +923,8 @@ export class DocumentStore {
     }
   }
   private apply(operation: CanonicalOperation) {
+    if (operation.kind.case === 'extendRows')
+      throw new Error('Structural operation requires a canonical projection refresh');
     const entry = operation.kind.value;
     const address = entry?.address;
     if (
@@ -1002,7 +1060,11 @@ export class DocumentStore {
       if (bytesUuid(hint.documentId) !== this.projection?.document_id) return;
       if (hint.headVersion > BigInt(this.projection.version)) {
         const event = hint.latestOperation;
-        if (event && hint.headVersion === BigInt(this.projection.version) + 1n) {
+        if (
+          event &&
+          hint.headVersion === BigInt(this.projection.version) + 1n &&
+          event.canonicalOperation?.kind.case !== 'extendRows'
+        ) {
           if (
             event.documentId.length !== 16 ||
             bytesUuid(event.documentId) !== this.projection.document_id ||
@@ -1063,7 +1125,8 @@ export class DocumentStore {
       if (
         payload.case === 'committed' &&
         payload.value.committedVersion === BigInt(this.projection.version) + 1n &&
-        payload.value.canonicalOperation
+        payload.value.canonicalOperation &&
+        payload.value.canonicalOperation.kind.case !== 'extendRows'
       ) {
         if (payload.value.confirmedStateHash.length !== 32) throw new Error('Invalid state hash');
         this.apply(payload.value.canonicalOperation);

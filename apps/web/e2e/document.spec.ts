@@ -187,6 +187,43 @@ test('two browser tabs see each other’s committed cell after a head hint', asy
   }
 });
 
+test('scrolling near the end extends stable rows and updates both browsers', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const documentId = new URL(page.url()).searchParams.get('document');
+  if (!documentId) throw new Error('Document ID missing');
+  const second = await page.context().newPage();
+  try {
+    await second.goto(page.url());
+    await expect(second.getByRole('textbox', { name: 'Значение ячейки' })).toBeVisible();
+    const firstGrid = page.getByRole('region', { name: 'Область таблицы' });
+    const secondGrid = second.getByRole('region', { name: 'Область таблицы' });
+    await firstGrid.hover();
+    await page.mouse.wheel(0, 50_000);
+    await expect
+      .poll(async () => {
+        const response = await page.request.get(`/api/documents/${documentId}`);
+        if (!response.ok()) return 0;
+        return (await response.json()).sheets[0].rows.length;
+      })
+      .toBe(2000);
+    await expect
+      .poll(() => firstGrid.evaluate((element) => element.scrollHeight))
+      .toBeGreaterThan(50_000);
+    await expect
+      .poll(() => secondGrid.evaluate((element) => element.scrollHeight))
+      .toBeGreaterThan(50_000);
+    await second.reload();
+    await expect
+      .poll(() => secondGrid.evaluate((element) => element.scrollHeight))
+      .toBeGreaterThan(50_000);
+  } finally {
+    await second.close();
+  }
+});
+
 test('two tabs converge after one tab disconnects during a remote edit', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');

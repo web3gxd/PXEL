@@ -16,6 +16,15 @@ process-local payload send gate (ADR-016). Два разных dev-пользо�
 остаются открытыми.
 Подробные результаты находятся в RUNBOOK.
 
+Первый структурный срез `ExtendRows` принят по ADR-019: actor добавляет
+ограниченный batch стабильных row IDs только в конец оси, сериализует
+конкурентные запросы через CAS, а WebSocket-клиент обновляет авторизованную
+projection после структурного события. `last_axis_change_version` выводится
+при replay; формула со старой base version пока получает
+`RebaseWindowExceeded`, поскольку историческая axis projection ещё не создана.
+Это консервативное ограничение снимается только вместе с проверенным binding
+и transformation для insert/delete.
+
 ## Command, validation, event, projection
 
 Command — намерение клиента: protocol_version, operation_id (UUIDv7), document_id, actor_id, base_version, client_sequence, client_instance_id, typed payload. Server AuthContext является authority; actor_id проверяется на совпадение, не дает права. ValidatedOperation — проверенное и нормализованное действие. CommittedEvent — неизменяемый durable факт с document version и schema version. Projection — восстанавливаемое состояние, не транспортный DTO.

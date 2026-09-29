@@ -651,6 +651,26 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
             v1::canonical_operation::Kind::ClearCell(clear) => CommandPayload::ClearCell {
                 address: address(clear.address)?,
             },
+            v1::canonical_operation::Kind::ExtendRows(extension) => {
+                if extension.rows.is_empty() || extension.rows.len() > 1_000 {
+                    return Err(SessionError::InvalidCommand);
+                }
+                let sheet = SheetId::from_bytes(bytes_id(&extension.sheet_id)?)?;
+                let mut rows = Vec::with_capacity(extension.rows.len());
+                let mut seen = std::collections::BTreeSet::new();
+                for raw in extension.rows {
+                    let bytes = bytes_id(&raw)?;
+                    if Uuid::from_bytes(bytes).get_version_num() != 7 {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    let row = RowId::from_bytes(bytes)?;
+                    if !seen.insert(row) {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    rows.push(row);
+                }
+                CommandPayload::ExtendRows { sheet, rows }
+            }
             v1::canonical_operation::Kind::SetCellFormula(_) => {
                 return Err(SessionError::InvalidCommand);
             }
@@ -698,6 +718,12 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
         Operation::ClearCell { address } => {
             v1::canonical_operation::Kind::ClearCell(v1::ClearCell {
                 address: Some(wire_address(address)),
+            })
+        }
+        Operation::ExtendRows { sheet, rows } => {
+            v1::canonical_operation::Kind::ExtendRows(v1::ExtendRows {
+                sheet_id: sheet.as_bytes().to_vec(),
+                rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
             })
         }
         Operation::CreateWorkbook { .. } | Operation::AdvanceCalculationEpoch { .. } => {

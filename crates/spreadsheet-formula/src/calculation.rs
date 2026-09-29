@@ -303,6 +303,8 @@ impl CalculationProjection {
             | Operation::ClearCell { address }
             | Operation::SetCellFormula { address, .. } => *address,
             Operation::CreateWorkbook { .. } => return Err(CalculationError::InvalidProjection),
+            // Axis changes replace the graph; the caller must rebuild from the new workbook.
+            Operation::ExtendRows { .. } => return Err(CalculationError::InvalidProjection),
             Operation::AdvanceCalculationEpoch { .. } => {
                 return self.prepare_reconcile(book, &BTreeSet::new(), limits);
             }

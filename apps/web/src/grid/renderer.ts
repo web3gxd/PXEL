@@ -25,13 +25,13 @@ export function drawGrid(
     scrollTop,
     height - GRID.columnHeaderHeight,
     GRID.rowHeight,
-    GRID.rowCount,
+    document?.sheet?.rows.length ?? GRID.rowCount,
   );
   const columns = visibleRange(
     scrollLeft,
     width - GRID.rowHeaderWidth,
     GRID.columnWidth,
-    GRID.columnCount,
+    document?.sheet?.columns.length ?? GRID.columnCount,
   );
   const x = (column: number) => GRID.rowHeaderWidth + column * GRID.columnWidth - scrollLeft;
   const y = (row: number) => GRID.columnHeaderHeight + row * GRID.rowHeight - scrollTop;

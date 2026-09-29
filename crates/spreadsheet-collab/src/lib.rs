@@ -526,6 +526,10 @@ async fn advance_context<J: OperationJournal>(
 /// must replace this proof with the checkpoint/structural-tail history before use.
 fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, SessionError> {
     match &command.operation {
+        CommandPayload::ExtendRows { sheet, rows } => Ok(Operation::ExtendRows {
+            sheet: *sheet,
+            rows: rows.clone(),
+        }),
         CommandPayload::SetCellValue { address, value } => Ok(Operation::SetCellValue {
             address: *address,
             value: value.normalized()?,
@@ -533,6 +537,7 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
         CommandPayload::ClearCell { address } => Ok(Operation::ClearCell { address: *address }),
         CommandPayload::SetCellFormula { address, source } => {
             if command.base_version == DocumentVersion::ZERO
+                || command.base_version < workbook.last_axis_change_version()
                 || workbook
                     .version()
                     .get()

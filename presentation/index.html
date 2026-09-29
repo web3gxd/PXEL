@@ -29,7 +29,7 @@
         <div class="cover-grid" aria-hidden="true"></div>
         <div class="cover-copy">
           <p class="kicker">
-            <span class="live-dot"></span> Рабочий прототип · фазы 0–2 локально · фаза 3 в работе
+            <span class="live-dot"></span> Рабочий прототип · фазы 0–2 локально · фазы 3–4 частично
           </p>
           <h1 id="cover-title">Таблицы,<br /><em>которыми</em><br />управляем мы.</h1>
           <p class="lead">
@@ -338,15 +338,19 @@
             <b>03</b><span>Два пользователя</span
             ><small>Replay, ACL, presence, 100×1000 domain convergence; gate открыт</small>
           </div>
-          <div><b>04</b><span>Структура</span><small>строки, колонки, undo</small></div>
+          <div class="doing">
+            <b>04</b><span>Структура</span
+            ><small>ExtendRows проверен; insert/delete, undo впереди</small>
+          </div>
           <div><b>05</b><span>Snapshots</span><small>S3 + recovery</small></div>
           <div><b>06</b><span>XLSX</span><small>импорт и экспорт</small></div>
         </div>
         <p class="roadmap-note">
-          Презентация обновляется после каждого пройденного gate. Для фазы 3 и далее проектный
-          контракт есть; очередь отправки ограничена 160 кадрами / 2 MiB. Локальные latency и
-          paused-socket stress измерены: медленный клиент закрыт после send timeout. Cross-host
-          поведение и сетевой queue overflow ещё открыты. Linux/Compose/remote CI — отдельные gates.
+          Презентация обновляется после проверенных срезов. `ExtendRows` уже сохраняет stable IDs,
+          проходит replay и автоматически расширяет Canvas в двух вкладках. Очередь отправки
+          ограничена 160 кадрами / 2 MiB. Локальные latency и paused-socket stress измерены:
+          медленный клиент закрыт после send timeout. Cross-host поведение и сетевой queue overflow
+          ещё открыты. Linux/Compose/remote CI — отдельные gates.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>
@@ -358,8 +362,8 @@
         <h2 id="closing-title">Таблица —<br /><em>наша система.</em></h2>
         <p class="lead">
           Сейчас главное: завершить сетевые convergence tests и измерить backpressure по этапам.
-          Ограниченный replay, отзыв прав, reconnect и локальный slow-reader stress проверены. Затем
-          — структура, snapshots и XLSX.
+          Ограниченный replay, отзыв прав, reconnect, локальный slow-reader stress и первый срез
+          структуры проверены. Дальше — insert/delete с трансформацией ссылок, snapshots и XLSX.
         </p>
         <div class="closing-links">
           <a href="../README.md"><span>Начать локально</span><b>README ↗</b></a>
