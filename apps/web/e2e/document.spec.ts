@@ -73,6 +73,13 @@ test('TSV paste commits one durable batch and survives reload', async ({ page })
   });
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const id = new URL(page.url()).searchParams.get('document');
+  expect(id).not.toBeNull();
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/documents/${id}`);
+      return (await response.json()).version;
+    })
+    .toBe('2');
   const state = await page.evaluate(
     async (documentId) => (await fetch(`/api/documents/${documentId}`)).json(),
     id,

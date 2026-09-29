@@ -1,6 +1,6 @@
 # Совместимость
 
-Статус: матрица целевого профиля с фактически реализованным первым набором формул. Работающий редактор и движок есть; базовый phase 2 gate пройден локально. Фаза 6 читает ограниченный XLSX в отдельную scalar IR и умеет записать этот IR в OOXML-пакет; документ из XLSX ещё не создаётся, пользовательского экспорта нет.
+Статус: матрица целевого профиля с фактически реализованным первым набором формул. Работающий редактор и движок есть; базовый phase 2 gate пройден локально. Фаза 6 читает ограниченный XLSX в отдельную scalar IR и экспортирует подтверждённую книгу владельца в OOXML-пакет. Документ из XLSX ещё не создаётся.
 
 Google Sheets задает пользовательскую модель мгновенного редактирования и collaboration. Excel — целевая совместимость формул/файлов в явно ограниченном профиле, не источник runtime architecture. Excel/LibreOffice headless, готовые spreadsheet/formula/collaboration engines не входят в runtime.
 
@@ -20,7 +20,7 @@ Google Sheets задает пользовательскую модель мгн�
 
 ## XLSX profile: phase 6
 
-Фактически реализован локальный `xlsx-preview <path>`: дочерний процесс проверяет ограниченный ZIP/OOXML пакет, извлекает числа, boolean, простые shared/inline strings и исходный текст формулы в XLSX-specific IR; родитель повторно валидирует IR и выводит только счетчики. Формульный cache отбрасывается. Библиотека также умеет записать этот scalar IR в XLSX; round-trip проверен только нашим reader на синтетическом fixture. Команда не создаёт документ и не выдаёт файл экспорта пользователю. Подробные лимиты и незакрытые границы — [ADR-043](adr/043-bounded-xlsx-package-inspection.md), [ADR-044](adr/044-normalized-xlsx-scalar-ir.md), [ADR-045](adr/045-xlsx-worker-framed-process.md), [ADR-046](adr/046-bounded-xlsx-worker-ir.md), [ADR-047](adr/047-scalar-xlsx-export.md). Таблица ниже описывает целевой профиль, не текущую полноту реализации.
+Фактически реализован локальный `xlsx-preview <path>`: дочерний процесс проверяет ограниченный ZIP/OOXML пакет, извлекает числа, boolean, простые shared/inline strings и исходный текст формулы в XLSX-specific IR; родитель повторно валидирует IR и выводит только счетчики. Формульный cache отбрасывается. `GET /api/documents/{id}/export.xlsx` для владельца записывает scalar projection подтверждённой книги; аудит фиксирует версию, размер и checksum до ответа. Round-trip проверен только нашим reader на синтетическом fixture; Excel-совместимость этим не доказана. Команда preview не создаёт документ. Подробные лимиты и незакрытые границы — [ADR-043](adr/043-bounded-xlsx-package-inspection.md), [ADR-044](adr/044-normalized-xlsx-scalar-ir.md), [ADR-045](adr/045-xlsx-worker-framed-process.md), [ADR-046](adr/046-bounded-xlsx-worker-ir.md), [ADR-047](adr/047-scalar-xlsx-export.md), [ADR-048](adr/048-owner-audited-document-xlsx-export.md). Таблица ниже описывает целевой профиль, не текущую полноту реализации.
 
 ZIP → OOXML package relationships → streaming XML → NormalizedImportWorkbook → parent schema validation → server formula binding → canonical document publication. Export идет из согласованной document version через отдельную Export IR. XLSX DTO не становится внутренней workbook model.
 

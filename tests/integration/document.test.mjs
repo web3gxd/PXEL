@@ -1785,3 +1785,55 @@ test('formula calculation and live subscription respect ACL revoke across versio
     writer.socket.terminate();
   }
 });
+
+test('owner exports committed scalar XLSX while viewer cannot export', async () => {
+  const suffix = uuid7().replaceAll('-', '').slice(-16);
+  const owner = await login(base, 'exp_owner_' + suffix);
+  const viewerAccount = 'exp_viewer_' + suffix;
+  const viewerHome = await login(base, viewerAccount);
+  const ownerIdentity = await (await api(base, owner, '/api/dev/identity')).json();
+  const viewerIdentity = await (await api(base, viewerHome, '/api/dev/identity')).json();
+  const { snapshot } = await createDocument(base, owner);
+  const writer = await connect(base, owner);
+  try {
+    assert.equal((await writer.send(setCommand(writer, snapshot, 7))).case, 'committed');
+    const formula = await writer.send(
+      formulaCommand(writer, { ...snapshot, version: '2' }, '=A1*2', {
+        column: 1,
+        sequence: 2,
+      }),
+    );
+    assert.equal(formula.case, 'committed');
+    const path = `/api/documents/${snapshot.document_id}/export.xlsx`;
+    const response = await api(base, owner, path);
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers.get('content-type'),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const archive = Buffer.from(await response.arrayBuffer());
+    assert.equal(archive.subarray(0, 4).toString('hex'), '504b0304');
+    assert.ok(archive.includes(Buffer.from('<v>7</v>')));
+    assert.ok(archive.includes(Buffer.from('<f>(A1*2)</f>')));
+    const grant = await api(
+      base,
+      owner,
+      `/api/documents/${snapshot.document_id}/permissions`,
+      'POST',
+      {
+        action: 'grant',
+        change_id: uuid7(),
+        target_user_id: viewerIdentity.actor_id,
+        role: 'viewer',
+      },
+    );
+    assert.equal(grant.status, 200);
+    const viewer = await login(base, viewerAccount, ownerIdentity.workspace_id);
+    assert.equal((await api(base, viewer, path)).status, 403);
+    const stranger = await login(base, 'exp_other_' + suffix);
+    assert.ok([403, 404].includes((await api(base, stranger, path)).status));
+  } finally {
+    writer.socket.terminate();
+  }
+});

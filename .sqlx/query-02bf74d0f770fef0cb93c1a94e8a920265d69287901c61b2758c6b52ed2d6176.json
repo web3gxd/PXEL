@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO export_audit_events(event_id,workspace_id,document_id,actor_id,document_version,payload_checksum,payload_size) VALUES($1,$2,$3,$4,$5,$6,$7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Bytea",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "02bf74d0f770fef0cb93c1a94e8a920265d69287901c61b2758c6b52ed2d6176"
+}

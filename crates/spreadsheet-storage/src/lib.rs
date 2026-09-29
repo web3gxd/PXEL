@@ -13,6 +13,8 @@ pub use postgres::{DatabaseError, PgDatabase};
 pub use s3::S3BlobStore;
 
 mod development_sessions;
+mod exports;
+pub use exports::ExportAuditError;
 mod journal;
 pub use development_sessions::DevelopmentSession;
 mod permissions;

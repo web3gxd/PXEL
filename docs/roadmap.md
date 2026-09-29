@@ -219,7 +219,13 @@ Criterion harness: 6.6972–7.2624 ms на локальном optimized domain c
 scalar IR в XLSX-пакет с обратным чтением двухлистного синтетического
 fixture нашим reader. Это библиотечный round-trip, не пользовательский
 экспорт и не Excel-verified interoperability; преобразование domain → IR,
-аудит и выдача файла ещё открыты.
+аудит и выдача файла были открыты на момент ADR-047.
+Шестой срез ([ADR-048](adr/048-owner-audited-document-xlsx-export.md))
+добавляет owner-only HTTP-выдачу scalar XLSX из подтверждённой версии книги.
+Append-only запись аудита с версией, размером и checksum фиксируется до
+отправки ответа; viewer не может скачать файл. Проверены PostgreSQL storage
+test и живой HTTP/WebSocket integration. Это ещё не import/edit/export/reimport:
+стили, даты, merges, Excel golden fixtures и document import остаются открыты.
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU

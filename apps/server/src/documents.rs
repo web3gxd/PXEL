@@ -6,11 +6,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use spreadsheet_application::journal::{JournalError, OperationJournal};
 use spreadsheet_collab::{SessionDirectory, SessionError, Submission};
 use spreadsheet_domain::workbook::*;
-use spreadsheet_storage::{PermissionError, PermissionRole, SnapshotError};
+use spreadsheet_storage::{ExportAuditError, PermissionError, PermissionRole, SnapshotError};
 use spreadsheet_wire_protocol::{self as wire, v1};
+use spreadsheet_xlsx::{NormalizedCell, NormalizedCellValue, NormalizedSheet, NormalizedWorkbook};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -360,6 +362,141 @@ pub async fn get_document(
         .await
         .map_err(session_api_error)?;
     document_view(id, &workbook)
+}
+
+pub async fn export_xlsx(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    if !crate::rate_allowed(&state).await {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limit"));
+    }
+    let principal = principal(&state, &headers).await?;
+    let document = DocumentId::from_bytes(parse_id(&id)?).map_err(domain_error)?;
+    state
+        .database
+        .authorize_export(principal.identity, document)
+        .await
+        .map_err(export_audit_api_error)?;
+    let permit = state
+        .exports
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError(StatusCode::TOO_MANY_REQUESTS, "export_busy"))?;
+    let session = state
+        .sessions
+        .session(principal.identity, document)
+        .await
+        .map_err(session_api_error)?;
+    let workbook = session
+        .read(principal.identity)
+        .await
+        .map_err(session_api_error)?;
+    let version = workbook.version();
+    let bytes = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let normalized = export_projection(&workbook)?;
+        spreadsheet_xlsx::export_scalar_xlsx(&normalized).map_err(|_| {
+            ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "export_profile_unsupported",
+            )
+        })
+    })
+    .await
+    .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "export_unavailable"))??;
+    let checksum: [u8; 32] = Sha256::digest(&bytes).into();
+    state
+        .database
+        .record_export(principal.identity, document, version, checksum, bytes.len())
+        .await
+        .map_err(export_audit_api_error)?;
+    Ok((
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=PXEL.xlsx",
+            ),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+fn export_audit_api_error(error: ExportAuditError) -> ApiError {
+    match error {
+        ExportAuditError::Unauthorized => ApiError(StatusCode::FORBIDDEN, "unauthorized"),
+        ExportAuditError::Unavailable => {
+            ApiError(StatusCode::SERVICE_UNAVAILABLE, "export_audit_unavailable")
+        }
+    }
+}
+
+fn export_projection(workbook: &Workbook) -> Result<NormalizedWorkbook, ApiError> {
+    let mut sheets = Vec::with_capacity(workbook.sheets().len());
+    for sheet in workbook.sheets() {
+        let mut cells = Vec::with_capacity(sheet.cells().len());
+        for (address, content) in sheet.cells() {
+            let row = sheet
+                .row_position(address.row)
+                .and_then(|position| position.checked_add(1))
+                .ok_or(ApiError(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "export_projection",
+                ))?;
+            let column = sheet
+                .column_position(address.column)
+                .and_then(|position| position.checked_add(1))
+                .ok_or(ApiError(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "export_projection",
+                ))?;
+            let value = match content {
+                CellContent::Value(CellValue::Blank) => continue,
+                CellContent::Value(CellValue::Number(value)) => NormalizedCellValue::Number(*value),
+                CellContent::Value(CellValue::Text(value)) => {
+                    NormalizedCellValue::Text(value.clone())
+                }
+                CellContent::Value(CellValue::Boolean(value)) => {
+                    NormalizedCellValue::Boolean(*value)
+                }
+                CellContent::Formula(formula) => {
+                    let current = spreadsheet_formula::bound::render_current(formula, workbook)
+                        .map_err(|_| {
+                            ApiError(
+                                StatusCode::UNPROCESSABLE_ENTITY,
+                                "export_profile_unsupported",
+                            )
+                        })?;
+                    let source = current.strip_prefix('=').ok_or(ApiError(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "export_projection",
+                    ))?;
+                    NormalizedCellValue::Formula(source.to_owned())
+                }
+            };
+            cells.push(NormalizedCell { row, column, value });
+        }
+        cells.sort_unstable_by_key(|cell| (cell.row, cell.column));
+        sheets.push(NormalizedSheet {
+            name: sheet.name().to_owned(),
+            cells,
+        });
+    }
+    let normalized = NormalizedWorkbook { sheets };
+    normalized.validate().map_err(|_| {
+        ApiError(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "export_profile_unsupported",
+        )
+    })?;
+    Ok(normalized)
 }
 
 pub async fn get_document_version(
