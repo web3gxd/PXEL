@@ -448,8 +448,9 @@ mod tests {
     use spreadsheet_application::{BlobDownload, BlobSource};
     use spreadsheet_collab::{InProcessSessionDirectory, SessionDirectory, Submission};
     use spreadsheet_domain::workbook::{
-        ActorId, CellAddress, CellValue, ColumnId, Command, CommandPayload, CommittedEvent,
-        EventPrincipal, Operation, OperationId, RowId, SheetId, SheetSeed, WorkspaceId,
+        ActorId, CellAddress, CellValue, CellWrite, ColumnId, Command, CommandPayload,
+        CommittedEvent, EventPrincipal, Operation, OperationId, RowId, SheetId, SheetSeed,
+        WorkspaceId,
     };
     use spreadsheet_domain::{BlobMetadata, StoredBlob};
     use std::{
@@ -1036,6 +1037,153 @@ mod tests {
         pool: sqlx::PgPool,
     ) -> TestResult {
         Box::pin(snapshot_scenario(pool)).await
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn two_sheet_snapshot_plus_tail_matches_full_postgres_replay(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        Box::pin(two_sheet_snapshot_scenario(pool)).await
+    }
+
+    async fn two_sheet_snapshot_scenario(pool: sqlx::PgPool) -> TestResult {
+        let db = PgDatabase { pool };
+        db.migrate().await?;
+        let identity = AuthenticatedActor {
+            actor_id: ActorId::from_bytes([61; 16])?,
+            workspace_id: WorkspaceId::from_bytes([62; 16])?,
+        };
+        db.issue_development_session([63; 32], identity.actor_id, identity.workspace_id)
+            .await?;
+        let document_id = DocumentId::from_bytes([64; 16])?;
+        let first = SheetSeed {
+            id: SheetId::from_bytes([65; 16])?,
+            name: "Budget".into(),
+            rows: vec![RowId::from_bytes([66; 16])?],
+            columns: vec![ColumnId::from_bytes([67; 16])?],
+        };
+        let second = SheetSeed {
+            id: SheetId::from_bytes([68; 16])?,
+            name: "Plan".into(),
+            rows: vec![RowId::from_bytes([69; 16])?],
+            columns: vec![ColumnId::from_bytes([70; 16])?],
+        };
+        let first_address = CellAddress {
+            sheet: first.id,
+            row: first.rows[0],
+            column: first.columns[0],
+        };
+        let second_address = CellAddress {
+            sheet: second.id,
+            row: second.rows[0],
+            column: second.columns[0],
+        };
+        let operations = [
+            Operation::CreateWorkbook { sheet: first },
+            Operation::AddSheet { sheet: second },
+            Operation::SetCellValues {
+                writes: vec![
+                    CellWrite {
+                        address: first_address,
+                        value: CellValue::Number(1.0),
+                    },
+                    CellWrite {
+                        address: second_address,
+                        value: CellValue::Number(2.0),
+                    },
+                ],
+            },
+        ];
+        let mut candidate = Workbook::empty(document_id);
+        let mut events = Vec::new();
+        for (index, operation) in operations.into_iter().enumerate() {
+            let next =
+                candidate.candidate(&operation, DocumentVersion::new((index + 1) as u64)?)?;
+            events.push(CommittedEvent {
+                document_id,
+                operation_id: OperationId::from_bytes([71 + index as u8; 16])?,
+                principal: EventPrincipal::User(identity.actor_id),
+                version: next.version(),
+                operation,
+                state_hash: next.hash(),
+            });
+            candidate = next;
+        }
+        db.create_imported(identity, &events).await?;
+        let temp = tempfile::tempdir()?;
+        let blobs = LocalFilesystemBlobStore::new(
+            temp.path().join("blobs"),
+            codec::MAX_SNAPSHOT_BYTES as u64,
+        )
+        .await?;
+        let snapshot_id = SnapshotId::from_bytes([75; 16])?;
+        db.publish_snapshot(
+            &blobs,
+            snapshot_id,
+            Arc::new(candidate.clone()),
+            "engine-v1",
+            "pxel-v1",
+        )
+        .await?;
+        let schema = sqlx::query_scalar!(
+            "SELECT snapshot_schema_version FROM document_snapshots WHERE snapshot_id=$1",
+            uuid(snapshot_id.as_bytes())
+        )
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(schema, 2);
+        let tail = Operation::SetCellValue {
+            address: second_address,
+            value: CellValue::Number(9.0),
+        };
+        let after_tail = candidate.candidate(&tail, DocumentVersion::new(4)?)?;
+        let tail_id = OperationId::from_bytes([76; 16])?;
+        let request = CommitRequest {
+            identity,
+            expected_head: candidate.version(),
+            expected_access: db.access(identity, document_id).await?,
+            command: Command {
+                operation_id: tail_id,
+                document_id,
+                actor_id: identity.actor_id,
+                base_version: candidate.version(),
+                client_sequence: 1,
+                operation: CommandPayload::SetCellValue {
+                    address: second_address,
+                    value: CellValue::Number(9.0),
+                },
+            },
+            event: CommittedEvent {
+                document_id,
+                operation_id: tail_id,
+                principal: EventPrincipal::User(identity.actor_id),
+                version: after_tail.version(),
+                operation: tail,
+                state_hash: after_tail.hash(),
+            },
+        };
+        assert!(matches!(
+            db.commit(&request).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let recovered = Box::pin(db.recover_document(&blobs, identity, document_id)).await?;
+        assert_eq!(recovered.snapshot_version, Some(candidate.version()));
+        assert_eq!(recovered.replayed_events, 1);
+        assert_eq!(recovered.workbook.sheets().len(), 2);
+        assert_eq!(recovered.workbook.hash(), after_tail.hash());
+        assert_eq!(
+            recovered.workbook.cell_content(second_address)?,
+            after_tail.cell_content(second_address)?
+        );
+        let mut full = Workbook::empty(document_id);
+        for event in db
+            .load_events(identity, document_id, DocumentVersion::ZERO, 4)
+            .await?
+        {
+            full.apply_event(&event)?;
+        }
+        assert_eq!(full.hash(), recovered.workbook.hash());
+        Ok(())
     }
 
     // Keep the SQLx test thread's Windows stack small; the scenario owns several

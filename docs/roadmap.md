@@ -262,6 +262,10 @@ schema 1. Клиент wire v1 при встрече `AddSheet` делает pro
 отключается, поскольку текущий Worker init поддерживает один лист; формулы
 показывают только серверный результат. Создание/удаление листов в UI и
 native/WASM multi-sheet parity требуют отдельных gates.
+Для snapshot schema 2 дополнительно прошёл PostgreSQL recovery test: один
+снимок двух листов + tail event на втором листе дали тот же domain hash, что
+полный replay всех четырёх событий. Это локальный filesystem/DB сценарий;
+S3-контракты и расширенная crash matrix остаются открытыми.
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU
