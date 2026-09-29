@@ -1,5 +1,38 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — чтение исторической версии документа
+
+Перед срезом прочитаны AGENTS.md, roadmap, ADR-033 и текущие recovery,
+journal, HTTP projection и тесты. Цель — дать авторизованный read-only доступ
+к точной подтверждённой версии, используя snapshot не новее этой версии.
+Инварианты: текущий head и actor не меняются; незавершённые и будущие версии
+не выдаются; журнал и snapshot проверяются; текущий ACL обязателен.
+Риски: дорогой replay и большой JSON projection, гонка отзыва ACL с HTTP
+body send. Для восстановления введены 2 permits и timeout 30 секунд;
+последняя гонка остаётся production-задачей и записана в ADR-036.
+
+Добавлены `recover_document_at_version` и HTTP
+`GET /api/documents/{id}/versions/{version}`. Общая функция JSON projection
+используется текущим и историческим маршрутом. Отдельный SQLx-тест с
+настоящей PostgreSQL и LocalFilesystemBlobStore проверяет snapshot eligibility,
+точный replay, fallback без объектов, unauthorized/future/zero и head.
+HTTP integration test проверяет v1/v2, ошибки и изоляцию workspace.
+
+Первый целевой прогон выявил Windows test-thread stack overflow после
+вложения нового async recovery future; внутренний recovery future вынесен
+на heap через `Box::pin`, и три snapshot SQLx-теста прошли 3/3. Clippy
+выявил пропущенный вариант `SnapshotError` в server mapping и лишний borrow;
+оба исправлены. HTTP-тест сначала упал на dev-account длиной >32, затем на
+ошибочном ожидании 403: существующий контракт скрывает чужой документ кодом 404. После исправления fixture и точного ожидания HTTP-тест прошёл 1/1;
+полный `node --test tests/integration/document.test.mjs` прошёл 33/33
+на локальном сервере. `just check` прошёл: Rust fmt/clippy/tests/build,
+WASM target/build, protobuf drift, frontend format/lint/typecheck,
+Vitest 71/71 и Vite build. `just sqlx-check` и
+`node apps/web/scripts/check-presentation.mjs` прошли; презентация —
+10 слайдов на 1440×900 и 390×844. `git diff --check` прошёл.
+GC, S3 contract, исторические calculated results и UI истории не
+реализованы. Linux/Compose/remote CI этим срезом не проверялись.
+
 ## 2026-09-29 — controlled interruption при публикации snapshot
 
 Перед срезом прочитаны AGENTS.md, roadmap, ADR-033, persistence/testing docs

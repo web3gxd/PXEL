@@ -29,6 +29,39 @@ import {
 } from '../helpers/client.mjs';
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
 
+test('historical HTTP read is exact, authorized and does not change head', async () => {
+  const owner = await login(base);
+  const stranger = await login(base, `history-stranger-${uuid7().slice(0, 8)}`);
+  const { snapshot } = await createDocument(base, owner);
+  const client = await connect(base, owner);
+  try {
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 17, { sequence: 1 }))).case,
+      'committed',
+    );
+    const path = `/api/documents/${snapshot.document_id}/versions/`;
+    const original = await api(base, owner, path + '1');
+    assert.equal(original.status, 200);
+    const atOne = await original.json();
+    assert.equal(atOne.version, '1');
+    assert.equal(atOne.state_hash, snapshot.state_hash);
+    assert.deepEqual(atOne.sheets[0].cells, []);
+    const current = await api(base, owner, path + '2');
+    assert.equal(current.status, 200);
+    const atTwo = await current.json();
+    assert.equal(atTwo.version, '2');
+    assert.equal(atTwo.sheets[0].cells[0].value.value, 17);
+    assert.equal((await api(base, owner, path + '3')).status, 404);
+    assert.equal((await api(base, owner, path + '0')).status, 404);
+    assert.equal((await api(base, owner, path + 'invalid')).status, 400);
+    // Cross-workspace reads conceal whether the document exists.
+    assert.equal((await api(base, stranger, path + '1')).status, 404);
+    assert.equal((await getDocument(base, owner, snapshot.document_id)).version, '2');
+  } finally {
+    client.socket.terminate();
+  }
+});
+
 test('copy range freezes values and translated formulas in one durable version', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);

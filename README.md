@@ -122,6 +122,13 @@ HttpOnly SameSite cookie. `/api/ws` принимает protobuf v1 Hello, выд
 timeout 45 s. Development session можно адресно отозвать через
 `DELETE /api/dev/session`.
 
+`GET /api/documents/{id}/versions/{version}` возвращает авторизованную
+историческую cacheless projection подтверждённой версии `1..head`. Snapshot
+используется только если он не новее запрошенной версии; при отсутствии
+валидного snapshot применяется журнал. Маршрут ограничен двумя параллельными
+чтениями и 30-секундным таймаутом восстановления. UI просмотра истории пока
+не добавлен.
+
 Без `dev-auth` login не доступен и WebSocket не авторизуется. Это безопасный skeleton,
 а не готовая production auth. В проекте нет обязательной внешней телеметрии.
 MinIO/Garage не запускаются; локальные snapshots относятся к фазе 5, S3 adapter ещё впереди.

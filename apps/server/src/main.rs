@@ -43,6 +43,7 @@ struct AppState {
     origins: Vec<String>,
     sockets: Arc<Semaphore>,
     calculation_encoders: Arc<Semaphore>,
+    history_reads: Arc<Semaphore>,
     rate: Mutex<(Instant, u32)>,
     sessions: spreadsheet_collab::InProcessSessionDirectory<PgDatabase>,
     delivery: delivery::DeliveryGates,
@@ -325,7 +326,8 @@ async fn main() -> anyhow::Result<()> {
                             SnapshotError::Corrupt
                             | SnapshotError::Codec(_)
                             | SnapshotError::SourceMismatch
-                            | SnapshotError::TooLarge => JournalError::Corrupt,
+                            | SnapshotError::TooLarge
+                            | SnapshotError::VersionNotCommitted => JournalError::Corrupt,
                             SnapshotError::Blob(_) | SnapshotError::Database(_) => {
                                 JournalError::Unavailable
                             }
@@ -346,6 +348,7 @@ async fn main() -> anyhow::Result<()> {
         origins: config.allowed_origins,
         sockets: Arc::new(Semaphore::new(128)),
         calculation_encoders: Arc::new(Semaphore::new(2)),
+        history_reads: Arc::new(Semaphore::new(2)),
         rate: Mutex::new((Instant::now(), 0)),
     });
     let app = Router::new()
@@ -366,6 +369,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/dev/identity", get(dev_identity))
         .route("/api/documents", post(documents::create))
         .route("/api/documents/{id}", get(documents::get_document))
+        .route(
+            "/api/documents/{id}/versions/{version}",
+            get(documents::get_document_version),
+        )
         .route(
             "/api/documents/{id}/permissions",
             post(documents::change_permission),

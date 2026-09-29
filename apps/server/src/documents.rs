@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use spreadsheet_application::journal::{JournalError, OperationJournal};
 use spreadsheet_collab::{SessionDirectory, SessionError, Submission};
 use spreadsheet_domain::workbook::*;
-use spreadsheet_storage::{PermissionError, PermissionRole};
+use spreadsheet_storage::{PermissionError, PermissionRole, SnapshotError};
 use spreadsheet_wire_protocol::{self as wire, v1};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -359,6 +359,52 @@ pub async fn get_document(
         .read(principal.identity)
         .await
         .map_err(session_api_error)?;
+    document_view(id, &workbook)
+}
+
+pub async fn get_document_version(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((id, version)): Path<(String, String)>,
+) -> Result<Json<DocumentView>, ApiError> {
+    if !crate::rate_allowed(&state).await {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limit"));
+    }
+    let principal = principal(&state, &headers).await?;
+    let id = DocumentId::from_bytes(parse_id(&id)?).map_err(domain_error)?;
+    let version = version
+        .parse::<u64>()
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid_version"))?;
+    let version = DocumentVersion::new(version)
+        .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid_version"))?;
+    let _permit = state
+        .history_reads
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError(StatusCode::TOO_MANY_REQUESTS, "history_busy"))?;
+    let recovered = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        state
+            .database
+            .recover_document_at_version(&state.blobs, principal.identity, id, version),
+    )
+    .await
+    .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "history_timeout"))?
+    .map_err(snapshot_api_error)?;
+    document_view(id, &recovered.workbook)
+}
+
+fn snapshot_api_error(error: SnapshotError) -> ApiError {
+    match error {
+        SnapshotError::VersionNotCommitted => {
+            ApiError(StatusCode::NOT_FOUND, "version_not_committed")
+        }
+        SnapshotError::Journal(error) => journal_error(error),
+        _ => ApiError(StatusCode::SERVICE_UNAVAILABLE, "history_unavailable"),
+    }
+}
+
+fn document_view(id: DocumentId, workbook: &Workbook) -> Result<Json<DocumentView>, ApiError> {
     let sheets = workbook
         .sheets()
         .iter()
@@ -394,7 +440,7 @@ pub async fn get_document(
                                     source: formula.source().to_owned(),
                                     canonical: formula.canonical().to_owned(),
                                     current_text: spreadsheet_formula::bound::render_current(
-                                        formula, &workbook,
+                                        formula, workbook,
                                     )
                                     .map_err(|_| {
                                         ApiError(

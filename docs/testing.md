@@ -51,6 +51,11 @@ STORED, VERIFIED, UPDATE внутри activation transaction и activation COMMI
 ACTIVE snapshot. Это проверки границ исполнения, не симуляция потери питания;
 orphan cleanup и реальный процессный crash harness остаются отдельной работой.
 
+Исторический read использует подходящий snapshot `<=V` и только хвост до V.
+SQLx-тест проверяет отсутствие snapshot, два ACTIVE поколения, удалённый
+объект, точный hash, будущую версию, ACL и неизменность head. HTTP test
+проверяет маршрут и JSON projection на настоящем сервере.
+
 Formula differential corpus один для native/browser/WASM. Excel expected results имеют workbook/version/OS/locale/provenance и verified flag. Отсутствие Excel runtime dependency не запрещает ручную верификацию fixtures. Unknown/unsupported syntax coverage не заменяется фиктивным numerical fallback.
 
 Fuzz targets появляются с parsers: formulas, protobuf decode, snapshot decode, references/ranges, ZIP/package/XML. Stable proptest — основной повседневный gate. Если libFuzzer требует nightly, отдельный pinned testing job и ADR/обоснование, без nightly product runtime.

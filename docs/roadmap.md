@@ -150,6 +150,10 @@ benchmark snapshot + 10 000 tail events дал 5.7527–8.6369 ms против
 GC, полный PostgreSQL/BlobStore benchmark и S3 contract остаются открытыми.
 Controlled interruption на шести границах publication уже проверил
 metadata/BlobStore/activation rollback; power-loss и GC сценарии не проверены.
+Read-only historical endpoint восстанавливает точную версию из подходящего
+snapshot и хвоста журнала ([ADR-036](adr/036-historical-version-read.md));
+PostgreSQL и HTTP tests проверили v1/v2, fallback, ACL и неизменность head.
+Исторические calculated results и UI истории ещё открыты.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).
@@ -211,13 +215,15 @@ SortRange не входит в ранний MVP. Будущий отдельны
 
 ## Отложенные задачи с критериями завершения
 
-| Задача          | Причина и зависимость                                 | Критерий завершения                                                                        |
-| --------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| AUTH-PROD       | Phase 0 dev auth не является production identity      | Выбран self-hosted provider, audited auth/CSRF/session integration до production           |
-| CALC-CONTRACT   | Формулы не входят в phase 0                           | Подтверждены semantics и fixture corpus до фазы 2                                          |
-| COLLAB-CONTRACT | Протокол команд пока отсутствует                      | Подтверждены rebase/revoke/barrier contracts до фазы 3                                     |
-| S3-CONTRACT     | Snapshots появятся только в фазе 5                    | Один BlobStore suite проходит filesystem, Garage candidate и российский S3                 |
-| XLSX-ISOLATION  | Недоверенный parser появится в фазе 6                 | Worker process sandbox, resource limits и malicious corpus проходят Linux/Windows adapters |
-| SORT-RECTANGLE  | Full-row sort нарушает ожидания выделенного диапазона | Отдельный ADR, transformation fixtures и atomic rectangle tests перед добавлением          |
+| Задача           | Причина и зависимость                                 | Критерий завершения                                                                        |
+| ---------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| AUTH-PROD        | Phase 0 dev auth не является production identity      | Выбран self-hosted provider, audited auth/CSRF/session integration до production           |
+| CALC-CONTRACT    | Формулы не входят в phase 0                           | Подтверждены semantics и fixture corpus до фазы 2                                          |
+| COLLAB-CONTRACT  | Протокол команд пока отсутствует                      | Подтверждены rebase/revoke/barrier contracts до фазы 3                                     |
+| S3-CONTRACT      | Snapshots появятся только в фазе 5                    | Один BlobStore suite проходит filesystem, Garage candidate и российский S3                 |
+| XLSX-ISOLATION   | Недоверенный parser появится в фазе 6                 | Worker process sandbox, resource limits и malicious corpus проходят Linux/Windows adapters |
+| SORT-RECTANGLE   | Full-row sort нарушает ожидания выделенного диапазона | Отдельный ADR, transformation fixtures и atomic rectangle tests перед добавлением          |
+| HISTORY-UI       | Фаза 5 пока даёт только точное read-only HTTP-чтение  | Список версий и безопасный просмотр diff доступны в UI без изменения head                  |
+| HISTORY-HTTP-ACL | HTTP body send не ограждён WebSocket delivery gate    | Тест гонки revoke/read доказывает отсутствие payload после завершённого revoke             |
 
 Ни одна запись этой roadmap сама по себе не означает реализованную или протестированную возможность.

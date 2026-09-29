@@ -96,6 +96,12 @@ Crash после object upload, до metadata update оставляет неза
 
 Reader авторизует historical read, выбирает подходящий ACTIVE snapshot <=requested version, проверяет envelope/checksum/hash и последовательно применяет log tail. Versions должны быть непрерывны. Unknown event/schema, gap и checksum mismatch не пропускаются. Replay применяет сохраненные canonical operations, не повторяет сортировку/генерацию IDs или random source.
 
+Точный read-only HTTP-запрос `/api/documents/{id}/versions/{version}` использует
+этот путь и возвращает только версии `1..head`; он не меняет head или actor.
+Сервер ограничивает одновременные historical reads и timeout. Расчётный cache
+не восстанавливается как часть исторической projection; результаты формул
+для указанного прошлого context пока не предоставляются.
+
 Cacheless content hash использует versioned domain encoding: fixed tags/endianness/lengths, ordered axes, sorted maps, normalized IEEE-754 bits. Runtime caches, pending operations, presence и protobuf field order исключены. Context identity/epoch передаются отдельно; result hash включает engine/profile/context/input_version и нормализованные результаты. Comparison проводится только при одинаковых версиях и завершенном calculation generation.
 
 [Protobuf serialization is not canonical](https://protobuf.dev/programming-guides/serialization-not-canonical/) — причина отдельной encoding, а не разрешение нестабильного domain hash.

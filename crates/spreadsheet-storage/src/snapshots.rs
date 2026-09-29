@@ -32,6 +32,8 @@ pub enum SnapshotError {
     Journal(#[from] JournalError),
     #[error("snapshot encoding worker failed")]
     WorkerFailed,
+    #[error("requested document version is not committed")]
+    VersionNotCommitted,
     #[cfg(test)]
     #[error("test interrupted snapshot publication")]
     TestInterruption,
@@ -126,6 +128,32 @@ impl PgDatabase {
         document_id: DocumentId,
     ) -> Result<RecoveryResult, SnapshotError> {
         let target = self.access(identity, document_id).await?.head;
+        Box::pin(self.recover_document_through(blobs, identity, document_id, target)).await
+    }
+
+    /// Reconstructs an exact committed version without changing the current
+    /// document head or exposing versions beyond the caller's current access.
+    pub async fn recover_document_at_version<B: BlobStore>(
+        &self,
+        blobs: &B,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        target: DocumentVersion,
+    ) -> Result<RecoveryResult, SnapshotError> {
+        let head = self.access(identity, document_id).await?.head;
+        if target == DocumentVersion::ZERO || target > head {
+            return Err(SnapshotError::VersionNotCommitted);
+        }
+        Box::pin(self.recover_document_through(blobs, identity, document_id, target)).await
+    }
+
+    async fn recover_document_through<B: BlobStore>(
+        &self,
+        blobs: &B,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        target: DocumentVersion,
+    ) -> Result<RecoveryResult, SnapshotError> {
         let snapshot = self
             .latest_valid_snapshot(blobs, document_id, target)
             .await?;
@@ -372,6 +400,53 @@ mod tests {
             active.preferred_snapshot_id,
             Some(uuid(snapshot_id.as_bytes()))
         );
+        Ok(())
+    }
+
+    async fn assert_historical_version(
+        db: &PgDatabase,
+        blobs: &LocalFilesystemBlobStore,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        expected: &Workbook,
+        expected_snapshot_version: Option<DocumentVersion>,
+        expected_replay: u64,
+    ) -> TestResult {
+        let recovered = db
+            .recover_document_at_version(blobs, identity, document_id, expected.version())
+            .await?;
+        assert_eq!(recovered.snapshot_version, expected_snapshot_version);
+        assert_eq!(recovered.replayed_events, expected_replay);
+        assert_eq!(recovered.workbook.hash(), expected.hash());
+        Ok(())
+    }
+
+    async fn assert_invalid_historical_requests(
+        db: &PgDatabase,
+        blobs: &LocalFilesystemBlobStore,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+    ) -> TestResult {
+        for target in [DocumentVersion::ZERO, DocumentVersion::new(3)?] {
+            assert!(matches!(
+                db.recover_document_at_version(blobs, identity, document_id, target)
+                    .await,
+                Err(SnapshotError::VersionNotCommitted)
+            ));
+        }
+        assert!(matches!(
+            db.recover_document_at_version(
+                blobs,
+                AuthenticatedActor {
+                    actor_id: ActorId::from_bytes([50; 16])?,
+                    workspace_id: identity.workspace_id,
+                },
+                document_id,
+                DocumentVersion::new(1)?,
+            )
+            .await,
+            Err(SnapshotError::Journal(JournalError::Unauthorized))
+        ));
         Ok(())
     }
 
@@ -734,6 +809,172 @@ mod tests {
             &book2,
         ))
         .await?;
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn historical_version_uses_only_eligible_snapshots_and_exact_tail(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        Box::pin(historical_scenario(pool)).await
+    }
+
+    async fn historical_scenario(pool: sqlx::PgPool) -> TestResult {
+        let db = PgDatabase { pool };
+        db.migrate().await?;
+        let identity = AuthenticatedActor {
+            actor_id: ActorId::from_bytes([1; 16])?,
+            workspace_id: WorkspaceId::from_bytes([2; 16])?,
+        };
+        db.issue_development_session([3; 32], identity.actor_id, identity.workspace_id)
+            .await?;
+        let document_id = DocumentId::from_bytes([4; 16])?;
+        let sheet = SheetId::from_bytes([5; 16])?;
+        let row = RowId::from_bytes([6; 16])?;
+        let column = ColumnId::from_bytes([7; 16])?;
+        let genesis = Operation::CreateWorkbook {
+            sheet: SheetSeed {
+                id: sheet,
+                name: "History".into(),
+                rows: vec![row],
+                columns: vec![column],
+            },
+        };
+        let book1 = Workbook::empty(document_id).candidate(&genesis, DocumentVersion::new(1)?)?;
+        db.create(
+            identity,
+            CommittedEvent {
+                document_id,
+                operation_id: OperationId::from_bytes([8; 16])?,
+                principal: EventPrincipal::User(identity.actor_id),
+                version: book1.version(),
+                operation: genesis,
+                state_hash: book1.hash(),
+            },
+        )
+        .await?;
+        let temp = tempfile::tempdir()?;
+        let blobs = LocalFilesystemBlobStore::new(
+            temp.path().join("blobs"),
+            codec::MAX_SNAPSHOT_BYTES as u64,
+        )
+        .await?;
+        let older_id = SnapshotId::from_bytes([10; 16])?;
+        Box::pin(db.publish_snapshot(
+            &blobs,
+            older_id,
+            Arc::new(book1.clone()),
+            "engine-v1",
+            "pxel-v1",
+        ))
+        .await?;
+        let address = CellAddress { sheet, row, column };
+        let value = CellValue::Text("after".into());
+        let operation = Operation::SetCellValue {
+            address,
+            value: value.clone(),
+        };
+        let book2 = book1.candidate(&operation, DocumentVersion::new(2)?)?;
+        let operation_id = OperationId::from_bytes([9; 16])?;
+        let request = CommitRequest {
+            identity,
+            expected_head: book1.version(),
+            expected_access: db.access(identity, document_id).await?,
+            command: Command {
+                operation_id,
+                document_id,
+                actor_id: identity.actor_id,
+                base_version: book1.version(),
+                client_sequence: 1,
+                operation: CommandPayload::SetCellValue { address, value },
+            },
+            event: CommittedEvent {
+                document_id,
+                operation_id,
+                principal: EventPrincipal::User(identity.actor_id),
+                version: book2.version(),
+                operation,
+                state_hash: book2.hash(),
+            },
+        };
+        assert!(matches!(
+            db.commit(&request).await?,
+            CommitOutcome::Committed(_)
+        ));
+        Box::pin(assert_historical_version(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            &book2,
+            Some(book1.version()),
+            1,
+        ))
+        .await?;
+        let newer_id = SnapshotId::from_bytes([11; 16])?;
+        Box::pin(db.publish_snapshot(
+            &blobs,
+            newer_id,
+            Arc::new(book2.clone()),
+            "engine-v1",
+            "pxel-v1",
+        ))
+        .await?;
+        Box::pin(assert_historical_version(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            &book1,
+            Some(book1.version()),
+            0,
+        ))
+        .await?;
+        Box::pin(assert_historical_version(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            &book2,
+            Some(book2.version()),
+            0,
+        ))
+        .await?;
+        Box::pin(assert_invalid_historical_requests(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+        ))
+        .await?;
+        let newer_key = BlobKey::parse(&uuid(newer_id.as_bytes()).to_string())?;
+        blobs.delete(&newer_key).await?;
+        Box::pin(assert_historical_version(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            &book2,
+            Some(book1.version()),
+            1,
+        ))
+        .await?;
+        let older_key = BlobKey::parse(&uuid(older_id.as_bytes()).to_string())?;
+        blobs.delete(&older_key).await?;
+        Box::pin(assert_historical_version(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            &book1,
+            None,
+            1,
+        ))
+        .await?;
+        assert_eq!(
+            db.access(identity, document_id).await?.head,
+            book2.version()
+        );
         Ok(())
     }
 
