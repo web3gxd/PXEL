@@ -60,6 +60,13 @@ impl NormalizedWorkbook {
             if sheet.name.is_empty()
                 || sheet.name.chars().count() > 31
                 || !names.insert(sheet.name.to_lowercase())
+                || !valid_xml_text(&sheet.name)
+                || sheet
+                    .name
+                    .chars()
+                    .any(|character| "[]:*?/\\".contains(character))
+                || sheet.name.starts_with('\'')
+                || sheet.name.ends_with('\'')
             {
                 return Err(XlsxError::InvalidPackage);
             }
@@ -98,6 +105,9 @@ impl NormalizedWorkbook {
                         if formula && value.is_empty() {
                             return Err(XlsxError::InvalidPackage);
                         }
+                        if !valid_xml_text(value) || formula && value.starts_with('=') {
+                            return Err(XlsxError::InvalidPackage);
+                        }
                         total_text_bytes = total_text_bytes
                             .checked_add(value.len())
                             .ok_or(XlsxError::LimitExceeded)?;
@@ -111,6 +121,13 @@ impl NormalizedWorkbook {
         }
         Ok(())
     }
+}
+
+fn valid_xml_text(value: &str) -> bool {
+    value.chars().all(|character| {
+        matches!(character, '\t' | '\n' | '\r')
+            || character >= '\u{20}' && !matches!(character, '\u{fffe}' | '\u{ffff}')
+    })
 }
 
 #[derive(Default)]

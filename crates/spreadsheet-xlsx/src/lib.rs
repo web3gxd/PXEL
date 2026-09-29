@@ -1,8 +1,10 @@
 //! Bounded inspection and normalized scalar extraction from an OOXML package.
 //! Parsed data is never published directly into the domain projection.
 
+mod export;
 mod normalized;
 
+pub use export::export_scalar_xlsx;
 pub use normalized::{NormalizedCell, NormalizedCellValue, NormalizedSheet, NormalizedWorkbook};
 
 use quick_xml::{Reader, XmlVersion, events::Event};

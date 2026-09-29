@@ -215,6 +215,11 @@ Criterion harness: 6.6972–7.2624 ms на локальном optimized domain c
 числа и лимиты до использования модели. CLI preview по-прежнему выводит
 только счётчики; документ не публикуется. OS sandbox, compatibility report,
 загрузка в книгу и export/reimport остаются открытыми.
+Пятый срез ([ADR-047](adr/047-scalar-xlsx-export.md)) добавил запись
+scalar IR в XLSX-пакет с обратным чтением двухлистного синтетического
+fixture нашим reader. Это библиотечный round-trip, не пользовательский
+экспорт и не Excel-verified interoperability; преобразование domain → IR,
+аудит и выдача файла ещё открыты.
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU
