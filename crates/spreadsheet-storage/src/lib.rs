@@ -13,3 +13,6 @@ mod permissions;
 pub use permissions::{PermissionError, PermissionReceipt, PermissionRole};
 mod snapshots;
 pub use snapshots::{RecoveryResult, SnapshotCleanupReport, SnapshotError, SnapshotReceipt};
+
+#[cfg(test)]
+mod recovery_benchmark;

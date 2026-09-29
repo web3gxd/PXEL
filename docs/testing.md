@@ -107,6 +107,12 @@ frontend-only benchmark, не проверка durable large-document path.
 `reason=timeout`; переполнение очереди этим тестом не доказано.
 [Отчёт](benchmarks/2026-09-29-slow-reader-local.md).
 
+`just bench-recovery-storage` запускает отдельно от CI игнорируемый release
+SQLx-test: 20 000 durable commits, verified snapshot на v10001, 10 000
+событий хвоста и сравнение с полным authenticated journal replay. Fixture
+создаётся до измерения; каждый sample проверяет domain hash. Два локальных
+прогона и границы интерпретации: [отчёт](benchmarks/2026-09-29-snapshot-replay-persisted-local.md).
+
 | Цель                                      | Target / measurement                                     |
 | ----------------------------------------- | -------------------------------------------------------- |
 | First usable grid после готовности данных | p95 <1 s                                                 |

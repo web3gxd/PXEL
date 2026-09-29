@@ -1,5 +1,34 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — persisted benchmark snapshot + 10 000 tail events
+
+Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-033/035/037,
+domain-only benchmark, storage recovery/journal и testing docs. Цель —
+измерить реальный PostgreSQL + BlobStore + codec путь до любой оптимизации.
+Инварианты: snapshot v10001 берётся только после durable commit; ещё 10 000
+событий доходят до v20001; каждый timed результат равен committed domain
+hash и полному replay. Риски: fixture с одной ячейкой и тёплыми кешами не
+моделирует большую книгу, холодный restart или нагрузку других клиентов.
+
+Добавлен игнорируемый release SQLx harness `recovery_benchmark` и команда
+`just bench-recovery-storage`. Он создает изолированную test database,
+выполняет 20 000 обычных durable commits, публикует проверенный snapshot,
+делает по два warm-up и 20 чередующихся samples для snapshot+tail и полного
+authenticated journal replay. Сборка test harness без запуска и storage
+clippy прошли. `just bench-recovery-storage` запущен дважды; оба прогона
+прошли и подтвердили одинаковый hash. Run 1: 20k commits + snapshot 20.477 s,
+snapshot p50/p95 49.795/87.611 ms, full replay 107.578/139.006 ms.
+Run 2: та же подготовка 21.167 s, snapshot 50.739/71.356 ms, full replay
+102.740/131.171 ms. PostgreSQL readiness проверил `fsync`,
+`full_page_writes`, `synchronous_commit` и точную миграцию. Машина,
+методика и ограничения записаны в
+`docs/benchmarks/2026-09-29-snapshot-replay-persisted-local.md`.
+`just check` и `just sqlx-check` прошли: Rust fmt/clippy/tests/build,
+WASM, protobuf drift, frontend format/lint/typecheck, Vitest 71/71 и Vite
+build; SQLx checked metadata не менялась. Презентация прошла 10 слайдов на
+1440×900 и 390×844, `git diff --check` прошёл. Значение p95 — локальный
+baseline одной ячейки, не SLO холодного восстановления большой книги.
+
 ## 2026-09-29 — уборка незавершённых snapshots
 
 Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-033/035,

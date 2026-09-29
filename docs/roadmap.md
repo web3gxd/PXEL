@@ -146,8 +146,12 @@ recovery API в этом случае применяет только хвост
 при пропуске milestone следующий шанс через 1000 событий. Domain-only
 benchmark snapshot + 10 000 tail events дал 5.7527–8.6369 ms против
 17.024–20.579 ms для полного replay 20 001 events; условия —
-[отчёт](benchmarks/2026-09-29-snapshot-replay-domain-local.md). Полная crash
-matrix, retention GC, PostgreSQL/BlobStore benchmark и S3 contract остаются открытыми.
+[отчёт](benchmarks/2026-09-29-snapshot-replay-domain-local.md). Отдельный
+release harness с реальными PostgreSQL, checksum/codec и LocalFilesystemBlobStore
+дал p95 71.356–87.611 ms для snapshot + 10 000 tail events в двух локальных
+прогонах; full replay p95 131.171–139.006 ms. Условия и ограничения —
+[отчёт](benchmarks/2026-09-29-snapshot-replay-persisted-local.md). Полная crash
+matrix, retention GC и S3 contract остаются открытыми.
 Controlled interruption на шести границах publication уже проверил
 metadata/BlobStore/activation rollback; power-loss не проверен.
 Уборка incomplete/rejected snapshots ([ADR-037](adr/037-incomplete-snapshot-cleanup.md))

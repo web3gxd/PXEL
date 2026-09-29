@@ -60,6 +60,9 @@ bench-render-sparse:
 bench-optimistic:
     node tests/performance/optimistic.mjs
 
+bench-recovery-storage:
+    cargo test --release --locked -p spreadsheet-storage --lib recovery_benchmark::persisted_snapshot_plus_ten_thousand_tail_events -- --ignored --exact --nocapture --test-threads=1
+
 stress-slow-reader:
     node --test tests/performance/slow-reader.test.mjs
 
