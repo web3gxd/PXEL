@@ -20,6 +20,7 @@ impl ReferenceResolver for Range {
 fn benchmarks(c: &mut Criterion) {
     for (name, source, expected) in [
         ("ABS_scalar", "=ABS(-123.5)", Value::Number(123.5)),
+        ("POWER_scalar", "=POWER(4,0.5)", Value::Number(2.0)),
         ("MOD_scalar", "=MOD(-123.5,7)", Value::Number(2.5)),
         ("ROUND_scalar", "=ROUND(1.005,2)", Value::Number(1.01)),
         (

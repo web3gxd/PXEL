@@ -30,7 +30,7 @@ IEEE-754 binary64, -0 → +0; nonfinite literal/input rejected; computed NaN/inf
 
 `+ - * /` выполняются в фиксированном AST order. Нет fast-math, reassociation или недокументированного FMA. SUM обходит аргументы слева направо, диапазоны в workbook row-major order; parallel reduction, меняющий order, запрещен. Optimization требует benchmark и correctness corpus.
 
-Phase 2 `^` ограничен integer exponent [-1024,1024]. Алгоритм: deterministic exponentiation-by-squaring с зафиксированным порядком умножения с reciprocal основания до возведения для отрицательного exponent; overflow/domain cases выражаются spreadsheet errors. Fractional/excessive exponent дает UnsupportedCompatibilityFeature diagnostic, не приблизительный ответ. Полный POWER/transcendental profile требует отдельно одобренной portable math implementation и native/WASM differential corpus; std powf не является доказательством parity.
+POWER и `^` используют общий portable libm0.2.16 с отключённым arch и включённым force-soft-floats по ADR-061. Дробные и большие finite exponents допустимы; negative base с nonintegral exponent даёт NUM; zero negative exponent даёт DIV/0, zero-to-zero NUM; nonfinite output NUM. Underflow сохраняет subnormals либо normalized zero. Бывший integer-only squaring profile заменён с новым engine identity0.5.0; history/context не переписываются. Native/WASM corpus доказывает сходимость в проверенных случаях, а не bitwise Excel parity или все возможные platform combinations.
 
 Три разных обещания: convergence compatibility (наш native/WASM exact normalized results); Excel compatibility (fixtures/допуски поддержанного профиля); bitwise Excel parity (не обещается).
 
@@ -78,7 +78,7 @@ COUNT/COUNTA посещают диапазон в row-major порядке с т
 MOD возвращает remainder со знаком divisor, zero divisor даёт DIV/0; fixed
 binary64 n-d*floor(n/d), nonfinite или потеря sign/bounds из-за крайних чисел
 даёт NUM. Native/WASM корпус проверяет 27 новых cases; ручная Excel verification
-и extreme precision corrections остаются открыты. Engine identity 0.4.0 требует
+и extreme precision corrections остаются открыты. Engine identity 0.5.0 требует
 явного epoch advance для старых persisted contexts.
 
 ROUND/ROUNDUP/ROUNDDOWN используют bounded shortest-decimal quantization по

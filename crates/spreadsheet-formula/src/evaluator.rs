@@ -184,7 +184,7 @@ fn eval(
             if matches!(right, Value::Error(_)) {
                 return Ok(right);
             }
-            binary(*op, left, right)?
+            binary(*op, left, right, budget)?
         }
         Node::Call { name, arguments } => {
             if name == "IF" {
@@ -206,7 +206,7 @@ fn eval(
                 }
             } else if matches!(
                 name.as_str(),
-                "ABS" | "MOD" | "ROUND" | "ROUNDUP" | "ROUNDDOWN"
+                "ABS" | "MOD" | "ROUND" | "ROUNDUP" | "ROUNDDOWN" | "POWER"
             ) {
                 scalar_math(ast, name, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "SUM" | "AVERAGE" | "MIN" | "MAX") {
@@ -248,6 +248,9 @@ fn scalar_math(
         Ok(value) => value,
         Err(error) => return Ok(Value::Error(error)),
     };
+    if name == "POWER" {
+        return crate::power::power(value, divisor, budget);
+    }
     let mode = match name {
         "ROUND" => Some(crate::rounding::Mode::Nearest),
         "ROUNDUP" => Some(crate::rounding::Mode::Away),
@@ -592,7 +595,12 @@ impl Aggregate {
         }
     }
 }
-fn binary(op: BinaryOp, left: Value, right: Value) -> Result<Value, EvaluationError> {
+fn binary(
+    op: BinaryOp,
+    left: Value,
+    right: Value,
+    budget: &mut EvaluationBudget,
+) -> Result<Value, EvaluationError> {
     if op == BinaryOp::Concat {
         return Ok(match (text(left), text(right)) {
             (Ok(a), Ok(b)) => {
@@ -642,31 +650,7 @@ fn binary(op: BinaryOp, left: Value, right: Value) -> Result<Value, EvaluationEr
             }
         }
         BinaryOp::Power => {
-            if b.fract() != 0.0 || b.abs() > 1024.0 {
-                return Err(EvaluationError::UnsupportedCompatibilityFeature);
-            }
-            if a == 0.0 && b == 0.0 {
-                return Ok(Value::Error(FormulaError::Num));
-            }
-            if a == 0.0 && b < 0.0 {
-                return Ok(Value::Error(FormulaError::Div0));
-            }
-            let mut exponent = b.abs() as u32;
-            let mut base = if b < 0.0 { 1.0 / a } else { a };
-            if !base.is_finite() {
-                return Ok(Value::Error(FormulaError::Num));
-            }
-            let mut result = 1.0;
-            while exponent > 0 {
-                if exponent & 1 != 0 {
-                    result *= base;
-                }
-                exponent >>= 1;
-                if exponent > 0 {
-                    base *= base;
-                }
-            }
-            number(result)
+            return crate::power::power(a, b, budget);
         }
         _ => return Err(EvaluationError::InvalidAst),
     })

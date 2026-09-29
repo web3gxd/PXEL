@@ -9,6 +9,7 @@ mod evaluator;
 mod formatter;
 mod lexer;
 mod parser;
+mod power;
 pub mod range_index;
 mod rounding;
 pub use ast::*;

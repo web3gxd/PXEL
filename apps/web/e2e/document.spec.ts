@@ -2,38 +2,57 @@ import { expect, test } from '@playwright/test';
 import { fromBinary } from '@bufbuild/protobuf';
 import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
 
-test('ROUND family follows dependent edits and survives reload', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
-  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
-  const grid = page.getByRole('region', { name: 'Область таблицы' });
-  const source = '=IF(ROUND(A1,2)=ROUNDUP(A1,2),ROUNDDOWN(A1,2),0)';
-  await bar.fill('1.005');
-  await bar.press('Enter');
-  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await grid.focus();
-  await page.keyboard.press('ArrowUp');
-  await page.keyboard.press('ArrowRight');
-  await bar.fill(source);
-  await bar.press('Enter');
-  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await grid.focus();
-  await page.keyboard.press('ArrowUp');
-  await expect(page.getByTestId('active-cell')).toHaveText('B1: 1');
-  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
-  await page.keyboard.press('ArrowLeft');
-  await bar.fill('1.004');
-  await bar.press('Enter');
-  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await page.reload();
-  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await grid.focus();
-  await page.keyboard.press('ArrowRight');
-  await expect(page.getByTestId('active-cell')).toHaveText('B1: 0');
-  await expect(bar).toHaveValue(source);
-  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
-});
+for (const scenario of [
+  {
+    name: 'ROUND family',
+    source: '=IF(ROUND(A1,2)=ROUNDUP(A1,2),ROUNDDOWN(A1,2),0)',
+    input: '1.005',
+    edit: '1.004',
+    before: '1',
+    after: '0',
+  },
+  {
+    name: 'POWER and exponentiation',
+    source: '=POWER(A1,0.5)+A1^0.5',
+    input: '4',
+    edit: '9',
+    before: '4',
+    after: '6',
+  },
+]) {
+  test(`${scenario.name} follows dependent edits and survives reload`, async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+    await page.getByRole('button', { name: 'Создать таблицу' }).click();
+    const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+    const grid = page.getByRole('region', { name: 'Область таблицы' });
+    const source = scenario.source;
+    await bar.fill(scenario.input);
+    await bar.press('Enter');
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await grid.focus();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowRight');
+    await bar.fill(source);
+    await bar.press('Enter');
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await grid.focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(page.getByTestId('active-cell')).toHaveText(`B1: ${scenario.before}`);
+    await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+    await page.keyboard.press('ArrowLeft');
+    await bar.fill(scenario.edit);
+    await bar.press('Enter');
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await page.reload();
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await grid.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByTestId('active-cell')).toHaveText(`B1: ${scenario.after}`);
+    await expect(bar).toHaveValue(source);
+    await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+  });
+}
 
 test('ABS and MOD update a referenced input and survive reload', async ({ page }) => {
   await page.goto('/');

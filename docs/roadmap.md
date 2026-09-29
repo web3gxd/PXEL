@@ -360,3 +360,9 @@ ADR-060 добавляет ROUND/ROUNDUP/ROUNDDOWN в engine 0.4.0: общий �
 202 cases, stateful native/browser parity 1001/2002, PostgreSQL 40/40,
 новые browser dependent-edit/reload tests при DPR1/2. Manual Excel rounding
 verification остаётся gate; benchmark зафиксирован отдельно.
+
+ADR-061 добавляет POWER и fractional exponent в engine0.5.0 с закреплённым
+portable libm0.2.16/force-soft-floats. 236 shared fixtures и stateful1001/2002
+сошлись native/browser; PostgreSQL41/41 и целевые UI DPR1/2 прошли. Ручная
+Excel precision verification и остальные платформы остаются отдельными gates;
+text/date/lookup/conditional aggregates и полный XLSX profile ещё впереди.

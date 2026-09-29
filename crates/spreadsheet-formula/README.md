@@ -42,12 +42,11 @@ Source provenance and documentation conflicts are retained in the corpus.
   normalization removes negative zero. `/0` -> `#DIV/0!`.
 - Operators execute in AST order. Negation binds above exponentiation; repeated
   exponentiation is left associative. `=-2^2` -> 4; `=2^3^2` -> 64.
-- `^` accepts integral exponents in [-1024,1024]; otherwise it returns
-  `UnsupportedCompatibilityFeature`. Fixed exponentiation by squaring is used.
-  Negative exponents take the reciprocal **before** squaring, preserving
-  representable subnormals such as `2^-1024`. This refines the earlier proposal
-  of reciprocal-after-squaring; no persisted formula version used that proposal.
-  Nonfinite reciprocal -> NUM; zero with negative exponent -> DIV/0; `0^0` -> NUM.
+- `^` and two-argument POWER use pinned portable libm with soft-float algorithms,
+  admitting finite fractional and large exponents. Negative base with nonintegral
+  exponent and nonfinite output -> NUM; zero with negative exponent -> DIV/0;
+  `0^0` -> NUM. Subnormals are preserved, underflow zero is normalized. The former
+  bounded integer squaring profile is superseded by ADR-061 and engine 0.5.0.
 - SUM/AVERAGE/MIN/MAX accept 1–255 arguments. Direct booleans and numeric text
   convert to numbers; text/bools/blanks obtained from references/ranges are
   ignored. Direct unparseable text -> VALUE. Missing argument -> numeric zero.
@@ -70,7 +69,7 @@ Source provenance and documentation conflicts are retained in the corpus.
   conditions, preserving later errors even after a decisive boolean; range
   traversal is budgeted and checked. NOT takes one scalar and inverts the same
   scalar coercion as IF. Arrays/implicit intersection remain unsupported.
-  Engine identity is `pxel-formula-0.4.0`; old persisted contexts require a new
+  Engine identity is `pxel-formula-0.5.0`; old persisted contexts require a new
   authorized calculation epoch. See ADR-055 and the common fixture corpus.
 
 - ABS takes one scalar; MOD takes two and follows the divisor sign. Blank is

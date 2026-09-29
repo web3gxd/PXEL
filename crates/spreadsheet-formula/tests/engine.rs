@@ -48,6 +48,42 @@ fn abs_and_mod_scalar_contract() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn power_supports_fractional_exponents_and_explicit_domain_errors()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(
+        evaluate(
+            &parse("=IFERROR(POWER(4,0.5),7)")?.ast,
+            &NoReferences,
+            &mut EvaluationBudget::new(40)
+        ),
+        Err(EvaluationError::CalculationLimitExceeded)
+    );
+    for (formula, expected) in [
+        ("=POWER(5,2)", Value::Number(25.0)),
+        ("=POWER(4,0.5)", Value::Number(2.0)),
+        ("=4^0.5", Value::Number(2.0)),
+        ("=POWER(-2,3)", Value::Number(-8.0)),
+        ("=POWER(-2,-3)", Value::Number(-0.125)),
+        ("=POWER(0,0)", Value::Error(FormulaError::Num)),
+        ("=POWER(0,-1)", Value::Error(FormulaError::Div0)),
+        ("=POWER(-2,0.5)", Value::Error(FormulaError::Num)),
+        ("=POWER(2,1025)", Value::Error(FormulaError::Num)),
+        ("=POWER(2,-1074)", Value::Number(f64::from_bits(1))),
+        ("=POWER(2,-1075)", Value::Number(0.0)),
+        ("=POWER(\"4\",TRUE)", Value::Number(4.0)),
+        ("=POWER(1)", Value::Error(FormulaError::Value)),
+        ("=POWER(\"x\",1)", Value::Error(FormulaError::Value)),
+        ("=IFERROR(POWER(-4,0.5),7)", Value::Number(7.0)),
+    ] {
+        assert_eq!(eval(formula)?, expected, "{formula}");
+    }
+    assert!(
+        matches!(eval("=POWER(4,5/4)")?, Value::Number(value) if (value-5.656854249492381).abs()<1e-14)
+    );
+    Ok(())
+}
+
+#[test]
 // Microsoft ROUNDUP/ROUNDDOWN examples deliberately use rounded decimal PI inputs.
 #[allow(clippy::approx_constant)]
 fn decimal_rounding_profile() -> Result<(), Box<dyn std::error::Error>> {
@@ -285,7 +321,7 @@ fn range_work_is_charged_and_cancellation_is_not_a_spreadsheet_value()
             &NoReferences,
             &mut EvaluationBudget::default()
         ),
-        Err(EvaluationError::UnsupportedCompatibilityFeature)
+        Ok(Value::Number(std::f64::consts::SQRT_2))
     );
     assert!(parse("=SUM(A1:A100001)").is_err());
     Ok(())

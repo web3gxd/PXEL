@@ -105,6 +105,11 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/rounddown-function",
       "title": "ROUNDDOWN function",
       "retrieved_at": "2026-09-29"
+    },
+    "power": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/power-function",
+      "title": "POWER function",
+      "retrieved_at": "2026-09-30"
     }
   },
   "cases": [
@@ -199,13 +204,13 @@
       }
     },
     {
-      "id": "power_fractional_outside_profile",
+      "id": "power_fractional",
       "formula": "=4^0.5",
       "origin": "Sheet1!C1",
       "cells": {},
       "expected": {
-        "type": "diagnostic",
-        "value": "UnsupportedCompatibilityFeature"
+        "type": "number",
+        "value": 2
       },
       "provenance": {
         "sources": [],
@@ -214,13 +219,13 @@
       }
     },
     {
-      "id": "power_exponent_limit",
+      "id": "power_overflow_large_exponent",
       "formula": "=2^1025",
       "origin": "Sheet1!C1",
       "cells": {},
       "expected": {
-        "type": "diagnostic",
-        "value": "UnsupportedCompatibilityFeature"
+        "type": "error",
+        "value": "#NUM!"
       },
       "provenance": {
         "sources": [],
@@ -3369,16 +3374,30 @@
       "formula": "=ROUND(1.7976931348623157e308,-308)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "error", "value": "#NUM!" },
-      "provenance": { "sources": ["round"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "rounddown_max_finite",
       "formula": "=ROUNDDOWN(1.7976931348623157e308,-308)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 1e308 },
-      "provenance": { "sources": ["rounddown"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 1e308
+      },
+      "provenance": {
+        "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "rounddown_arity",
@@ -3391,6 +3410,516 @@
       },
       "provenance": {
         "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_square",
+      "formula": "=POWER(5,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 25
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_published_fractional",
+      "formula": "=ROUND(POWER(98.6,3.2),3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2401077.222
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_published_quarter",
+      "formula": "=ROUND(POWER(4,5/4),9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 5.656854249
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_sqrt",
+      "formula": "=POWER(4,0.5)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_sqrt_small",
+      "formula": "=POWER(0.25,0.5)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0.5
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_negative_odd",
+      "formula": "=POWER(-2,3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -8
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_negative_even",
+      "formula": "=POWER(-2,4)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 16
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_negative_reciprocal",
+      "formula": "=POWER(-2,-3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -0.125
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_negative_fraction",
+      "formula": "=POWER(-2,0.5)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_zero_zero",
+      "formula": "=POWER(0,0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_zero_negative",
+      "formula": "=POWER(0,-1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_zero_positive",
+      "formula": "=POWER(0,0.5)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_negative_zero",
+      "formula": "=POWER(-0,3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_identity_huge",
+      "formula": "=POWER(1,1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_negative_identity_huge",
+      "formula": "=POWER(-1,1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_huge_overflow",
+      "formula": "=POWER(2,1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_huge_underflow",
+      "formula": "=POWER(2,-1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_subnormal",
+      "formula": "=POWER(2,-1074)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 5e-324
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_underflow",
+      "formula": "=POWER(2,-1075)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_overflow",
+      "formula": "=POWER(2,1024)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_max_zero_exponent",
+      "formula": "=POWER(1.7976931348623157e308,0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_bool",
+      "formula": "=POWER(TRUE,TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_text",
+      "formula": "=POWER(\"4\",\"0.5\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_blank",
+      "formula": "=POWER(,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_blank_exponent",
+      "formula": "=POWER(2,)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_arity",
+      "formula": "=POWER(2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_arity_extra",
+      "formula": "=POWER(2,3,4)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_bad_text",
+      "formula": "=POWER(\"x\",2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_propagate",
+      "formula": "=POWER(2,1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_iferror",
+      "formula": "=IFERROR(POWER(-4,0.5),7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_operator_fraction",
+      "formula": "=4^0.5",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_operator_negative_fraction",
+      "formula": "=(-4)^0.5",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_operator_large_negative",
+      "formula": "=2^-1074",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 5e-324
+      },
+      "provenance": {
+        "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "portable_power_unary_precedence",
+      "formula": "=-2^2",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 4
+      },
+      "provenance": {
+        "sources": ["power"],
         "basis": "derived",
         "verified_in_excel": false
       }
