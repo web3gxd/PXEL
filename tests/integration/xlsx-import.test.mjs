@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { api, connect, getDocument, login, setCommand } from '../helpers/client.mjs';
 
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
+const browserOrigin = 'http://localhost:5173';
 const executable = resolve(`target/debug/pxel-server${process.platform === 'win32' ? '.exe' : ''}`);
+const { chromium } = createRequire(resolve('apps/web/package.json'))('@playwright/test');
 
 function importFixture(path, identity, extraArguments = []) {
   const databaseUrl =
@@ -63,6 +66,33 @@ test('multi-sheet XLSX is committed, replayed and exported with both sheets', as
     5,
   );
   assert.equal((await api(base, owner, `/api/documents/${documentId}/export.xlsx`)).status, 200);
+  const browser = await chromium.launch();
+  try {
+    for (const deviceScaleFactor of [1, 2]) {
+      const context = await browser.newContext({ deviceScaleFactor });
+      try {
+        const [name, value] = owner.split('=');
+        await context.addCookies([{ name, value, domain: 'localhost', path: '/api' }]);
+        const page = await context.newPage();
+        await page.goto(`${browserOrigin}/?document=${documentId}`);
+        await page.getByRole('button', { name: 'Перейти на лист Plan' }).click();
+        assert.match(await page.locator('.sheet-summary').textContent(), /^Plan/);
+        const grid = page.getByRole('region', { name: 'Область таблицы' });
+        await grid.focus();
+        for (let index = 0; index < 25; index++) await page.keyboard.press('ArrowRight');
+        for (let index = 0; index < 3; index++) await page.keyboard.press('ArrowDown');
+        assert.equal(await page.locator('.cell-address').textContent(), 'Z4');
+        assert.equal(
+          await page.getByRole('textbox', { name: 'Значение ячейки' }).inputValue(),
+          'world!',
+        );
+      } finally {
+        await context.close();
+      }
+    }
+  } finally {
+    await browser.close();
+  }
 });
 
 test('merge metadata is reported and cannot be silently dropped during import', async () => {

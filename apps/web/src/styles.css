@@ -328,6 +328,8 @@ h1 {
   align-items: center;
   align-self: stretch;
   gap: 12px;
+  min-width: 0;
+  overflow-x: auto;
 }
 .sheet-navigation > .tool {
   align-self: center;
@@ -345,11 +347,21 @@ h1 {
   padding: 0 20px;
   gap: 9px;
   font-weight: 600;
+  color: var(--secondary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.sheet-tab.active {
   color: var(--accent);
   background: #e8efe5;
   box-shadow: inset 0 -2px 0 var(--accent);
-  font-size: 12px;
-  white-space: nowrap;
+}
+.sheet-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .sheet-summary {
   font-size: 11px;

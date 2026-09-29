@@ -244,7 +244,8 @@ export function decodeProjection(input: unknown): Projection {
     typeof p.state_hash !== 'string' ||
     !/^[0-9a-f]{64}$/.test(p.state_hash) ||
     !Array.isArray(p.sheets) ||
-    p.sheets.length !== 1
+    p.sheets.length < 1 ||
+    p.sheets.length > 64
   )
     throw invalid();
   if (
@@ -254,6 +255,11 @@ export function decodeProjection(input: unknown): Projection {
       !/^[1-9]\d*$/.test(p.calculation_context.epoch))
   )
     throw invalid();
+  const sheetIds = new Set<string>();
+  const sheetNames = new Set<string>();
+  const rowIds = new Set<string>();
+  const columnIds = new Set<string>();
+  let totalCells = 0;
   for (const sheet of p.sheets) {
     if (
       !sheet ||
@@ -266,16 +272,32 @@ export function decodeProjection(input: unknown): Projection {
       !sheet.columns.length ||
       sheet.rows.length > 1000000 ||
       sheet.columns.length > 16384 ||
-      sheet.cells.length > 1000000
+      sheet.cells.length > 100000
     )
       throw invalid();
+    const foldedName = sheet.name.toLowerCase();
+    if (
+      !sheet.name ||
+      Array.from(sheet.name).length > 31 ||
+      sheetIds.has(sheet.id) ||
+      sheetNames.has(foldedName)
+    )
+      throw invalid();
+    sheetIds.add(sheet.id);
+    sheetNames.add(foldedName);
+    totalCells += sheet.cells.length;
+    if (totalCells > 100000) throw invalid();
     if (
       !sheet.rows.every(isUuid) ||
       !sheet.columns.every(isUuid) ||
       new Set(sheet.rows).size !== sheet.rows.length ||
-      new Set(sheet.columns).size !== sheet.columns.length
+      new Set(sheet.columns).size !== sheet.columns.length ||
+      sheet.rows.some((id) => rowIds.has(id)) ||
+      sheet.columns.some((id) => columnIds.has(id))
     )
       throw invalid();
+    sheet.rows.forEach((id) => rowIds.add(id));
+    sheet.columns.forEach((id) => columnIds.add(id));
     const rows = new Set(sheet.rows),
       columns = new Set(sheet.columns),
       cells = new Set<string>();
@@ -322,6 +344,7 @@ export class DocumentStore {
     this.notify();
   });
   projection: Projection | undefined;
+  activeSheetId: string | undefined;
   confirmed = new Map<string, Value>();
   pending: Pending[] = [];
   private lastUndoableOperation: string | undefined;
@@ -367,7 +390,24 @@ export class DocumentStore {
     this.listeners.forEach((fn) => fn());
   };
   get sheet() {
-    return this.projection?.sheets[0];
+    return (
+      this.projection?.sheets.find((sheet) => sheet.id === this.activeSheetId) ??
+      this.projection?.sheets[0]
+    );
+  }
+  selectSheet(sheetId: string) {
+    if (this.sheet?.id === sheetId) return true;
+    if (!this.projection?.sheets.some((sheet) => sheet.id === sheetId)) return false;
+    if (this.editing) this.commit();
+    if (this.editing) return false;
+    this.activeSheetId = sheetId;
+    this.selected = { row: 0, column: 0 };
+    this.selectionAnchor = { row: 0, column: 0 };
+    this.remotePresence = [];
+    this.syncPreview(true);
+    this.schedulePresence();
+    this.notify();
+    return true;
   }
   value(position: Position) {
     const row = this.sheet?.rows[position.row],
@@ -449,6 +489,15 @@ export class DocumentStore {
     const sheet = this.sheet,
       projection = this.projection;
     if (!sheet || !projection) return;
+    if (projection.sheets.length > 1) {
+      this.preview.dispose();
+      this.previewStatus = 'idle';
+      this.previewValues = new Map();
+      this.previewStamp = undefined;
+      this.previewOverlay.clear();
+      this.previewDirty.clear();
+      return;
+    }
     const overlay = new Set<string>();
     for (const pending of this.pending) {
       if (pending.kind === 'cell') overlay.add(key(pending.row, pending.column));
@@ -590,19 +639,25 @@ export class DocumentStore {
       assembly.bytes += bytes;
       if (assembly.bytes > 32 * 1024 * 1024 || assembly.values.size + message.cells.length > 100000)
         throw new Error('Calculation exceeds limit');
-      const rows = new Set(this.sheet?.rows),
-        columns = new Set(this.sheet?.columns);
+      const axesBySheet = new Map(
+        this.projection.sheets.map(
+          (sheet) =>
+            [sheet.id, { rows: new Set(sheet.rows), columns: new Set(sheet.columns) }] as const,
+        ),
+      );
       for (const cell of message.cells) {
         const address = cell.address,
           value = cell.value?.kind;
+        const targetAxes =
+          address?.sheetId.length === 16 ? axesBySheet.get(bytesUuid(address.sheetId)) : undefined;
         if (
           !address ||
           address.sheetId.length !== 16 ||
           address.rowId.length !== 16 ||
           address.columnId.length !== 16 ||
-          bytesUuid(address.sheetId) !== this.sheet?.id ||
-          !rows.has(bytesUuid(address.rowId)) ||
-          !columns.has(bytesUuid(address.columnId)) ||
+          !targetAxes ||
+          !targetAxes.rows.has(bytesUuid(address.rowId)) ||
+          !targetAxes.columns.has(bytesUuid(address.columnId)) ||
           !value?.case
         )
           throw new Error('Invalid calculation cell');
@@ -649,8 +704,10 @@ export class DocumentStore {
   }
   load(projection: Projection) {
     const previousSheet = this.sheet;
-    const nextSheet = projection.sheets[0];
     const documentChanged = this.projection?.document_id !== projection.document_id;
+    const nextSheet =
+      projection.sheets.find((sheet) => sheet.id === this.activeSheetId && !documentChanged) ??
+      projection.sheets[0];
     const axesChanged = Boolean(
       previousSheet &&
       nextSheet &&
@@ -691,10 +748,13 @@ export class DocumentStore {
     const nextSelected = remap(this.selected);
     const nextAnchor = remap(this.selectionAnchor);
     this.projection = projection;
+    this.activeSheetId = nextSheet?.id;
     this.selected = nextSelected;
     this.selectionAnchor = nextAnchor;
     this.confirmed = new Map(
-      projection.sheets[0]?.cells.map((c) => [key(c.row_id, c.column_id), c.value]),
+      projection.sheets.flatMap((sheet) =>
+        sheet.cells.map((c) => [key(c.row_id, c.column_id), c.value] as const),
+      ),
     );
     this.restartCalculation();
     this.syncPreview(true);
@@ -1135,6 +1195,7 @@ export class DocumentStore {
       schema_version: 1,
       document_id: this.projection.document_id,
       version: this.projection.version,
+      sheet_id: this.sheet?.id,
       source,
       from_row: this.selected.row,
       from_column: this.selected.column,
@@ -1273,6 +1334,7 @@ export class DocumentStore {
       copy.schema_version !== 1 ||
       copy.document_id !== projection.document_id ||
       copy.version !== projection.version ||
+      copy.sheet_id !== this.sheet?.id ||
       typeof copy.source !== 'string' ||
       !copy.source.startsWith('=') ||
       byteLength(copy.source) > 32 * 1024 ||
@@ -1672,14 +1734,16 @@ export class DocumentStore {
     const address = entry?.address;
     if (
       !address ||
+      address.sheetId.length !== 16 ||
       address.rowId.length !== 16 ||
-      address.columnId.length !== 16 ||
-      bytesUuid(address.sheetId) !== this.sheet?.id
+      address.columnId.length !== 16
     )
       throw new Error('Invalid canonical address');
+    const sheet = this.projection?.sheets.find((sheet) => sheet.id === bytesUuid(address.sheetId));
     if (
-      !this.sheet.rows.includes(bytesUuid(address.rowId)) ||
-      !this.sheet.columns.includes(bytesUuid(address.columnId))
+      !sheet ||
+      !sheet.rows.includes(bytesUuid(address.rowId)) ||
+      !sheet.columns.includes(bytesUuid(address.columnId))
     )
       throw new Error('Unknown canonical axis');
     const k = key(bytesUuid(address.rowId), bytesUuid(address.columnId));
@@ -1703,7 +1767,7 @@ export class DocumentStore {
         !formula.ast ||
         formula.compatibilityProfile !== 1 ||
         !formula.origin ||
-        bytesUuid(formula.origin.sheetId) !== this.sheet.id ||
+        bytesUuid(formula.origin.sheetId) !== sheet.id ||
         bytesUuid(formula.origin.rowId) !== bytesUuid(address.rowId) ||
         bytesUuid(formula.origin.columnId) !== bytesUuid(address.columnId)
       )

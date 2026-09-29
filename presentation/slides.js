@@ -12,7 +12,7 @@ function show(index, updateHash = true) {
   progress.style.width = `${((current + 1) / slides.length) * 100}%`;
   previous.disabled = current === 0;
   next.disabled = current === slides.length - 1;
-  slide.scrollIntoView({ behavior: updateHash ? 'smooth' : 'instant', block: 'start' });
+  slide.scrollIntoView({ behavior: 'instant', block: 'start' });
   if (updateHash) history.replaceState(null, '', `#${slide.id}`);
 }
 
@@ -44,6 +44,10 @@ document.addEventListener('keydown', (event) => {
 
 const initial = slides.findIndex((slide) => `#${slide.id}` === location.hash);
 show(initial < 0 ? 0 : initial, false);
+window.addEventListener('hashchange', () => {
+  const target = slides.findIndex((slide) => `#${slide.id}` === location.hash);
+  if (target >= 0) show(target, false);
+});
 
 const observer = new IntersectionObserver(
   (entries) => {

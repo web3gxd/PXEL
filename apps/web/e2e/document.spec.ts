@@ -163,6 +163,7 @@ test('keyboard range selection copies a sparse rectangle and pastes it in one ve
   await page.reload();
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
   await grid.focus();
+  await expect(page.getByTestId('active-cell')).toHaveText('A1: 1');
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
   await expect(page.getByTestId('active-cell')).toHaveText('D4: 1');

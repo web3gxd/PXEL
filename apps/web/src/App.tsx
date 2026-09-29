@@ -323,16 +323,25 @@ export function App() {
               <path d="M7 6h13M7 12h13M7 18h13M3 6h.01M3 12h.01M3 18h.01" />
             </Icon>
           </span>
-          <span className="sheet-tab">
-            <Icon size={15}>
-              <rect x="4" y="3" width="16" height="18" rx="2" />
-              <path d="M4 9h16M10 9v12" />
-            </Icon>
-            Лист 1
-          </span>
+          {document.projection?.sheets.map((sheet) => (
+            <button
+              className={`sheet-tab${document.activeSheetId === sheet.id ? ' active' : ''}`}
+              type="button"
+              key={sheet.id}
+              aria-label={`Перейти на лист ${sheet.name}`}
+              aria-current={document.activeSheetId === sheet.id ? 'page' : undefined}
+              onClick={() => document.selectSheet(sheet.id)}
+            >
+              <Icon size={15}>
+                <rect x="4" y="3" width="16" height="18" rx="2" />
+                <path d="M4 9h16M10 9v12" />
+              </Icon>
+              {sheet.name}
+            </button>
+          ))}
         </div>
         <span className="sheet-summary">
-          {document.sheet ? 'Лист 1' : 'Пустой лист'}
+          {document.sheet?.name ?? 'Пустой лист'}
           <span className="summary-separator">·</span>
           {document.sheet?.rows.length ?? 1_000} строк × {document.sheet?.columns.length ?? 26}{' '}
           столбцов

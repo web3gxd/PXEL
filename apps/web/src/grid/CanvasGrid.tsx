@@ -14,6 +14,10 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
   const [canvasAvailable, setCanvasAvailable] = useState(true);
 
   useEffect(() => {
+    scrollRef.current?.scrollTo(0, 0);
+  }, [document?.activeSheetId]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     const scroller = scrollRef.current;
     if (!canvas || !scroller) return;
@@ -113,7 +117,7 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
   };
 
   return (
-    <section className="grid-surface" aria-label="Лист 1">
+    <section className="grid-surface" aria-label={document?.sheet?.name ?? 'Пустой лист'}>
       <div
         ref={scrollRef}
         className="grid-scroll"

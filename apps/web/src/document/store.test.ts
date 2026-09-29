@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { create, fromBinary } from '@bufbuild/protobuf';
 import type { Reply, Request } from '../calculation/protocol';
-import { ClientEnvelopeSchema, ServerEnvelopeSchema } from '../generated/pxel/wire/v1/session_pb';
+import {
+  CellAddressSchema,
+  ClientEnvelopeSchema,
+  ServerEnvelopeSchema,
+} from '../generated/pxel/wire/v1/session_pb';
 import type { FormulaError } from '../generated/pxel/wire/v1/session_pb';
 import {
   DocumentStore,
@@ -1163,6 +1167,79 @@ it('snapshot boundary rejects malformed axes and nonfinite values', () => {
   expect(() => decodeProjection(invalid)).toThrow();
   expect(() => decodeProjection({})).toThrow();
 });
+it('selects sheets by stable ID and applies remote patches to hidden sheets', async () => {
+  const second = {
+    id: uuidV7(),
+    name: 'Plan',
+    rows: [uuidV7()],
+    columns: [uuidV7()],
+    cells: [] as Projection['sheets'][number]['cells'],
+  };
+  second.cells.push({
+    row_id: second.rows[0]!,
+    column_id: second.columns[0]!,
+    value: { type: 'text', value: 'second' },
+  });
+  const state = projection();
+  state.sheets[0]!.cells.push({
+    row_id: rowId,
+    column_id: columnId,
+    value: { type: 'text', value: 'first' },
+  });
+  state.sheets.push(second);
+  expect(decodeProjection(structuredClone(state)).sheets).toHaveLength(2);
+  const store = new DocumentStore();
+  store.load(structuredClone(state));
+  expect(store.display({ row: 0, column: 0 })).toBe('first');
+  await store.receive(
+    create(ServerEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'documentHeadChanged',
+        value: {
+          documentId: uuidBytes(documentId),
+          headVersion: 2n,
+          latestOperation: {
+            documentId: uuidBytes(documentId),
+            operationId: uuidBytes(uuidV7()),
+            actorId: uuidBytes(uuidV7()),
+            committedVersion: 2n,
+            confirmedStateHash: new Uint8Array(32),
+            canonicalOperation: {
+              kind: {
+                case: 'setCellValue',
+                value: {
+                  address: {
+                    sheetId: uuidBytes(second.id),
+                    rowId: uuidBytes(second.rows[0]!),
+                    columnId: uuidBytes(second.columns[0]!),
+                  },
+                  value: { kind: { case: 'text', value: 'remote' } },
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+  );
+  expect(store.projection?.version).toBe('2');
+  expect(store.selectSheet(second.id)).toBe(true);
+  expect(store.sheet?.name).toBe('Plan');
+  expect(store.display({ row: 0, column: 0 })).toBe('remote');
+  const refreshed = structuredClone(state);
+  refreshed.version = '3';
+  refreshed.sheets[1]!.cells[0]!.value = { type: 'text', value: 'updated' };
+  store.load(refreshed);
+  expect(store.activeSheetId).toBe(second.id);
+  expect(store.display({ row: 0, column: 0 })).toBe('updated');
+  expect(store.selectSheet(sheetId)).toBe(true);
+  expect(store.display({ row: 0, column: 0 })).toBe('first');
+  const collision = structuredClone(state);
+  collision.sheets[1]!.rows[0] = rowId;
+  expect(() => decodeProjection(collision)).toThrow();
+  store.dispose();
+});
 it('operation identities are valid UUIDv7', () => {
   expect(uuidV7()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
@@ -1227,6 +1304,40 @@ function calculation(
     },
   });
 }
+it('accepts authoritative calculation for a formula on a hidden sheet', async () => {
+  const state = formulaProjection();
+  const formula = state.sheets[0]!.cells.pop()!;
+  const second = {
+    id: uuidV7(),
+    name: 'Plan',
+    rows: [uuidV7()],
+    columns: [uuidV7()],
+    cells: [formula],
+  };
+  formula.row_id = second.rows[0]!;
+  formula.column_id = second.columns[0]!;
+  state.sheets.push(second);
+  vi.stubGlobal('location', { href: 'http://localhost/' });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, json: async () => structuredClone(state) })),
+  );
+  const store = new DocumentStore();
+  store.load(structuredClone(state));
+  expect(await store.connected(uuidBytes(documentId), () => true)).toBe(true);
+  const patch = calculation('2', 42);
+  if (patch.payload.case !== 'calculationCommitted') throw new Error('Missing calculation fixture');
+  patch.payload.value.cells[0]!.address = create(CellAddressSchema, {
+    sheetId: uuidBytes(second.id),
+    rowId: uuidBytes(second.rows[0]!),
+    columnId: uuidBytes(second.columns[0]!),
+  });
+  await store.receive(patch);
+  expect(store.calculationStatus).toBe('complete');
+  expect(store.selectSheet(second.id)).toBe(true);
+  expect(store.display({ row: 0, column: 0 })).toBe('42');
+  store.dispose();
+});
 describe('formula intents and versioned server calculation', () => {
   it('sends formula source separately and edits source while displaying server result', async () => {
     const { store, sent } = await connectedStore();
