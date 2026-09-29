@@ -258,10 +258,12 @@ schema 1. Клиент wire v1 при встрече `AddSheet` делает pro
 Одиннадцатый срез ([ADR-052](adr/052-active-sheet-ui.md)) показывает вкладки
 импортированных листов и переключает Canvas по stable sheet ID. Вся
 подтверждённая projection и серверный расчёт остаются общими для книги;
-выбор вкладки не пишет событие. Для многолистовой книги WASM preview временно
-отключается, поскольку текущий Worker init поддерживает один лист; формулы
-показывают только серверный результат. Создание/удаление листов в UI и
-native/WASM multi-sheet parity требуют отдельных gates.
+выбор вкладки не пишет событие. Последующий [ADR-053](adr/053-multi-sheet-wasm-preview.md)
+включил ограниченный multi-sheet WASM preview: init schema 2 передает оси и
+sparse cells всех листов, patch schema 1 адресует stable sheet ID. Chromium
+differential corpus 1001 книг/2002 patches, включая межлистовую формулу, дал
+одинаковые native/WASM outputs и hashes. Создание/удаление листов в UI,
+Excel golden parity и большой multi-sheet performance gate остаются открыты.
 Для snapshot schema 2 дополнительно прошёл PostgreSQL recovery test: один
 снимок двух листов + tail event на втором листе дали тот же domain hash, что
 полный replay всех четырёх событий. Это локальный filesystem/DB сценарий;

@@ -737,7 +737,7 @@ impl Workbook {
             .iter()
             .map(|sheet| sheet.sheet.clone())
             .collect::<Vec<_>>();
-        let mut workbook = Self::hydrate_many(
+        let mut workbook = Self::hydrate_sheets(
             image.document_id,
             image.version,
             seeds,
@@ -815,9 +815,10 @@ impl Workbook {
         seed: SheetSeed,
         cells: impl IntoIterator<Item = (CellAddress, CellContent)>,
     ) -> Result<Self, DomainError> {
-        Self::hydrate_many(document_id, version, std::iter::once(seed), cells)
+        Self::hydrate_sheets(document_id, version, std::iter::once(seed), cells)
     }
-    fn hydrate_many(
+    /// Hydrates ordered sheets together so cross-sheet bound references can be validated.
+    pub fn hydrate_sheets(
         document_id: DocumentId,
         version: DocumentVersion,
         seeds: impl IntoIterator<Item = SheetSeed>,

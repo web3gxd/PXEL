@@ -9,6 +9,9 @@ const ROW: &str = "00000000-0000-0000-0000-000000000003";
 const A: &str = "00000000-0000-0000-0000-000000000004";
 const B: &str = "00000000-0000-0000-0000-000000000005";
 const C: &str = "00000000-0000-0000-0000-000000000006";
+const SHEET_TWO: &str = "00000000-0000-0000-0000-000000000007";
+const ROW_TWO: &str = "00000000-0000-0000-0000-000000000008";
+const COLUMN_TWO: &str = "00000000-0000-0000-0000-000000000009";
 fn init() -> Value {
     json!({"schema_version":1,"document_id":DOC,"input_version":"3","pending_revision":"0","sheets":[{"id":SHEET,"name":"Лист 1","rows":[ROW],"columns":[A,B,C],"cells":[{"row_id":ROW,"column_id":A,"value":{"type":"number","value":2}},{"row_id":ROW,"column_id":B,"value":{"type":"formula","value":{"source":"=A1+1"}}},{"row_id":ROW,"column_id":C,"value":{"type":"formula","value":{"source":"=7"}}}]}]})
 }
@@ -51,6 +54,45 @@ fn incremental_preview_is_separate_and_has_shared_core_hash() {
         .map(|b| format!("{b:02x}"))
         .collect::<String>();
     assert_eq!(updated["normalized_result_hash"], hash);
+}
+
+#[test]
+fn two_sheet_preview_recalculates_cross_sheet_dependency() {
+    let mut input = init();
+    input["schema_version"] = json!(2);
+    input["sheets"][0]["cells"][1]["value"]["value"]["source"] = json!("='Sheet 2'!A1+1");
+    input["sheets"].as_array_mut().unwrap().push(json!({
+        "id": SHEET_TWO, "name": "Sheet 2", "rows": [ROW_TWO], "columns": [COLUMN_TWO],
+        "cells": [{"row_id":ROW_TWO,"column_id":COLUMN_TWO,"value":{"type":"number","value":4}}]
+    }));
+    let mut book = PreviewWorkbook::from_json(&input.to_string()).unwrap();
+    let first = calculate(&mut book);
+    assert_eq!(first["evaluated_cells"], 2);
+    assert_eq!(first["results"][0]["value"]["value"], 5.0);
+    let mut update = patch(vec![json!({
+        "sheet_id":SHEET_TWO,"row_id":ROW_TWO,"column_id":COLUMN_TWO,
+        "value":{"type":"number","value":9}
+    })]);
+    update["schema_version"] = json!(1);
+    book.apply_json(&update.to_string()).unwrap();
+    let second = calculate(&mut book);
+    assert_eq!(second["evaluated_cells"], 1);
+    assert_eq!(second["results"][0]["value"]["value"], 10.0);
+    let mut native = spreadsheet_formula::calculation::CalculationProjection::from_workbook(
+        book.workbook(),
+        Default::default(),
+    )
+    .unwrap();
+    native
+        .calculate(book.workbook(), Default::default(), &AtomicBool::new(false))
+        .unwrap();
+    let native_hash = native
+        .result_hash()
+        .unwrap()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    assert_eq!(second["normalized_result_hash"], native_hash);
 }
 
 #[test]
@@ -127,7 +169,7 @@ fn coalesced_version_jump_accepts_formula_metadata_at_new_base() {
 #[test]
 fn unknown_identity_schema_and_input_caps_fail_closed() {
     let mut input = init();
-    input["schema_version"] = json!(2);
+    input["schema_version"] = json!(3);
     assert!(matches!(
         PreviewWorkbook::from_json(&input.to_string()),
         Err(PreviewError::UnsupportedProfile)

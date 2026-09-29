@@ -12,6 +12,8 @@ The browser validates an ordered 1–64-sheet projection and keeps `activeSheetI
 
 The stateful WASM preview protocol currently accepts one sheet. For a multi-sheet book, the browser disposes that preview worker and displays only server-authoritative calculation results. This is a visible performance limitation, not a substitute evaluator. Native/WASM multi-sheet preview parity requires a separate change to the worker's versioned init/patch schema and fixtures.
 
+This temporary limitation was removed by [ADR-053](053-multi-sheet-wasm-preview.md). The historical decision above describes the behavior of this slice before the versioned multi-sheet init was added.
+
 ## Consequences
 
 Tab selection creates no durable event. Other participants see the selected sheet through ephemeral presence only. Add/delete/rename/reorder sheet controls still need commands and conflict semantics. The client must reject cross-sheet formula clipboard payloads until copy translation is specified; the scalar range copy already carries a sheet ID. A browser test opens a real imported two-sheet document, changes tabs and reads a cell on the second sheet.

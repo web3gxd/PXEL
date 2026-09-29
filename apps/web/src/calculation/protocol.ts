@@ -2,7 +2,7 @@ import type { CalculatedValue, Sheet, Value } from '../document/store';
 
 export type Stamp = { document_id: string; input_version: string; pending_revision: string };
 export type PreviewCell = { sheet_id: string; row_id: string; column_id: string; value: Value };
-export type PreviewInit = Stamp & { schema_version: 1; sheets: Sheet[] };
+export type PreviewInit = Stamp & { schema_version: 1 | 2; sheets: Sheet[] };
 export type PreviewPatch = Stamp & {
   schema_version: 1;
   expected_input_version: string;

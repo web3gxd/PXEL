@@ -134,6 +134,88 @@ it('keeps draft WASM preview separate from authored and canonical state, then re
   expect(store.display({ row: 0, column: 0 })).toBe('');
   expect(requests.filter((request) => request.kind === 'init')).toHaveLength(1);
 });
+it('initializes every sheet once and addresses preview patches by the owning sheet', () => {
+  const requests: Request[] = [];
+  let deliver: ((reply: Reply) => void) | undefined;
+  class PreviewWorker {
+    onmessage: ((event: MessageEvent<Reply>) => void) | null = null;
+    onerror = null;
+    constructor() {
+      deliver = (reply) => this.onmessage?.({ data: reply } as MessageEvent<Reply>);
+    }
+    postMessage(request: Request) {
+      requests.push(request);
+    }
+    terminate() {}
+  }
+  vi.stubGlobal('Worker', PreviewWorker);
+  const secondSheet = '01994100-0000-7000-8000-000000000005';
+  const secondRow = '01994100-0000-7000-8000-000000000006';
+  const secondColumn = '01994100-0000-7000-8000-000000000007';
+  const book = projection();
+  book.sheets[0]!.cells.push({
+    row_id: rowId,
+    column_id: columnId,
+    value: { type: 'formula', value: { source: "='Data'!A1+1" } },
+  });
+  book.sheets.push({
+    id: secondSheet,
+    name: 'Data',
+    rows: [secondRow],
+    columns: [secondColumn],
+    cells: [{ row_id: secondRow, column_id: secondColumn, value: { type: 'number', value: 4 } }],
+  });
+  const store = new DocumentStore();
+  store.load(book);
+  const init = requests[0];
+  expect(init?.kind).toBe('init');
+  if (init?.kind !== 'init') throw new Error('Expected preview init');
+  expect(init.data.schema_version).toBe(2);
+  expect(init.data.sheets).toHaveLength(2);
+  expect(init.data.sheets[1]?.cells[0]?.value).toEqual({ type: 'number', value: 4 });
+  expect(store.selectSheet(secondSheet)).toBe(true);
+  const selectedInit = requests[1];
+  if (selectedInit?.kind !== 'init') throw new Error('Expected preview reinit');
+  deliver?.({
+    id: selectedInit.id,
+    result: {
+      schema_version: 1,
+      preview: true,
+      complete: true,
+      full: true,
+      document_id: documentId,
+      input_version: '1',
+      pending_revision: '0',
+      formula_engine_version: 'pxel-formula-0.1.0',
+      compatibility_profile: 'pxel-excel-subset-v1',
+      normalized_result_hash: 'a'.repeat(64),
+      evaluated_cells: 1,
+      dirty_cells: 1,
+      results: [
+        {
+          sheet_id: sheetId,
+          row_id: rowId,
+          column_id: columnId,
+          value: { type: 'number', value: 5 },
+        },
+      ],
+      cleared: [],
+    },
+  });
+  store.begin('9');
+  const patch = requests[2];
+  expect(patch?.kind).toBe('apply');
+  if (patch?.kind !== 'apply') throw new Error('Expected preview patch');
+  expect(patch.data.cells).toEqual([
+    {
+      sheet_id: secondSheet,
+      row_id: secondRow,
+      column_id: secondColumn,
+      value: { type: 'number', value: 9 },
+    },
+  ]);
+  store.dispose();
+});
 async function connectedStore() {
   vi.useFakeTimers();
   vi.stubGlobal('location', { href: 'http://localhost/' });
@@ -1039,19 +1121,22 @@ describe('document projection and pending intents', () => {
     expect(store.projection?.version).toBe('3');
     store.disconnected();
   });
-  it('retries a transient projection rate limit without losing the current document', async () => {
+  it('retries consecutive projection rate limits without losing the current document', async () => {
     vi.useFakeTimers();
     const store = new DocumentStore();
     store.projection = projection();
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 429 })
+      .mockResolvedValueOnce({ ok: false, status: 429 })
+      .mockResolvedValueOnce({ ok: false, status: 429 })
+      .mockResolvedValueOnce({ ok: false, status: 429 })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => projection() });
     vi.stubGlobal('fetch', fetcher);
     const refresh = store.refresh();
     await vi.runAllTimersAsync();
     expect(await refresh).toBe(true);
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(5);
     expect(store.projection?.document_id).toBe(documentId);
     expect(store.error).toBe('');
     store.dispose();

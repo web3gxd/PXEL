@@ -71,6 +71,30 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
   });
   return { init, patches: [mutation(1, replacement), mutation(2, a)] };
 });
+{
+  const document = id(2000), first = id(2001), second = id(2002);
+  const rowA = id(2003), rowB = id(2004), colA = id(2005), colB = id(2006);
+  const patch = (revision, value) => ({
+    schema_version: 1, document_id: document,
+    expected_input_version: '3', input_version: '3',
+    expected_pending_revision: String(revision - 1), pending_revision: String(revision),
+    cells: [{sheet_id: second, row_id: rowB, column_id: colB, value: {type: 'number', value}}],
+  });
+  requests.push({
+    init: {
+      schema_version: 2, document_id: document, input_version: '3', pending_revision: '0',
+      sheets: [
+        {id: first, name: 'Main', rows: [rowA], columns: [colA], cells: [
+          {row_id: rowA, column_id: colA, value: {type: 'formula', value: {source: "='Other Sheet'!A1+1"}}},
+        ]},
+        {id: second, name: 'Other Sheet', rows: [rowB], columns: [colB], cells: [
+          {row_id: rowB, column_id: colB, value: {type: 'number', value: 4}},
+        ]},
+      ],
+    },
+    patches: [patch(1, 9), patch(2, 4)],
+  });
+}
 const input = JSON.stringify(requests);
 const native = spawnSync(
   'cargo',
@@ -158,7 +182,7 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const start = performance.now();
   const actual = await page.evaluate((items) => window.run(items), requests);
-  assert.equal(actual.results.length, 1000);
+  assert.equal(actual.results.length, requests.length);
   for (let index = 0; index < expected.length; index++) {
     assert.deepEqual(
       actual.results[index],
@@ -170,8 +194,8 @@ try {
   const report = {
     schema_version: 1,
     seed,
-    workbooks: 1000,
-    patches: 2000,
+    workbooks: requests.length,
+    patches: requests.reduce((total, request) => total + request.patches.length, 0),
     native_wasm_parity: true,
     wasm_loads: loads,
     input_bytes: Buffer.byteLength(input),

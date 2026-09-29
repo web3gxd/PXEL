@@ -383,7 +383,11 @@ impl PreviewWorkbook {
             return Err(PreviewError::LimitExceeded);
         }
         let init: Initialize = serde_json::from_str(json).map_err(|_| PreviewError::InvalidJson)?;
-        if init.schema_version != 1 || init.sheets.len() != 1 {
+        if !matches!(init.schema_version, 1 | 2)
+            || init.sheets.is_empty()
+            || init.sheets.len() > 64
+            || (init.schema_version == 1 && init.sheets.len() != 1)
+        {
             return Err(PreviewError::UnsupportedProfile);
         }
         let pending_revision = revision(&init.pending_revision)?;
@@ -392,42 +396,49 @@ impl PreviewWorkbook {
         }
         let document_id = DocumentId::from_bytes(identity(&init.document_id)?)?;
         let version = DocumentVersion::new(revision(&init.input_version)?)?;
-        let sheet = init
-            .sheets
-            .into_iter()
-            .next()
-            .ok_or(PreviewError::InvalidProjection)?;
-        if sheet.rows.len() > 100_000 || sheet.columns.len() > 1000 || sheet.cells.len() > 100_000 {
-            return Err(PreviewError::LimitExceeded);
-        }
-        let seed = SheetSeed {
-            id: SheetId::from_bytes(identity(&sheet.id)?)?,
-            name: sheet.name,
-            rows: sheet
-                .rows
-                .iter()
-                .map(|id| Ok(RowId::from_bytes(identity(id)?)?))
-                .collect::<Result<_, PreviewError>>()?,
-            columns: sheet
-                .columns
-                .iter()
-                .map(|id| Ok(ColumnId::from_bytes(identity(id)?)?))
-                .collect::<Result<_, PreviewError>>()?,
-        };
-        let axes = Workbook::hydrate(document_id, version, seed.clone(), std::iter::empty())?;
-        let mut addresses = BTreeSet::new();
-        let mut cells = Vec::with_capacity(sheet.cells.len());
-        let mut retained = (0usize, 0usize);
-        for cell in sheet.cells {
-            let at = address(&sheet.id, &cell.row_id, &cell.column_id)?;
-            if !addresses.insert(at) {
-                return Err(PreviewError::InvalidProjection);
+        let mut seeds = Vec::with_capacity(init.sheets.len());
+        let mut sheet_cells = Vec::with_capacity(init.sheets.len());
+        let mut total_cells = 0usize;
+        for sheet in init.sheets {
+            total_cells = total_cells
+                .checked_add(sheet.cells.len())
+                .ok_or(PreviewError::LimitExceeded)?;
+            if sheet.rows.len() > 100_000 || sheet.columns.len() > 1000 || total_cells > 100_000 {
+                return Err(PreviewError::LimitExceeded);
             }
-            let content = cell_content(cell.value, at, &axes, version)?;
-            retain_budget(&content, &mut retained)?;
-            cells.push((at, content));
+            seeds.push(SheetSeed {
+                id: SheetId::from_bytes(identity(&sheet.id)?)?,
+                name: sheet.name,
+                rows: sheet
+                    .rows
+                    .iter()
+                    .map(|id| Ok(RowId::from_bytes(identity(id)?)?))
+                    .collect::<Result<_, PreviewError>>()?,
+                columns: sheet
+                    .columns
+                    .iter()
+                    .map(|id| Ok(ColumnId::from_bytes(identity(id)?)?))
+                    .collect::<Result<_, PreviewError>>()?,
+            });
+            sheet_cells.push((sheet.id, sheet.cells));
         }
-        let workbook = Workbook::hydrate(document_id, version, seed, cells)?;
+        let axes =
+            Workbook::hydrate_sheets(document_id, version, seeds.clone(), std::iter::empty())?;
+        let mut addresses = BTreeSet::new();
+        let mut cells = Vec::with_capacity(total_cells);
+        let mut retained = (0usize, 0usize);
+        for (sheet_id, input_cells) in sheet_cells {
+            for cell in input_cells {
+                let at = address(&sheet_id, &cell.row_id, &cell.column_id)?;
+                if !addresses.insert(at) {
+                    return Err(PreviewError::InvalidProjection);
+                }
+                let content = cell_content(cell.value, at, &axes, version)?;
+                retain_budget(&content, &mut retained)?;
+                cells.push((at, content));
+            }
+        }
+        let workbook = Workbook::hydrate_sheets(document_id, version, seeds, cells)?;
         let calculation =
             CalculationProjection::from_workbook(&workbook, CalculationLimits::default())?;
         Ok(Self {

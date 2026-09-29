@@ -337,6 +337,7 @@ export class DocumentStore {
   private previewRevision = 0n;
   private previewOverlay = new Set<string>();
   private previewDirty = new Set<string>();
+  private previewSheetByRow = new Map<string, string>();
   private preview = new PreviewClient((status, values, stamp) => {
     this.previewStatus = status;
     this.previewValues = values ?? new Map();
@@ -489,14 +490,10 @@ export class DocumentStore {
     const sheet = this.sheet,
       projection = this.projection;
     if (!sheet || !projection) return;
-    if (projection.sheets.length > 1) {
-      this.preview.dispose();
-      this.previewStatus = 'idle';
-      this.previewValues = new Map();
-      this.previewStamp = undefined;
-      this.previewOverlay.clear();
-      this.previewDirty.clear();
-      return;
+    if (reset) {
+      this.previewSheetByRow = new Map(
+        projection.sheets.flatMap((item) => item.rows.map((row) => [row, item.id] as const)),
+      );
     }
     const overlay = new Set<string>();
     for (const pending of this.pending) {
@@ -520,20 +517,40 @@ export class DocumentStore {
     };
     if (reset) {
       const keys = new Set([...this.confirmed.keys(), ...overlay]);
-      const cells = [...keys].map((cellKey) => {
+      const cellsBySheet = new Map(
+        projection.sheets.map((item) => [item.id, [] as Sheet['cells']]),
+      );
+      for (const cellKey of keys) {
         const [row_id = '', column_id = ''] = cellKey.split('/');
-        return { row_id, column_id, value: this.previewValue(row_id, column_id) };
-      });
-      this.preview.reset({ ...stamp, schema_version: 1, sheets: [{ ...sheet, cells }] });
-    } else {
-      const cells: PreviewCell[] = [...touched].map((cellKey) => {
-        const [row_id = '', column_id = ''] = cellKey.split('/');
-        return {
-          sheet_id: sheet.id,
+        const owner = this.previewSheetByRow.get(row_id);
+        if (!owner) continue;
+        cellsBySheet.get(owner)?.push({
           row_id,
           column_id,
           value: this.previewValue(row_id, column_id),
-        };
+        });
+      }
+      this.preview.reset({
+        ...stamp,
+        schema_version: projection.sheets.length === 1 ? 1 : 2,
+        sheets: projection.sheets.map((item) => ({
+          ...item,
+          cells: cellsBySheet.get(item.id) ?? [],
+        })),
+      });
+    } else {
+      const cells: PreviewCell[] = [...touched].flatMap((cellKey) => {
+        const [row_id = '', column_id = ''] = cellKey.split('/');
+        const sheet_id = this.previewSheetByRow.get(row_id);
+        if (!sheet_id) return [];
+        return [
+          {
+            sheet_id,
+            row_id,
+            column_id,
+            value: this.previewValue(row_id, column_id),
+          },
+        ];
       });
       this.preview.patch(stamp, cells);
     }
@@ -840,7 +857,7 @@ export class DocumentStore {
     this.notify();
     try {
       let response: Response | undefined;
-      for (const delay of [200, 400, 800, 0]) {
+      for (const delay of [200, 400, 800, 1600, 3200, 0]) {
         if (generation !== this.syncGeneration) return false;
         response = await fetch(`/api/documents/${encodeURIComponent(id)}`, {
           signal: AbortSignal.timeout(10000),
