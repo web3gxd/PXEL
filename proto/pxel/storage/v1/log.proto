@@ -31,6 +31,7 @@ message Operation {
   SetCellValues set_cell_values = 12;
   CellWrite authored_cell_write = 13;
   CellWrite compensating_cell_write = 14;
+  CopyRange copy_range = 15;
  }
 }
 message AdvanceCalculationEpoch {
@@ -69,6 +70,9 @@ message CellWrite {
  AuthoredWriteKind authored_kind = 6;
 }
 message CellContent { oneof kind { CellValue value = 1; BoundFormula formula = 2; } }
+// Schema 14 freezes all destinations. Missing content clears the destination.
+message CopyRange { repeated ContentWrite writes = 1; }
+message ContentWrite { CellAddress address = 1; CellContent content = 2; }
 enum AuthoredWriteKind {
  AUTHORED_WRITE_KIND_UNSPECIFIED = 0;
  AUTHORED_WRITE_KIND_SET_VALUE = 1;

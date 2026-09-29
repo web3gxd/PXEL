@@ -635,6 +635,7 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
     if usize::from(input.operation.is_some())
         + usize::from(input.formula_command.is_some())
         + usize::from(input.undo_cell.is_some())
+        + usize::from(input.copy_range.is_some())
         != 1
     {
         return Err(SessionError::InvalidCommand);
@@ -647,6 +648,13 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
     } else if let Some(undo) = input.undo_cell {
         CommandPayload::UndoCell {
             target_operation_id: OperationId::from_bytes(bytes_id(&undo.target_operation_id)?)?,
+        }
+    } else if let Some(copy) = input.copy_range {
+        CommandPayload::CopyRange {
+            source: address(copy.source)?,
+            destination: address(copy.destination)?,
+            rows: copy.rows,
+            columns: copy.columns,
         }
     } else {
         match input
@@ -946,7 +954,9 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
                 columns: columns.iter().map(|id| id.as_bytes().to_vec()).collect(),
             })
         }
-        Operation::CreateWorkbook { .. } | Operation::AdvanceCalculationEpoch { .. } => {
+        Operation::CreateWorkbook { .. }
+        | Operation::AdvanceCalculationEpoch { .. }
+        | Operation::CopyRange { .. } => {
             return None;
         }
         Operation::SetCellFormula { address, formula } => {
@@ -963,13 +973,13 @@ pub(crate) fn committed_message(event: &CommittedEvent) -> Option<v1::OperationC
     let EventPrincipal::User(actor_id) = event.principal else {
         return None;
     };
-    let operation = canonical(event.operation.clone())?;
+    let operation = canonical(event.operation.clone());
     Some(v1::OperationCommitted {
         document_id: event.document_id.as_bytes().to_vec(),
         operation_id: event.operation_id.as_bytes().to_vec(),
         actor_id: actor_id.as_bytes().to_vec(),
         committed_version: event.version.get(),
-        canonical_operation: Some(operation),
+        canonical_operation: operation,
         confirmed_state_hash: event.state_hash.to_vec(),
         transformed: false,
     })
@@ -1015,6 +1025,7 @@ pub async fn handle_command(
                 }
                 SessionError::BaseVersionAhead => v1::RejectionCode::BaseVersionAhead,
                 SessionError::RebaseWindowExceeded => v1::RejectionCode::RebaseWindowExceeded,
+                SessionError::SourceVersionChanged => v1::RejectionCode::SourceVersionChanged,
                 SessionError::InvalidFormula => v1::RejectionCode::InvalidFormula,
                 SessionError::Journal(JournalError::NotFound) => v1::RejectionCode::NotFound,
                 SessionError::Journal(JournalError::IdempotencyConflict) => {
@@ -1062,6 +1073,7 @@ pub async fn handle_command(
                     v1::RejectionCode::BaseVersionAhead
                         | v1::RejectionCode::RetryableConflict
                         | v1::RejectionCode::RebaseWindowExceeded
+                        | v1::RejectionCode::SourceVersionChanged
                 ),
             })
         }
@@ -1115,6 +1127,26 @@ mod undo_wire_tests {
             })),
         });
         assert!(matches!(command(forged), Err(SessionError::InvalidCommand)));
+        let cell = v1::CellAddress {
+            sheet_id: id(),
+            row_id: id(),
+            column_id: id(),
+        };
+        let mut copy = envelope();
+        copy.copy_range = Some(v1::CopyRangeCommand {
+            source: Some(cell.clone()),
+            destination: Some(cell),
+            rows: 1,
+            columns: 1,
+        });
+        assert!(matches!(
+            command(copy.clone())?.operation,
+            CommandPayload::CopyRange { .. }
+        ));
+        copy.undo_cell = Some(v1::UndoCell {
+            target_operation_id: id(),
+        });
+        assert!(matches!(command(copy), Err(SessionError::InvalidCommand)));
         Ok(())
     }
 }

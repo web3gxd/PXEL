@@ -109,6 +109,13 @@ hard restart/retry и browser DPR 1/2 прошли. Локальный один�
 `UndoCell` возвращает `NotUndoable`, не связывая старый source с новыми осями.
 Domain/codec, PostgreSQL/WebSocket и browser DPR 1/2 проверки прошли. General
 formula undo, batch/structural undo и redo ещё открыты.
+Двенадцатый срез ([ADR-030](adr/030-authoritative-copy-range.md)) добавляет
+server-side `CopyRange` смешанного прямоугольника до 1,000 ячеек: source
+фиксируется на точной версии документа, формулы связываются сервером в точках
+назначения, а значения и пустоты сохраняются одной schema-14 операцией.
+Устаревший source отклоняется; текущий wire v1 передаёт head/version/hash,
+после чего клиент обновляет projection по HTTP. Cut/move, стили и batch undo
+по-прежнему открыты. Результаты полного gate записываются в RUNBOOK.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

@@ -137,6 +137,78 @@ test('keyboard range selection copies a sparse rectangle and pastes it in one ve
   await expect(page.getByTestId('active-cell')).toHaveText('D4: 1');
 });
 
+test('mixed value and formula range copies atomically with shifted references', async ({
+  page,
+}) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('3');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  await bar.fill('=A1*2');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const second = await page.context().newPage();
+  await second.goto(page.url());
+  await expect(second.getByTestId('connection-status')).toHaveText('Подключено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Shift+ArrowRight');
+  await expect(page.getByTestId('selection-range')).toHaveText('Выделено A1:B1');
+  await page.keyboard.press('ControlOrMeta+C');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByTestId('active-cell')).toHaveText('C3: ');
+  await page.keyboard.press('ControlOrMeta+V');
+  const id = new URL(page.url()).searchParams.get('document');
+  await expect
+    .poll(async () => {
+      const state = await page.evaluate(
+        async (documentId) => (await fetch(`/api/documents/${documentId}`)).json(),
+        id,
+      );
+      return state.version;
+    })
+    .toBe('4');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(page.getByTestId('active-cell')).toHaveText('C3: 3');
+  await grid.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByTestId('active-cell')).toHaveText('D3: 6');
+  await expect(bar).toHaveValue('=(C3*2)');
+  const secondGrid = second.getByRole('region', { name: 'Область таблицы' });
+  await secondGrid.focus();
+  await second.keyboard.press('ArrowRight');
+  await second.keyboard.press('ArrowRight');
+  await second.keyboard.press('ArrowRight');
+  await second.keyboard.press('ArrowDown');
+  await second.keyboard.press('ArrowDown');
+  await expect(second.getByTestId('active-cell')).toHaveText('D3: 6');
+  await second.close();
+  await page.reload();
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  const state = await page.evaluate(
+    async (documentId) => (await fetch(`/api/documents/${documentId}`)).json(),
+    id,
+  );
+  expect(state.version).toBe('4');
+  expect(
+    state.sheets[0].cells.some(
+      (cell: { value: { type: string; value?: { current_text?: string } } }) =>
+        cell.value.type === 'formula' && cell.value.value?.current_text === '=(C3*2)',
+    ),
+  ).toBe(true);
+});
+
 test('pointer drag selects a rectangle without allocating DOM cells', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');

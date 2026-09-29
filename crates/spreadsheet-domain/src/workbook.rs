@@ -305,6 +305,11 @@ pub struct CellWrite {
     pub address: CellAddress,
     pub value: CellValue,
 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContentWrite {
+    pub address: CellAddress,
+    pub content: Option<CellContent>,
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CellWriteKind {
     SetValue,
@@ -350,6 +355,11 @@ pub enum Operation {
     },
     SetCellValues {
         writes: Vec<CellWrite>,
+    },
+    /// Frozen source contents, including transformed formulas and blank cells.
+    /// Replay never reads the source range again.
+    CopyRange {
+        writes: Vec<ContentWrite>,
     },
     SetCellFormula {
         address: CellAddress,
@@ -405,6 +415,12 @@ pub enum CommandPayload {
     },
     SetCellValues {
         writes: Vec<CellWrite>,
+    },
+    CopyRange {
+        source: CellAddress,
+        destination: CellAddress,
+        rows: u32,
+        columns: u32,
     },
     SetCellFormula {
         address: CellAddress,
@@ -766,6 +782,37 @@ impl Workbook {
                 .collect::<Vec<_>>();
             return self.preview_candidate(&operations, next_version);
         }
+        if let Operation::CopyRange { writes } = operation {
+            if writes.is_empty() || writes.len() > 1_000 {
+                return Err(DomainError::LimitExceeded);
+            }
+            let text_bytes = writes
+                .iter()
+                .try_fold(0usize, |total, write| {
+                    total.checked_add(write.content.as_ref().map_or(0, CellContent::text_bytes))
+                })
+                .ok_or(DomainError::LimitExceeded)?;
+            if text_bytes > MAX_CELL_VALUE_BATCH_TEXT_BYTES {
+                return Err(DomainError::LimitExceeded);
+            }
+            let operations = writes
+                .iter()
+                .map(|write| match &write.content {
+                    Some(CellContent::Value(value)) => Operation::SetCellValue {
+                        address: write.address,
+                        value: value.clone(),
+                    },
+                    Some(CellContent::Formula(formula)) => Operation::SetCellFormula {
+                        address: write.address,
+                        formula: formula.clone(),
+                    },
+                    None => Operation::ClearCell {
+                        address: write.address,
+                    },
+                })
+                .collect::<Vec<_>>();
+            return self.preview_candidate(&operations, next_version);
+        }
         let budgets = self.operation_budgets(operation)?;
         let mut next = self.clone();
         next.apply_operation(operation, budgets, next_version)?;
@@ -835,6 +882,7 @@ impl Workbook {
                 | Operation::ClearCell { address }
                 | Operation::CellWrite { address, .. } => *address,
                 Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
+                Operation::CopyRange { .. } => return Err(DomainError::InvalidAxis),
             };
             if !seen.insert(address) {
                 return Err(DomainError::InvalidAxis);
@@ -1005,6 +1053,7 @@ impl Workbook {
                 self.updated_budgets(*address, value.text_bytes(), 0)?
             }
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
+            Operation::CopyRange { .. } => return Err(DomainError::InvalidAxis),
             Operation::SetCellFormula { address, formula } => {
                 self.validate_formula(*address, formula)?;
                 self.updated_budgets(*address, formula.text_bytes(), formula.ast_memory_bytes())?
@@ -1200,6 +1249,7 @@ impl Workbook {
                 }
             }
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
+            Operation::CopyRange { .. } => return Err(DomainError::InvalidAxis),
             Operation::SetCellFormula { address, formula } => {
                 let sheet = self
                     .sheets

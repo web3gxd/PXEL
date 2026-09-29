@@ -32,6 +32,8 @@ pub enum SessionError {
     InvalidCommand,
     #[error("formula base version is outside the available axis history")]
     RebaseWindowExceeded,
+    #[error("range copy source version is no longer current")]
+    SourceVersionChanged,
     #[error("formula could not be normalized")]
     InvalidFormula,
     #[error("document invariant failed")]
@@ -642,6 +644,105 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
                 })
                 .collect::<Result<_, SessionError>>()?,
         }),
+        CommandPayload::CopyRange {
+            source,
+            destination,
+            rows,
+            columns,
+        } => {
+            if command.base_version != workbook.version() {
+                return Err(SessionError::SourceVersionChanged);
+            }
+            let count = rows
+                .checked_mul(*columns)
+                .ok_or(SessionError::InvalidCommand)?;
+            if count == 0 || count > 1_000 || source.sheet != destination.sheet {
+                return Err(SessionError::InvalidCommand);
+            }
+            let sheet = workbook
+                .sheets()
+                .iter()
+                .find(|sheet| sheet.id() == source.sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            let source_row = sheet
+                .row_position(source.row)
+                .ok_or(DomainError::MissingRow)?;
+            let source_column = sheet
+                .column_position(source.column)
+                .ok_or(DomainError::MissingColumn)?;
+            let destination_row = sheet
+                .row_position(destination.row)
+                .ok_or(DomainError::MissingRow)?;
+            let destination_column = sheet
+                .column_position(destination.column)
+                .ok_or(DomainError::MissingColumn)?;
+            let mut writes = Vec::with_capacity(count as usize);
+            for row_offset in 0..*rows {
+                for column_offset in 0..*columns {
+                    let sr = source_row
+                        .checked_add(row_offset)
+                        .ok_or(SessionError::InvalidCommand)?;
+                    let sc = source_column
+                        .checked_add(column_offset)
+                        .ok_or(SessionError::InvalidCommand)?;
+                    let dr = destination_row
+                        .checked_add(row_offset)
+                        .ok_or(SessionError::InvalidCommand)?;
+                    let dc = destination_column
+                        .checked_add(column_offset)
+                        .ok_or(SessionError::InvalidCommand)?;
+                    let source_address = spreadsheet_domain::workbook::CellAddress {
+                        sheet: source.sheet,
+                        row: *sheet
+                            .rows()
+                            .get(sr as usize)
+                            .ok_or(DomainError::MissingRow)?,
+                        column: *sheet
+                            .columns()
+                            .get(sc as usize)
+                            .ok_or(DomainError::MissingColumn)?,
+                    };
+                    let destination_address = spreadsheet_domain::workbook::CellAddress {
+                        sheet: destination.sheet,
+                        row: *sheet
+                            .rows()
+                            .get(dr as usize)
+                            .ok_or(DomainError::MissingRow)?,
+                        column: *sheet
+                            .columns()
+                            .get(dc as usize)
+                            .ok_or(DomainError::MissingColumn)?,
+                    };
+                    let content = match workbook.cell_content(source_address)? {
+                        Some(CellContent::Value(value)) => Some(CellContent::Value(value.clone())),
+                        Some(CellContent::Formula(formula)) => {
+                            let current =
+                                spreadsheet_formula::bound::render_current(formula, workbook)
+                                    .map_err(|_| SessionError::InvalidFormula)?;
+                            let copied = spreadsheet_formula::copy_formula_text(
+                                &current,
+                                (sr, sc),
+                                (dr, dc),
+                            )
+                            .map_err(|_| SessionError::InvalidFormula)?;
+                            let bound = spreadsheet_formula::binder::bind(
+                                &copied,
+                                workbook,
+                                destination_address,
+                            )
+                            .map_err(|_| SessionError::InvalidFormula)?;
+                            Some(CellContent::Formula(bound))
+                        }
+                        None => None,
+                    };
+                    writes.push(spreadsheet_domain::workbook::ContentWrite {
+                        address: destination_address,
+                        content,
+                    });
+                }
+            }
+            Ok(Operation::CopyRange { writes })
+        }
         CommandPayload::ClearCell { address } => Ok(Operation::CellWrite {
             address: *address,
             content: None,

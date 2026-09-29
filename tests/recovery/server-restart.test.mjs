@@ -11,6 +11,7 @@ import {
   releaseSessions,
   formulaCommand,
   connect,
+  copyRangeCommand,
   createDocument,
   deleteColumnsCommand,
   deleteRowsCommand,
@@ -373,6 +374,61 @@ test(
         const formulaUndoRetry = await connect(base, cookie);
         assert.equal((await formulaUndoRetry.send(formulaUndo)).case, 'receipt');
         formulaUndoRetry.socket.terminate();
+
+        const { snapshot: rangeBase } = await createDocument(base, cookie);
+        const rangeWriter = await connect(base, cookie);
+        assert.equal(
+          (await rangeWriter.send(setCommand(rangeWriter, rangeBase, 3))).case,
+          'committed',
+        );
+        assert.equal(
+          (
+            await rangeWriter.send(
+              formulaCommand(rangeWriter, { ...rangeBase, version: '2' }, '=A1*2', {
+                column: 1,
+                sequence: 2,
+              }),
+            )
+          ).case,
+          'committed',
+        );
+        const rangeCopy = copyRangeCommand(
+          rangeWriter,
+          { ...rangeBase, version: '3' },
+          { destinationRow: 1, destinationColumn: 2, rows: 1, columns: 2 },
+          { sequence: 3 },
+        );
+        const rangeCommit = await rangeWriter.send(rangeCopy);
+        assert.equal(rangeCommit.case, 'committed');
+        rangeWriter.socket.terminate();
+        await kill();
+        await start();
+        const rangeRecovered = await getDocument(base, cookie, rangeBase.document_id);
+        assert.equal(rangeRecovered.version, '4');
+        assert.equal(
+          rangeRecovered.state_hash,
+          Buffer.from(rangeCommit.value.confirmedStateHash).toString('hex'),
+        );
+        assert.equal(
+          rangeRecovered.sheets[0].cells.find(
+            (cell) =>
+              cell.row_id === rangeBase.sheets[0].rows[1] &&
+              cell.column_id === rangeBase.sheets[0].columns[3],
+          )?.value.value.current_text,
+          '=(C2*2)',
+        );
+        const rangeResult = await calculation(base, cookie, rangeBase.document_id, 4);
+        assert.deepEqual(
+          rangeResult.values.find(
+            (cell) =>
+              cell.row_id === rangeBase.sheets[0].rows[1] &&
+              cell.column_id === rangeBase.sheets[0].columns[3],
+          )?.value,
+          { type: 'number', value: 6 },
+        );
+        const rangeRetry = await connect(base, cookie);
+        assert.equal((await rangeRetry.send(rangeCopy)).case, 'receipt');
+        rangeRetry.socket.terminate();
       } finally {
         client.socket.terminate();
       }

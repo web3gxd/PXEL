@@ -333,7 +333,7 @@ describe('document projection and pending intents', () => {
     expect(store.selected).toEqual({ row: 2, column: 2 });
     store.dispose();
   });
-  it('rejects multi-cell formula copy rather than changing reference meaning', () => {
+  it('captures a versioned stable-ID range when selection contains a formula', () => {
     const state = projection();
     state.sheets[0]!.columns.push(uuidV7());
     state.sheets[0]!.cells.push({
@@ -344,9 +344,77 @@ describe('document projection and pending intents', () => {
     const store = new DocumentStore();
     store.load(state);
     store.select({ row: 0, column: 1 }, true);
-    expect(store.copySelectionTsv()).toBeUndefined();
-    expect(store.error).toContain('формул');
+    expect(store.copySelectionTsv()).toBe('=1+1\t');
+    const raw = store.copyRangePayload();
+    expect(raw).toContain(rowId);
+    expect(raw).toContain(columnId);
+    state.version = '2';
+    store.load(state);
+    expect(store.pasteRangeCopy(raw ?? '')).toBe(false);
     store.dispose();
+  });
+  it('sends one server-bound range copy and refreshes its canonical projection', async () => {
+    const { store, sent } = await connectedStore();
+    const expanded = projection();
+    expanded.sheets[0]!.rows.push(uuidV7());
+    expanded.sheets[0]!.columns.push(uuidV7(), uuidV7(), uuidV7());
+    expanded.sheets[0]!.cells.push({
+      row_id: rowId,
+      column_id: expanded.sheets[0]!.columns[1]!,
+      value: {
+        type: 'formula',
+        value: {
+          source: '=A1+1',
+          current_text: '=A1+1',
+          canonical: '=(A1+1)',
+          ast_schema: 1,
+          compatibility_profile: 'pxel-excel-subset-v1',
+          bound_at_version: '1',
+        },
+      },
+    });
+    store.load(expanded);
+    store.select({ row: 0, column: 1 }, true);
+    const raw = store.copyRangePayload();
+    expect(raw).toBeDefined();
+    store.select({ row: 1, column: 2 });
+    expect(store.pasteRangeCopy(raw ?? '')).toBe(true);
+    expect(store.pending).toHaveLength(1);
+    const sentCommand = sent
+      .map((bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload)
+      .find((payload) => payload.case === 'command');
+    if (!sentCommand || sentCommand.case !== 'command' || !sentCommand.value.copyRange)
+      throw new Error('Missing range copy command');
+    expect(sentCommand.value.copyRange.rows).toBe(1);
+    expect(sentCommand.value.copyRange.columns).toBe(2);
+    expect(bytesUuid(sentCommand.value.copyRange.source?.rowId ?? new Uint8Array())).toBe(rowId);
+    const next = structuredClone(expanded);
+    next.version = '2';
+    next.sheets[0]!.cells.push({
+      row_id: expanded.sheets[0]!.rows[1]!,
+      column_id: expanded.sheets[0]!.columns[2]!,
+      value: { type: 'number', value: 7 },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => next }));
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: sentCommand.value.operationId,
+            committedVersion: 2n,
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.pending).toHaveLength(0);
+    expect(store.projection?.version).toBe('2');
+    store.disconnected();
   });
   it('uses current formula text for copy and refuses a stale clipboard version', async () => {
     const store = new DocumentStore();
@@ -583,6 +651,41 @@ describe('document projection and pending intents', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     store.disconnected();
   });
+  it('refreshes instead of applying a head event with no canonical patch', async () => {
+    const { store } = await connectedStore();
+    const next = projection();
+    next.version = '2';
+    next.sheets[0]!.cells.push({
+      row_id: rowId,
+      column_id: columnId,
+      value: { type: 'number', value: 42 },
+    });
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => next }));
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'documentHeadChanged',
+          value: {
+            documentId: uuidBytes(documentId),
+            headVersion: 2n,
+            latestOperation: {
+              documentId: uuidBytes(documentId),
+              operationId: uuidBytes(uuidV7()),
+              actorId: uuidBytes(uuidV7()),
+              committedVersion: 2n,
+              confirmedStateHash: new Uint8Array(32),
+            },
+          },
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.projection?.version).toBe('2');
+    expect(store.display({ row: 0, column: 0 })).toBe('42');
+    store.disconnected();
+  });
   it('uses the replay barrier to repair a missing event', async () => {
     const { store } = await connectedStore();
     const next = projection();
@@ -686,6 +789,39 @@ describe('document projection and pending intents', () => {
     );
     expect(store.projection?.version).toBe('2');
     expect(store.display({ row: 0, column: 0 })).toBe('42');
+    store.disconnected();
+  });
+  it('refreshes when a head hint contains an event without a wire canonical operation', async () => {
+    const { store } = await connectedStore();
+    const next = projection();
+    next.version = '2';
+    next.sheets[0]!.cells = [
+      { row_id: rowId, column_id: columnId, value: { type: 'number', value: 43 } },
+    ];
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => next }));
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'documentHeadChanged',
+          value: {
+            documentId: uuidBytes(documentId),
+            headVersion: 2n,
+            latestOperation: {
+              documentId: uuidBytes(documentId),
+              operationId: uuidBytes(uuidV7()),
+              actorId: uuidBytes(uuidV7()),
+              committedVersion: 2n,
+              confirmedStateHash: new Uint8Array(32),
+            },
+          },
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.projection?.version).toBe('2');
+    expect(store.display({ row: 0, column: 0 })).toBe('43');
     store.disconnected();
   });
   it('uses a full authorized refresh for a structural axis event', async () => {

@@ -142,7 +142,9 @@ async fn send_replay(
             if event.version.get() != cursor || cursor > barrier.get() {
                 return Err(());
             }
-            if documents::committed_message(&event).is_none() {
+            if documents::committed_message(&event)
+                .is_none_or(|message| message.canonical_operation.is_none())
+            {
                 return send_replay_fallback(outbound, principal, session, delivery, barrier).await;
             }
             let payload = head_hint(

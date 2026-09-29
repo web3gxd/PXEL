@@ -159,13 +159,24 @@ message DocumentCommand {
   uint64 base_version = 4;
   uint64 client_sequence = 5;
   CanonicalOperation operation = 6;
-  // Exactly one of legacy operation or formula_command must be present.
+  // Exactly one command payload must be present.
   // Client ASTs are never accepted as canonical input.
   SetCellFormulaCommand formula_command = 7;
   UndoCell undo_cell = 8;
+  CopyRangeCommand copy_range = 9;
 }
 
 message UndoCell { bytes target_operation_id = 1; }
+
+// Source and destination are stable-ID top-left cells on the same sheet.
+// Copy is admitted only at the exact source version; the server freezes all
+// resulting contents, including transformed formulas, before durable commit.
+message CopyRangeCommand {
+  CellAddress source = 1;
+  CellAddress destination = 2;
+  uint32 rows = 3;
+  uint32 columns = 4;
+}
 
 message SetCellFormulaCommand {
   CellAddress address = 1;
@@ -208,6 +219,7 @@ enum RejectionCode {
   REJECTION_CODE_NOT_UNDOABLE = 14;
   REJECTION_CODE_UNDO_WINDOW_EXCEEDED = 15;
   REJECTION_CODE_PAYLOAD_TOO_LARGE = 16;
+  REJECTION_CODE_SOURCE_VERSION_CHANGED = 17;
 }
 
 message OperationRejected {

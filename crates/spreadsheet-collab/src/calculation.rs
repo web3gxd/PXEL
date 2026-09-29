@@ -93,6 +93,11 @@ impl CalculationHandle {
                     .changed
                     .extend(writes.iter().map(|write| write.address));
             }
+            Operation::CopyRange { writes } => {
+                pending
+                    .changed
+                    .extend(writes.iter().map(|write| write.address));
+            }
             Operation::CreateWorkbook { .. } => pending.rebuild = true,
             Operation::ExtendRows { .. } => pending.rebuild = true,
             Operation::InsertRows { .. }

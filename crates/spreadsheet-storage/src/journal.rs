@@ -44,7 +44,7 @@ struct StoredEventRow<'a> {
     canonical_event_hash: &'a [u8],
 }
 fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=13) {
+    if !matches!(row.schema_version, 1..=14) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -104,6 +104,7 @@ fn touches_address(operation: &Operation, address: CellAddress) -> bool {
             address: target, ..
         } => *target == address,
         Operation::SetCellValues { writes } => writes.iter().any(|write| write.address == address),
+        Operation::CopyRange { writes } => writes.iter().any(|write| write.address == address),
         Operation::DeleteRows { sheet, rows } => {
             *sheet == address.sheet && rows.contains(&address.row)
         }
@@ -426,6 +427,10 @@ impl OperationJournal for PgDatabase {
             },
             Operation::SetCellValues { writes } => CommandPayload::SetCellValues {
                 writes: writes.clone(),
+            },
+            Operation::CopyRange { .. } => match &c.operation {
+                CommandPayload::CopyRange { .. } => c.operation.clone(),
+                _ => return Err(JournalError::Corrupt),
             },
             Operation::ExtendRows { sheet, rows } => CommandPayload::ExtendRows {
                 sheet: *sheet,

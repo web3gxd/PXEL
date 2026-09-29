@@ -125,8 +125,10 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           if (!document?.sheet) return;
           event.preventDefault();
           const formula = event.clipboardData.getData('application/x-pxel-formula+json');
+          const range = event.clipboardData.getData('application/x-pxel-range+json');
           const tsv = event.clipboardData.getData('application/x-pxel-tsv+json');
           if (formula) void document.pasteFormulaCopy(formula, document.pasteOrigin);
+          else if (range) document.pasteRangeCopy(range, document.pasteOrigin);
           else if (tsv) {
             try {
               const internal = JSON.parse(tsv) as { schema_version?: number; text?: string };
@@ -151,6 +153,8 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           );
           const formula = document.copyFormulaPayload();
           if (formula) event.clipboardData.setData('application/x-pxel-formula+json', formula);
+          const range = document.copyRangePayload();
+          if (range) event.clipboardData.setData('application/x-pxel-range+json', range);
         }}
         onPointerDown={(event) => {
           if (!document?.sheet) return;

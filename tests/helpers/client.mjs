@@ -247,6 +247,33 @@ export function undoCellCommand(
   };
 }
 
+export function copyRangeCommand(
+  client,
+  snapshot,
+  { sourceRow = 0, sourceColumn = 0, destinationRow, destinationColumn, rows, columns },
+  { sequence = 1, operationId = uuid7() } = {},
+) {
+  const sheet = snapshot.sheets[0];
+  const cell = (row, column) => ({
+    sheetId: bytes(sheet.id),
+    rowId: bytes(sheet.rows[row]),
+    columnId: bytes(sheet.columns[column]),
+  });
+  return {
+    operationId: bytes(operationId),
+    documentId: bytes(snapshot.document_id),
+    actorId: client.actorId,
+    baseVersion: BigInt(snapshot.version),
+    clientSequence: BigInt(sequence),
+    copyRange: {
+      source: cell(sourceRow, sourceColumn),
+      destination: cell(destinationRow, destinationColumn),
+      rows,
+      columns,
+    },
+  };
+}
+
 export function batchValuesCommand(
   client,
   snapshot,

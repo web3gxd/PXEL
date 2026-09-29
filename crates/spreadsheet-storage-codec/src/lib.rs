@@ -114,6 +114,27 @@ fn hash_content(h: &mut Sha256, content: &Option<CellContent>) -> Result<(), Cod
     }
     Ok(())
 }
+fn validate_copy_writes(writes: &[ContentWrite]) -> Result<(), CodecError> {
+    if writes.is_empty()
+        || writes.len() > 1_000
+        || writes
+            .iter()
+            .map(|write| write.address)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != writes.len()
+        || writes
+            .iter()
+            .try_fold(0usize, |total, write| {
+                total.checked_add(write.content.as_ref().map_or(0, CellContent::text_bytes))
+            })
+            .ok_or(CodecError::Invalid)?
+            > MAX_CELL_VALUE_BATCH_TEXT_BYTES
+    {
+        return Err(CodecError::Invalid);
+    }
+    Ok(())
+}
 fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
     use v1::operation::Kind;
     Ok(v1::Operation {
@@ -243,6 +264,20 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                                         CellValue::Boolean(v) => v1::cell_value::Kind::Boolean(v),
                                     }),
                                 }),
+                            })
+                        })
+                        .collect::<Result<_, CodecError>>()?,
+                })
+            }
+            Operation::CopyRange { writes } => {
+                validate_copy_writes(writes)?;
+                Kind::CopyRange(v1::CopyRange {
+                    writes: writes
+                        .iter()
+                        .map(|write| {
+                            Ok(v1::ContentWrite {
+                                address: Some(addr(&write.address)),
+                                content: encode_optional_content(&write.content)?,
                             })
                         })
                         .collect::<Result<_, CodecError>>()?,
@@ -529,6 +564,25 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
             }
             Operation::SetCellValues { writes }
         }
+        Kind::CopyRange(batch) => {
+            if batch.writes.is_empty() || batch.writes.len() > 1_000 {
+                return Err(CodecError::Invalid);
+            }
+            let writes = batch
+                .writes
+                .into_iter()
+                .map(|write| {
+                    let address = decode_addr(write.address.ok_or(CodecError::Invalid)?)?;
+                    let content = write
+                        .content
+                        .map(|content| decode_content(content, address))
+                        .transpose()?;
+                    Ok(ContentWrite { address, content })
+                })
+                .collect::<Result<Vec<_>, CodecError>>()?;
+            validate_copy_writes(&writes)?;
+            Operation::CopyRange { writes }
+        }
         kind @ (Kind::AuthoredCellWrite(_) | Kind::CompensatingCellWrite(_)) => {
             let compensating = matches!(kind, Kind::CompensatingCellWrite(_));
             let write = match kind {
@@ -600,6 +654,7 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::CopyRange { .. } => 14,
         Operation::CellWrite {
             content: Some(CellContent::Formula(_)),
             undoes: Some(_),
@@ -654,7 +709,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=13) {
+    if !matches!(e.schema_version, 1..=14) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -671,7 +726,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         &operation,
     ) {
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -679,7 +734,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13, 0, actor, _) => {
+        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -861,6 +916,17 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
                 }
             }
         }
+        Operation::CopyRange { writes } => {
+            validate_copy_writes(writes)?;
+            h.update([15]);
+            h.update((writes.len() as u64).to_le_bytes());
+            for write in writes {
+                h.update(write.address.sheet.as_bytes());
+                h.update(write.address.row.as_bytes());
+                h.update(write.address.column.as_bytes());
+                hash_content(h, &write.content)?;
+            }
+        }
         Operation::CellWrite {
             address,
             content,
@@ -962,6 +1028,21 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
                 writes: writes.clone(),
             },
         )?,
+        CommandPayload::CopyRange {
+            source,
+            destination,
+            rows,
+            columns,
+        } => {
+            h.update([15]);
+            for address in [source, destination] {
+                h.update(address.sheet.as_bytes());
+                h.update(address.row.as_bytes());
+                h.update(address.column.as_bytes());
+            }
+            h.update(rows.to_le_bytes());
+            h.update(columns.to_le_bytes());
+        }
         CommandPayload::ClearCell { address } => {
             semantic_operation(&mut h, &Operation::ClearCell { address: *address })?
         }
@@ -1019,6 +1100,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::InsertColumnsRebased { .. })
         | (EventPrincipal::System, Operation::DeleteColumns { .. })
         | (EventPrincipal::System, Operation::SetCellValues { .. })
+        | (EventPrincipal::System, Operation::CopyRange { .. })
         | (EventPrincipal::System, Operation::CellWrite { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
@@ -1760,6 +1842,48 @@ mod formula_tests {
         assert_eq!(decode(&bytes)?, event);
         let mut old_schema = v1::EventEnvelope::decode(bytes.as_slice())?;
         old_schema.schema_version = 12;
+        assert!(matches!(
+            decode(&old_schema.encode_to_vec()),
+            Err(CodecError::UnsupportedSchema)
+        ));
+        Ok(())
+    }
+    #[test]
+    fn frozen_mixed_copy_roundtrips_only_in_schema_fourteen()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let formula = fixture()?;
+        let address = formula.origin();
+        let value_address = CellAddress {
+            column: ColumnId::from_bytes([4; 16])?,
+            ..address
+        };
+        let event = CommittedEvent {
+            document_id: DocumentId::from_bytes([7; 16])?,
+            operation_id: OperationId::from_bytes([8; 16])?,
+            principal: EventPrincipal::User(ActorId::from_bytes([9; 16])?),
+            version: DocumentVersion::new(4)?,
+            operation: Operation::CopyRange {
+                writes: vec![
+                    ContentWrite {
+                        address,
+                        content: Some(CellContent::Formula(formula)),
+                    },
+                    ContentWrite {
+                        address: value_address,
+                        content: Some(CellContent::Value(CellValue::Number(3.0))),
+                    },
+                ],
+            },
+            state_hash: [11; 32],
+        };
+        let bytes = encode(&event)?;
+        assert_eq!(
+            v1::EventEnvelope::decode(bytes.as_slice())?.schema_version,
+            14
+        );
+        assert_eq!(decode(&bytes)?, event);
+        let mut old_schema = v1::EventEnvelope::decode(bytes.as_slice())?;
+        old_schema.schema_version = 13;
         assert!(matches!(
             decode(&old_schema.encode_to_vec()),
             Err(CodecError::UnsupportedSchema)

@@ -7,6 +7,7 @@ import {
   bytes,
   decodeFrame,
   connect,
+  copyRangeCommand,
   createDocument,
   deleteColumnsCommand,
   deleteRowsCommand,
@@ -27,6 +28,170 @@ import {
   uuid7,
 } from '../helpers/client.mjs';
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
+
+test('copy range freezes values and translated formulas in one durable version', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 3, { sequence: 1 }))).case,
+      'committed',
+    );
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, { ...snapshot, version: '2' }, '=A1*2', {
+            column: 1,
+            sequence: 2,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    assert.equal(
+      (
+        await client.send(
+          setCommand(client, { ...snapshot, version: '3' }, 5, { row: 1, sequence: 3 }),
+        )
+      ).case,
+      'committed',
+    );
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, { ...snapshot, version: '4' }, '=A2+1', {
+            row: 1,
+            column: 1,
+            sequence: 4,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    const atFive = await getDocument(base, cookie, snapshot.document_id);
+    const copy = copyRangeCommand(
+      client,
+      atFive,
+      {
+        destinationRow: 2,
+        destinationColumn: 2,
+        rows: 2,
+        columns: 2,
+      },
+      { sequence: 5 },
+    );
+    const commit = await client.send(copy);
+    assert.equal(commit.case, 'committed');
+    assert.equal(commit.value.committedVersion, 6n);
+    assert.equal(commit.value.canonicalOperation, undefined);
+    const loaded = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(loaded.version, '6');
+    const returning = await connect(base, cookie);
+    try {
+      const [hint, complete] = await receiveFrames(returning, 2, () =>
+        subscribeDocument(returning, snapshot.document_id, 5),
+      );
+      assert.equal(hint.case, 'documentHeadChanged');
+      assert.equal(hint.value.headVersion, 6n);
+      assert.equal(hint.value.latestOperation, undefined);
+      assert.equal(complete.case, 'replayComplete');
+      assert.equal(complete.value.resyncRequired, true);
+    } finally {
+      returning.socket.terminate();
+    }
+    const at = (row, column) =>
+      loaded.sheets[0].cells.find(
+        (cell) =>
+          cell.row_id === snapshot.sheets[0].rows[row] &&
+          cell.column_id === snapshot.sheets[0].columns[column],
+      )?.value;
+    assert.deepEqual(at(2, 2), { type: 'number', value: 3 });
+    assert.equal(at(2, 3)?.value.current_text, '=(C3*2)');
+    assert.deepEqual(at(3, 2), { type: 'number', value: 5 });
+    assert.equal(at(3, 3)?.value.current_text, '=(C4+1)');
+    const results = await calculation(base, cookie, snapshot.document_id, 6);
+    assert.deepEqual(
+      results.values.find(
+        (cell) =>
+          cell.row_id === snapshot.sheets[0].rows[2] &&
+          cell.column_id === snapshot.sheets[0].columns[3],
+      )?.value,
+      { type: 'number', value: 6 },
+    );
+    assert.equal((await client.send(copy)).case, 'receipt');
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).version, '6');
+    const collision = structuredClone(copy);
+    collision.copyRange.destination.rowId = bytes(snapshot.sheets[0].rows[4]);
+    const conflict = await client.send(collision);
+    assert.equal(conflict.case, 'rejected');
+    assert.equal(conflict.value.code, 6);
+
+    const stale = copyRangeCommand(
+      client,
+      atFive,
+      {
+        destinationRow: 4,
+        destinationColumn: 4,
+        rows: 1,
+        columns: 1,
+      },
+      { sequence: 6 },
+    );
+    const rejected = await client.send(stale);
+    assert.equal(rejected.case, 'rejected');
+    assert.equal(rejected.value.code, 17);
+    assert.equal(rejected.value.retryable, false);
+    assert.equal(rejected.value.resyncRequired, true);
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).version, '6');
+
+    const overlap = copyRangeCommand(
+      client,
+      loaded,
+      { destinationRow: 0, destinationColumn: 1, rows: 1, columns: 2 },
+      { sequence: 7 },
+    );
+    assert.equal((await client.send(overlap)).case, 'committed');
+    const overlapped = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(overlapped.version, '7');
+    const sameRow = (column) =>
+      overlapped.sheets[0].cells.find(
+        (cell) =>
+          cell.row_id === snapshot.sheets[0].rows[0] &&
+          cell.column_id === snapshot.sheets[0].columns[column],
+      )?.value;
+    assert.deepEqual(sameRow(1), { type: 'number', value: 3 });
+    assert.equal(sameRow(2)?.value.current_text, '=(B1*2)');
+    const fill = setCommand(client, overlapped, 77, { row: 3, column: 4, sequence: 8 });
+    assert.equal((await client.send(fill)).case, 'committed');
+    const blank = copyRangeCommand(
+      client,
+      { ...overlapped, version: '8' },
+      {
+        sourceRow: 2,
+        sourceColumn: 0,
+        destinationRow: 3,
+        destinationColumn: 4,
+        rows: 1,
+        columns: 1,
+      },
+      { sequence: 9 },
+    );
+    assert.equal((await client.send(blank)).case, 'committed');
+    const cleared = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(cleared.version, '9');
+    assert.equal(
+      cleared.sheets[0].cells.some(
+        (cell) =>
+          cell.row_id === snapshot.sheets[0].rows[3] &&
+          cell.column_id === snapshot.sheets[0].columns[4],
+      ),
+      false,
+    );
+  } finally {
+    client.socket.close();
+  }
+});
 
 test('value batch commits atomically in one version, replays and deduplicates', async () => {
   const cookie = await login(base);

@@ -106,6 +106,12 @@ type PendingUndo = {
   bytes: Uint8Array;
   attempts: number;
 };
+type PendingRangeCopy = {
+  kind: 'copyRange';
+  id: string;
+  bytes: Uint8Array;
+  attempts: number;
+};
 type Pending =
   | PendingCell
   | PendingBatch
@@ -114,7 +120,8 @@ type Pending =
   | PendingDeletion
   | PendingColumnInsertion
   | PendingColumnDeletion
-  | PendingUndo;
+  | PendingUndo
+  | PendingRangeCopy;
 export function uuidBytes(id: string) {
   return Uint8Array.from(id.replaceAll('-', '').match(/../g) ?? [], (pair) => parseInt(pair, 16));
 }
@@ -168,6 +175,7 @@ const rejectionText: Record<number, string> = {
   14: 'Эту операцию пока нельзя отменить.',
   15: 'Срок отмены этой операции истек. Последние 10 000 изменений доступны для отмены.',
   16: 'Изменение слишком большое для надежной записи в журнал.',
+  17: 'Источник диапазона изменился. Скопируйте его ещё раз.',
 };
 const isUuid = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -903,12 +911,12 @@ export class DocumentStore {
       const fields: string[] = [];
       for (let column = startColumn; column <= endColumn; column++) {
         const value = this.value({ row, column });
-        if (count > 1 && value?.type === 'formula') {
-          this.error = 'Копирование диапазона с формулами пока недоступно.';
+        const text = value?.type === 'formula' ? value.value.current_text : displayValue(value);
+        if (text === undefined) {
+          this.error = 'Формула ещё не готова для копирования.';
           this.notify();
           return undefined;
         }
-        const text = displayValue(value);
         if (/\r|\n|\t/.test(text) || (value?.type === 'text' && text.startsWith('='))) {
           this.error = 'Эту ячейку нельзя без потерь скопировать как TSV.';
           this.notify();
@@ -1089,6 +1097,124 @@ export class DocumentStore {
       from_row: this.selected.row,
       from_column: this.selected.column,
     });
+  }
+  copyRangePayload() {
+    const sheet = this.sheet,
+      projection = this.projection;
+    if (!sheet || !projection || this.pending.length || this.editing) return undefined;
+    const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
+    const rows = endRow - startRow + 1,
+      columns = endColumn - startColumn + 1;
+    if (rows * columns <= 1 || rows * columns > 1_000) return undefined;
+    let hasFormula = false;
+    for (let row = startRow; row <= endRow && !hasFormula; row++)
+      for (let column = startColumn; column <= endColumn; column++)
+        if (this.value({ row, column })?.type === 'formula') {
+          hasFormula = true;
+          break;
+        }
+    if (!hasFormula) return undefined;
+    const row = sheet.rows[startRow],
+      column = sheet.columns[startColumn];
+    if (!row || !column) return undefined;
+    return JSON.stringify({
+      schema_version: 1,
+      document_id: projection.document_id,
+      version: projection.version,
+      sheet_id: sheet.id,
+      row_id: row,
+      column_id: column,
+      rows,
+      columns,
+    });
+  }
+  pasteRangeCopy(raw: string, position: Position = this.pasteOrigin) {
+    const projection = this.projection,
+      sheet = this.sheet,
+      actor = this.actor;
+    if (!projection || !sheet || !actor || byteLength(raw) > 16 * 1024 || this.pending.length)
+      return false;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return false;
+    }
+    if (!payload || typeof payload !== 'object') return false;
+    const copy = payload as Record<string, unknown>;
+    if (
+      copy.schema_version !== 1 ||
+      copy.document_id !== projection.document_id ||
+      copy.version !== projection.version ||
+      copy.sheet_id !== sheet.id ||
+      typeof copy.row_id !== 'string' ||
+      typeof copy.column_id !== 'string' ||
+      !Number.isInteger(copy.rows) ||
+      !Number.isInteger(copy.columns) ||
+      (copy.rows as number) < 1 ||
+      (copy.columns as number) < 1 ||
+      (copy.rows as number) * (copy.columns as number) > 1_000
+    ) {
+      this.error = 'Источник диапазона изменился. Скопируйте его ещё раз.';
+      this.notify();
+      return false;
+    }
+    const sourceRow = sheet.rows.indexOf(copy.row_id),
+      sourceColumn = sheet.columns.indexOf(copy.column_id);
+    const rows = copy.rows as number,
+      columns = copy.columns as number;
+    if (
+      sourceRow < 0 ||
+      sourceColumn < 0 ||
+      sourceRow + rows > sheet.rows.length ||
+      sourceColumn + columns > sheet.columns.length ||
+      position.row + rows > sheet.rows.length ||
+      position.column + columns > sheet.columns.length
+    ) {
+      this.error = 'Диапазон выходит за границы листа.';
+      this.notify();
+      return false;
+    }
+    const destinationRow = sheet.rows[position.row],
+      destinationColumn = sheet.columns[position.column];
+    if (!destinationRow || !destinationColumn) return false;
+    const id = uuidV7();
+    const bytes = toBinary(
+      ClientEnvelopeSchema,
+      create(ClientEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'command',
+          value: {
+            operationId: uuidBytes(id),
+            documentId: uuidBytes(projection.document_id),
+            actorId: actor,
+            baseVersion: BigInt(projection.version),
+            clientSequence: ++this.sequence,
+            copyRange: {
+              source: {
+                sheetId: uuidBytes(sheet.id),
+                rowId: uuidBytes(copy.row_id),
+                columnId: uuidBytes(copy.column_id),
+              },
+              destination: {
+                sheetId: uuidBytes(sheet.id),
+                rowId: uuidBytes(destinationRow),
+                columnId: uuidBytes(destinationColumn),
+              },
+              rows,
+              columns,
+            },
+          },
+        },
+      }),
+    );
+    if (bytes.byteLength > 1_048_576) return false;
+    this.pending.push({ kind: 'copyRange', id, bytes, attempts: 0 });
+    this.error = '';
+    this.notify();
+    this.flush();
+    return true;
   }
   async pasteFormulaCopy(raw: string, position: Position = this.selected) {
     const projection = this.projection;
@@ -1637,7 +1763,7 @@ export class DocumentStore {
       if (hint.headVersion > BigInt(this.projection.version)) {
         const event = hint.latestOperation;
         if (
-          event &&
+          event?.canonicalOperation &&
           hint.headVersion === BigInt(this.projection.version) + 1n &&
           event.canonicalOperation?.kind.case !== 'extendRows' &&
           event.canonicalOperation?.kind.case !== 'insertRows' &&
@@ -1652,8 +1778,7 @@ export class DocumentStore {
             event.operationId.length !== 16 ||
             event.actorId.length !== 16 ||
             event.committedVersion !== hint.headVersion ||
-            event.confirmedStateHash.length !== 32 ||
-            !event.canonicalOperation
+            event.confirmedStateHash.length !== 32
           )
             throw new Error('Invalid canonical head event');
           this.apply(event.canonicalOperation);
@@ -1694,6 +1819,13 @@ export class DocumentStore {
     this.inflight = undefined;
     if (payload.case === 'rejected') {
       const rejection = payload.value;
+      if (pending?.kind === 'copyRange' && rejection.code === 17) {
+        this.pending = this.pending.filter((p) => p.id !== id);
+        this.error = 'Источник диапазона изменился. Скопируйте его ещё раз.';
+        await this.refresh();
+        this.notify();
+        return;
+      }
       if (rejection.retryable) {
         this.error = 'Сервер занят. Повторяем изменение…';
         this.timer = setTimeout(() => this.flush(), 1500);
