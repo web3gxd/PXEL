@@ -353,7 +353,7 @@
           </div>
           <div class="doing">
             <b>04</b><span>Структура</span
-            ><small>Оси, диапазоны, TSV, копия формулы и защищённый undo одной ячейки</small>
+            ><small>Оси, диапазоны, TSV, копия формулы и guarded undo с возвратом формулы</small>
           </div>
           <div><b>05</b><span>Snapshots</span><small>S3 + recovery</small></div>
           <div><b>06</b><span>XLSX</span><small>импорт и экспорт</small></div>
@@ -369,10 +369,12 @@
           относительные ссылки, а сервер заново связывает текст со stable IDs. Shift+стрелки и drag
           выделяют прямоугольник; Ctrl+C/V переносит до 1000 обычных значений одним commit. Undo
           отменяет недавнюю собственную запись новой версией; поздняя чужая правка блокирует его.
-          Один замер в PostgreSQL с хвостом 1000 событий занял 22,461 мс — это не p95. Очередь
-          отправки ограничена 160 кадрами / 2 MiB. Локальные latency и paused-socket stress
-          измерены: медленный клиент закрыт после send timeout. Cross-host поведение и сетевой queue
-          overflow ещё открыты. Linux/Compose/remote CI — отдельные gates.
+          Если запись затёрла формулу, undo возвращает её вместе с расчётом только при неизменных
+          осях; после вставки или удаления строк и столбцов возвращается явный отказ. Один замер в
+          PostgreSQL с хвостом 1000 событий занял 22,461 мс — это не p95. Очередь отправки
+          ограничена 160 кадрами / 2 MiB. Локальные latency и paused-socket stress измерены:
+          медленный клиент закрыт после send timeout. Cross-host поведение и сетевой queue overflow
+          ещё открыты. Linux/Compose/remote CI — отдельные gates.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>

@@ -59,7 +59,7 @@ message DeleteRows { bytes sheet_id = 1; repeated bytes rows = 2; }
 message InsertColumns { bytes sheet_id = 1; bytes before_column_id = 2; repeated bytes columns = 3; }
 message DeleteColumns { bytes sheet_id = 1; repeated bytes columns = 2; }
 message SetCellValues { repeated SetCellValue writes = 1; }
-// Schema 11/12 preserve the exact preimage for replay and guarded compensation.
+// Schema 11/12 preserve the exact preimage; schema 13 restores formula preimages.
 message CellWrite {
  CellAddress address = 1;
  CellContent content = 2;

@@ -271,9 +271,6 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                     Some(CellWriteKind::Clear) if content.is_some() => {
                         return Err(CodecError::Invalid);
                     }
-                    None if matches!(content, Some(CellContent::Formula(_))) => {
-                        return Err(CodecError::Invalid);
-                    }
                     _ => {}
                 }
                 let write = v1::CellWrite {
@@ -588,9 +585,6 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                 Some(CellWriteKind::Clear) if content.is_some() => {
                     return Err(CodecError::Invalid);
                 }
-                None if matches!(content, Some(CellContent::Formula(_))) => {
-                    return Err(CodecError::Invalid);
-                }
                 _ => {}
             }
             Operation::CellWrite {
@@ -606,6 +600,11 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::CellWrite {
+            content: Some(CellContent::Formula(_)),
+            undoes: Some(_),
+            ..
+        } => 13,
         Operation::CellWrite {
             undoes: Some(_), ..
         } => 12,
@@ -655,7 +654,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=12) {
+    if !matches!(e.schema_version, 1..=13) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -672,7 +671,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         &operation,
     ) {
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -680,7 +679,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12, 0, actor, _) => {
+        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -1731,6 +1730,40 @@ mod formula_tests {
             target_operation_id: OperationId::from_bytes([8; 16])?,
         };
         assert_ne!(command_fingerprint(&retry)?, fingerprint);
+        Ok(())
+    }
+    #[test]
+    fn formula_preimage_compensation_roundtrips_only_in_schema_thirteen()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let formula = fixture()?;
+        let address = formula.origin();
+        let event = CommittedEvent {
+            document_id: DocumentId::from_bytes([7; 16])?,
+            operation_id: OperationId::from_bytes([8; 16])?,
+            principal: EventPrincipal::User(ActorId::from_bytes([9; 16])?),
+            version: DocumentVersion::new(4)?,
+            operation: Operation::CellWrite {
+                address,
+                content: Some(CellContent::Formula(formula)),
+                previous: Some(CellContent::Value(CellValue::Number(12.0))),
+                kind: None,
+                undoes: Some(OperationId::from_bytes([10; 16])?),
+                undoes_version: Some(DocumentVersion::new(3)?),
+            },
+            state_hash: [11; 32],
+        };
+        let bytes = encode(&event)?;
+        assert_eq!(
+            v1::EventEnvelope::decode(bytes.as_slice())?.schema_version,
+            13
+        );
+        assert_eq!(decode(&bytes)?, event);
+        let mut old_schema = v1::EventEnvelope::decode(bytes.as_slice())?;
+        old_schema.schema_version = 12;
+        assert!(matches!(
+            decode(&old_schema.encode_to_vec()),
+            Err(CodecError::UnsupportedSchema)
+        ));
         Ok(())
     }
     #[test]

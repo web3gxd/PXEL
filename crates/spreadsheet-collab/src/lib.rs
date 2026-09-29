@@ -441,7 +441,12 @@ async fn submit<J: OperationJournal>(
                 else {
                     return Err(JournalError::NotUndoable.into());
                 };
-                if matches!(previous, Some(CellContent::Formula(_))) {
+                // A historical bound formula was not present in the workbook
+                // while this value occupied its cell, so axis edits could not
+                // rebase it. Restore it only when the axes have not changed.
+                if matches!(previous, Some(CellContent::Formula(_)))
+                    && workbook.last_axis_change_version() > target.version
+                {
                     return Err(JournalError::NotUndoable.into());
                 }
                 Operation::CellWrite {

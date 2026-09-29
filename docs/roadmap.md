@@ -102,6 +102,13 @@ hard restart/retry и browser DPR 1/2 прошли. Локальный один�
 хвостом 1000 событий: 22.461 ms, не p95
 ([условия](benchmarks/2026-09-29-undo-tail-local.md)). Старые события,
 формульный preimage, batch и структура не отменяются этим срезом.
+Одиннадцатый срез ([ADR-029](adr/029-formula-preimage-undo.md)) восстанавливает
+формульный preimage одиночной value/clear записи, если после неё не менялись
+оси. Formula AST сохраняется в schema-13 компенсации; canonical patch сообщает
+`SetCellFormula`, а сервер пересчитывает результат. После структурного изменения
+`UndoCell` возвращает `NotUndoable`, не связывая старый source с новыми осями.
+Domain/codec, PostgreSQL/WebSocket и browser DPR 1/2 проверки прошли. General
+formula undo, batch/structural undo и redo ещё открыты.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

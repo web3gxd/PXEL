@@ -44,7 +44,7 @@ struct StoredEventRow<'a> {
     canonical_event_hash: &'a [u8],
 }
 fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=12) {
+    if !matches!(row.schema_version, 1..=13) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -87,12 +87,7 @@ fn undo_target_address(
             undoes: None,
             undoes_version: None,
             ..
-        } => {
-            if matches!(previous, Some(CellContent::Formula(_))) {
-                return Err(JournalError::NotUndoable);
-            }
-            Ok((*address, previous.clone()))
-        }
+        } => Ok((*address, previous.clone())),
         _ => Err(JournalError::NotUndoable),
     }
 }

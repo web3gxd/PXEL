@@ -21,6 +21,7 @@ import {
   nextFrame,
   receiveFrames,
   setCommand,
+  undoCellCommand,
   sendPresence,
   subscribeDocument,
   uuid7,
@@ -1154,6 +1155,75 @@ test(
     }
   },
 );
+
+test('undo restores a formula preimage only while its axes are unchanged', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 7, { sequence: 1 }))).case,
+      'committed',
+    );
+    const formula = await client.send(
+      formulaCommand(client, { ...snapshot, version: '2' }, '=A1+1', {
+        column: 1,
+        sequence: 2,
+      }),
+    );
+    assert.equal(formula.case, 'committed');
+    const overwrite = setCommand(client, { ...snapshot, version: '3' }, 99, {
+      column: 1,
+      sequence: 3,
+    });
+    assert.equal((await client.send(overwrite)).case, 'committed');
+    const undo = await client.send(
+      undoCellCommand(client, { ...snapshot, version: '4' }, overwrite.operationId, {
+        sequence: 4,
+      }),
+    );
+    assert.equal(undo.case, 'committed', `undo rejected with code ${undo.value?.code}`);
+    assert.equal(undo.value.canonicalOperation.kind.case, 'setCellFormula');
+    const restored = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(restored.version, '5');
+    assert.equal(
+      restored.sheets[0].cells.find((cell) => cell.column_id === snapshot.sheets[0].columns[1])
+        ?.value.value.source,
+      '=A1+1',
+    );
+    const calculated = await calculation(base, cookie, snapshot.document_id, 5);
+    assert.equal(calculated.status, 'complete');
+    assert.deepEqual(
+      calculated.values.find((cell) => cell.column_id === snapshot.sheets[0].columns[1])?.value,
+      { type: 'number', value: 8 },
+    );
+
+    const later = setCommand(client, restored, 100, { column: 1, sequence: 5 });
+    assert.equal((await client.send(later)).case, 'committed');
+    const insertion = await client.send(
+      insertRowsCommand(
+        client,
+        { ...restored, version: '6' },
+        snapshot.sheets[0].rows[0],
+        [uuid7()],
+        {
+          sequence: 6,
+        },
+      ),
+    );
+    assert.equal(insertion.case, 'committed');
+    const rejected = await client.send(
+      undoCellCommand(client, { ...restored, version: '7' }, later.operationId, {
+        sequence: 7,
+      }),
+    );
+    assert.equal(rejected.case, 'rejected');
+    assert.equal(rejected.value.code, 14);
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).version, '7');
+  } finally {
+    client.socket.close();
+  }
+});
 
 test(
   'create, durable commit, exact retry, collision and stable-ID validation',

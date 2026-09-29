@@ -122,7 +122,8 @@ fn domain_preimage_guard_needs_journal_history_check_for_equal_value_write()
 }
 
 #[test]
-fn clearing_formula_records_preimage_but_undo_cannot_restore_it_yet() -> Result<(), DomainError> {
+fn clearing_formula_records_preimage_and_restores_it_on_unchanged_axes() -> Result<(), DomainError>
+{
     let (book, address) = seed()?;
     let formula = Formula::new(
         "=42".into(),
@@ -148,16 +149,14 @@ fn clearing_formula_records_preimage_but_undo_cannot_restore_it_yet() -> Result<
     assert!(book.cell_content(address)?.is_none());
     let undo = Operation::CellWrite {
         address,
-        content: Some(formula_content),
+        content: Some(formula_content.clone()),
         previous: None,
         kind: None,
         undoes: Some(OperationId::from_bytes([5; 16])?),
         undoes_version: Some(DocumentVersion::new(3)?),
     };
-    assert_eq!(
-        book.candidate(&undo, DocumentVersion::new(4)?).err(),
-        Some(DomainError::UnsupportedUndoFormula)
-    );
+    let restored = book.candidate(&undo, DocumentVersion::new(4)?)?;
+    assert_eq!(restored.cell_content(address)?, Some(&formula_content));
     Ok(())
 }
 

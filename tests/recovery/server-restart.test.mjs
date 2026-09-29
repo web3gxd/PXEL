@@ -333,6 +333,46 @@ test(
         assert.equal((await undoRetry.send(undo)).case, 'receipt');
         assert.equal((await getDocument(base, cookie, undoBase.document_id)).version, '3');
         undoRetry.socket.terminate();
+
+        const { snapshot: formulaUndoBase } = await createDocument(base, cookie);
+        const formulaUndoWriter = await connect(base, cookie);
+        assert.equal(
+          (await formulaUndoWriter.send(formulaCommand(formulaUndoWriter, formulaUndoBase, '=2+3')))
+            .case,
+          'committed',
+        );
+        const overwritten = setCommand(
+          formulaUndoWriter,
+          { ...formulaUndoBase, version: '2' },
+          42,
+          {
+            sequence: 2,
+          },
+        );
+        assert.equal((await formulaUndoWriter.send(overwritten)).case, 'committed');
+        const formulaUndo = undoCellCommand(
+          formulaUndoWriter,
+          { ...formulaUndoBase, version: '3' },
+          overwritten.operationId,
+          { sequence: 3 },
+        );
+        const formulaUndoCommit = await formulaUndoWriter.send(formulaUndo);
+        assert.equal(formulaUndoCommit.case, 'committed');
+        formulaUndoWriter.socket.terminate();
+        await kill();
+        await start();
+        const formulaUndoRecovered = await getDocument(base, cookie, formulaUndoBase.document_id);
+        assert.equal(formulaUndoRecovered.version, '4');
+        assert.equal(formulaUndoRecovered.sheets[0].cells[0].value.value.source, '=2+3');
+        assert.equal(
+          formulaUndoRecovered.state_hash,
+          Buffer.from(formulaUndoCommit.value.confirmedStateHash).toString('hex'),
+        );
+        const afterFormulaUndo = await calculation(base, cookie, formulaUndoBase.document_id, 4);
+        assert.deepEqual(afterFormulaUndo.values[0].value, { type: 'number', value: 5 });
+        const formulaUndoRetry = await connect(base, cookie);
+        assert.equal((await formulaUndoRetry.send(formulaUndo)).case, 'receipt');
+        formulaUndoRetry.socket.terminate();
       } finally {
         client.socket.terminate();
       }

@@ -46,8 +46,6 @@ pub enum DomainError {
     InvalidCalculationContext,
     #[error("cell content no longer matches the committed preimage")]
     PreimageConflict,
-    #[error("undo cannot restore a formula before historical reference rebasing is specified")]
-    UnsupportedUndoFormula,
 }
 
 macro_rules! identity {
@@ -1038,9 +1036,6 @@ impl Workbook {
                         return Err(DomainError::InvalidValue);
                     }
                     _ => {}
-                }
-                if kind.is_none() && matches!(content, Some(CellContent::Formula(_))) {
-                    return Err(DomainError::UnsupportedUndoFormula);
                 }
                 if self.cell_content(*address)? != previous.as_ref() {
                     return Err(DomainError::PreimageConflict);
