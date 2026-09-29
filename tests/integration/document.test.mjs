@@ -834,6 +834,112 @@ test('seeded mixed-client writes, retry, extension and reconnect converge throug
   }
 });
 
+test('reconnect crosses structural events and a frozen copy without losing the barrier', async () => {
+  const cookie = await login(base);
+  for (let scenario = 0; scenario < 5; scenario++) {
+    const { snapshot } = await createDocument(base, cookie);
+    const left = await connect(base, cookie);
+    const right = await connect(base, cookie);
+    try {
+      const first = await Promise.all([
+        left.send(setCommand(left, snapshot, scenario + 10, { sequence: 1 })),
+        right.send(setCommand(right, snapshot, scenario + 20, { column: 1, sequence: 1 })),
+      ]);
+      assert.ok(first.every((result) => result.case === 'committed'));
+      assert.deepEqual(first.map((result) => result.value.committedVersion).sort(), [2n, 3n]);
+      let current = await getDocument(base, cookie, snapshot.document_id);
+      const insertRow = await left.send(
+        insertRowsCommand(left, current, current.sheets[0].rows[1], [uuid7()], { sequence: 2 }),
+      );
+      assert.equal(insertRow.case, 'committed');
+      assert.equal(insertRow.value.committedVersion, 4n);
+      current = await getDocument(base, cookie, snapshot.document_id);
+      const insertColumn = await right.send(
+        insertColumnsCommand(right, current, current.sheets[0].columns[1], [uuid7()], {
+          sequence: 2,
+        }),
+      );
+      assert.equal(insertColumn.case, 'committed');
+      assert.equal(insertColumn.value.committedVersion, 5n);
+      current = await getDocument(base, cookie, snapshot.document_id);
+      const inserted = await left.send(
+        setCommand(left, current, scenario + 30, { row: 1, column: 1, sequence: 3 }),
+      );
+      assert.equal(inserted.case, 'committed');
+      assert.equal(inserted.value.committedVersion, 6n);
+      current = await getDocument(base, cookie, snapshot.document_id);
+      const copy = copyRangeCommand(
+        right,
+        current,
+        { destinationRow: 2, destinationColumn: 3, rows: 2, columns: 2 },
+        { sequence: 3 },
+      );
+      const copied = await right.send(copy);
+      assert.equal(copied.case, 'committed');
+      assert.equal(copied.value.committedVersion, 7n);
+      assert.equal((await right.send(copy)).case, 'receipt');
+      current = await getDocument(base, cookie, snapshot.document_id);
+      const deleteRow = await left.send(
+        deleteRowsCommand(left, current, [snapshot.sheets[0].rows[1]], { sequence: 4 }),
+      );
+      assert.equal(deleteRow.case, 'committed');
+      assert.equal(deleteRow.value.committedVersion, 8n);
+      current = await getDocument(base, cookie, snapshot.document_id);
+      const deleteColumn = await right.send(
+        deleteColumnsCommand(right, current, [snapshot.sheets[0].columns[1]], { sequence: 4 }),
+      );
+      assert.equal(deleteColumn.case, 'committed');
+      assert.equal(deleteColumn.value.committedVersion, 9n);
+      const canonical = await getDocument(base, cookie, snapshot.document_id);
+      assert.equal(canonical.version, '9');
+      assert.equal(
+        canonical.state_hash,
+        Buffer.from(deleteColumn.value.confirmedStateHash).toString('hex'),
+      );
+
+      const early = await connect(base, cookie);
+      try {
+        const frames = await receiveFrames(early, 7, () =>
+          subscribeDocument(early, snapshot.document_id, 1),
+        );
+        assert.deepEqual(
+          frames.slice(0, 5).map((frame) => frame.value.headVersion),
+          [2n, 3n, 4n, 5n, 6n],
+        );
+        assert.equal(frames[5].case, 'documentHeadChanged');
+        assert.equal(frames[5].value.headVersion, 9n);
+        assert.equal(frames[5].value.latestOperation, undefined);
+        assert.equal(frames[6].case, 'replayComplete');
+        assert.equal(frames[6].value.barrierVersion, 9n);
+        assert.equal(frames[6].value.resyncRequired, true);
+      } finally {
+        early.socket.terminate();
+      }
+
+      const late = await connect(base, cookie);
+      try {
+        const frames = await receiveFrames(late, 3, () =>
+          subscribeDocument(late, snapshot.document_id, 7),
+        );
+        assert.deepEqual(
+          frames.slice(0, 2).map((frame) => frame.value.headVersion),
+          [8n, 9n],
+        );
+        assert.equal(frames[2].value.resyncRequired, false);
+        assert.equal(
+          Buffer.from(frames[1].value.latestOperation.confirmedStateHash).toString('hex'),
+          canonical.state_hash,
+        );
+      } finally {
+        late.socket.terminate();
+      }
+    } finally {
+      left.socket.terminate();
+      right.socket.terminate();
+    }
+  }
+});
+
 test('late subscriber receives every missed version in order before the replay barrier', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);

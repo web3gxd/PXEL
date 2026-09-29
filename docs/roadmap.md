@@ -31,6 +31,11 @@ queue overflow в сети и cross-host case ещё не подтвержден
 disconnect/reconnect и поздний replay. Версии пришли без пропусков, финальный
 event state hash совпал с HTTP canonical projection. Это меньше целевых
 100×1000 сетевых сценариев и не закрывает phase 3 gate.
+Ещё 5 сетевых сценариев смешали конкурентные записи, вставку/удаление строк и
+столбцов, frozen CopyRange, idempotent retry и reconnect: поздний replay после
+CopyRange был непрерывным, а replay через CopyRange честно потребовал projection
+resync на barrier. Полный PostgreSQL/WebSocket integration suite прошёл 40/40.
+Эти пять сценариев также не заменяют масштабный случайный сетевой прогон.
 Живой integration test одновременной записи в одну ячейку подтвердил версии
 2/3, серверный порядок и значение победителя после replay. Это не заменяет
 случайные multi-user сценарии с разными задержками и отказами.

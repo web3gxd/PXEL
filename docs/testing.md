@@ -35,6 +35,13 @@ SetCellValue/ClearCell, вставку и удаление stable-ID строк/
 моделирует реальные WebSocket/БД, ACL, формулы в CopyRange или calculation patches; они требуют
 отдельных интеграционных сценариев по мере появления соответствующего кода.
 
+Отдельный настоящий WebSocket/PostgreSQL test выполняет пять смешанных
+сценариев с двумя писателями, структурными вставками/удалениями, frozen
+`CopyRange`, retry и reconnect. После непредставимого в wire v1 CopyRange
+`ReplayComplete` требует projection resync; подключение после него получает
+непрерывные структурные events и финальный hash. Это функциональное покрытие,
+не 100×1000 случайных сетевых сценариев и не latency benchmark.
+
 Recovery matrix: до transaction; после CAS/INSERT до второго statement; после COMMIT до publish/ACK; candidate failure; two writers CAS; unknown commit outcome; snapshot UPLOADING/STORED/VERIFIED/ACTIVE boundaries; object upload до metadata; replay interruption/gap/corrupt event. Невалидный candidate не сохраняется, committed event не теряется.
 
 Formula differential corpus один для native/browser/WASM. Excel expected results имеют workbook/version/OS/locale/provenance и verified flag. Отсутствие Excel runtime dependency не запрещает ручную верификацию fixtures. Unknown/unsupported syntax coverage не заменяется фиктивным numerical fallback.
