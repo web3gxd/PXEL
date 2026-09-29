@@ -21,9 +21,12 @@ durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалё
 столбцов и frozen CopyRange значений. Локальный сетевой scalar/LWW harness
 100×1000 прошёл за 1 310 127 ms с двумя
 авторами, live/replay подписчиком, повторами и reconnect. Отдельный hard-restart
-сценарий с двумя авторами прошёл; общий `just smoke` проверил integration
-42/42, recovery 2/2 и Chromium 48/48. Полный gate фазы 3 ещё открыт: нужны совмещённые ACL/формульные
-convergence сценарии, cross-host stress и измерения latency. Outbound queue с
+сценарий с двумя авторами прошёл. Добавлен живой сценарий формула + ACL revoke:
+viewer видит серверный расчёт после правки, затем его подписка закрывается и
+последующий расчёт запрещён. После исправления временного HTTP 429 при загрузке
+projection общий `just smoke` проверил integration 43/43, recovery 2/2 и
+Chromium 48/48. Полный gate фазы 3 ещё открыт: нужны масштабный совмещённый
+ACL/формульный convergence stress, cross-host stress и измерения latency. Outbound queue с
 лимитом кадров/байтов реализована в ADR-018; cross-host slow-reader stress и
 очередные метрики ещё открыты. Локальный paused-socket stress выполнен:
 три прогона по 512×30,005-byte commits завершились head 513, медленный socket

@@ -778,9 +778,16 @@ export class DocumentStore {
     this.loading = true;
     this.notify();
     try {
-      const response = await fetch(`/api/documents/${encodeURIComponent(id)}`, {
-        signal: AbortSignal.timeout(10000),
-      });
+      let response: Response | undefined;
+      for (const delay of [200, 400, 800, 0]) {
+        if (generation !== this.syncGeneration) return false;
+        response = await fetch(`/api/documents/${encodeURIComponent(id)}`, {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (response.status !== 429 || delay === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      if (!response) throw new Error('Не удалось открыть таблицу');
       if (!response.ok)
         throw new Error(
           response.status === 403 ? 'Нет доступа к таблице' : 'Не удалось открыть таблицу',

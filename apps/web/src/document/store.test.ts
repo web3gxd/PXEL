@@ -1035,6 +1035,23 @@ describe('document projection and pending intents', () => {
     expect(store.projection?.version).toBe('3');
     store.disconnected();
   });
+  it('retries a transient projection rate limit without losing the current document', async () => {
+    vi.useFakeTimers();
+    const store = new DocumentStore();
+    store.projection = projection();
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 429 })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => projection() });
+    vi.stubGlobal('fetch', fetcher);
+    const refresh = store.refresh();
+    await vi.runAllTimersAsync();
+    expect(await refresh).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(store.projection?.document_id).toBe(documentId);
+    expect(store.error).toBe('');
+    store.dispose();
+  });
   it('retains an oversized draft without queuing an invalid command', async () => {
     const { store, sent } = await connectedStore();
     store.begin('я'.repeat(17000));

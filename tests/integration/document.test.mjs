@@ -1705,3 +1705,83 @@ test('owner grant and revoke fence a second user subscription at access epoch', 
     writer.socket.terminate();
   }
 });
+
+test('formula calculation and live subscription respect ACL revoke across versions', async () => {
+  const suffix = uuid7().replaceAll('-', '').slice(-16);
+  const owner = await login(base, 'calc_owner_' + suffix);
+  const readerAccount = 'calc_reader_' + suffix;
+  const readerHome = await login(base, readerAccount);
+  const ownerIdentity = await (await api(base, owner, '/api/dev/identity')).json();
+  const readerIdentity = await (await api(base, readerHome, '/api/dev/identity')).json();
+  const { snapshot } = await createDocument(base, owner);
+  const writer = await connect(base, owner);
+  let reader;
+  let calculationClient;
+  try {
+    assert.equal((await writer.send(setCommand(writer, snapshot, 2))).case, 'committed');
+    const formula = await writer.send(
+      formulaCommand(writer, { ...snapshot, version: '2' }, '=A1+1', {
+        column: 1,
+        sequence: 2,
+      }),
+    );
+    assert.equal(formula.case, 'committed');
+    assert.equal(formula.value.committedVersion, 3n);
+    const path = `/api/documents/${snapshot.document_id}/permissions`;
+    const grant = await api(base, owner, path, 'POST', {
+      action: 'grant',
+      change_id: uuid7(),
+      target_user_id: readerIdentity.actor_id,
+      role: 'viewer',
+    });
+    assert.equal(grant.status, 200);
+    const readerCookie = await login(base, readerAccount, ownerIdentity.workspace_id);
+    reader = await connect(base, readerCookie);
+    calculationClient = await connect(base, readerCookie);
+    const [barrier] = await receiveFrames(reader, 1, () =>
+      subscribeDocument(reader, snapshot.document_id, 3),
+    );
+    assert.equal(barrier.case, 'replayComplete');
+    const before = await requestCalculation(calculationClient, snapshot.document_id, 3);
+    assert.equal(before.chunks.at(-1).cells[0].value.kind.value, 3);
+    const update = nextFrame(reader);
+    assert.equal(
+      (await writer.send(setCommand(writer, { ...snapshot, version: '3' }, 7, { sequence: 3 })))
+        .case,
+      'committed',
+    );
+    assert.equal((await update).value.headVersion, 4n);
+    const recalculated = await requestCalculation(calculationClient, snapshot.document_id, 4);
+    const last = recalculated.chunks.at(-1);
+    assert.equal(last.inputVersion, 4n);
+    assert.equal(last.cells[0].value.kind.value, 8);
+    const closed = once(reader.socket, 'close', { signal: AbortSignal.timeout(5000) });
+    const revoke = await api(base, owner, path, 'POST', {
+      action: 'revoke',
+      change_id: uuid7(),
+      target_user_id: readerIdentity.actor_id,
+    });
+    assert.equal(revoke.status, 200);
+    assert.equal((await revoke.json()).access_epoch, 2);
+    await closed;
+    assert.equal(
+      (await writer.send(setCommand(writer, { ...snapshot, version: '4' }, 9, { sequence: 4 })))
+        .case,
+      'committed',
+    );
+    assert.ok(
+      [403, 404].includes(
+        (await api(base, readerCookie, `/api/documents/${snapshot.document_id}/calculation`))
+          .status,
+      ),
+    );
+    const denied = await requestCalculation(calculationClient, snapshot.document_id, 5);
+    assert.equal(denied.error.code, 3);
+    const ownerResult = await calculation(base, owner, snapshot.document_id, 5);
+    assert.deepEqual(ownerResult.values[0].value, { type: 'number', value: 10 });
+  } finally {
+    reader?.socket.terminate();
+    calculationClient?.socket.terminate();
+    writer.socket.terminate();
+  }
+});
