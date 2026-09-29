@@ -34,9 +34,9 @@ snapshots уже проходят проверенную активацию и �
 cargo run --locked -q -p pxel-server -- xlsx-preview fixtures/xlsx/minimal_scalars.xlsx
 ```
 
-Команда запускает отдельный дочерний процесс и печатает только количество
-листов и ячеек. OS sandbox, загрузка XLSX в редактор и экспорт ещё не
-реализованы.
+Команда запускает отдельный дочерний процесс, принимает от него bounded IR,
+повторно проверяет модель в родителе и печатает только количество листов и
+ячеек. OS sandbox, загрузка XLSX в редактор и экспорт ещё не реализованы.
 
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Нужны wasm32 target, wasm-bindgen-cli **0.2.129** и установленный Playwright Chromium.
@@ -190,6 +190,6 @@ MinIO/Garage не запускаются; локальные snapshots отно�
 - `migrations/`, `tests/integration/`, `.sqlx/` — DB schema, live tests, checked query metadata.
 - `docs/`, `docs/adr/` — актуальные контракты и решения.
 
-XLSX crate появится вместе с первым использующим его срезом; пустых crates заранее
-нет. MSRV policy до production v1 не установлена.
+XLSX crate используется безопасным разбором и worker preview; пустых crates
+«на будущее» нет. MSRV policy до production v1 не установлена.
 Toolchain и временное lint exception: [web tooling](apps/web/TOOLING.md).

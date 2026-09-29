@@ -2,6 +2,10 @@
 
 Status: accepted for the third phase-6 slice (2026-09-29).
 
+The counts-only response described below was superseded by the bounded IR
+response in [ADR-046](046-bounded-xlsx-worker-ir.md). The process isolation
+limitations and timeout policy remain.
+
 `pxel-server xlsx-preview <path>` now canonicalizes the input path, starts the
 same binary in `xlsx-worker` mode, clears its inherited environment, and talks
 through a fixed version-1 binary request/response frame. Request: `PXIW`,

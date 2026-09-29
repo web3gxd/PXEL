@@ -1,6 +1,7 @@
 //! A bounded local process boundary for XLSX parsing. OS sandbox adapters are
-//! a later gate; this protocol never carries document content back to parent.
+//! a later gate; only a bounded, parent-validated IR crosses this boundary.
 
+use spreadsheet_xlsx::NormalizedWorkbook;
 use std::{
     io::{Read, Write},
     path::Path,
@@ -12,9 +13,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const REQUEST_MAGIC: &[u8; 4] = b"PXIW";
 const RESPONSE_MAGIC: &[u8; 4] = b"PXOW";
-const PROTOCOL_VERSION: u16 = 1;
+const PROTOCOL_VERSION: u16 = 2;
 const MAX_PATH_BYTES: usize = 4096;
-const RESPONSE_BYTES: usize = 15;
+const RESPONSE_HEADER_BYTES: usize = 11;
+const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const WORKER_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -39,6 +41,22 @@ pub struct PreviewCounts {
 
 /// Parent-side entry point. Only a canonical absolute path crosses the boundary.
 pub async fn preview(path: &Path) -> Result<PreviewCounts, WorkerError> {
+    let workbook = load(path).await?;
+    let sheets = u32::try_from(workbook.sheets.len()).map_err(|_| WorkerError::Protocol)?;
+    let cells = workbook
+        .sheets
+        .iter()
+        .try_fold(0_u32, |sum, sheet| {
+            u32::try_from(sheet.cells.len())
+                .ok()
+                .and_then(|len| sum.checked_add(len))
+        })
+        .ok_or(WorkerError::Protocol)?;
+    Ok(PreviewCounts { sheets, cells })
+}
+
+/// Decode and validate worker output again before it can enter server workflows.
+pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
     let absolute = tokio::fs::canonicalize(path)
         .await
         .map_err(|_| WorkerError::InvalidInput)?;
@@ -86,9 +104,15 @@ pub async fn preview(path: &Path) -> Result<PreviewCounts, WorkerError> {
             .map_err(|_| WorkerError::Protocol)?;
         stdin.shutdown().await.map_err(|_| WorkerError::Protocol)?;
         drop(stdin);
-        let mut frame = [0_u8; RESPONSE_BYTES];
+        let mut frame = [0_u8; RESPONSE_HEADER_BYTES];
         stdout
             .read_exact(&mut frame)
+            .await
+            .map_err(|_| WorkerError::Protocol)?;
+        let length = decode_header(&frame)?;
+        let mut payload = vec![0_u8; length];
+        stdout
+            .read_exact(&mut payload)
             .await
             .map_err(|_| WorkerError::Protocol)?;
         let mut extra = [0_u8; 1];
@@ -104,7 +128,7 @@ pub async fn preview(path: &Path) -> Result<PreviewCounts, WorkerError> {
         if !status.success() {
             return Err(WorkerError::Process);
         }
-        decode_response(&frame)
+        decode_payload(&payload)
     })
     .await;
     match transfer {
@@ -122,7 +146,7 @@ pub async fn preview(path: &Path) -> Result<PreviewCounts, WorkerError> {
     }
 }
 
-/// Child-side entry point. The only result is a fixed-size versioned frame.
+/// Child-side entry point. Output is one bounded versioned IR frame.
 pub fn run() -> Result<(), WorkerError> {
     let mut stdin = std::io::stdin().lock();
     let mut header = [0_u8; 8];
@@ -148,47 +172,42 @@ pub fn run() -> Result<(), WorkerError> {
     }
     let path = std::str::from_utf8(&path).map_err(|_| WorkerError::InvalidInput)?;
     let result = spreadsheet_xlsx::normalize_file(Path::new(path));
-    let (status, counts) = match result {
+    let (status, payload) = match result {
         Ok(workbook) => {
-            let sheets = u32::try_from(workbook.sheets.len()).map_err(|_| WorkerError::Protocol)?;
-            let cells = workbook
-                .sheets
-                .iter()
-                .try_fold(0_u32, |sum, sheet| {
-                    u32::try_from(sheet.cells.len())
-                        .ok()
-                        .and_then(|len| sum.checked_add(len))
-                })
-                .ok_or(WorkerError::Protocol)?;
-            (0_u8, PreviewCounts { sheets, cells })
+            workbook.validate().map_err(|_| WorkerError::Protocol)?;
+            let payload = serde_json::to_vec(&workbook).map_err(|_| WorkerError::Protocol)?;
+            if payload.len() > MAX_RESPONSE_BYTES {
+                return Err(WorkerError::Rejected);
+            }
+            (0_u8, payload)
         }
-        Err(_) => (
-            1_u8,
-            PreviewCounts {
-                sheets: 0,
-                cells: 0,
-            },
-        ),
+        Err(_) => (1_u8, Vec::new()),
     };
     let mut stdout = std::io::stdout().lock();
     stdout
-        .write_all(&encode_response(status, counts))
+        .write_all(&encode_header(status, payload.len())?)
+        .map_err(|_| WorkerError::Protocol)?;
+    stdout
+        .write_all(&payload)
         .map_err(|_| WorkerError::Protocol)?;
     stdout.flush().map_err(|_| WorkerError::Protocol)?;
     Ok(())
 }
 
-fn encode_response(status: u8, counts: PreviewCounts) -> [u8; RESPONSE_BYTES] {
-    let mut frame = [0_u8; RESPONSE_BYTES];
+fn encode_header(status: u8, length: usize) -> Result<[u8; RESPONSE_HEADER_BYTES], WorkerError> {
+    if length > MAX_RESPONSE_BYTES || (status == 0 && length == 0) || (status != 0 && length != 0) {
+        return Err(WorkerError::Protocol);
+    }
+    let mut frame = [0_u8; RESPONSE_HEADER_BYTES];
     frame[..4].copy_from_slice(RESPONSE_MAGIC);
     frame[4..6].copy_from_slice(&PROTOCOL_VERSION.to_be_bytes());
     frame[6] = status;
-    frame[7..11].copy_from_slice(&counts.sheets.to_be_bytes());
-    frame[11..15].copy_from_slice(&counts.cells.to_be_bytes());
-    frame
+    let length = u32::try_from(length).map_err(|_| WorkerError::Protocol)?;
+    frame[7..11].copy_from_slice(&length.to_be_bytes());
+    Ok(frame)
 }
 
-fn decode_response(frame: &[u8; RESPONSE_BYTES]) -> Result<PreviewCounts, WorkerError> {
+fn decode_header(frame: &[u8; RESPONSE_HEADER_BYTES]) -> Result<usize, WorkerError> {
     if &frame[..4] != RESPONSE_MAGIC || u16::from_be_bytes([frame[4], frame[5]]) != PROTOCOL_VERSION
     {
         return Err(WorkerError::Protocol);
@@ -199,44 +218,55 @@ fn decode_response(frame: &[u8; RESPONSE_BYTES]) -> Result<PreviewCounts, Worker
     if frame[6] != 0 {
         return Err(WorkerError::Protocol);
     }
-    let sheets = u32::from_be_bytes([frame[7], frame[8], frame[9], frame[10]]);
-    let cells = u32::from_be_bytes([frame[11], frame[12], frame[13], frame[14]]);
-    if sheets == 0 || sheets > 64 || cells > 100_000 {
+    let length = u32::from_be_bytes([frame[7], frame[8], frame[9], frame[10]]) as usize;
+    if length == 0 || length > MAX_RESPONSE_BYTES {
         return Err(WorkerError::Protocol);
     }
-    Ok(PreviewCounts { sheets, cells })
+    Ok(length)
+}
+
+fn decode_payload(payload: &[u8]) -> Result<NormalizedWorkbook, WorkerError> {
+    if payload.is_empty() || payload.len() > MAX_RESPONSE_BYTES {
+        return Err(WorkerError::Protocol);
+    }
+    let workbook: NormalizedWorkbook =
+        serde_json::from_slice(payload).map_err(|_| WorkerError::Protocol)?;
+    workbook.validate().map_err(|_| WorkerError::Protocol)?;
+    Ok(workbook)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PreviewCounts, WorkerError, decode_response, encode_response};
+    use super::{WorkerError, decode_header, decode_payload, encode_header};
 
     #[test]
-    fn response_codec_rejects_unknown_version_status_and_counts() {
-        let counts = PreviewCounts {
-            sheets: 2,
-            cells: 5,
-        };
-        let frame = encode_response(0, counts);
-        assert_eq!(decode_response(&frame), Ok(counts));
+    fn response_codec_rejects_unknown_version_status_and_size() {
+        let frame = encode_header(0, 5).unwrap_or([0; 11]);
+        assert_eq!(decode_header(&frame), Ok(5));
         let mut unknown = frame;
-        unknown[5] = 2;
-        assert_eq!(decode_response(&unknown), Err(WorkerError::Protocol));
-        let rejected = encode_response(
-            1,
-            PreviewCounts {
-                sheets: 0,
-                cells: 0,
-            },
+        unknown[5] = 3;
+        assert_eq!(decode_header(&unknown), Err(WorkerError::Protocol));
+        let rejected = encode_header(1, 0).unwrap_or([0; 11]);
+        assert_eq!(decode_header(&rejected), Err(WorkerError::Rejected));
+        assert_eq!(encode_header(0, 0), Err(WorkerError::Protocol));
+        assert_eq!(
+            encode_header(0, 64 * 1024 * 1024 + 1),
+            Err(WorkerError::Protocol)
         );
-        assert_eq!(decode_response(&rejected), Err(WorkerError::Rejected));
-        let invalid = encode_response(
-            0,
-            PreviewCounts {
-                sheets: 65,
-                cells: 0,
-            },
-        );
-        assert_eq!(decode_response(&invalid), Err(WorkerError::Protocol));
+    }
+
+    #[test]
+    fn parent_rejects_invalid_worker_ir() {
+        let valid = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"hello"}}]}]}"#;
+        assert!(decode_payload(valid).is_ok());
+        let duplicate = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"a"}},{"row":1,"column":1,"value":{"Text":"b"}}]}]}"#;
+        assert_eq!(decode_payload(duplicate), Err(WorkerError::Protocol));
+        let invalid_number = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Number":-0.0}}]}]}"#;
+        assert_eq!(decode_payload(invalid_number), Err(WorkerError::Protocol));
+        let unknown = br#"{"sheets":[{"name":"Data","cells":[],"hidden":true}]}"#;
+        assert_eq!(decode_payload(unknown), Err(WorkerError::Protocol));
+        let duplicate_names =
+            br#"{"sheets":[{"name":"Data","cells":[]},{"name":"data","cells":[]}]}"#;
+        assert_eq!(decode_payload(duplicate_names), Err(WorkerError::Protocol));
     }
 }

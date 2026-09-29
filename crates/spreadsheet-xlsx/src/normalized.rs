@@ -3,6 +3,7 @@ use super::{
     resolve_target, resolve_xml_reference,
 };
 use quick_xml::{Reader, XmlVersion, events::Event};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 const MAX_CELLS: usize = 100_000;
@@ -14,18 +15,21 @@ const MAX_ROW: u32 = 1_048_576;
 const MAX_COLUMN: u32 = 16_384;
 
 /// XLSX-specific intermediate representation. No stable domain IDs are assigned here.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NormalizedWorkbook {
     pub sheets: Vec<NormalizedSheet>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NormalizedSheet {
     pub name: String,
     pub cells: Vec<NormalizedCell>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NormalizedCell {
     /// One-based OOXML row index.
     pub row: u32,
@@ -34,13 +38,79 @@ pub struct NormalizedCell {
     pub value: NormalizedCellValue,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NormalizedCellValue {
     Number(f64),
     Text(String),
     Boolean(bool),
     /// Source without the leading '='; server binding must parse and validate it.
     Formula(String),
+}
+
+impl NormalizedWorkbook {
+    /// Revalidate child output at the parent boundary before any import step.
+    pub fn validate(&self) -> Result<(), XlsxError> {
+        if self.sheets.is_empty() || self.sheets.len() > 64 {
+            return Err(XlsxError::LimitExceeded);
+        }
+        let mut names = HashSet::new();
+        let mut total_cells = 0_usize;
+        let mut total_text_bytes = 0_usize;
+        for sheet in &self.sheets {
+            if sheet.name.is_empty()
+                || sheet.name.chars().count() > 31
+                || !names.insert(sheet.name.to_lowercase())
+            {
+                return Err(XlsxError::InvalidPackage);
+            }
+            let mut previous = None;
+            for cell in &sheet.cells {
+                let address = (cell.row, cell.column);
+                if cell.row == 0
+                    || cell.row > MAX_ROW
+                    || cell.column == 0
+                    || cell.column > MAX_COLUMN
+                    || previous.is_some_and(|last| last >= address)
+                {
+                    return Err(XlsxError::InvalidPackage);
+                }
+                previous = Some(address);
+                total_cells = total_cells.checked_add(1).ok_or(XlsxError::LimitExceeded)?;
+                if total_cells > MAX_CELLS {
+                    return Err(XlsxError::LimitExceeded);
+                }
+                match &cell.value {
+                    NormalizedCellValue::Number(value)
+                        if !value.is_finite() || value.is_sign_negative() && *value == 0.0 =>
+                    {
+                        return Err(XlsxError::InvalidPackage);
+                    }
+                    NormalizedCellValue::Text(value) | NormalizedCellValue::Formula(value) => {
+                        let formula = matches!(cell.value, NormalizedCellValue::Formula(_));
+                        let limit = if formula {
+                            MAX_FORMULA_BYTES
+                        } else {
+                            MAX_TEXT_BYTES
+                        };
+                        if value.len() > limit {
+                            return Err(XlsxError::LimitExceeded);
+                        }
+                        if formula && value.is_empty() {
+                            return Err(XlsxError::InvalidPackage);
+                        }
+                        total_text_bytes = total_text_bytes
+                            .checked_add(value.len())
+                            .ok_or(XlsxError::LimitExceeded)?;
+                        if total_text_bytes > MAX_IR_TEXT_BYTES {
+                            return Err(XlsxError::LimitExceeded);
+                        }
+                    }
+                    NormalizedCellValue::Number(_) | NormalizedCellValue::Boolean(_) => {}
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]
