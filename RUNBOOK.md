@@ -1,5 +1,33 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — замер первого Canvas-кадра с загруженной книгой
+
+Перед срезом прочитаны AGENTS, roadmap, testing, текущий Canvas renderer и
+phase-3 benchmark. Цель — измерить первый полезный кадр после загрузки
+projection, сохранив презентацию как проверяемый отчёт. Инвариант: маркер
+ставится только после успешного `drawGrid` для конкретного document ID;
+измерение не должно подменять проверку большой sparse книги.
+
+В `CanvasGrid.tsx` добавлен `pxel:document-grid-ready`, в
+`tests/performance/render.mjs` — браузерный harness; `just bench-render`
+запускает 1 первый load и 20 reloads против production Vite bundle и release
+backend. Условия и реальные числа записаны в
+[отчёте](docs/benchmarks/2026-09-29-render-local.md), отражены в testing,
+roadmap и презентации. В последнем прогоне Chromium 153 на Windows/Ultra 9
+185H дал p95 64.4 ms от navigation и 18.8 ms после document GET, максимум
+107 DOM nodes для пустой книги 1,000×26. `pnpm build` прошёл; два запуска
+`just bench-render` прошли, второй — после добавления viewport/DPR metadata.
+Первый `just check` нашёл только форматирование benchmark Markdown; после
+`prettier --write` повторный `just check` завершился exit 0 (Rust fmt,
+Clippy, workspace tests/build, wasm32, protobuf drift, WASM build, Prettier,
+ESLint, TS, 53 Vitest и Vite). `pnpm test:e2e` против release backend/production
+bundle прошёл 16/16 при DPR 1/2; presentation check прошёл 10 слайдов на
+1440×900 и 390×844. Chrome DevTools MCP не ответил в отведённое время;
+проверка выполнена через настоящий Playwright Chromium.
+Большая sparse книга, optimistic input p95 и fixed runner пока не измерены.
+
+---
+
 ## 2026-09-29 — локальный benchmark ACK и доставки второму клиенту
 
 Перед срезом прочитаны AGENTS, roadmap, testing, ADR-018 и текущий WS/actor

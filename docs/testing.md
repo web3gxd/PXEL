@@ -54,6 +54,12 @@ sequential edits. Он проверяет версии ACK/второго кли
 `PXEL_BENCH_SERVER_PROFILE=release`. Последний проверенный локальный результат
 и ограничения: [2026-09-29-phase3-local.md](benchmarks/2026-09-29-phase3-local.md).
 
+`just bench-render` измеряет первый Canvas-кадр с загруженной projection через
+browser Performance API в Chromium на production bundle. Последний локальный
+замер: 20 reloads, p95 64.4 ms от navigation и 18.8 ms после ответа document
+GET, 107 DOM nodes для пустой книги 1,000×26. Условия и ограничения:
+[2026-09-29-render-local.md](benchmarks/2026-09-29-render-local.md).
+
 | Цель                                      | Target / measurement                                     |
 | ----------------------------------------- | -------------------------------------------------------- |
 | First usable grid после готовности данных | p95 <1 s                                                 |

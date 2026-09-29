@@ -51,6 +51,9 @@ convergence:
 bench-collab:
     node --test tests/performance/collaboration.test.mjs
 
+bench-render:
+    node tests/performance/render.mjs
+
 sqlx-check:
     cargo sqlx prepare --check --workspace -- --all-targets --all-features
 

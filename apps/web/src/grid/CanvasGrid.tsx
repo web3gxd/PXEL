@@ -36,6 +36,16 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
         canvas.dataset.ready = 'true';
         performance.mark('pxel:grid-ready');
       }
+      const documentId = document?.projection?.document_id;
+      if (
+        rendered &&
+        document?.sheet &&
+        documentId &&
+        canvas.dataset.documentReady !== documentId
+      ) {
+        canvas.dataset.documentReady = documentId;
+        performance.mark('pxel:document-grid-ready');
+      }
     };
     const schedule = () => {
       frame ??= requestAnimationFrame(render);
