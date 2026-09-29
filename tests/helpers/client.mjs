@@ -231,6 +231,22 @@ export function setCommand(
   };
 }
 
+export function undoCellCommand(
+  client,
+  snapshot,
+  targetOperationId,
+  { sequence = 1, operationId = uuid7() } = {},
+) {
+  return {
+    operationId: bytes(operationId),
+    documentId: bytes(snapshot.document_id),
+    actorId: client.actorId,
+    baseVersion: BigInt(snapshot.version),
+    clientSequence: BigInt(sequence),
+    undoCell: { targetOperationId },
+  };
+}
+
 export function batchValuesCommand(
   client,
   snapshot,

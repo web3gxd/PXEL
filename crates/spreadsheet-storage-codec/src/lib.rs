@@ -11,6 +11,8 @@ pub mod v1 {
 pub enum CodecError {
     #[error("unsupported event schema")]
     UnsupportedSchema,
+    #[error("durable event exceeds the maximum encoded size")]
+    EventTooLarge,
     #[error("invalid durable event")]
     Invalid,
 }
@@ -30,6 +32,87 @@ fn decode_addr(a: v1::CellAddress) -> Result<CellAddress, CodecError> {
         row: RowId::from_bytes(id(&a.row_id)?).map_err(|_| CodecError::Invalid)?,
         column: ColumnId::from_bytes(id(&a.column_id)?).map_err(|_| CodecError::Invalid)?,
     })
+}
+fn encode_content(content: &CellContent) -> Result<v1::CellContent, CodecError> {
+    let kind = match content {
+        CellContent::Value(value) => {
+            let value = value
+                .clone()
+                .normalized()
+                .map_err(|_| CodecError::Invalid)?;
+            v1::cell_content::Kind::Value(v1::CellValue {
+                kind: Some(match value {
+                    CellValue::Blank => return Err(CodecError::Invalid),
+                    CellValue::Number(value) => v1::cell_value::Kind::Number(value),
+                    CellValue::Text(value) => v1::cell_value::Kind::Text(value),
+                    CellValue::Boolean(value) => v1::cell_value::Kind::Boolean(value),
+                }),
+            })
+        }
+        CellContent::Formula(formula) => {
+            v1::cell_content::Kind::Formula(formula_codec::encode(formula))
+        }
+    };
+    Ok(v1::CellContent { kind: Some(kind) })
+}
+fn decode_content(
+    content: v1::CellContent,
+    address: CellAddress,
+) -> Result<CellContent, CodecError> {
+    match content.kind.ok_or(CodecError::Invalid)? {
+        v1::cell_content::Kind::Value(value) => {
+            let value = match value.kind.ok_or(CodecError::Invalid)? {
+                v1::cell_value::Kind::Blank(_) => return Err(CodecError::Invalid),
+                v1::cell_value::Kind::Number(value) => CellValue::Number(value),
+                v1::cell_value::Kind::Text(value) => CellValue::Text(value),
+                v1::cell_value::Kind::Boolean(value) => CellValue::Boolean(value),
+            };
+            Ok(CellContent::Value(
+                value.normalized().map_err(|_| CodecError::Invalid)?,
+            ))
+        }
+        v1::cell_content::Kind::Formula(value) => {
+            let formula = formula_codec::decode(value)?;
+            if formula.origin() != address {
+                return Err(CodecError::Invalid);
+            }
+            Ok(CellContent::Formula(formula))
+        }
+    }
+}
+fn encode_optional_content(
+    content: &Option<CellContent>,
+) -> Result<Option<v1::CellContent>, CodecError> {
+    content.as_ref().map(encode_content).transpose()
+}
+fn hash_content(h: &mut Sha256, content: &Option<CellContent>) -> Result<(), CodecError> {
+    match content {
+        None => h.update([0]),
+        Some(CellContent::Value(value)) => {
+            h.update([1]);
+            match value
+                .clone()
+                .normalized()
+                .map_err(|_| CodecError::Invalid)?
+            {
+                CellValue::Blank => return Err(CodecError::Invalid),
+                CellValue::Number(value) => {
+                    h.update([1]);
+                    h.update(value.to_bits().to_le_bytes());
+                }
+                CellValue::Text(value) => {
+                    h.update([2]);
+                    field(h, value.as_bytes());
+                }
+                CellValue::Boolean(value) => h.update([3, u8::from(value)]),
+            }
+        }
+        Some(CellContent::Formula(formula)) => {
+            h.update([2]);
+            h.update(formula.semantic_hash());
+        }
+    }
+    Ok(())
 }
 fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
     use v1::operation::Kind;
@@ -164,6 +247,48 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                         })
                         .collect::<Result<_, CodecError>>()?,
                 })
+            }
+            Operation::CellWrite {
+                address,
+                content,
+                previous,
+                kind,
+                undoes,
+                undoes_version,
+            } => {
+                let authored_kind = match (kind, undoes, undoes_version) {
+                    (Some(CellWriteKind::SetValue), None, None) => 1,
+                    (Some(CellWriteKind::Clear), None, None) => 2,
+                    (None, Some(_), Some(_)) => 0,
+                    _ => return Err(CodecError::Invalid),
+                };
+                match kind {
+                    Some(CellWriteKind::SetValue)
+                        if matches!(content, Some(CellContent::Formula(_))) =>
+                    {
+                        return Err(CodecError::Invalid);
+                    }
+                    Some(CellWriteKind::Clear) if content.is_some() => {
+                        return Err(CodecError::Invalid);
+                    }
+                    None if matches!(content, Some(CellContent::Formula(_))) => {
+                        return Err(CodecError::Invalid);
+                    }
+                    _ => {}
+                }
+                let write = v1::CellWrite {
+                    address: Some(addr(address)),
+                    content: encode_optional_content(content)?,
+                    previous: encode_optional_content(previous)?,
+                    undoes_operation_id: undoes.map_or_else(Vec::new, |id| id.as_bytes().to_vec()),
+                    undoes_version: undoes_version.map_or(0, DocumentVersion::get),
+                    authored_kind,
+                };
+                if undoes.is_some() {
+                    Kind::CompensatingCellWrite(write)
+                } else {
+                    Kind::AuthoredCellWrite(write)
+                }
             }
         }),
     })
@@ -407,10 +532,84 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
             }
             Operation::SetCellValues { writes }
         }
+        kind @ (Kind::AuthoredCellWrite(_) | Kind::CompensatingCellWrite(_)) => {
+            let compensating = matches!(kind, Kind::CompensatingCellWrite(_));
+            let write = match kind {
+                Kind::AuthoredCellWrite(write) | Kind::CompensatingCellWrite(write) => write,
+                _ => return Err(CodecError::Invalid),
+            };
+            let address = decode_addr(write.address.ok_or(CodecError::Invalid)?)?;
+            let content = write
+                .content
+                .map(|content| decode_content(content, address))
+                .transpose()?;
+            let previous = write
+                .previous
+                .map(|content| decode_content(content, address))
+                .transpose()?;
+            let (kind, undoes, undoes_version) = if compensating {
+                if write.authored_kind != 0
+                    || write.undoes_version == 0
+                    || write.undoes_operation_id.is_empty()
+                {
+                    return Err(CodecError::Invalid);
+                }
+                (
+                    None,
+                    Some(
+                        OperationId::from_bytes(id(&write.undoes_operation_id)?)
+                            .map_err(|_| CodecError::Invalid)?,
+                    ),
+                    Some(
+                        DocumentVersion::new(write.undoes_version)
+                            .map_err(|_| CodecError::Invalid)?,
+                    ),
+                )
+            } else {
+                if !write.undoes_operation_id.is_empty() || write.undoes_version != 0 {
+                    return Err(CodecError::Invalid);
+                }
+                (
+                    Some(match write.authored_kind {
+                        1 => CellWriteKind::SetValue,
+                        2 => CellWriteKind::Clear,
+                        _ => return Err(CodecError::Invalid),
+                    }),
+                    None,
+                    None,
+                )
+            };
+            match kind {
+                Some(CellWriteKind::SetValue)
+                    if matches!(content, Some(CellContent::Formula(_))) =>
+                {
+                    return Err(CodecError::Invalid);
+                }
+                Some(CellWriteKind::Clear) if content.is_some() => {
+                    return Err(CodecError::Invalid);
+                }
+                None if matches!(content, Some(CellContent::Formula(_))) => {
+                    return Err(CodecError::Invalid);
+                }
+                _ => {}
+            }
+            Operation::CellWrite {
+                address,
+                content,
+                previous,
+                kind,
+                undoes,
+                undoes_version,
+            }
+        }
     })
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::CellWrite {
+            undoes: Some(_), ..
+        } => 12,
+        Operation::CellWrite { .. } => 11,
         Operation::ExtendRows { .. } => 4,
         Operation::InsertRows { .. } => 5,
         Operation::InsertRowsRebased { .. } => 6,
@@ -433,7 +632,7 @@ pub fn encode(event: &CommittedEvent) -> Result<Vec<u8>, CodecError> {
         (EventPrincipal::System, Operation::AdvanceCalculationEpoch { .. }) => (Vec::new(), 2),
         (EventPrincipal::System, _) => return Err(CodecError::Invalid),
     };
-    Ok(v1::EventEnvelope {
+    let envelope = v1::EventEnvelope {
         schema_version: schema_version(&event.operation),
         document_id: event.document_id.as_bytes().to_vec(),
         operation_id: event.operation_id.as_bytes().to_vec(),
@@ -442,15 +641,21 @@ pub fn encode(event: &CommittedEvent) -> Result<Vec<u8>, CodecError> {
         state_hash: event.state_hash.to_vec(),
         operation: Some(operation(&event.operation)?),
         principal_kind,
+    };
+    encode_envelope(envelope)
+}
+fn encode_envelope(envelope: v1::EventEnvelope) -> Result<Vec<u8>, CodecError> {
+    if envelope.encoded_len() > 4 * 1024 * 1024 {
+        return Err(CodecError::EventTooLarge);
     }
-    .encode_to_vec())
+    Ok(envelope.encode_to_vec())
 }
 pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
     if bytes.len() > 4 * 1024 * 1024 {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=10) {
+    if !matches!(e.schema_version, 1..=12) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -467,7 +672,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         &operation,
     ) {
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -475,13 +680,17 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10, 0, actor, _) => {
+        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
         _ => return Err(CodecError::Invalid),
     };
     if matches!(&operation,Operation::SetCellFormula{formula,..} if formula.bound_at_version().get()>=e.committed_version)
+    {
+        return Err(CodecError::Invalid);
+    }
+    if matches!(&operation, Operation::CellWrite { undoes_version: Some(version), .. } if version.get() >= e.committed_version)
     {
         return Err(CodecError::Invalid);
     }
@@ -653,6 +862,31 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
                 }
             }
         }
+        Operation::CellWrite {
+            address,
+            content,
+            previous,
+            kind,
+            undoes,
+            undoes_version,
+        } => {
+            let tag = match (kind, undoes, undoes_version) {
+                (Some(CellWriteKind::SetValue), None, None) => 12,
+                (Some(CellWriteKind::Clear), None, None) => 13,
+                (None, Some(_), Some(_)) => 14,
+                _ => return Err(CodecError::Invalid),
+            };
+            h.update([tag]);
+            h.update(address.sheet.as_bytes());
+            h.update(address.row.as_bytes());
+            h.update(address.column.as_bytes());
+            hash_content(h, content)?;
+            hash_content(h, previous)?;
+            if let (Some(undoes), Some(version)) = (undoes, undoes_version) {
+                h.update(undoes.as_bytes());
+                h.update(version.get().to_le_bytes());
+            }
+        }
     }
     Ok(())
 }
@@ -739,6 +973,12 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
             h.update(address.column.as_bytes());
             field(&mut h, source.as_str().as_bytes());
         }
+        CommandPayload::UndoCell {
+            target_operation_id,
+        } => {
+            h.update([14]);
+            h.update(target_operation_id.as_bytes());
+        }
     }
     Ok(h.finalize().into())
 }
@@ -780,6 +1020,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::InsertColumnsRebased { .. })
         | (EventPrincipal::System, Operation::DeleteColumns { .. })
         | (EventPrincipal::System, Operation::SetCellValues { .. })
+        | (EventPrincipal::System, Operation::CellWrite { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
         (EventPrincipal::System, _) => h.update(b"PXEL-EVENT-SYSTEM-1"),
@@ -976,6 +1217,18 @@ mod tests {
         c.client_sequence = 2;
         assert_ne!(command_fingerprint(&c)?, hash);
         Ok(())
+    }
+
+    #[test]
+    fn encoder_refuses_payload_that_replay_would_reject() {
+        let envelope = v1::EventEnvelope {
+            document_id: vec![0; 4 * 1024 * 1024 + 1],
+            ..Default::default()
+        };
+        assert!(matches!(
+            encode_envelope(envelope),
+            Err(CodecError::EventTooLarge)
+        ));
     }
 }
 
@@ -1394,6 +1647,90 @@ mod formula_tests {
             writes[0].value = CellValue::Number(43.0);
         }
         assert_ne!(command_fingerprint(&command)?, fingerprint);
+        Ok(())
+    }
+    #[test]
+    fn authored_and_compensating_cell_writes_are_distinct_durable_schemas()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document_id = DocumentId::from_bytes([1; 16])?;
+        let actor = ActorId::from_bytes([3; 16])?;
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([4; 16])?,
+            row: RowId::from_bytes([5; 16])?,
+            column: ColumnId::from_bytes([6; 16])?,
+        };
+        let target_operation_id = OperationId::from_bytes([2; 16])?;
+        let authored = CommittedEvent {
+            document_id,
+            operation_id: target_operation_id,
+            principal: EventPrincipal::User(actor),
+            version: DocumentVersion::new(2)?,
+            operation: Operation::CellWrite {
+                address,
+                content: Some(CellContent::Value(CellValue::Number(8.0))),
+                previous: Some(CellContent::Value(CellValue::Number(3.0))),
+                kind: Some(CellWriteKind::SetValue),
+                undoes: None,
+                undoes_version: None,
+            },
+            state_hash: [7; 32],
+        };
+        let bytes = encode(&authored)?;
+        assert_eq!(
+            v1::EventEnvelope::decode(bytes.as_slice())?.schema_version,
+            11
+        );
+        assert_eq!(decode(&bytes)?, authored);
+        let compensation = CommittedEvent {
+            operation_id: OperationId::from_bytes([9; 16])?,
+            version: DocumentVersion::new(3)?,
+            operation: Operation::CellWrite {
+                address,
+                content: Some(CellContent::Value(CellValue::Number(3.0))),
+                previous: Some(CellContent::Value(CellValue::Number(8.0))),
+                kind: None,
+                undoes: Some(target_operation_id),
+                undoes_version: Some(DocumentVersion::new(2)?),
+            },
+            ..authored.clone()
+        };
+        let bytes = encode(&compensation)?;
+        assert_eq!(
+            v1::EventEnvelope::decode(bytes.as_slice())?.schema_version,
+            12
+        );
+        assert_eq!(decode(&bytes)?, compensation);
+        assert_ne!(event_hash(&authored)?, event_hash(&compensation)?);
+
+        let mut malformed = v1::EventEnvelope::decode(bytes.as_slice())?;
+        if let Some(v1::Operation {
+            kind: Some(v1::operation::Kind::CompensatingCellWrite(write)),
+        }) = malformed.operation.as_mut()
+        {
+            write.undoes_version = 0;
+        } else {
+            return Err("unexpected compensation DTO".into());
+        }
+        assert!(matches!(
+            decode(&malformed.encode_to_vec()),
+            Err(CodecError::Invalid)
+        ));
+
+        let mut retry = Command {
+            document_id,
+            operation_id: compensation.operation_id,
+            actor_id: actor,
+            base_version: DocumentVersion::new(2)?,
+            client_sequence: 1,
+            operation: CommandPayload::UndoCell {
+                target_operation_id,
+            },
+        };
+        let fingerprint = command_fingerprint(&retry)?;
+        retry.operation = CommandPayload::UndoCell {
+            target_operation_id: OperationId::from_bytes([8; 16])?,
+        };
+        assert_ne!(command_fingerprint(&retry)?, fingerprint);
         Ok(())
     }
     #[test]

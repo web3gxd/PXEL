@@ -54,7 +54,15 @@ commit order; target IDs формул не меняются. Relative column off
 используются повторно. Scalar references на удалённую колонку дают `#REF!`,
 partial ranges сужаются до живых границ. Stale write получает typed
 rejection, исходный idempotent retry — receipt. Replay проверяет domain hash.
-Undo и inverse ещё не реализованы.
+Структурные inverse ещё не реализованы.
+
+Guarded undo по ADR-028 реализован только для новых одиночных value/clear writes
+с persisted preimage (schema 11). `UndoCell` — отдельное намерение; schema-12
+компенсация создаёт новую версию. Actor проверяет candidate, а журнал под
+блокировкой документа сканирует до 10 000 последующих событий на любую запись
+того же stable address перед CAS. Повтор команды возвращает receipt. Старые
+события, batch, формулы и структурные операции этим срезом не отменяются;
+формульный preimage записывается, но его restoration пока отклоняется.
 
 ## Command, validation, event, projection
 

@@ -8,8 +8,8 @@ use spreadsheet_application::journal::{
     OperationJournal, SystemCommitRequest,
 };
 use spreadsheet_domain::workbook::{
-    CalculationContext, Command, CommandPayload, CommittedEvent, DocumentId, DocumentVersion,
-    DomainError, EventPrincipal, Operation, OperationId, Workbook,
+    CalculationContext, CellContent, CellWriteKind, Command, CommandPayload, CommittedEvent,
+    DocumentId, DocumentVersion, DomainError, EventPrincipal, Operation, OperationId, Workbook,
 };
 use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
 use thiserror::Error;
@@ -423,8 +423,50 @@ async fn submit<J: OperationJournal>(
                 .checked_add(1)
                 .ok_or(SessionError::InvalidCommand)?,
         )?;
-        let operation = normalize(&command, workbook)?;
-        let candidate = Arc::new(workbook.candidate(&operation, next)?);
+        let operation = match &command.operation {
+            CommandPayload::UndoCell {
+                target_operation_id,
+            } => {
+                let target = journal
+                    .load_undo_target(identity, command.document_id, *target_operation_id)
+                    .await?;
+                let Operation::CellWrite {
+                    address,
+                    content,
+                    previous,
+                    undoes: None,
+                    undoes_version: None,
+                    kind: Some(_),
+                } = target.operation
+                else {
+                    return Err(JournalError::NotUndoable.into());
+                };
+                if matches!(previous, Some(CellContent::Formula(_))) {
+                    return Err(JournalError::NotUndoable.into());
+                }
+                Operation::CellWrite {
+                    address,
+                    content: previous,
+                    previous: content,
+                    undoes: Some(*target_operation_id),
+                    undoes_version: Some(target.version),
+                    kind: None,
+                }
+            }
+            _ => normalize(&command, workbook)?,
+        };
+        let candidate = match workbook.candidate(&operation, next) {
+            Ok(candidate) => Arc::new(candidate),
+            Err(
+                DomainError::PreimageConflict
+                | DomainError::MissingSheet
+                | DomainError::MissingRow
+                | DomainError::MissingColumn,
+            ) if matches!(command.operation, CommandPayload::UndoCell { .. }) => {
+                return Err(JournalError::UndoConflict.into());
+            }
+            Err(error) => return Err(error.into()),
+        };
         if matches!(
             operation,
             Operation::InsertRowsRebased { .. }
@@ -572,10 +614,18 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
             sheet: *sheet,
             columns: columns.clone(),
         }),
-        CommandPayload::SetCellValue { address, value } => Ok(Operation::SetCellValue {
-            address: *address,
-            value: value.normalized()?,
-        }),
+        CommandPayload::SetCellValue { address, value } => {
+            let value = value.normalized()?;
+            Ok(Operation::CellWrite {
+                address: *address,
+                content: (value != spreadsheet_domain::workbook::CellValue::Blank)
+                    .then_some(CellContent::Value(value)),
+                previous: workbook.cell_content(*address)?.cloned(),
+                undoes: None,
+                undoes_version: None,
+                kind: Some(CellWriteKind::SetValue),
+            })
+        }
         CommandPayload::SetCellValues { writes } => Ok(Operation::SetCellValues {
             writes: writes
                 .iter()
@@ -587,7 +637,14 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
                 })
                 .collect::<Result<_, SessionError>>()?,
         }),
-        CommandPayload::ClearCell { address } => Ok(Operation::ClearCell { address: *address }),
+        CommandPayload::ClearCell { address } => Ok(Operation::CellWrite {
+            address: *address,
+            content: None,
+            previous: workbook.cell_content(*address)?.cloned(),
+            undoes: None,
+            undoes_version: None,
+            kind: Some(CellWriteKind::Clear),
+        }),
         CommandPayload::SetCellFormula { address, source } => {
             if command.base_version == DocumentVersion::ZERO
                 || command.base_version < workbook.last_axis_change_version()
@@ -614,6 +671,8 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
                 formula,
             })
         }
-        CommandPayload::CreateWorkbook { .. } => Err(SessionError::InvalidCommand),
+        CommandPayload::CreateWorkbook { .. } | CommandPayload::UndoCell { .. } => {
+            Err(SessionError::InvalidCommand)
+        }
     }
 }

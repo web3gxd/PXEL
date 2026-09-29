@@ -1,5 +1,18 @@
 import { expect, test } from '@playwright/test';
 
+function uuidV7() {
+  const id = crypto.getRandomValues(new Uint8Array(16));
+  let time = BigInt(Date.now());
+  for (let index = 5; index >= 0; index--) {
+    id[index] = Number(time & 255n);
+    time >>= 8n;
+  }
+  id[6] = 0x70 | ((id[6] ?? 0) & 15);
+  id[8] = 0x80 | ((id[8] ?? 0) & 63);
+  const raw = [...id].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20)}`;
+}
+
 test('copying one formula shifts relative references in WASM and commits server-bound text', async ({
   page,
 }) => {
@@ -326,6 +339,104 @@ test('two browser tabs see each other’s committed cell after a head hint', asy
     await expect(firstBar).toHaveValue('23');
   } finally {
     await second.close();
+  }
+});
+
+test('one-step undo is a durable compensation broadcast to another browser', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const second = await page.context().newPage();
+  try {
+    await second.goto(page.url());
+    const firstBar = page.getByRole('textbox', { name: 'Значение ячейки' });
+    const secondBar = second.getByRole('textbox', { name: 'Значение ячейки' });
+    await firstBar.fill('42');
+    await firstBar.press('Enter');
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await expect(secondBar).toHaveValue('42');
+    const grid = page.getByRole('region', { name: 'Область таблицы' });
+    await grid.focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(
+      page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }),
+    ).toBeEnabled();
+    await page.keyboard.press('Control+z');
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await expect(firstBar).toHaveValue('');
+    await expect(secondBar).toHaveValue('');
+    await page.reload();
+    await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+    await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('');
+    await expect(
+      page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }),
+    ).toBeDisabled();
+  } finally {
+    await second.close();
+  }
+});
+
+test('one-step undo rejects a later edit by another user', async ({ page, browser }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const documentId = new URL(page.url()).searchParams.get('document');
+  if (!documentId) throw new Error('Document ID missing');
+  const origin = new URL(page.url()).origin;
+  const owner = await (
+    await page.request.get('/api/dev/identity', { headers: { Origin: origin } })
+  ).json();
+  const editorContext = await browser.newContext();
+  const account = `undo_${crypto.randomUUID().replaceAll('-', '').slice(0, 20)}`;
+  try {
+    const temporarySession = await editorContext.request.post(origin + '/api/dev/session', {
+      headers: { Origin: origin, 'X-PXEL-DEV-ACCOUNT': account },
+    });
+    expect(temporarySession.status()).toBe(204);
+    const editorIdentity = await (
+      await editorContext.request.get(origin + '/api/dev/identity', { headers: { Origin: origin } })
+    ).json();
+    await editorContext.request.delete(origin + '/api/dev/session', {
+      headers: { Origin: origin },
+    });
+    const grant = await page.request.post(`/api/documents/${documentId}/permissions`, {
+      headers: { Origin: origin },
+      data: {
+        action: 'grant',
+        change_id: uuidV7(),
+        target_user_id: editorIdentity.actor_id,
+        role: 'editor',
+      },
+    });
+    expect(grant.status()).toBe(200);
+    const shared = await editorContext.request.post(origin + '/api/dev/session', {
+      headers: {
+        Origin: origin,
+        'X-PXEL-DEV-ACCOUNT': account,
+        'X-PXEL-DEV-WORKSPACE': owner.workspace_id,
+      },
+    });
+    expect(shared.status()).toBe(204);
+    const editor = await editorContext.newPage();
+    await editor.goto(page.url());
+    await expect(editor.getByTestId('connection-status')).toHaveText('Подключено');
+    const ownerBar = page.getByRole('textbox', { name: 'Значение ячейки' });
+    await ownerBar.fill('mine');
+    await ownerBar.press('Enter');
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    const editorBar = editor.getByRole('textbox', { name: 'Значение ячейки' });
+    await expect(editorBar).toHaveValue('mine');
+    await editorBar.fill('theirs');
+    await editorBar.press('Enter');
+    await expect(editor.getByTestId('save-status')).toHaveText('Сохранено');
+    await page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }).click();
+    await expect(page.getByRole('alert')).toContainText('ячейка была изменена');
+    const saved = await (await page.request.get(`/api/documents/${documentId}`)).json();
+    expect(saved.sheets[0].cells[0].value).toEqual({ type: 'text', value: 'theirs' });
+  } finally {
+    await editorContext.close();
   }
 });
 

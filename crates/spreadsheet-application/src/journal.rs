@@ -56,6 +56,14 @@ pub enum JournalError {
     Corrupt,
     #[error("journal schema unsupported")]
     UnsupportedSchema,
+    #[error("durable event exceeds the size limit")]
+    PayloadTooLarge,
+    #[error("undo target changed or is unavailable")]
+    UndoConflict,
+    #[error("operation cannot be undone")]
+    NotUndoable,
+    #[error("undo target is outside the guarded history window")]
+    UndoWindowExceeded,
 }
 pub trait OperationJournal: Send + Sync {
     fn quarantine(
@@ -79,6 +87,12 @@ pub trait OperationJournal: Send + Sync {
         after: DocumentVersion,
         limit: u32,
     ) -> impl Future<Output = Result<Vec<CommittedEvent>, JournalError>> + Send;
+    fn load_undo_target(
+        &self,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        target_operation_id: OperationId,
+    ) -> impl Future<Output = Result<CommittedEvent, JournalError>> + Send;
     fn commit(
         &self,
         request: &CommitRequest,

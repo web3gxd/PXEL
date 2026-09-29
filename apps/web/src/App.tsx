@@ -162,11 +162,18 @@ export function App() {
         aria-label="Форматирование (недоступно в режиме просмотра)"
       >
         <div className="tool-group">
-          <Tool label="Отменить">
+          <button
+            type="button"
+            className="tool"
+            aria-label="Отменить последнюю правку ячейки"
+            title="Отменить последнюю сохраненную правку ячейки"
+            disabled={!document.canUndo || state.kind !== 'online'}
+            onClick={() => document.undo()}
+          >
             <Icon>
               <path d="M9 7 5 11l4 4M5 11h9a5 5 0 0 1 5 5" />
             </Icon>
-          </Tool>
+          </button>
           <Tool label="Повторить">
             <Icon>
               <path d="m15 7 4 4-4 4m4-4h-9a5 5 0 0 0-5 5" />

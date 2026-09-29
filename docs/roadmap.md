@@ -94,6 +94,14 @@ TSV-копирование до 1,000 обычных значений и вст�
 browser DPR 1/2 подтвердил один commit, reload и отсутствие DOM-ячеек.
 Смешанные диапазоны с формулами требуют следующего server-side `CopyRange` с
 замороженным source; локальный TSV-copy не выдается за такую операцию.
+Десятый узкий срез фазы 4 ([ADR-028](adr/028-guarded-single-cell-undo.md)):
+guarded undo только новых одиночных value/clear writes своего автора. Schema 11
+хранит preimage, schema 12 — новую компенсирующую версию; поздняя запись в ту же
+stable ячейку отклоняет undo даже при совпадающем значении. PostgreSQL tests,
+hard restart/retry и browser DPR 1/2 прошли. Локальный одинарный замер с
+хвостом 1000 событий: 22.461 ms, не p95
+([условия](benchmarks/2026-09-29-undo-tail-local.md)). Старые события,
+формульный preimage, batch и структура не отменяются этим срезом.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

@@ -44,6 +44,10 @@ pub enum DomainError {
     LimitExceeded,
     #[error("invalid calculation context")]
     InvalidCalculationContext,
+    #[error("cell content no longer matches the committed preimage")]
+    PreimageConflict,
+    #[error("undo cannot restore a formula before historical reference rebasing is specified")]
+    UnsupportedUndoFormula,
 }
 
 macro_rules! identity {
@@ -303,6 +307,11 @@ pub struct CellWrite {
     pub address: CellAddress,
     pub value: CellValue,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CellWriteKind {
+    SetValue,
+    Clear,
+}
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
     CreateWorkbook {
@@ -351,6 +360,16 @@ pub enum Operation {
     ClearCell {
         address: CellAddress,
     },
+    /// A guarded, replayable content write. `previous` is the exact content
+    /// observed before the write; `undoes` identifies a compensated user event.
+    CellWrite {
+        address: CellAddress,
+        content: Option<CellContent>,
+        previous: Option<CellContent>,
+        kind: Option<CellWriteKind>,
+        undoes: Option<OperationId>,
+        undoes_version: Option<DocumentVersion>,
+    },
     AdvanceCalculationEpoch {
         context: CalculationContext,
     },
@@ -395,6 +414,9 @@ pub enum CommandPayload {
     },
     ClearCell {
         address: CellAddress,
+    },
+    UndoCell {
+        target_operation_id: OperationId,
     },
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -617,6 +639,15 @@ impl Workbook {
     pub fn sheets(&self) -> &[Sheet] {
         &self.sheets
     }
+    pub fn cell_content(&self, address: CellAddress) -> Result<Option<&CellContent>, DomainError> {
+        let sheet = self
+            .sheets
+            .iter()
+            .find(|sheet| sheet.id == address.sheet)
+            .ok_or(DomainError::MissingSheet)?;
+        sheet.validate_address(address)?;
+        Ok(sheet.cells.get(&address))
+    }
     pub fn calculation_context(&self) -> Option<&CalculationContext> {
         self.calculation_context.as_ref()
     }
@@ -803,7 +834,8 @@ impl Workbook {
                 }
                 Operation::SetCellValue { address, .. }
                 | Operation::SetCellFormula { address, .. }
-                | Operation::ClearCell { address } => *address,
+                | Operation::ClearCell { address }
+                | Operation::CellWrite { address, .. } => *address,
                 Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
             };
             if !seen.insert(address) {
@@ -980,6 +1012,57 @@ impl Workbook {
                 self.updated_budgets(*address, formula.text_bytes(), formula.ast_memory_bytes())?
             }
             Operation::ClearCell { address } => self.updated_budgets(*address, 0, 0)?,
+            Operation::CellWrite {
+                address,
+                content,
+                previous,
+                kind,
+                undoes,
+                undoes_version,
+            } => {
+                if undoes.is_some() != undoes_version.is_some()
+                    || undoes_version.is_some_and(|version| version > self.version)
+                    || (kind.is_some() == undoes.is_some())
+                {
+                    return Err(DomainError::VersionConflict);
+                }
+                match kind {
+                    Some(CellWriteKind::SetValue)
+                        if content
+                            .as_ref()
+                            .is_some_and(|content| !matches!(content, CellContent::Value(_))) =>
+                    {
+                        return Err(DomainError::InvalidValue);
+                    }
+                    Some(CellWriteKind::Clear) if content.is_some() => {
+                        return Err(DomainError::InvalidValue);
+                    }
+                    _ => {}
+                }
+                if kind.is_none() && matches!(content, Some(CellContent::Formula(_))) {
+                    return Err(DomainError::UnsupportedUndoFormula);
+                }
+                if self.cell_content(*address)? != previous.as_ref() {
+                    return Err(DomainError::PreimageConflict);
+                }
+                match content {
+                    Some(CellContent::Value(CellValue::Blank)) => {
+                        return Err(DomainError::InvalidValue);
+                    }
+                    Some(CellContent::Value(value)) => {
+                        value.validate()?;
+                    }
+                    Some(CellContent::Formula(formula)) => {
+                        self.validate_formula(*address, formula)?;
+                    }
+                    None => {}
+                }
+                self.updated_budgets(
+                    *address,
+                    content.as_ref().map_or(0, CellContent::text_bytes),
+                    content.as_ref().map_or(0, CellContent::ast_memory_bytes),
+                )?
+            }
         })
     }
     fn validate_new_rows(&self, rows: &[RowId]) -> Result<(), DomainError> {
@@ -1143,6 +1226,27 @@ impl Workbook {
                     .ok_or(DomainError::MissingSheet)?;
                 sheet.validate_address(*address)?;
                 sheet.cells.remove(address);
+            }
+            Operation::CellWrite {
+                address, content, ..
+            } => {
+                let sheet = self
+                    .sheets
+                    .iter_mut()
+                    .find(|sheet| sheet.id == address.sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                if let Some(content) = content {
+                    if sheet.cells.len() >= MAX_CELLS && !sheet.cells.contains_key(address) {
+                        return Err(DomainError::LimitExceeded);
+                    }
+                    let normalized = match content {
+                        CellContent::Value(value) => CellContent::Value(value.normalized()?),
+                        CellContent::Formula(formula) => CellContent::Formula(formula.clone()),
+                    };
+                    sheet.cells.insert(*address, normalized);
+                } else {
+                    sheet.cells.remove(address);
+                }
             }
         }
         self.text_bytes = text_bytes;

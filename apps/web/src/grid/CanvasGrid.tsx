@@ -199,7 +199,18 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
         }}
         onDoubleClick={() => document?.begin()}
         onKeyDown={(event) => {
-          if (!document?.sheet || event.ctrlKey || event.metaKey || event.altKey) return;
+          if (!document?.sheet) return;
+          if (
+            (event.ctrlKey || event.metaKey) &&
+            !event.altKey &&
+            !event.shiftKey &&
+            event.key.toLowerCase() === 'z'
+          ) {
+            event.preventDefault();
+            document.undo();
+            return;
+          }
+          if (event.ctrlKey || event.metaKey || event.altKey) return;
           const { row, column } = document.selected;
           const moves: Record<string, [number, number]> = {
             ArrowDown: [1, 0],
@@ -299,7 +310,7 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
         )}
       <p id="grid-description" className="sr-only">
         {document?.sheet
-          ? 'Стрелки и Tab перемещают выделение. Shift со стрелками выделяет диапазон, Ctrl+C и Ctrl+V копируют и вставляют значения. F2 или двойной щелчок открывают редактор. Enter сохраняет, Escape отменяет ввод.'
+          ? 'Стрелки и Tab перемещают выделение. Shift со стрелками выделяет диапазон, Ctrl+C и Ctrl+V копируют и вставляют значения. Ctrl+Z отменяет последнюю сохраненную правку ячейки. F2 или двойной щелчок открывают редактор. Enter сохраняет, Escape отменяет ввод.'
           : 'Пустой лист: 1000 строк и 26 столбцов. Режим просмотра. Для прокрутки используйте клавиши со стрелками или Page Down. Создайте таблицу для редактирования.'}
       </p>
       {!canvasAvailable && (

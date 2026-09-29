@@ -1,4 +1,5 @@
 use crate::PgDatabase;
+use futures_util::TryStreamExt;
 use spreadsheet_application::journal::*;
 use spreadsheet_domain::workbook::*;
 use spreadsheet_storage_codec as codec;
@@ -29,6 +30,98 @@ fn version(n: i64) -> Result<DocumentVersion, JournalError> {
 }
 fn number(n: u64) -> Result<i64, JournalError> {
     i64::try_from(n).map_err(|_| JournalError::Corrupt)
+}
+const UNDO_WINDOW: u64 = 10_000;
+struct StoredEventRow<'a> {
+    document: DocumentId,
+    committed_version: i64,
+    operation_id: Uuid,
+    actor_id: Option<Uuid>,
+    principal_kind: &'a str,
+    schema_version: i32,
+    payload: &'a [u8],
+    payload_checksum: &'a [u8],
+    canonical_event_hash: &'a [u8],
+}
+fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
+    if !matches!(row.schema_version, 1..=12) {
+        return Err(JournalError::UnsupportedSchema);
+    }
+    if codec::checksum(row.payload).as_slice() != row.payload_checksum {
+        return Err(JournalError::Corrupt);
+    }
+    let event = codec::decode(row.payload).map_err(|error| match error {
+        codec::CodecError::UnsupportedSchema => JournalError::UnsupportedSchema,
+        _ => JournalError::Corrupt,
+    })?;
+    if codec::schema_version(&event.operation)
+        != u32::try_from(row.schema_version).map_err(|_| JournalError::Corrupt)?
+        || event.document_id != row.document
+        || event.version != version(row.committed_version)?
+        || event.operation_id.as_bytes() != row.operation_id.as_bytes()
+        || match event.principal {
+            EventPrincipal::User(actor) => {
+                row.principal_kind != "user"
+                    || row.actor_id.as_ref().map(Uuid::as_bytes) != Some(actor.as_bytes())
+            }
+            EventPrincipal::System => row.principal_kind != "system" || row.actor_id.is_some(),
+        }
+        || codec::event_hash(&event).map_err(invalid)?.as_slice() != row.canonical_event_hash
+    {
+        return Err(JournalError::Corrupt);
+    }
+    Ok(event)
+}
+fn undo_target_address(
+    event: &CommittedEvent,
+    actor: ActorId,
+) -> Result<(CellAddress, Option<CellContent>), JournalError> {
+    if event.principal != EventPrincipal::User(actor) {
+        return Err(JournalError::NotUndoable);
+    }
+    match &event.operation {
+        Operation::CellWrite {
+            address,
+            previous,
+            kind: Some(_),
+            undoes: None,
+            undoes_version: None,
+            ..
+        } => {
+            if matches!(previous, Some(CellContent::Formula(_))) {
+                return Err(JournalError::NotUndoable);
+            }
+            Ok((*address, previous.clone()))
+        }
+        _ => Err(JournalError::NotUndoable),
+    }
+}
+fn touches_address(operation: &Operation, address: CellAddress) -> bool {
+    match operation {
+        Operation::SetCellValue {
+            address: target, ..
+        }
+        | Operation::ClearCell { address: target }
+        | Operation::SetCellFormula {
+            address: target, ..
+        }
+        | Operation::CellWrite {
+            address: target, ..
+        } => *target == address,
+        Operation::SetCellValues { writes } => writes.iter().any(|write| write.address == address),
+        Operation::DeleteRows { sheet, rows } => {
+            *sheet == address.sheet && rows.contains(&address.row)
+        }
+        Operation::DeleteColumns { sheet, columns } => {
+            *sheet == address.sheet && columns.contains(&address.column)
+        }
+        Operation::CreateWorkbook { .. }
+        | Operation::ExtendRows { .. }
+        | Operation::InsertRows { .. }
+        | Operation::InsertRowsRebased { .. }
+        | Operation::InsertColumnsRebased { .. }
+        | Operation::AdvanceCalculationEpoch { .. } => false,
+    }
 }
 async fn access_locked(
     tx: &mut Transaction<'_, Postgres>,
@@ -90,12 +183,93 @@ async fn existing(
     })
     .transpose()
 }
+async fn undo_target_locked(
+    tx: &mut Transaction<'_, Postgres>,
+    document: DocumentId,
+    target_id: OperationId,
+    actor: ActorId,
+    head: DocumentVersion,
+) -> Result<(CommittedEvent, CellAddress, Option<CellContent>), JournalError> {
+    let row = sqlx::query!(
+        "SELECT committed_version, operation_id, actor_id, principal_kind, schema_version, payload, payload_checksum, canonical_event_hash FROM document_operations WHERE document_id=$1 AND operation_id=$2",
+        uuid(document.as_bytes()),
+        uuid(target_id.as_bytes())
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(error)?
+    .ok_or(JournalError::UndoConflict)?;
+    let event = verified_event(StoredEventRow {
+        document,
+        committed_version: row.committed_version,
+        operation_id: row.operation_id,
+        actor_id: row.actor_id,
+        principal_kind: &row.principal_kind,
+        schema_version: row.schema_version,
+        payload: &row.payload,
+        payload_checksum: &row.payload_checksum,
+        canonical_event_hash: &row.canonical_event_hash,
+    })?;
+    let (address, previous) = undo_target_address(&event, actor)?;
+    if head
+        .get()
+        .checked_sub(event.version.get())
+        .ok_or(JournalError::Corrupt)?
+        > UNDO_WINDOW
+    {
+        return Err(JournalError::UndoWindowExceeded);
+    }
+    Ok((event, address, previous))
+}
+async fn guard_undo_tail(
+    tx: &mut Transaction<'_, Postgres>,
+    document: DocumentId,
+    target: &CommittedEvent,
+    address: CellAddress,
+    head: DocumentVersion,
+) -> Result<(), JournalError> {
+    let mut rows = sqlx::query!(
+        "SELECT committed_version, operation_id, actor_id, principal_kind, schema_version, payload, payload_checksum, canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version>$2 AND committed_version<=$3 ORDER BY committed_version",
+        uuid(document.as_bytes()),
+        number(target.version.get())?,
+        number(head.get())?
+    )
+    .fetch(&mut **tx);
+    let mut expected = target.version.get();
+    while let Some(row) = rows.try_next().await.map_err(error)? {
+        expected = expected.checked_add(1).ok_or(JournalError::Corrupt)?;
+        let event = verified_event(StoredEventRow {
+            document,
+            committed_version: row.committed_version,
+            operation_id: row.operation_id,
+            actor_id: row.actor_id,
+            principal_kind: &row.principal_kind,
+            schema_version: row.schema_version,
+            payload: &row.payload,
+            payload_checksum: &row.payload_checksum,
+            canonical_event_hash: &row.canonical_event_hash,
+        })?;
+        if event.version.get() != expected {
+            return Err(JournalError::Corrupt);
+        }
+        if touches_address(&event.operation, address) {
+            return Err(JournalError::UndoConflict);
+        }
+    }
+    if expected != head.get() {
+        return Err(JournalError::Corrupt);
+    }
+    Ok(())
+}
 async fn insert(
     tx: &mut Transaction<'_, Postgres>,
     event: &CommittedEvent,
     fingerprint: [u8; 32],
 ) -> Result<CommitReceipt, JournalError> {
-    let payload = codec::encode(event).map_err(invalid)?;
+    let payload = codec::encode(event).map_err(|error| match error {
+        codec::CodecError::EventTooLarge => JournalError::PayloadTooLarge,
+        _ => JournalError::Corrupt,
+    })?;
     let checksum = codec::checksum(&payload);
     let hash = codec::event_hash(event).map_err(invalid)?;
     let (actor, principal_kind) = match event.principal {
@@ -294,6 +468,32 @@ impl OperationJournal for PgDatabase {
                 columns: columns.clone(),
             },
             Operation::ClearCell { address } => CommandPayload::ClearCell { address: *address },
+            Operation::CellWrite {
+                address,
+                content,
+                kind,
+                undoes,
+                undoes_version,
+                ..
+            } => match (kind, undoes, undoes_version, content) {
+                (Some(CellWriteKind::SetValue), None, None, Some(CellContent::Value(value))) => {
+                    CommandPayload::SetCellValue {
+                        address: *address,
+                        value: value.clone(),
+                    }
+                }
+                (Some(CellWriteKind::SetValue), None, None, None) => CommandPayload::SetCellValue {
+                    address: *address,
+                    value: CellValue::Blank,
+                },
+                (Some(CellWriteKind::Clear), None, None, None) => {
+                    CommandPayload::ClearCell { address: *address }
+                }
+                (None, Some(target_operation_id), Some(_), _) => CommandPayload::UndoCell {
+                    target_operation_id: *target_operation_id,
+                },
+                _ => return Err(JournalError::Corrupt),
+            },
             Operation::SetCellFormula { address, formula } => {
                 if formula.origin() != *address
                     || formula.bound_at_version() > request.expected_head
@@ -339,6 +539,36 @@ impl OperationJournal for PgDatabase {
             || access.membership_access_epoch != request.expected_access.membership_access_epoch
         {
             return Err(JournalError::Conflict);
+        }
+        if let Operation::CellWrite {
+            address,
+            content,
+            previous,
+            kind: None,
+            undoes: Some(target_id),
+            undoes_version: Some(target_version),
+        } = &e.operation
+        {
+            let (target, target_address, target_previous) = undo_target_locked(
+                &mut tx,
+                c.document_id,
+                *target_id,
+                request.identity.actor_id,
+                access.head,
+            )
+            .await?;
+            if target.version != *target_version
+                || target_address != *address
+                || target_previous != *content
+                || *previous
+                    != match &target.operation {
+                        Operation::CellWrite { content, .. } => content.clone(),
+                        _ => return Err(JournalError::NotUndoable),
+                    }
+            {
+                return Err(JournalError::UndoConflict);
+            }
+            guard_undo_tail(&mut tx, c.document_id, &target, *address, access.head).await?;
         }
         let updated=sqlx::query!("UPDATE documents SET head_version=head_version+1 WHERE document_id=$1 AND head_version=$2 RETURNING head_version",uuid(c.document_id.as_bytes()),number(request.expected_head.get())?).fetch_optional(&mut *tx).await.map_err(error)?;
         if updated.is_none() {
@@ -416,6 +646,28 @@ impl OperationJournal for PgDatabase {
         tx.commit().await.map_err(error)?;
         Ok(CommitOutcome::Committed(receipt))
     }
+    async fn load_undo_target(
+        &self,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        target_operation_id: OperationId,
+    ) -> Result<CommittedEvent, JournalError> {
+        let mut tx = self.pool.begin().await.map_err(error)?;
+        let access = access_locked(&mut tx, identity, document_id).await?;
+        if !access.can_edit {
+            return Err(JournalError::Unauthorized);
+        }
+        let (target, _, _) = undo_target_locked(
+            &mut tx,
+            document_id,
+            target_operation_id,
+            identity.actor_id,
+            access.head,
+        )
+        .await?;
+        tx.commit().await.map_err(error)?;
+        Ok(target)
+    }
     async fn load_events(
         &self,
         identity: AuthenticatedActor,
@@ -432,32 +684,19 @@ impl OperationJournal for PgDatabase {
         let mut events = Vec::with_capacity(rows.len());
         let mut expected = after.get();
         for r in rows {
-            if !matches!(r.schema_version, 1..=10) {
-                return Err(JournalError::UnsupportedSchema);
-            }
-            if codec::checksum(&r.payload).as_slice() != r.payload_checksum {
-                return Err(JournalError::Corrupt);
-            }
-            let e = codec::decode(&r.payload).map_err(|e| match e {
-                codec::CodecError::UnsupportedSchema => JournalError::UnsupportedSchema,
-                _ => JournalError::Corrupt,
+            let e = verified_event(StoredEventRow {
+                document: document_id,
+                committed_version: r.committed_version,
+                operation_id: r.operation_id,
+                actor_id: r.actor_id,
+                principal_kind: &r.principal_kind,
+                schema_version: r.schema_version,
+                payload: &r.payload,
+                payload_checksum: &r.payload_checksum,
+                canonical_event_hash: &r.canonical_event_hash,
             })?;
             expected = expected.checked_add(1).ok_or(JournalError::Corrupt)?;
-            if codec::schema_version(&e.operation)
-                != u32::try_from(r.schema_version).map_err(|_| JournalError::Corrupt)?
-                || e.document_id != document_id
-                || e.version.get() != expected
-                || e.version != version(r.committed_version)?
-                || e.operation_id.as_bytes() != r.operation_id.as_bytes()
-                || match e.principal {
-                    EventPrincipal::User(actor) => {
-                        r.principal_kind != "user"
-                            || r.actor_id.as_ref().map(Uuid::as_bytes) != Some(actor.as_bytes())
-                    }
-                    EventPrincipal::System => r.principal_kind != "system" || r.actor_id.is_some(),
-                }
-                || codec::event_hash(&e).map_err(invalid)?.as_slice() != r.canonical_event_hash
-            {
+            if e.version.get() != expected {
                 return Err(JournalError::Corrupt);
             }
             events.push(e)
@@ -559,6 +798,402 @@ mod tests {
                 state_hash: candidate.hash(),
             },
         })
+    }
+    async fn guarded_write_request(
+        db: &PgDatabase,
+        identity: AuthenticatedActor,
+        book: &Workbook,
+        id: u8,
+        content: Option<CellContent>,
+        previous: Option<CellContent>,
+        undoes: Option<(OperationId, DocumentVersion)>,
+    ) -> Result<CommitRequest, Box<dyn std::error::Error>> {
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        let (kind, undoes_id, undoes_version, payload) = match (&content, undoes) {
+            (_, Some((target, target_version))) => (
+                None,
+                Some(target),
+                Some(target_version),
+                CommandPayload::UndoCell {
+                    target_operation_id: target,
+                },
+            ),
+            (Some(CellContent::Value(value)), None) => (
+                Some(CellWriteKind::SetValue),
+                None,
+                None,
+                CommandPayload::SetCellValue {
+                    address,
+                    value: value.clone(),
+                },
+            ),
+            (None, None) => (
+                Some(CellWriteKind::Clear),
+                None,
+                None,
+                CommandPayload::ClearCell { address },
+            ),
+            _ => return Err("invalid guarded-write test fixture".into()),
+        };
+        let operation = Operation::CellWrite {
+            address,
+            content,
+            previous,
+            kind,
+            undoes: undoes_id,
+            undoes_version,
+        };
+        let next = DocumentVersion::new(book.version().get() + 1)?;
+        let candidate = book.candidate(&operation, next)?;
+        let operation_id = OperationId::from_bytes([id; 16])?;
+        Ok(CommitRequest {
+            identity,
+            expected_head: book.version(),
+            expected_access: db.access(identity, book.document_id()).await?,
+            command: Command {
+                operation_id,
+                document_id: book.document_id(),
+                actor_id: identity.actor_id,
+                base_version: book.version(),
+                client_sequence: 1,
+                operation: payload,
+            },
+            event: CommittedEvent {
+                document_id: book.document_id(),
+                operation_id,
+                principal: EventPrincipal::User(identity.actor_id),
+                version: next,
+                operation,
+                state_hash: candidate.hash(),
+            },
+        })
+    }
+    #[sqlx::test(migrations = false)]
+    async fn guarded_undo_commits_new_version_and_replays_after_retry(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        let (db, identity, book) = fixture(pool).await?;
+        let original = guarded_write_request(
+            &db,
+            identity,
+            &book,
+            81,
+            Some(CellContent::Value(CellValue::Text("first".into()))),
+            None,
+            None,
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&original).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let target = db
+            .load_undo_target(identity, book.document_id(), original.event.operation_id)
+            .await?;
+        assert_eq!(target.version.get(), 2);
+        let after_original = book.candidate(&original.event.operation, target.version)?;
+        let undo = guarded_write_request(
+            &db,
+            identity,
+            &after_original,
+            82,
+            None,
+            Some(CellContent::Value(CellValue::Text("first".into()))),
+            Some((original.event.operation_id, target.version)),
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&undo).await?,
+            CommitOutcome::Committed(_)
+        ));
+        assert!(matches!(
+            db.commit(&undo).await?,
+            CommitOutcome::AlreadyCommitted(_)
+        ));
+        let mut reused_id = undo.command.clone();
+        reused_id.operation = CommandPayload::UndoCell {
+            target_operation_id: OperationId::from_bytes([83; 16])?,
+        };
+        assert!(matches!(
+            db.receipt(identity, &reused_id).await,
+            Err(JournalError::IdempotencyConflict)
+        ));
+        let mut replay = Workbook::empty(book.document_id());
+        for event in db
+            .load_events(identity, book.document_id(), DocumentVersion::ZERO, 1000)
+            .await?
+        {
+            replay.apply_event(&event)?;
+        }
+        assert_eq!(replay.hash(), undo.event.state_hash);
+        assert_eq!(replay.version().get(), 3);
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
+    async fn blank_value_is_distinct_from_clear_in_schema_eleven(pool: sqlx::PgPool) -> TestResult {
+        let (db, identity, book) = fixture(pool).await?;
+        let mut blank = guarded_write_request(&db, identity, &book, 87, None, None, None).await?;
+        if let Operation::CellWrite { kind, .. } = &mut blank.event.operation {
+            *kind = Some(CellWriteKind::SetValue);
+        }
+        if let CommandPayload::ClearCell { address } = blank.command.operation {
+            blank.command.operation = CommandPayload::SetCellValue {
+                address,
+                value: CellValue::Blank,
+            };
+        } else {
+            return Err("expected clear fixture".into());
+        }
+        assert!(matches!(
+            db.commit(&blank).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let event = db
+            .load_undo_target(identity, book.document_id(), blank.event.operation_id)
+            .await?;
+        assert!(matches!(
+            event.operation,
+            Operation::CellWrite {
+                kind: Some(CellWriteKind::SetValue),
+                content: None,
+                ..
+            }
+        ));
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
+    async fn undo_tail_guard_rejects_write_away_and_back_to_same_value(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        let (db, identity, book) = fixture(pool).await?;
+        let original = guarded_write_request(
+            &db,
+            identity,
+            &book,
+            83,
+            Some(CellContent::Value(CellValue::Text("first".into()))),
+            None,
+            None,
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&original).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let after_original = book.candidate(&original.event.operation, original.event.version)?;
+        let away = guarded_write_request(
+            &db,
+            identity,
+            &after_original,
+            84,
+            Some(CellContent::Value(CellValue::Text("second".into()))),
+            Some(CellContent::Value(CellValue::Text("first".into()))),
+            None,
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&away).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let after_away = after_original.candidate(&away.event.operation, away.event.version)?;
+        let back = guarded_write_request(
+            &db,
+            identity,
+            &after_away,
+            85,
+            Some(CellContent::Value(CellValue::Text("first".into()))),
+            Some(CellContent::Value(CellValue::Text("second".into()))),
+            None,
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&back).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let after_back = after_away.candidate(&back.event.operation, back.event.version)?;
+        let undo = guarded_write_request(
+            &db,
+            identity,
+            &after_back,
+            86,
+            None,
+            Some(CellContent::Value(CellValue::Text("first".into()))),
+            Some((original.event.operation_id, original.event.version)),
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&undo).await,
+            Err(JournalError::UndoConflict)
+        ));
+        assert_eq!(db.access(identity, book.document_id()).await?.head.get(), 4);
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
+    async fn undo_rejects_foreign_target_and_foreign_same_value_write(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        let (db, owner, book) = fixture(pool).await?;
+        let original = guarded_write_request(
+            &db,
+            owner,
+            &book,
+            88,
+            Some(CellContent::Value(CellValue::Text("same".into()))),
+            None,
+            None,
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&original).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let other = AuthenticatedActor {
+            actor_id: ActorId::from_bytes([89; 16])?,
+            workspace_id: owner.workspace_id,
+        };
+        sqlx::query!(
+            "INSERT INTO users(user_id) VALUES($1)",
+            uuid(other.actor_id.as_bytes())
+        )
+        .execute(&db.pool)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO memberships(workspace_id,user_id,role) VALUES($1,$2,'member')",
+            uuid(other.workspace_id.as_bytes()),
+            uuid(other.actor_id.as_bytes())
+        )
+        .execute(&db.pool)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO document_permissions(workspace_id,document_id,user_id,role) VALUES($1,$2,$3,'editor')",
+            uuid(other.workspace_id.as_bytes()),
+            uuid(book.document_id().as_bytes()),
+            uuid(other.actor_id.as_bytes())
+        )
+        .execute(&db.pool)
+        .await?;
+        assert!(matches!(
+            db.load_undo_target(other, book.document_id(), original.event.operation_id)
+                .await,
+            Err(JournalError::NotUndoable)
+        ));
+        let after_original = book.candidate(&original.event.operation, original.event.version)?;
+        let same = guarded_write_request(
+            &db,
+            other,
+            &after_original,
+            91,
+            Some(CellContent::Value(CellValue::Text("same".into()))),
+            Some(CellContent::Value(CellValue::Text("same".into()))),
+            None,
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&same).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let after_same = after_original.candidate(&same.event.operation, same.event.version)?;
+        let undo = guarded_write_request(
+            &db,
+            owner,
+            &after_same,
+            92,
+            None,
+            Some(CellContent::Value(CellValue::Text("same".into()))),
+            Some((original.event.operation_id, original.event.version)),
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&undo).await,
+            Err(JournalError::UndoConflict)
+        ));
+        Ok(())
+    }
+    /// Run with `cargo test -p spreadsheet-storage undo_tail_scan_timing -- --ignored --nocapture`.
+    /// Reports one real PostgreSQL commit sample; it is not a latency percentile.
+    #[sqlx::test(migrations = false)]
+    #[ignore]
+    async fn undo_tail_scan_timing(pool: sqlx::PgPool) -> TestResult {
+        let (db, identity, mut book) = fixture(pool).await?;
+        let original = guarded_write_request(
+            &db,
+            identity,
+            &book,
+            93,
+            Some(CellContent::Value(CellValue::Text("target".into()))),
+            None,
+            None,
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&original).await?,
+            CommitOutcome::Committed(_)
+        ));
+        book.apply_event(&original.event)?;
+        const TAIL_EVENTS: u128 = 1_000;
+        for index in 0..TAIL_EVENTS {
+            let row = RowId::from_bytes((10_000 + index).to_be_bytes())?;
+            let operation = Operation::ExtendRows {
+                sheet: SheetId::from_bytes([5; 16])?,
+                rows: vec![row],
+            };
+            let next = DocumentVersion::new(book.version().get() + 1)?;
+            let candidate = book.candidate(&operation, next)?;
+            let operation_id = OperationId::from_bytes((20_000 + index).to_be_bytes())?;
+            let request = CommitRequest {
+                identity,
+                expected_head: book.version(),
+                expected_access: db.access(identity, book.document_id()).await?,
+                command: Command {
+                    operation_id,
+                    document_id: book.document_id(),
+                    actor_id: identity.actor_id,
+                    base_version: book.version(),
+                    client_sequence: index as u64 + 2,
+                    operation: CommandPayload::ExtendRows {
+                        sheet: SheetId::from_bytes([5; 16])?,
+                        rows: vec![row],
+                    },
+                },
+                event: CommittedEvent {
+                    document_id: book.document_id(),
+                    operation_id,
+                    principal: EventPrincipal::User(identity.actor_id),
+                    version: next,
+                    operation,
+                    state_hash: candidate.hash(),
+                },
+            };
+            assert!(matches!(
+                db.commit(&request).await?,
+                CommitOutcome::Committed(_)
+            ));
+            book = candidate;
+        }
+        let undo = guarded_write_request(
+            &db,
+            identity,
+            &book,
+            94,
+            None,
+            Some(CellContent::Value(CellValue::Text("target".into()))),
+            Some((original.event.operation_id, original.event.version)),
+        )
+        .await?;
+        let started = std::time::Instant::now();
+        assert!(matches!(
+            db.commit(&undo).await?,
+            CommitOutcome::Committed(_)
+        ));
+        eprintln!(
+            "undo_tail_scan_timing: tail_events={TAIL_EVENTS}, commit_wall_ms={:.3}",
+            started.elapsed().as_secs_f64() * 1_000.0
+        );
+        Ok(())
     }
     #[sqlx::test(migrations = false)]
     async fn retry_100_times_is_one_event_and_replay_survives_new_adapter(

@@ -632,13 +632,21 @@ fn address(input: Option<v1::CellAddress>) -> Result<CellAddress, SessionError> 
 }
 
 fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
-    if input.operation.is_some() == input.formula_command.is_some() {
+    if usize::from(input.operation.is_some())
+        + usize::from(input.formula_command.is_some())
+        + usize::from(input.undo_cell.is_some())
+        != 1
+    {
         return Err(SessionError::InvalidCommand);
     }
     let operation = if let Some(formula) = input.formula_command {
         CommandPayload::SetCellFormula {
             address: address(formula.address)?,
             source: FormulaSource::new(formula.source).map_err(|_| SessionError::InvalidFormula)?,
+        }
+    } else if let Some(undo) = input.undo_cell {
+        CommandPayload::UndoCell {
+            target_operation_id: OperationId::from_bytes(bytes_id(&undo.target_operation_id)?)?,
         }
     } else {
         match input
@@ -828,6 +836,39 @@ fn wire_address(value: CellAddress) -> v1::CellAddress {
 }
 fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
     let kind = match operation {
+        Operation::CellWrite {
+            address, content, ..
+        } => {
+            let value = match content {
+                None => v1::cell_value::Kind::Blank(true),
+                Some(spreadsheet_domain::workbook::CellContent::Value(value)) => match value {
+                    CellValue::Blank => v1::cell_value::Kind::Blank(true),
+                    CellValue::Number(n) => v1::cell_value::Kind::Number(n),
+                    CellValue::Text(s) => v1::cell_value::Kind::Text(s),
+                    CellValue::Boolean(b) => v1::cell_value::Kind::Boolean(b),
+                },
+                Some(spreadsheet_domain::workbook::CellContent::Formula(formula)) => {
+                    return Some(v1::CanonicalOperation {
+                        kind: Some(v1::canonical_operation::Kind::SetCellFormula(Box::new(
+                            v1::SetCellFormula {
+                                address: Some(wire_address(address)),
+                                formula: Some(wire::formula::encode_formula(&formula)),
+                            },
+                        ))),
+                    });
+                }
+            };
+            if matches!(value, v1::cell_value::Kind::Blank(_)) {
+                v1::canonical_operation::Kind::ClearCell(v1::ClearCell {
+                    address: Some(wire_address(address)),
+                })
+            } else {
+                v1::canonical_operation::Kind::SetCellValue(v1::SetCellValue {
+                    address: Some(wire_address(address)),
+                    value: Some(v1::CellValue { kind: Some(value) }),
+                })
+            }
+        }
         Operation::SetCellValue { address, value } => {
             v1::canonical_operation::Kind::SetCellValue(v1::SetCellValue {
                 address: Some(wire_address(address)),
@@ -979,6 +1020,16 @@ pub async fn handle_command(
                 SessionError::Journal(JournalError::IdempotencyConflict) => {
                     v1::RejectionCode::IdempotencyConflict
                 }
+                SessionError::Journal(JournalError::UndoConflict) => {
+                    v1::RejectionCode::UndoConflict
+                }
+                SessionError::Journal(JournalError::NotUndoable) => v1::RejectionCode::NotUndoable,
+                SessionError::Journal(JournalError::UndoWindowExceeded) => {
+                    v1::RejectionCode::UndoWindowExceeded
+                }
+                SessionError::Journal(JournalError::PayloadTooLarge) => {
+                    v1::RejectionCode::PayloadTooLarge
+                }
                 SessionError::Journal(JournalError::Conflict) => {
                     v1::RejectionCode::RetryableConflict
                 }
@@ -1018,5 +1069,52 @@ pub async fn handle_command(
     v1::ServerEnvelope {
         protocol_version: wire::PROTOCOL_VERSION,
         payload: Some(payload),
+    }
+}
+
+#[cfg(test)]
+mod undo_wire_tests {
+    use super::*;
+
+    fn id() -> Vec<u8> {
+        Uuid::now_v7().as_bytes().to_vec()
+    }
+
+    fn envelope() -> v1::DocumentCommand {
+        v1::DocumentCommand {
+            operation_id: id(),
+            document_id: id(),
+            actor_id: id(),
+            base_version: 1,
+            client_sequence: 1,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn undo_intent_cannot_be_combined_with_a_cell_write() -> Result<(), SessionError> {
+        let target = id();
+        let mut request = envelope();
+        request.undo_cell = Some(v1::UndoCell {
+            target_operation_id: target.clone(),
+        });
+        let parsed = command(request)?;
+        assert!(matches!(
+            parsed.operation,
+            CommandPayload::UndoCell { target_operation_id }
+                if target_operation_id.as_bytes() == target.as_slice()
+        ));
+
+        let mut forged = envelope();
+        forged.undo_cell = Some(v1::UndoCell {
+            target_operation_id: target,
+        });
+        forged.operation = Some(v1::CanonicalOperation {
+            kind: Some(v1::canonical_operation::Kind::ClearCell(v1::ClearCell {
+                address: None,
+            })),
+        });
+        assert!(matches!(command(forged), Err(SessionError::InvalidCommand)));
+        Ok(())
     }
 }

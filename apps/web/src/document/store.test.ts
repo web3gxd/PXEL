@@ -148,6 +148,154 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('undoes an acknowledged own plain write as a new non-optimistic command', async () => {
+    const { store, sent } = await connectedStore();
+    expect(store.canUndo).toBe(false);
+    expect(store.set({ row: 0, column: 0 }, { type: 'number', value: 42 })).toBe(true);
+    const original = fromBinary(ClientEnvelopeSchema, sent[0] ?? new Uint8Array()).payload;
+    if (original.case !== 'command' || original.value.operation?.kind.case !== 'setCellValue')
+      throw new Error('Missing original write');
+    const originalId = original.value.operationId;
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: originalId,
+            committedVersion: 2n,
+            canonicalOperation: original.value.operation,
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    expect(store.canUndo).toBe(true);
+    expect(store.undo()).toBe(true);
+    expect(store.canUndo).toBe(false);
+    expect(store.display({ row: 0, column: 0 })).toBe('42');
+    expect(store.pending[0]?.kind).toBe('undo');
+    const command = fromBinary(ClientEnvelopeSchema, sent[1] ?? new Uint8Array()).payload;
+    if (command.case !== 'command' || !command.value.undoCell)
+      throw new Error('Missing undo command');
+    expect(command.value.operation).toBeUndefined();
+    expect(command.value.undoCell.targetOperationId).toEqual(originalId);
+    expect(command.value.operationId).not.toEqual(originalId);
+    expect(store.undo()).toBe(false);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: command.value.operationId,
+            committedVersion: 3n,
+            canonicalOperation: {
+              kind: {
+                case: 'clearCell',
+                value: { address: original.value.operation.kind.value.address },
+              },
+            },
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    expect(store.projection?.version).toBe('3');
+    expect(store.display({ row: 0, column: 0 })).toBe('');
+    expect(store.pending).toHaveLength(0);
+    expect(store.canUndo).toBe(false);
+    store.disconnected();
+  });
+  it('shows typed undo conflict without applying an inverse locally', async () => {
+    const { store, sent } = await connectedStore();
+    store.set({ row: 0, column: 0 }, { type: 'text', value: 'mine' });
+    const original = fromBinary(ClientEnvelopeSchema, sent[0] ?? new Uint8Array()).payload;
+    if (original.case !== 'command' || !original.value.operation)
+      throw new Error('Missing original write');
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: original.value.operationId,
+            committedVersion: 2n,
+            canonicalOperation: original.value.operation,
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    expect(store.undo()).toBe(true);
+    const undo = fromBinary(ClientEnvelopeSchema, sent[1] ?? new Uint8Array()).payload;
+    if (undo.case !== 'command') throw new Error('Missing undo');
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'rejected',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: undo.value.operationId,
+            code: 13,
+            retryable: false,
+          },
+        },
+      }),
+    );
+    expect(store.display({ row: 0, column: 0 })).toBe('mine');
+    expect(store.error).toContain('ячейка была изменена');
+    expect(store.canUndo).toBe(false);
+    store.disconnected();
+  });
+  it('applies a remote restoration using the existing wire value operation', async () => {
+    const { store } = await connectedStore();
+    const fetchMock = vi.fn(async () => {
+      throw new Error('Unexpected full projection read');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'documentHeadChanged',
+          value: {
+            documentId: uuidBytes(documentId),
+            headVersion: 2n,
+            latestOperation: {
+              documentId: uuidBytes(documentId),
+              operationId: uuidBytes(uuidV7()),
+              actorId: uuidBytes(uuidV7()),
+              committedVersion: 2n,
+              confirmedStateHash: new Uint8Array(32),
+              canonicalOperation: {
+                kind: {
+                  case: 'setCellValue',
+                  value: {
+                    address: {
+                      sheetId: uuidBytes(sheetId),
+                      rowId: uuidBytes(rowId),
+                      columnId: uuidBytes(columnId),
+                    },
+                    value: { kind: { case: 'text', value: 'previous' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(store.projection?.version).toBe('2');
+    expect(store.display({ row: 0, column: 0 })).toBe('previous');
+    expect(store.canUndo).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    store.disconnected();
+  });
   it('selects a rectangle and copies sparse values including its blank trailing cell', () => {
     const state = projection();
     const secondRow = uuidV7(),

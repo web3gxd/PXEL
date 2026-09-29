@@ -166,6 +166,17 @@ h1 {
   color: #778478;
   flex-shrink: 0;
 }
+.tool:not(:disabled) {
+  color: #285c39;
+  cursor: pointer;
+}
+.tool:not(:disabled):hover {
+  background: #dce8da;
+}
+.tool:not(:disabled):focus-visible {
+  outline: 2px solid #285c39;
+  outline-offset: 2px;
+}
 .tool strong {
   font-size: 16px;
   font-weight: 700;

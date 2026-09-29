@@ -84,7 +84,8 @@ impl CalculationHandle {
         match operation {
             Operation::SetCellValue { address, .. }
             | Operation::SetCellFormula { address, .. }
-            | Operation::ClearCell { address } => {
+            | Operation::ClearCell { address }
+            | Operation::CellWrite { address, .. } => {
                 pending.changed.insert(*address);
             }
             Operation::SetCellValues { writes } => {

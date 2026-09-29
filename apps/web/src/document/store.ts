@@ -99,6 +99,13 @@ type PendingColumnDeletion = {
   bytes: Uint8Array;
   attempts: number;
 };
+type PendingUndo = {
+  kind: 'undo';
+  id: string;
+  target: string;
+  bytes: Uint8Array;
+  attempts: number;
+};
 type Pending =
   | PendingCell
   | PendingBatch
@@ -106,7 +113,8 @@ type Pending =
   | PendingInsertion
   | PendingDeletion
   | PendingColumnInsertion
-  | PendingColumnDeletion;
+  | PendingColumnDeletion
+  | PendingUndo;
 export function uuidBytes(id: string) {
   return Uint8Array.from(id.replaceAll('-', '').match(/../g) ?? [], (pair) => parseInt(pair, 16));
 }
@@ -156,6 +164,10 @@ const rejectionText: Record<number, string> = {
   8: 'Хранилище временно недоступно.',
   9: 'Строка или столбец уже удалены.',
   12: 'Для вставки строк в таблицу с формулами пока нужен перенос ссылок.',
+  13: 'Отмена невозможна: ячейка была изменена после вашей правки.',
+  14: 'Эту операцию пока нельзя отменить.',
+  15: 'Срок отмены этой операции истек. Последние 10 000 изменений доступны для отмены.',
+  16: 'Изменение слишком большое для надежной записи в журнал.',
 };
 const isUuid = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -304,6 +316,7 @@ export class DocumentStore {
   projection: Projection | undefined;
   confirmed = new Map<string, Value>();
   pending: Pending[] = [];
+  private lastUndoableOperation: string | undefined;
   selected: Position = { row: 0, column: 0 };
   selectionAnchor: Position = { row: 0, column: 0 };
   remotePresence: RemotePresence[] = [];
@@ -649,6 +662,7 @@ export class DocumentStore {
       this.headRefreshVersion = 0n;
       this.headRefreshAttempts = 0;
       this.remotePresence = [];
+      this.lastUndoableOperation = undefined;
     }
     const remap = (position: Position): Position => {
       if (documentChanged || !previousSheet || !nextSheet) return { row: 0, column: 0 };
@@ -1017,6 +1031,40 @@ export class DocumentStore {
     }
     this.pending.push({ kind: 'cell', id, row, column, value, bytes, attempts: 0 });
     this.syncPreview();
+    this.error = '';
+    this.notify();
+    this.flush();
+    return true;
+  }
+  get canUndo() {
+    return Boolean(
+      this.lastUndoableOperation && this.sender && this.pending.length === 0 && !this.editing,
+    );
+  }
+  undo() {
+    const projection = this.projection,
+      actor = this.actor,
+      target = this.lastUndoableOperation;
+    if (!projection || !actor || !target || !this.canUndo) return false;
+    const id = uuidV7();
+    const bytes = toBinary(
+      ClientEnvelopeSchema,
+      create(ClientEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'command',
+          value: {
+            operationId: uuidBytes(id),
+            documentId: uuidBytes(projection.document_id),
+            actorId: actor,
+            baseVersion: BigInt(projection.version),
+            clientSequence: ++this.sequence,
+            undoCell: { targetOperationId: uuidBytes(target) },
+          },
+        },
+      }),
+    );
+    this.pending.push({ kind: 'undo', id, target, bytes, attempts: 0 });
     this.error = '';
     this.notify();
     this.flush();
@@ -1641,6 +1689,7 @@ export class DocumentStore {
       throw new Error('Invalid operation identity');
     if (bytesUuid(message.documentId) !== this.projection?.document_id) return;
     const id = bytesUuid(message.operationId);
+    const pending = this.pending.find((op) => op.id === id);
     clearTimeout(this.timer);
     this.inflight = undefined;
     if (payload.case === 'rejected') {
@@ -1652,6 +1701,7 @@ export class DocumentStore {
         return;
       }
       this.pending = this.pending.filter((p) => p.id !== id);
+      if (pending?.kind === 'undo' && !rejection.retryable) this.lastUndoableOperation = undefined;
       this.error = `Изменение отклонено. ${rejectionText[rejection.code] ?? 'Неизвестная причина; обновите страницу.'}`;
       if (rejection.resyncRequired) await this.refresh();
     } else {
@@ -1688,6 +1738,11 @@ export class DocumentStore {
         }
       }
       this.pending = this.pending.filter((p) => p.id !== id);
+      if (pending?.kind === 'cell') {
+        this.lastUndoableOperation = pending.value.type === 'formula' ? undefined : pending.id;
+      } else if (pending) {
+        this.lastUndoableOperation = undefined;
+      }
       this.error = '';
     }
     this.syncPreview();

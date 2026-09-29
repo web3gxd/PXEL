@@ -301,7 +301,8 @@ impl CalculationProjection {
         let address = match operation {
             Operation::SetCellValue { address, .. }
             | Operation::ClearCell { address }
-            | Operation::SetCellFormula { address, .. } => *address,
+            | Operation::SetCellFormula { address, .. }
+            | Operation::CellWrite { address, .. } => *address,
             Operation::SetCellValues { writes } => {
                 let changed = writes.iter().map(|write| write.address).collect();
                 return self.prepare_reconcile(book, &changed, limits);

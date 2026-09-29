@@ -20,6 +20,7 @@ import {
   getDocument,
   login,
   setCommand,
+  undoCellCommand,
   uuid7,
 } from '../helpers/client.mjs';
 
@@ -302,6 +303,36 @@ test(
         const batchRetry = await connect(base, cookie);
         assert.equal((await batchRetry.send(batchCommand)).case, 'receipt');
         batchRetry.socket.terminate();
+
+        const { snapshot: undoBase } = await createDocument(base, cookie);
+        const undoWriter = await connect(base, cookie);
+        const original = setCommand(undoWriter, undoBase, 'before undo');
+        assert.equal((await undoWriter.send(original)).case, 'committed');
+        undoWriter.socket.terminate();
+        await kill();
+        await start();
+        const beforeUndo = await getDocument(base, cookie, undoBase.document_id);
+        assert.equal(beforeUndo.version, '2');
+        const undoClient = await connect(base, cookie);
+        const undo = undoCellCommand(undoClient, beforeUndo, original.operationId, {
+          sequence: 2,
+        });
+        const undoCommit = await undoClient.send(undo);
+        assert.equal(undoCommit.case, 'committed');
+        undoClient.socket.terminate();
+        await kill();
+        await start();
+        const undoRecovered = await getDocument(base, cookie, undoBase.document_id);
+        assert.equal(undoRecovered.version, '3');
+        assert.equal(undoRecovered.sheets[0].cells.length, 0);
+        assert.equal(
+          undoRecovered.state_hash,
+          Buffer.from(undoCommit.value.confirmedStateHash).toString('hex'),
+        );
+        const undoRetry = await connect(base, cookie);
+        assert.equal((await undoRetry.send(undo)).case, 'receipt');
+        assert.equal((await getDocument(base, cookie, undoBase.document_id)).version, '3');
+        undoRetry.socket.terminate();
       } finally {
         client.socket.terminate();
       }

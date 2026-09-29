@@ -162,7 +162,10 @@ message DocumentCommand {
   // Exactly one of legacy operation or formula_command must be present.
   // Client ASTs are never accepted as canonical input.
   SetCellFormulaCommand formula_command = 7;
+  UndoCell undo_cell = 8;
 }
+
+message UndoCell { bytes target_operation_id = 1; }
 
 message SetCellFormulaCommand {
   CellAddress address = 1;
@@ -201,6 +204,10 @@ enum RejectionCode {
   REJECTION_CODE_REBASE_WINDOW_EXCEEDED = 10;
   REJECTION_CODE_INVALID_FORMULA = 11;
   REJECTION_CODE_UNSUPPORTED_STRUCTURAL_DEPENDENCY = 12;
+  REJECTION_CODE_UNDO_CONFLICT = 13;
+  REJECTION_CODE_NOT_UNDOABLE = 14;
+  REJECTION_CODE_UNDO_WINDOW_EXCEEDED = 15;
+  REJECTION_CODE_PAYLOAD_TOO_LARGE = 16;
 }
 
 message OperationRejected {

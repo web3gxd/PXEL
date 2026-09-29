@@ -29,6 +29,8 @@ message Operation {
   InsertColumns insert_columns_rebased = 10;
   DeleteColumns delete_columns = 11;
   SetCellValues set_cell_values = 12;
+  CellWrite authored_cell_write = 13;
+  CellWrite compensating_cell_write = 14;
  }
 }
 message AdvanceCalculationEpoch {
@@ -57,6 +59,21 @@ message DeleteRows { bytes sheet_id = 1; repeated bytes rows = 2; }
 message InsertColumns { bytes sheet_id = 1; bytes before_column_id = 2; repeated bytes columns = 3; }
 message DeleteColumns { bytes sheet_id = 1; repeated bytes columns = 2; }
 message SetCellValues { repeated SetCellValue writes = 1; }
+// Schema 11/12 preserve the exact preimage for replay and guarded compensation.
+message CellWrite {
+ CellAddress address = 1;
+ CellContent content = 2;
+ CellContent previous = 3;
+ bytes undoes_operation_id = 4;
+ uint64 undoes_version = 5;
+ AuthoredWriteKind authored_kind = 6;
+}
+message CellContent { oneof kind { CellValue value = 1; BoundFormula formula = 2; } }
+enum AuthoredWriteKind {
+ AUTHORED_WRITE_KIND_UNSPECIFIED = 0;
+ AUTHORED_WRITE_KIND_SET_VALUE = 1;
+ AUTHORED_WRITE_KIND_CLEAR = 2;
+}
 message CellAddress { bytes sheet_id = 1; bytes row_id = 2; bytes column_id = 3; }
 message SetCellValue { CellAddress address = 1; CellValue value = 2; }
 message CellValue { oneof kind { bool blank = 1; double number = 2; string text = 3; bool boolean = 4; } }
