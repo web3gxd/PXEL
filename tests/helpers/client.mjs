@@ -230,6 +230,37 @@ export function setCommand(
     },
   };
 }
+export function addSheetCommand(
+  client,
+  snapshot,
+  {
+    sheetId = uuid7(),
+    name = 'Лист 2',
+    rows = [uuid7()],
+    columns = [uuid7()],
+    sequence = 1,
+    operationId = uuid7(),
+  } = {},
+) {
+  return {
+    operationId: bytes(operationId),
+    documentId: bytes(snapshot.document_id),
+    actorId: client.actorId,
+    baseVersion: BigInt(snapshot.version),
+    clientSequence: BigInt(sequence),
+    operation: {
+      kind: {
+        case: 'addSheet',
+        value: {
+          sheetId: bytes(sheetId),
+          name,
+          rows: rows.map(bytes),
+          columns: columns.map(bytes),
+        },
+      },
+    },
+  };
+}
 
 export function undoCellCommand(
   client,

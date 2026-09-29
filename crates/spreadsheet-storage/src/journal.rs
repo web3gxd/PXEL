@@ -421,11 +421,12 @@ impl OperationJournal for PgDatabase {
             return Err(JournalError::Corrupt);
         }
         let canonical_payload = match &e.operation {
-            Operation::CreateWorkbook { .. }
-            | Operation::AddSheet { .. }
-            | Operation::AdvanceCalculationEpoch { .. } => {
+            Operation::CreateWorkbook { .. } | Operation::AdvanceCalculationEpoch { .. } => {
                 return Err(JournalError::Corrupt);
             }
+            Operation::AddSheet { sheet } => CommandPayload::AddSheet {
+                sheet: sheet.clone(),
+            },
             Operation::SetCellValue { address, value } => CommandPayload::SetCellValue {
                 address: *address,
                 value: value.clone(),

@@ -411,6 +411,28 @@ test('create, edit sparse cells, keyboard navigation, reload durable values', as
   expect(errors).toEqual([]);
 });
 
+test('adding a sheet persists stable tabs and reaches another browser', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const second = await page.context().newPage();
+  try {
+    await second.goto(page.url());
+    await expect(second.getByTestId('connection-status')).toHaveText('Подключено');
+    await page.getByRole('button', { name: 'Добавить лист' }).click();
+    await expect(page.getByRole('button', { name: 'Перейти на лист Лист 2' })).toBeVisible();
+    await expect(page.locator('.sheet-summary')).toContainText('Лист 2');
+    await expect(second.getByRole('button', { name: 'Перейти на лист Лист 2' })).toBeVisible();
+    await second.getByRole('button', { name: 'Перейти на лист Лист 2' }).click();
+    await expect(second.locator('.sheet-summary')).toContainText('Лист 2');
+    await second.reload();
+    await expect(second.getByRole('button', { name: 'Перейти на лист Лист 2' })).toBeVisible();
+  } finally {
+    await second.close();
+  }
+});
+
 test('two browser tabs see each other’s committed cell after a head hint', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');

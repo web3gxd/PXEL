@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import {
   api,
+  addSheetCommand,
   batchValuesCommand,
   bytes,
   decodeFrame,
@@ -28,6 +29,55 @@ import {
   uuid7,
 } from '../helpers/client.mjs';
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
+
+test('AddSheet is durable, idempotent and rejects a duplicate sheet name', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    const command = addSheetCommand(client, snapshot);
+    const committed = await client.send(command);
+    assert.equal(committed.case, 'committed');
+    assert.equal(committed.value.committedVersion, 2n);
+    assert.equal(committed.value.canonicalOperation.kind.case, 'addSheet');
+    const after = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(after.version, '2');
+    assert.equal(after.sheets.length, 2);
+    assert.equal(after.sheets[1].name, 'Лист 2');
+    assert.equal(after.sheets[1].rows.length, 1);
+    assert.equal(after.sheets[1].columns.length, 1);
+    const receipt = await client.send(command);
+    assert.equal(receipt.case, 'receipt');
+    assert.equal(receipt.value.committedVersion, 2n);
+    const duplicate = await client.send(addSheetCommand(client, after, { sequence: 2 }));
+    assert.equal(duplicate.case, 'rejected');
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).version, '2');
+    const replay = await connect(base, cookie);
+    try {
+      const frames = await receiveFrames(replay, 2, () =>
+        subscribeDocument(replay, snapshot.document_id, 1),
+      );
+      assert.deepEqual(
+        frames.map((frame) => frame.case),
+        ['documentHeadChanged', 'replayComplete'],
+      );
+      assert.equal(frames[0].value.latestOperation.canonicalOperation.kind.case, 'addSheet');
+    } finally {
+      replay.socket.terminate();
+    }
+    const strangerCookie = await login(base, `sheet-stranger-${uuid7().slice(0, 8)}`);
+    const stranger = await connect(base, strangerCookie);
+    try {
+      const denied = await stranger.send(addSheetCommand(stranger, snapshot));
+      assert.equal(denied.case, 'rejected');
+      assert.equal(denied.value.code, 2);
+    } finally {
+      stranger.socket.terminate();
+    }
+  } finally {
+    client.socket.terminate();
+  }
+});
 
 test('historical HTTP read is exact, authorized and does not change head', async () => {
   const owner = await login(base);

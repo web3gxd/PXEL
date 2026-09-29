@@ -234,6 +234,49 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('sends a bounded stable-ID AddSheet and selects it only after canonical commit', async () => {
+    const { store, sent } = await connectedStore();
+    expect(store.addSheet()).toBe(true);
+    expect(store.projection?.sheets).toHaveLength(1);
+    const payload = fromBinary(ClientEnvelopeSchema, sent[0] ?? new Uint8Array()).payload;
+    if (payload.case !== 'command' || payload.value.operation?.kind.case !== 'addSheet')
+      throw new Error('Missing AddSheet command');
+    const proposed = payload.value.operation.kind.value;
+    expect(proposed.name).toBe('Лист 2');
+    expect(proposed.rows).toHaveLength(1_000);
+    expect(proposed.columns).toHaveLength(26);
+    const added = {
+      id: bytesUuid(proposed.sheetId),
+      name: proposed.name,
+      rows: proposed.rows.map(bytesUuid),
+      columns: proposed.columns.map(bytesUuid),
+      cells: [],
+    };
+    const updated = { ...projection(), version: '2', sheets: [...projection().sheets, added] };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => updated })),
+    );
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: payload.value.operationId,
+            committedVersion: 2n,
+            canonicalOperation: payload.value.operation,
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    expect(store.projection?.sheets).toHaveLength(2);
+    expect(store.activeSheetId).toBe(added.id);
+    expect(store.pending).toHaveLength(0);
+    store.disconnected();
+  });
   it('undoes an acknowledged own plain write as a new non-optimistic command', async () => {
     const { store, sent } = await connectedStore();
     expect(store.canUndo).toBe(false);

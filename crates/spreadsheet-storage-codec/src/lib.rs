@@ -998,6 +998,12 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
                 sheet: sheet.clone(),
             },
         )?,
+        CommandPayload::AddSheet { sheet } => semantic_operation(
+            &mut h,
+            &Operation::AddSheet {
+                sheet: sheet.clone(),
+            },
+        )?,
         CommandPayload::ExtendRows { sheet, rows } => semantic_operation(
             &mut h,
             &Operation::ExtendRows {

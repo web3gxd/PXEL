@@ -108,7 +108,17 @@ message CanonicalOperation {
     InsertColumns insert_columns = 7;
     DeleteColumns delete_columns = 8;
     SetCellValues set_cell_values = 9;
+    AddSheet add_sheet = 10;
   }
+}
+
+// The client proposes stable IDs; the server validates every axis ID and
+// persists the entire empty sheet as one authenticated operation.
+message AddSheet {
+  bytes sheet_id = 1;
+  string name = 2;
+  repeated bytes rows = 3;
+  repeated bytes columns = 4;
 }
 
 // Appends at the current end. Rows have stable identities; stale commands

@@ -681,6 +681,9 @@ async fn advance_context<J: OperationJournal>(
 /// axis projections are not yet available for an older formula command.
 fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, SessionError> {
     match &command.operation {
+        CommandPayload::AddSheet { sheet } => Ok(Operation::AddSheet {
+            sheet: sheet.clone(),
+        }),
         CommandPayload::ExtendRows { sheet, rows } => Ok(Operation::ExtendRows {
             sheet: *sheet,
             rows: rows.clone(),

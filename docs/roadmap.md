@@ -264,6 +264,11 @@ sparse cells всех листов, patch schema 1 адресует stable sheet
 differential corpus 1001 книг/2002 patches, включая межлистовую формулу, дал
 одинаковые native/WASM outputs и hashes. Создание/удаление листов в UI,
 Excel golden parity и большой multi-sheet performance gate остаются открыты.
+Следующий [ADR-054](adr/054-interactive-add-sheet.md) добавил интерактивный
+`AddSheet`: один authenticated WS command → candidate/CAS → schema-15 journal,
+receipt/replay и вкладка в двух браузерах. Команда создаёт пустой лист 1000×26,
+не ячейки. Удаление/переименование/перестановка листов, их undo и benchmark
+структурного refresh остаются открыты.
 Синтетический XLSX fixture дополнительно прошёл import → server calculation →
 browser edit второго листа → server recalculation первого → export/reimport;
 ложный calculated cache был проигнорирован. Это ограниченный сквозной сценарий,

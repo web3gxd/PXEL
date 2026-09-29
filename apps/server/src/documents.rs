@@ -999,6 +999,58 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
                 }
                 CommandPayload::DeleteColumns { sheet, columns }
             }
+            v1::canonical_operation::Kind::AddSheet(input) => {
+                if input.rows.is_empty()
+                    || input.rows.len() > 1_000
+                    || input.columns.is_empty()
+                    || input.columns.len() > 100
+                {
+                    return Err(SessionError::InvalidCommand);
+                }
+                let sheet_id = bytes_id(&input.sheet_id)?;
+                if Uuid::from_bytes(sheet_id).get_version_num() != 7 {
+                    return Err(SessionError::InvalidCommand);
+                }
+                let rows = input
+                    .rows
+                    .iter()
+                    .map(|raw| {
+                        let bytes = bytes_id(raw)?;
+                        if Uuid::from_bytes(bytes).get_version_num() != 7 {
+                            return Err(SessionError::InvalidCommand);
+                        }
+                        RowId::from_bytes(bytes).map_err(SessionError::from)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let columns = input
+                    .columns
+                    .iter()
+                    .map(|raw| {
+                        let bytes = bytes_id(raw)?;
+                        if Uuid::from_bytes(bytes).get_version_num() != 7 {
+                            return Err(SessionError::InvalidCommand);
+                        }
+                        ColumnId::from_bytes(bytes).map_err(SessionError::from)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if rows.iter().collect::<std::collections::BTreeSet<_>>().len() != rows.len()
+                    || columns
+                        .iter()
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        != columns.len()
+                {
+                    return Err(SessionError::InvalidCommand);
+                }
+                CommandPayload::AddSheet {
+                    sheet: SheetSeed {
+                        id: SheetId::from_bytes(sheet_id)?,
+                        name: input.name,
+                        rows,
+                        columns,
+                    },
+                }
+            }
             v1::canonical_operation::Kind::SetCellFormula(_) => {
                 return Err(SessionError::InvalidCommand);
             }
@@ -1140,8 +1192,17 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
                 columns: columns.iter().map(|id| id.as_bytes().to_vec()).collect(),
             })
         }
+        Operation::AddSheet { sheet } => v1::canonical_operation::Kind::AddSheet(v1::AddSheet {
+            sheet_id: sheet.id.as_bytes().to_vec(),
+            name: sheet.name,
+            rows: sheet.rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
+            columns: sheet
+                .columns
+                .iter()
+                .map(|id| id.as_bytes().to_vec())
+                .collect(),
+        }),
         Operation::CreateWorkbook { .. }
-        | Operation::AddSheet { .. }
         | Operation::AdvanceCalculationEpoch { .. }
         | Operation::CopyRange { .. } => {
             return None;
@@ -1334,6 +1395,46 @@ mod undo_wire_tests {
             target_operation_id: id(),
         });
         assert!(matches!(command(copy), Err(SessionError::InvalidCommand)));
+        Ok(())
+    }
+
+    #[test]
+    fn add_sheet_wire_validates_ids_and_roundtrips_canonical() -> Result<(), SessionError> {
+        let sheet_id = id();
+        let row = id();
+        let column = id();
+        let mut request = envelope();
+        request.operation = Some(v1::CanonicalOperation {
+            kind: Some(v1::canonical_operation::Kind::AddSheet(v1::AddSheet {
+                sheet_id: sheet_id.clone(),
+                name: "Лист 2".into(),
+                rows: vec![row.clone()],
+                columns: vec![column.clone()],
+            })),
+        });
+        let parsed = command(request.clone())?;
+        let CommandPayload::AddSheet { sheet } = parsed.operation else {
+            return Err(SessionError::InvalidCommand);
+        };
+        assert_eq!(sheet.id.as_bytes(), sheet_id.as_slice());
+        assert_eq!(sheet.rows[0].as_bytes(), row.as_slice());
+        assert_eq!(sheet.columns[0].as_bytes(), column.as_slice());
+        let wire = canonical(Operation::AddSheet { sheet }).ok_or(SessionError::InvalidCommand)?;
+        assert!(matches!(
+            wire.kind,
+            Some(v1::canonical_operation::Kind::AddSheet(_))
+        ));
+        if let Some(v1::canonical_operation::Kind::AddSheet(value)) = request
+            .operation
+            .as_mut()
+            .and_then(|operation| operation.kind.as_mut())
+        {
+            value.rows.push(value.rows[0].clone());
+        }
+        assert!(matches!(
+            command(request),
+            Err(SessionError::InvalidCommand)
+        ));
         Ok(())
     }
 }

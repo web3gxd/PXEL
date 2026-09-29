@@ -14,6 +14,8 @@ Snapshot schema 2 stores an ordered list of sheets and their sparse authored cel
 
 Wire protocol v1 has no canonical `AddSheet` message. A subscriber crossing this event is sent to full projection resync, as it already is for genesis. The event remains durable and fully replayable by the server. Interactive add/delete/reorder sheet commands require separate wire semantics and authorization tests. Client-only sheet selection is specified in ADR-052.
 
+This was the behavior of the import slice. [ADR-054](054-interactive-add-sheet.md) adds the wire v1 `AddSheet` field and interactive command; old persisted schema-15 events are unchanged.
+
 ## Consequences
 
 This is scalar XLSX multi-sheet preservation, not full spreadsheet feature parity. Styles, merged cells, metadata and unsupported formulas still follow the explicit compatibility loss policy. The import command remains local and dev-auth gated. A later snapshot schema change must retain an explicit old-reader path; schema 2 snapshots cannot be read by a schema 1-only server. The database migration extends the allowed event and snapshot schema versions before writing them.

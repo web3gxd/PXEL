@@ -5,15 +5,20 @@ const previous = document.querySelector('#prev');
 const next = document.querySelector('#next');
 let current = 0;
 
-function show(index, updateHash = true) {
-  current = Math.max(0, Math.min(index, slides.length - 1));
-  const slide = slides[current];
+function setCurrent(index, updateHash) {
+  current = index;
+  const slide = slides[index];
   counter.value = `${String(current + 1).padStart(2, '0')} / ${String(slides.length).padStart(2, '0')}`;
   progress.style.width = `${((current + 1) / slides.length) * 100}%`;
   previous.disabled = current === 0;
   next.disabled = current === slides.length - 1;
-  slide.scrollIntoView({ behavior: 'instant', block: 'start' });
   if (updateHash) history.replaceState(null, '', `#${slide.id}`);
+}
+
+function show(index, updateHash = true) {
+  const target = Math.max(0, Math.min(index, slides.length - 1));
+  setCurrent(target, updateHash);
+  slides[target].scrollIntoView({ behavior: 'instant', block: 'start' });
 }
 
 previous.addEventListener('click', () => show(current - 1));
@@ -49,22 +54,21 @@ window.addEventListener('hashchange', () => {
   if (target >= 0) show(target, false);
 });
 
-const observer = new IntersectionObserver(
-  (entries) => {
-    const visible = entries
-      .filter((entry) => entry.isIntersecting)
-      .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-    if (!visible.length) return;
-    const index = slides.indexOf(visible[0].target);
-    if (index !== current) {
-      current = index;
-      counter.value = `${String(index + 1).padStart(2, '0')} / ${String(slides.length).padStart(2, '0')}`;
-      progress.style.width = `${((index + 1) / slides.length) * 100}%`;
-      previous.disabled = index === 0;
-      next.disabled = index === slides.length - 1;
-      history.replaceState(null, '', `#${slides[index].id}`);
-    }
-  },
-  { threshold: [0.45, 0.75] },
-);
-slides.forEach((slide) => observer.observe(slide));
+let scrollFrame = 0;
+window.addEventListener('scroll', () => {
+  if (scrollFrame) return;
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = 0;
+    const position = window.scrollY;
+    let closest = 0;
+    let distance = Infinity;
+    slides.forEach((slide, index) => {
+      const offset = Math.abs(slide.offsetTop - position);
+      if (offset < distance) {
+        distance = offset;
+        closest = index;
+      }
+    });
+    if (closest !== current) setCurrent(closest, true);
+  });
+});

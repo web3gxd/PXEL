@@ -391,6 +391,9 @@ pub enum CommandPayload {
     CreateWorkbook {
         sheet: SheetSeed,
     },
+    AddSheet {
+        sheet: SheetSeed,
+    },
     ExtendRows {
         sheet: SheetId,
         rows: Vec<RowId>,

@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file pxel/wire/v1/session.proto.
  */
 export const file_pxel_wire_v1_session: GenFile = /*@__PURE__*/
-  fileDesc("ChpweGVsL3dpcmUvdjEvc2Vzc2lvbi5wcm90bxIMcHhlbC53aXJlLnYxIsYCCg5DbGllbnRFbnZlbG9wZRIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgNEioKBWhlbGxvGAIgASgLMhkucHhlbC53aXJlLnYxLkNsaWVudEhlbGxvSAASMAoHY29tbWFuZBgDIAEoCzIdLnB4ZWwud2lyZS52MS5Eb2N1bWVudENvbW1hbmRIABI/ChNyZXF1ZXN0X2NhbGN1bGF0aW9uGAQgASgLMiAucHhlbC53aXJlLnYxLlJlcXVlc3RDYWxjdWxhdGlvbkgAEj0KEnN1YnNjcmliZV9kb2N1bWVudBgFIAEoCzIfLnB4ZWwud2lyZS52MS5TdWJzY3JpYmVEb2N1bWVudEgAEjEKDHNldF9wcmVzZW5jZRgGIAEoCzIZLnB4ZWwud2lyZS52MS5TZXRQcmVzZW5jZUgAQgkKB3BheWxvYWQiPgoLQ2xpZW50SGVsbG8SGgoSY2xpZW50X2luc3RhbmNlX2lkGAEgASgMEhMKC2NsaWVudF9uYW1lGAIgASgJIrEECg5TZXJ2ZXJFbnZlbG9wZRIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgNEi4KB3dlbGNvbWUYAiABKAsyGy5weGVsLndpcmUudjEuU2VydmVyV2VsY29tZUgAEiwKBWVycm9yGAMgASgLMhsucHhlbC53aXJlLnYxLlByb3RvY29sRXJyb3JIABI1Cgljb21taXR0ZWQYBCABKAsyIC5weGVsLndpcmUudjEuT3BlcmF0aW9uQ29tbWl0dGVkSAASMwoIcmVqZWN0ZWQYBSABKAsyHy5weGVsLndpcmUudjEuT3BlcmF0aW9uUmVqZWN0ZWRIABIxCgdyZWNlaXB0GAYgASgLMh4ucHhlbC53aXJlLnYxLk9wZXJhdGlvblJlY2VpcHRIABJDChVjYWxjdWxhdGlvbl9jb21taXR0ZWQYByABKAsyIi5weGVsLndpcmUudjEuQ2FsY3VsYXRpb25Db21taXR0ZWRIABJCChVkb2N1bWVudF9oZWFkX2NoYW5nZWQYCCABKAsyIS5weGVsLndpcmUudjEuRG9jdW1lbnRIZWFkQ2hhbmdlZEgAEjcKD3JlcGxheV9jb21wbGV0ZRgJIAEoCzIcLnB4ZWwud2lyZS52MS5SZXBsYXlDb21wbGV0ZUgAEjsKEXByZXNlbmNlX3NuYXBzaG90GAogASgLMh4ucHhlbC53aXJlLnYxLlByZXNlbmNlU25hcHNob3RIAEIJCgdwYXlsb2FkIm8KDVNlcnZlcldlbGNvbWUSEgoKc2Vzc2lvbl9pZBgBIAEoDBIQCghhY3Rvcl9pZBgCIAEoDBIdChVoZWFydGJlYXRfaW50ZXJ2YWxfbXMYAyABKA0SGQoRbWF4X21lc3NhZ2VfYnl0ZXMYBCABKA0iWgoNUHJvdG9jb2xFcnJvchIlCgRjb2RlGAEgASgOMhcucHhlbC53aXJlLnYxLkVycm9yQ29kZRIiChpzdXBwb3J0ZWRfcHJvdG9jb2xfdmVyc2lvbhgCIAEoDSJ3CgtTZXRQcmVzZW5jZRITCgtkb2N1bWVudF9pZBgBIAEoDBIpCgZhbmNob3IYAiABKAsyGS5weGVsLndpcmUudjEuQ2VsbEFkZHJlc3MSKAoFZm9jdXMYAyABKAsyGS5weGVsLndpcmUudjEuQ2VsbEFkZHJlc3MiiQEKDFByZXNlbmNlUGVlchISCgpzZXNzaW9uX2lkGAEgASgMEhAKCGFjdG9yX2lkGAIgASgMEikKBmFuY2hvchgDIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIoCgVmb2N1cxgEIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcyJSChBQcmVzZW5jZVNuYXBzaG90EhMKC2RvY3VtZW50X2lkGAEgASgMEikKBXBlZXJzGAIgAygLMhoucHhlbC53aXJlLnYxLlByZXNlbmNlUGVlciJCCgtDZWxsQWRkcmVzcxIQCghzaGVldF9pZBgBIAEoDBIOCgZyb3dfaWQYAiABKAwSEQoJY29sdW1uX2lkGAMgASgMIlkKCUNlbGxWYWx1ZRIPCgVibGFuaxgBIAEoCEgAEhAKBm51bWJlchgCIAEoAUgAEg4KBHRleHQYAyABKAlIABIRCgdib29sZWFuGAQgASgISABCBgoEa2luZCJiCgxTZXRDZWxsVmFsdWUSKgoHYWRkcmVzcxgBIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxImCgV2YWx1ZRgCIAEoCzIXLnB4ZWwud2lyZS52MS5DZWxsVmFsdWUiNwoJQ2xlYXJDZWxsEioKB2FkZHJlc3MYASABKAsyGS5weGVsLndpcmUudjEuQ2VsbEFkZHJlc3Mi9AMKEkNhbm9uaWNhbE9wZXJhdGlvbhI0Cg5zZXRfY2VsbF92YWx1ZRgBIAEoCzIaLnB4ZWwud2lyZS52MS5TZXRDZWxsVmFsdWVIABItCgpjbGVhcl9jZWxsGAIgASgLMhcucHhlbC53aXJlLnYxLkNsZWFyQ2VsbEgAEjgKEHNldF9jZWxsX2Zvcm11bGEYAyABKAsyHC5weGVsLndpcmUudjEuU2V0Q2VsbEZvcm11bGFIABIvCgtleHRlbmRfcm93cxgEIAEoCzIYLnB4ZWwud2lyZS52MS5FeHRlbmRSb3dzSAASLwoLaW5zZXJ0X3Jvd3MYBSABKAsyGC5weGVsLndpcmUudjEuSW5zZXJ0Um93c0gAEi8KC2RlbGV0ZV9yb3dzGAYgASgLMhgucHhlbC53aXJlLnYxLkRlbGV0ZVJvd3NIABI1Cg5pbnNlcnRfY29sdW1ucxgHIAEoCzIbLnB4ZWwud2lyZS52MS5JbnNlcnRDb2x1bW5zSAASNQoOZGVsZXRlX2NvbHVtbnMYCCABKAsyGy5weGVsLndpcmUudjEuRGVsZXRlQ29sdW1uc0gAEjYKD3NldF9jZWxsX3ZhbHVlcxgJIAEoCzIbLnB4ZWwud2lyZS52MS5TZXRDZWxsVmFsdWVzSABCBgoEa2luZCIsCgpFeHRlbmRSb3dzEhAKCHNoZWV0X2lkGAEgASgMEgwKBHJvd3MYAiADKAwiQwoKSW5zZXJ0Um93cxIQCghzaGVldF9pZBgBIAEoDBIVCg1iZWZvcmVfcm93X2lkGAIgASgMEgwKBHJvd3MYAyADKAwiLAoKRGVsZXRlUm93cxIQCghzaGVldF9pZBgBIAEoDBIMCgRyb3dzGAIgAygMIkwKDUluc2VydENvbHVtbnMSEAoIc2hlZXRfaWQYASABKAwSGAoQYmVmb3JlX2NvbHVtbl9pZBgCIAEoDBIPCgdjb2x1bW5zGAMgAygMIjIKDURlbGV0ZUNvbHVtbnMSEAoIc2hlZXRfaWQYASABKAwSDwoHY29sdW1ucxgCIAMoDCI7Cg1TZXRDZWxsVmFsdWVzEioKBndyaXRlcxgBIAMoCzIaLnB4ZWwud2lyZS52MS5TZXRDZWxsVmFsdWUizwIKD0RvY3VtZW50Q29tbWFuZBIUCgxvcGVyYXRpb25faWQYASABKAwSEwoLZG9jdW1lbnRfaWQYAiABKAwSEAoIYWN0b3JfaWQYAyABKAwSFAoMYmFzZV92ZXJzaW9uGAQgASgEEhcKD2NsaWVudF9zZXF1ZW5jZRgFIAEoBBIzCglvcGVyYXRpb24YBiABKAsyIC5weGVsLndpcmUudjEuQ2Fub25pY2FsT3BlcmF0aW9uEjwKD2Zvcm11bGFfY29tbWFuZBgHIAEoCzIjLnB4ZWwud2lyZS52MS5TZXRDZWxsRm9ybXVsYUNvbW1hbmQSKQoJdW5kb19jZWxsGAggASgLMhYucHhlbC53aXJlLnYxLlVuZG9DZWxsEjIKCmNvcHlfcmFuZ2UYCSABKAsyHi5weGVsLndpcmUudjEuQ29weVJhbmdlQ29tbWFuZCInCghVbmRvQ2VsbBIbChN0YXJnZXRfb3BlcmF0aW9uX2lkGAEgASgMIowBChBDb3B5UmFuZ2VDb21tYW5kEikKBnNvdXJjZRgBIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIuCgtkZXN0aW5hdGlvbhgCIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIMCgRyb3dzGAMgASgNEg8KB2NvbHVtbnMYBCABKA0iUwoVU2V0Q2VsbEZvcm11bGFDb21tYW5kEioKB2FkZHJlc3MYASABKAsyGS5weGVsLndpcmUudjEuQ2VsbEFkZHJlc3MSDgoGc291cmNlGAIgASgJIt4BChJPcGVyYXRpb25Db21taXR0ZWQSEwoLZG9jdW1lbnRfaWQYASABKAwSFAoMb3BlcmF0aW9uX2lkGAIgASgMEhAKCGFjdG9yX2lkGAMgASgMEhkKEWNvbW1pdHRlZF92ZXJzaW9uGAQgASgEEj0KE2Nhbm9uaWNhbF9vcGVyYXRpb24YBSABKAsyIC5weGVsLndpcmUudjEuQ2Fub25pY2FsT3BlcmF0aW9uEhwKFGNvbmZpcm1lZF9zdGF0ZV9oYXNoGAYgASgMEhMKC3RyYW5zZm9ybWVkGAcgASgIIpQBChBPcGVyYXRpb25SZWNlaXB0EhMKC2RvY3VtZW50X2lkGAEgASgMEhQKDG9wZXJhdGlvbl9pZBgCIAEoDBIZChFjb21taXR0ZWRfdmVyc2lvbhgDIAEoBBIcChRjYW5vbmljYWxfZXZlbnRfaGFzaBgEIAEoDBIcChRjdXJyZW50X2hlYWRfdmVyc2lvbhgFIAEoBCKVAQoRT3BlcmF0aW9uUmVqZWN0ZWQSEwoLZG9jdW1lbnRfaWQYASABKAwSFAoMb3BlcmF0aW9uX2lkGAIgASgMEikKBGNvZGUYAyABKA4yGy5weGVsLndpcmUudjEuUmVqZWN0aW9uQ29kZRIRCglyZXRyeWFibGUYBCABKAgSFwoPcmVzeW5jX3JlcXVpcmVkGAUgASgIIkAKElJlcXVlc3RDYWxjdWxhdGlvbhITCgtkb2N1bWVudF9pZBgBIAEoDBIVCg1pbnB1dF92ZXJzaW9uGAIgASgEIkMKEVN1YnNjcmliZURvY3VtZW50EhMKC2RvY3VtZW50X2lkGAEgASgMEhkKEWxhc3Rfc2Vlbl92ZXJzaW9uGAIgASgEInwKE0RvY3VtZW50SGVhZENoYW5nZWQSEwoLZG9jdW1lbnRfaWQYASABKAwSFAoMaGVhZF92ZXJzaW9uGAIgASgEEjoKEGxhdGVzdF9vcGVyYXRpb24YAyABKAsyIC5weGVsLndpcmUudjEuT3BlcmF0aW9uQ29tbWl0dGVkIlcKDlJlcGxheUNvbXBsZXRlEhMKC2RvY3VtZW50X2lkGAEgASgMEhcKD2JhcnJpZXJfdmVyc2lvbhgCIAEoBBIXCg9yZXN5bmNfcmVxdWlyZWQYAyABKAgijAEKD0NhbGN1bGF0ZWRWYWx1ZRIPCgVibGFuaxgBIAEoCEgAEhAKBm51bWJlchgCIAEoAUgAEg4KBHRleHQYAyABKAlIABIRCgdib29sZWFuGAQgASgISAASKwoFZXJyb3IYBSABKA4yGi5weGVsLndpcmUudjEuRm9ybXVsYUVycm9ySABCBgoEa2luZCJqCg5DYWxjdWxhdGVkQ2VsbBIqCgdhZGRyZXNzGAEgASgLMhkucHhlbC53aXJlLnYxLkNlbGxBZGRyZXNzEiwKBXZhbHVlGAIgASgLMh0ucHhlbC53aXJlLnYxLkNhbGN1bGF0ZWRWYWx1ZSL1AgoUQ2FsY3VsYXRpb25Db21taXR0ZWQSEwoLZG9jdW1lbnRfaWQYASABKAwSFQoNaW5wdXRfdmVyc2lvbhgCIAEoBBIZChFjYWxjdWxhdGlvbl9lcG9jaBgDIAEoBBIeChZmb3JtdWxhX2VuZ2luZV92ZXJzaW9uGAQgASgJEh0KFWNvbXBhdGliaWxpdHlfcHJvZmlsZRgFIAEoCRISCgpjb250ZXh0X2lkGAYgASgMEhYKDnBhdGNoX3NlcXVlbmNlGAcgASgNEhAKCGlzX2ZpbmFsGAggASgIEh0KFWNhbGN1bGF0ZWRfc3RhdGVfaGFzaBgJIAEoDBIrCgVjZWxscxgKIAMoCzIcLnB4ZWwud2lyZS52MS5DYWxjdWxhdGVkQ2VsbBIVCg1mdWxsX3NuYXBzaG90GAsgASgIEjYKCmVycm9yX2NvZGUYDCABKA4yIi5weGVsLndpcmUudjEuQ2FsY3VsYXRpb25FcnJvckNvZGUiaQoOU2V0Q2VsbEZvcm11bGESKgoHYWRkcmVzcxgBIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIrCgdmb3JtdWxhGAIgASgLMhoucHhlbC53aXJlLnYxLkJvdW5kRm9ybXVsYSLeAQoMQm91bmRGb3JtdWxhEg4KBnNvdXJjZRgBIAEoCRIRCgljYW5vbmljYWwYAiABKAkSIwoDYXN0GAMgASgLMhYucHhlbC53aXJlLnYxLkJvdW5kQXN0EikKBm9yaWdpbhgEIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIYChBib3VuZF9hdF92ZXJzaW9uGAUgASgEEkEKFWNvbXBhdGliaWxpdHlfcHJvZmlsZRgGIAEoDjIiLnB4ZWwud2lyZS52MS5Db21wYXRpYmlsaXR5UHJvZmlsZSJaCghCb3VuZEFzdBIWCg5zY2hlbWFfdmVyc2lvbhgBIAEoDRIMCgRyb290GAIgASgNEigKBW5vZGVzGAMgAygLMhkucHhlbC53aXJlLnYxLkZvcm11bGFOb2RlIqkDCgtGb3JtdWxhTm9kZRIQCgZudW1iZXIYASABKAFIABIOCgR0ZXh0GAIgASgJSAASEQoHYm9vbGVhbhgDIAEoCEgAEisKBWVycm9yGAQgASgOMhoucHhlbC53aXJlLnYxLkZvcm11bGFFcnJvckgAEhEKB21pc3NpbmcYBSABKAhIABIwCgRjZWxsGAYgASgLMiAucHhlbC53aXJlLnYxLkJvdW5kQ2VsbFJlZmVyZW5jZUgAEjIKBXJhbmdlGAcgASgLMiEucHhlbC53aXJlLnYxLkJvdW5kUmFuZ2VSZWZlcmVuY2VIABI5ChFpbnZhbGlkX3JlZmVyZW5jZRgIIAEoDjIcLnB4ZWwud2lyZS52MS5SZWZlcmVuY2VFcnJvckgAEigKBXVuYXJ5GAkgASgLMhcucHhlbC53aXJlLnYxLlVuYXJ5Tm9kZUgAEioKBmJpbmFyeRgKIAEoCzIYLnB4ZWwud2lyZS52MS5CaW5hcnlOb2RlSAASJgoEY2FsbBgLIAEoCzIWLnB4ZWwud2lyZS52MS5DYWxsTm9kZUgAQgYKBGtpbmQiSQoRQXhpc1JlZmVyZW5jZU1vZGUSEgoIYWJzb2x1dGUYASABKAhIABIYCg5yZWxhdGl2ZV9kZWx0YRgCIAEoEkgAQgYKBGtpbmQisgEKEkJvdW5kQ2VsbFJlZmVyZW5jZRIQCghzaGVldF9pZBgBIAEoDBIOCgZyb3dfaWQYAiABKAwSEQoJY29sdW1uX2lkGAMgASgMEjEKCHJvd19tb2RlGAQgASgLMh8ucHhlbC53aXJlLnYxLkF4aXNSZWZlcmVuY2VNb2RlEjQKC2NvbHVtbl9tb2RlGAUgASgLMh8ucHhlbC53aXJlLnYxLkF4aXNSZWZlcmVuY2VNb2RlInUKE0JvdW5kUmFuZ2VSZWZlcmVuY2USLwoFc3RhcnQYASABKAsyIC5weGVsLndpcmUudjEuQm91bmRDZWxsUmVmZXJlbmNlEi0KA2VuZBgCIAEoCzIgLnB4ZWwud2lyZS52MS5Cb3VuZENlbGxSZWZlcmVuY2UiSwoJVW5hcnlOb2RlEi0KCG9wZXJhdG9yGAEgASgOMhsucHhlbC53aXJlLnYxLlVuYXJ5T3BlcmF0b3ISDwoHb3BlcmFuZBgCIAEoDSJZCgpCaW5hcnlOb2RlEi4KCG9wZXJhdG9yGAEgASgOMhwucHhlbC53aXJlLnYxLkJpbmFyeU9wZXJhdG9yEgwKBGxlZnQYAiABKA0SDQoFcmlnaHQYAyABKA0iKwoIQ2FsbE5vZGUSDAoEbmFtZRgBIAEoCRIRCglhcmd1bWVudHMYAiADKA0qpgEKCUVycm9yQ29kZRIaChZFUlJPUl9DT0RFX1VOU1BFQ0lGSUVEEAASIwofRVJST1JfQ09ERV9VTlNVUFBPUlRFRF9QUk9UT0NPTBABEh4KGkVSUk9SX0NPREVfSU5WQUxJRF9NRVNTQUdFEAISHAoYRVJST1JfQ09ERV9BVVRIX1JFUVVJUkVEEAMSGgoWRVJST1JfQ09ERV9TRVJWRVJfQlVTWRAEKq0FCg1SZWplY3Rpb25Db2RlEh4KGlJFSkVDVElPTl9DT0RFX1VOU1BFQ0lGSUVEEAASHwobUkVKRUNUSU9OX0NPREVfVU5BVVRIT1JJWkVEEAESHAoYUkVKRUNUSU9OX0NPREVfTk9UX0ZPVU5EEAISIgoeUkVKRUNUSU9OX0NPREVfSU5WQUxJRF9DT01NQU5EEAMSJQohUkVKRUNUSU9OX0NPREVfQkFTRV9WRVJTSU9OX0FIRUFEEAQSJQohUkVKRUNUSU9OX0NPREVfUkVUUllBQkxFX0NPTkZMSUNUEAUSJwojUkVKRUNUSU9OX0NPREVfSURFTVBPVEVOQ1lfQ09ORkxJQ1QQBhIdChlSRUpFQ1RJT05fQ09ERV9RVUVVRV9GVUxMEAcSHgoaUkVKRUNUSU9OX0NPREVfVU5BVkFJTEFCTEUQCBIhCh1SRUpFQ1RJT05fQ09ERV9ERUxFVEVEX1RBUkdFVBAJEikKJVJFSkVDVElPTl9DT0RFX1JFQkFTRV9XSU5ET1dfRVhDRUVERUQQChIiCh5SRUpFQ1RJT05fQ09ERV9JTlZBTElEX0ZPUk1VTEEQCxI0CjBSRUpFQ1RJT05fQ09ERV9VTlNVUFBPUlRFRF9TVFJVQ1RVUkFMX0RFUEVOREVOQ1kQDBIgChxSRUpFQ1RJT05fQ09ERV9VTkRPX0NPTkZMSUNUEA0SHwobUkVKRUNUSU9OX0NPREVfTk9UX1VORE9BQkxFEA4SJwojUkVKRUNUSU9OX0NPREVfVU5ET19XSU5ET1dfRVhDRUVERUQQDxIkCiBSRUpFQ1RJT05fQ09ERV9QQVlMT0FEX1RPT19MQVJHRRAQEikKJVJFSkVDVElPTl9DT0RFX1NPVVJDRV9WRVJTSU9OX0NIQU5HRUQQESqKAgoUQ2FsY3VsYXRpb25FcnJvckNvZGUSJgoiQ0FMQ1VMQVRJT05fRVJST1JfQ09ERV9VTlNQRUNJRklFRBAAEikKJUNBTENVTEFUSU9OX0VSUk9SX0NPREVfTElNSVRfRVhDRUVERUQQARIkCiBDQUxDVUxBVElPTl9FUlJPUl9DT0RFX0NBTkNFTExFRBACEiYKIkNBTENVTEFUSU9OX0VSUk9SX0NPREVfVU5BVkFJTEFCTEUQAxItCilDQUxDVUxBVElPTl9FUlJPUl9DT0RFX0lOVkFMSURfUFJPSkVDVElPThAEEiIKHkNBTENVTEFUSU9OX0VSUk9SX0NPREVfVElNRU9VVBAFKmgKFENvbXBhdGliaWxpdHlQcm9maWxlEiUKIUNPTVBBVElCSUxJVFlfUFJPRklMRV9VTlNQRUNJRklFRBAAEikKJUNPTVBBVElCSUxJVFlfUFJPRklMRV9FWENFTF9TVUJTRVRfVjEQASp+Cg1VbmFyeU9wZXJhdG9yEh4KGlVOQVJZX09QRVJBVE9SX1VOU1BFQ0lGSUVEEAASFwoTVU5BUllfT1BFUkFUT1JfUExVUxABEhgKFFVOQVJZX09QRVJBVE9SX01JTlVTEAISGgoWVU5BUllfT1BFUkFUT1JfUEVSQ0VOVBADKo0DCg5CaW5hcnlPcGVyYXRvchIfChtCSU5BUllfT1BFUkFUT1JfVU5TUEVDSUZJRUQQABIXChNCSU5BUllfT1BFUkFUT1JfQUREEAESHAoYQklOQVJZX09QRVJBVE9SX1NVQlRSQUNUEAISHAoYQklOQVJZX09QRVJBVE9SX01VTFRJUExZEAMSGgoWQklOQVJZX09QRVJBVE9SX0RJVklERRAEEhkKFUJJTkFSWV9PUEVSQVRPUl9QT1dFUhAFEhoKFkJJTkFSWV9PUEVSQVRPUl9DT05DQVQQBhIZChVCSU5BUllfT1BFUkFUT1JfRVFVQUwQBxIdChlCSU5BUllfT1BFUkFUT1JfTk9UX0VRVUFMEAgSGAoUQklOQVJZX09QRVJBVE9SX0xFU1MQCRIeChpCSU5BUllfT1BFUkFUT1JfTEVTU19FUVVBTBAKEhsKF0JJTkFSWV9PUEVSQVRPUl9HUkVBVEVSEAsSIQodQklOQVJZX09QRVJBVE9SX0dSRUFURVJfRVFVQUwQDCqEAgoMRm9ybXVsYUVycm9yEh0KGUZPUk1VTEFfRVJST1JfVU5TUEVDSUZJRUQQABIWChJGT1JNVUxBX0VSUk9SX05VTEwQARIWChJGT1JNVUxBX0VSUk9SX0RJVjAQAhIXChNGT1JNVUxBX0VSUk9SX1ZBTFVFEAMSFQoRRk9STVVMQV9FUlJPUl9SRUYQBBIWChJGT1JNVUxBX0VSUk9SX05BTUUQBRIVChFGT1JNVUxBX0VSUk9SX05VTRAGEhQKEEZPUk1VTEFfRVJST1JfTkEQBxIXChNGT1JNVUxBX0VSUk9SX1NQSUxMEAgSFwoTRk9STVVMQV9FUlJPUl9DWUNMRRAJKpsBCg5SZWZlcmVuY2VFcnJvchIfChtSRUZFUkVOQ0VfRVJST1JfVU5TUEVDSUZJRUQQABIiCh5SRUZFUkVOQ0VfRVJST1JfREVMRVRFRF9UQVJHRVQQARIhCh1SRUZFUkVOQ0VfRVJST1JfT1VUX09GX0JPVU5EUxACEiEKHVJFRkVSRU5DRV9FUlJPUl9NSVNTSU5HX1NIRUVUEANiBnByb3RvMw");
+  fileDesc("ChpweGVsL3dpcmUvdjEvc2Vzc2lvbi5wcm90bxIMcHhlbC53aXJlLnYxIsYCCg5DbGllbnRFbnZlbG9wZRIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgNEioKBWhlbGxvGAIgASgLMhkucHhlbC53aXJlLnYxLkNsaWVudEhlbGxvSAASMAoHY29tbWFuZBgDIAEoCzIdLnB4ZWwud2lyZS52MS5Eb2N1bWVudENvbW1hbmRIABI/ChNyZXF1ZXN0X2NhbGN1bGF0aW9uGAQgASgLMiAucHhlbC53aXJlLnYxLlJlcXVlc3RDYWxjdWxhdGlvbkgAEj0KEnN1YnNjcmliZV9kb2N1bWVudBgFIAEoCzIfLnB4ZWwud2lyZS52MS5TdWJzY3JpYmVEb2N1bWVudEgAEjEKDHNldF9wcmVzZW5jZRgGIAEoCzIZLnB4ZWwud2lyZS52MS5TZXRQcmVzZW5jZUgAQgkKB3BheWxvYWQiPgoLQ2xpZW50SGVsbG8SGgoSY2xpZW50X2luc3RhbmNlX2lkGAEgASgMEhMKC2NsaWVudF9uYW1lGAIgASgJIrEECg5TZXJ2ZXJFbnZlbG9wZRIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgNEi4KB3dlbGNvbWUYAiABKAsyGy5weGVsLndpcmUudjEuU2VydmVyV2VsY29tZUgAEiwKBWVycm9yGAMgASgLMhsucHhlbC53aXJlLnYxLlByb3RvY29sRXJyb3JIABI1Cgljb21taXR0ZWQYBCABKAsyIC5weGVsLndpcmUudjEuT3BlcmF0aW9uQ29tbWl0dGVkSAASMwoIcmVqZWN0ZWQYBSABKAsyHy5weGVsLndpcmUudjEuT3BlcmF0aW9uUmVqZWN0ZWRIABIxCgdyZWNlaXB0GAYgASgLMh4ucHhlbC53aXJlLnYxLk9wZXJhdGlvblJlY2VpcHRIABJDChVjYWxjdWxhdGlvbl9jb21taXR0ZWQYByABKAsyIi5weGVsLndpcmUudjEuQ2FsY3VsYXRpb25Db21taXR0ZWRIABJCChVkb2N1bWVudF9oZWFkX2NoYW5nZWQYCCABKAsyIS5weGVsLndpcmUudjEuRG9jdW1lbnRIZWFkQ2hhbmdlZEgAEjcKD3JlcGxheV9jb21wbGV0ZRgJIAEoCzIcLnB4ZWwud2lyZS52MS5SZXBsYXlDb21wbGV0ZUgAEjsKEXByZXNlbmNlX3NuYXBzaG90GAogASgLMh4ucHhlbC53aXJlLnYxLlByZXNlbmNlU25hcHNob3RIAEIJCgdwYXlsb2FkIm8KDVNlcnZlcldlbGNvbWUSEgoKc2Vzc2lvbl9pZBgBIAEoDBIQCghhY3Rvcl9pZBgCIAEoDBIdChVoZWFydGJlYXRfaW50ZXJ2YWxfbXMYAyABKA0SGQoRbWF4X21lc3NhZ2VfYnl0ZXMYBCABKA0iWgoNUHJvdG9jb2xFcnJvchIlCgRjb2RlGAEgASgOMhcucHhlbC53aXJlLnYxLkVycm9yQ29kZRIiChpzdXBwb3J0ZWRfcHJvdG9jb2xfdmVyc2lvbhgCIAEoDSJ3CgtTZXRQcmVzZW5jZRITCgtkb2N1bWVudF9pZBgBIAEoDBIpCgZhbmNob3IYAiABKAsyGS5weGVsLndpcmUudjEuQ2VsbEFkZHJlc3MSKAoFZm9jdXMYAyABKAsyGS5weGVsLndpcmUudjEuQ2VsbEFkZHJlc3MiiQEKDFByZXNlbmNlUGVlchISCgpzZXNzaW9uX2lkGAEgASgMEhAKCGFjdG9yX2lkGAIgASgMEikKBmFuY2hvchgDIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIoCgVmb2N1cxgEIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcyJSChBQcmVzZW5jZVNuYXBzaG90EhMKC2RvY3VtZW50X2lkGAEgASgMEikKBXBlZXJzGAIgAygLMhoucHhlbC53aXJlLnYxLlByZXNlbmNlUGVlciJCCgtDZWxsQWRkcmVzcxIQCghzaGVldF9pZBgBIAEoDBIOCgZyb3dfaWQYAiABKAwSEQoJY29sdW1uX2lkGAMgASgMIlkKCUNlbGxWYWx1ZRIPCgVibGFuaxgBIAEoCEgAEhAKBm51bWJlchgCIAEoAUgAEg4KBHRleHQYAyABKAlIABIRCgdib29sZWFuGAQgASgISABCBgoEa2luZCJiCgxTZXRDZWxsVmFsdWUSKgoHYWRkcmVzcxgBIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxImCgV2YWx1ZRgCIAEoCzIXLnB4ZWwud2lyZS52MS5DZWxsVmFsdWUiNwoJQ2xlYXJDZWxsEioKB2FkZHJlc3MYASABKAsyGS5weGVsLndpcmUudjEuQ2VsbEFkZHJlc3MioQQKEkNhbm9uaWNhbE9wZXJhdGlvbhI0Cg5zZXRfY2VsbF92YWx1ZRgBIAEoCzIaLnB4ZWwud2lyZS52MS5TZXRDZWxsVmFsdWVIABItCgpjbGVhcl9jZWxsGAIgASgLMhcucHhlbC53aXJlLnYxLkNsZWFyQ2VsbEgAEjgKEHNldF9jZWxsX2Zvcm11bGEYAyABKAsyHC5weGVsLndpcmUudjEuU2V0Q2VsbEZvcm11bGFIABIvCgtleHRlbmRfcm93cxgEIAEoCzIYLnB4ZWwud2lyZS52MS5FeHRlbmRSb3dzSAASLwoLaW5zZXJ0X3Jvd3MYBSABKAsyGC5weGVsLndpcmUudjEuSW5zZXJ0Um93c0gAEi8KC2RlbGV0ZV9yb3dzGAYgASgLMhgucHhlbC53aXJlLnYxLkRlbGV0ZVJvd3NIABI1Cg5pbnNlcnRfY29sdW1ucxgHIAEoCzIbLnB4ZWwud2lyZS52MS5JbnNlcnRDb2x1bW5zSAASNQoOZGVsZXRlX2NvbHVtbnMYCCABKAsyGy5weGVsLndpcmUudjEuRGVsZXRlQ29sdW1uc0gAEjYKD3NldF9jZWxsX3ZhbHVlcxgJIAEoCzIbLnB4ZWwud2lyZS52MS5TZXRDZWxsVmFsdWVzSAASKwoJYWRkX3NoZWV0GAogASgLMhYucHhlbC53aXJlLnYxLkFkZFNoZWV0SABCBgoEa2luZCJJCghBZGRTaGVldBIQCghzaGVldF9pZBgBIAEoDBIMCgRuYW1lGAIgASgJEgwKBHJvd3MYAyADKAwSDwoHY29sdW1ucxgEIAMoDCIsCgpFeHRlbmRSb3dzEhAKCHNoZWV0X2lkGAEgASgMEgwKBHJvd3MYAiADKAwiQwoKSW5zZXJ0Um93cxIQCghzaGVldF9pZBgBIAEoDBIVCg1iZWZvcmVfcm93X2lkGAIgASgMEgwKBHJvd3MYAyADKAwiLAoKRGVsZXRlUm93cxIQCghzaGVldF9pZBgBIAEoDBIMCgRyb3dzGAIgAygMIkwKDUluc2VydENvbHVtbnMSEAoIc2hlZXRfaWQYASABKAwSGAoQYmVmb3JlX2NvbHVtbl9pZBgCIAEoDBIPCgdjb2x1bW5zGAMgAygMIjIKDURlbGV0ZUNvbHVtbnMSEAoIc2hlZXRfaWQYASABKAwSDwoHY29sdW1ucxgCIAMoDCI7Cg1TZXRDZWxsVmFsdWVzEioKBndyaXRlcxgBIAMoCzIaLnB4ZWwud2lyZS52MS5TZXRDZWxsVmFsdWUizwIKD0RvY3VtZW50Q29tbWFuZBIUCgxvcGVyYXRpb25faWQYASABKAwSEwoLZG9jdW1lbnRfaWQYAiABKAwSEAoIYWN0b3JfaWQYAyABKAwSFAoMYmFzZV92ZXJzaW9uGAQgASgEEhcKD2NsaWVudF9zZXF1ZW5jZRgFIAEoBBIzCglvcGVyYXRpb24YBiABKAsyIC5weGVsLndpcmUudjEuQ2Fub25pY2FsT3BlcmF0aW9uEjwKD2Zvcm11bGFfY29tbWFuZBgHIAEoCzIjLnB4ZWwud2lyZS52MS5TZXRDZWxsRm9ybXVsYUNvbW1hbmQSKQoJdW5kb19jZWxsGAggASgLMhYucHhlbC53aXJlLnYxLlVuZG9DZWxsEjIKCmNvcHlfcmFuZ2UYCSABKAsyHi5weGVsLndpcmUudjEuQ29weVJhbmdlQ29tbWFuZCInCghVbmRvQ2VsbBIbChN0YXJnZXRfb3BlcmF0aW9uX2lkGAEgASgMIowBChBDb3B5UmFuZ2VDb21tYW5kEikKBnNvdXJjZRgBIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIuCgtkZXN0aW5hdGlvbhgCIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIMCgRyb3dzGAMgASgNEg8KB2NvbHVtbnMYBCABKA0iUwoVU2V0Q2VsbEZvcm11bGFDb21tYW5kEioKB2FkZHJlc3MYASABKAsyGS5weGVsLndpcmUudjEuQ2VsbEFkZHJlc3MSDgoGc291cmNlGAIgASgJIt4BChJPcGVyYXRpb25Db21taXR0ZWQSEwoLZG9jdW1lbnRfaWQYASABKAwSFAoMb3BlcmF0aW9uX2lkGAIgASgMEhAKCGFjdG9yX2lkGAMgASgMEhkKEWNvbW1pdHRlZF92ZXJzaW9uGAQgASgEEj0KE2Nhbm9uaWNhbF9vcGVyYXRpb24YBSABKAsyIC5weGVsLndpcmUudjEuQ2Fub25pY2FsT3BlcmF0aW9uEhwKFGNvbmZpcm1lZF9zdGF0ZV9oYXNoGAYgASgMEhMKC3RyYW5zZm9ybWVkGAcgASgIIpQBChBPcGVyYXRpb25SZWNlaXB0EhMKC2RvY3VtZW50X2lkGAEgASgMEhQKDG9wZXJhdGlvbl9pZBgCIAEoDBIZChFjb21taXR0ZWRfdmVyc2lvbhgDIAEoBBIcChRjYW5vbmljYWxfZXZlbnRfaGFzaBgEIAEoDBIcChRjdXJyZW50X2hlYWRfdmVyc2lvbhgFIAEoBCKVAQoRT3BlcmF0aW9uUmVqZWN0ZWQSEwoLZG9jdW1lbnRfaWQYASABKAwSFAoMb3BlcmF0aW9uX2lkGAIgASgMEikKBGNvZGUYAyABKA4yGy5weGVsLndpcmUudjEuUmVqZWN0aW9uQ29kZRIRCglyZXRyeWFibGUYBCABKAgSFwoPcmVzeW5jX3JlcXVpcmVkGAUgASgIIkAKElJlcXVlc3RDYWxjdWxhdGlvbhITCgtkb2N1bWVudF9pZBgBIAEoDBIVCg1pbnB1dF92ZXJzaW9uGAIgASgEIkMKEVN1YnNjcmliZURvY3VtZW50EhMKC2RvY3VtZW50X2lkGAEgASgMEhkKEWxhc3Rfc2Vlbl92ZXJzaW9uGAIgASgEInwKE0RvY3VtZW50SGVhZENoYW5nZWQSEwoLZG9jdW1lbnRfaWQYASABKAwSFAoMaGVhZF92ZXJzaW9uGAIgASgEEjoKEGxhdGVzdF9vcGVyYXRpb24YAyABKAsyIC5weGVsLndpcmUudjEuT3BlcmF0aW9uQ29tbWl0dGVkIlcKDlJlcGxheUNvbXBsZXRlEhMKC2RvY3VtZW50X2lkGAEgASgMEhcKD2JhcnJpZXJfdmVyc2lvbhgCIAEoBBIXCg9yZXN5bmNfcmVxdWlyZWQYAyABKAgijAEKD0NhbGN1bGF0ZWRWYWx1ZRIPCgVibGFuaxgBIAEoCEgAEhAKBm51bWJlchgCIAEoAUgAEg4KBHRleHQYAyABKAlIABIRCgdib29sZWFuGAQgASgISAASKwoFZXJyb3IYBSABKA4yGi5weGVsLndpcmUudjEuRm9ybXVsYUVycm9ySABCBgoEa2luZCJqCg5DYWxjdWxhdGVkQ2VsbBIqCgdhZGRyZXNzGAEgASgLMhkucHhlbC53aXJlLnYxLkNlbGxBZGRyZXNzEiwKBXZhbHVlGAIgASgLMh0ucHhlbC53aXJlLnYxLkNhbGN1bGF0ZWRWYWx1ZSL1AgoUQ2FsY3VsYXRpb25Db21taXR0ZWQSEwoLZG9jdW1lbnRfaWQYASABKAwSFQoNaW5wdXRfdmVyc2lvbhgCIAEoBBIZChFjYWxjdWxhdGlvbl9lcG9jaBgDIAEoBBIeChZmb3JtdWxhX2VuZ2luZV92ZXJzaW9uGAQgASgJEh0KFWNvbXBhdGliaWxpdHlfcHJvZmlsZRgFIAEoCRISCgpjb250ZXh0X2lkGAYgASgMEhYKDnBhdGNoX3NlcXVlbmNlGAcgASgNEhAKCGlzX2ZpbmFsGAggASgIEh0KFWNhbGN1bGF0ZWRfc3RhdGVfaGFzaBgJIAEoDBIrCgVjZWxscxgKIAMoCzIcLnB4ZWwud2lyZS52MS5DYWxjdWxhdGVkQ2VsbBIVCg1mdWxsX3NuYXBzaG90GAsgASgIEjYKCmVycm9yX2NvZGUYDCABKA4yIi5weGVsLndpcmUudjEuQ2FsY3VsYXRpb25FcnJvckNvZGUiaQoOU2V0Q2VsbEZvcm11bGESKgoHYWRkcmVzcxgBIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIrCgdmb3JtdWxhGAIgASgLMhoucHhlbC53aXJlLnYxLkJvdW5kRm9ybXVsYSLeAQoMQm91bmRGb3JtdWxhEg4KBnNvdXJjZRgBIAEoCRIRCgljYW5vbmljYWwYAiABKAkSIwoDYXN0GAMgASgLMhYucHhlbC53aXJlLnYxLkJvdW5kQXN0EikKBm9yaWdpbhgEIAEoCzIZLnB4ZWwud2lyZS52MS5DZWxsQWRkcmVzcxIYChBib3VuZF9hdF92ZXJzaW9uGAUgASgEEkEKFWNvbXBhdGliaWxpdHlfcHJvZmlsZRgGIAEoDjIiLnB4ZWwud2lyZS52MS5Db21wYXRpYmlsaXR5UHJvZmlsZSJaCghCb3VuZEFzdBIWCg5zY2hlbWFfdmVyc2lvbhgBIAEoDRIMCgRyb290GAIgASgNEigKBW5vZGVzGAMgAygLMhkucHhlbC53aXJlLnYxLkZvcm11bGFOb2RlIqkDCgtGb3JtdWxhTm9kZRIQCgZudW1iZXIYASABKAFIABIOCgR0ZXh0GAIgASgJSAASEQoHYm9vbGVhbhgDIAEoCEgAEisKBWVycm9yGAQgASgOMhoucHhlbC53aXJlLnYxLkZvcm11bGFFcnJvckgAEhEKB21pc3NpbmcYBSABKAhIABIwCgRjZWxsGAYgASgLMiAucHhlbC53aXJlLnYxLkJvdW5kQ2VsbFJlZmVyZW5jZUgAEjIKBXJhbmdlGAcgASgLMiEucHhlbC53aXJlLnYxLkJvdW5kUmFuZ2VSZWZlcmVuY2VIABI5ChFpbnZhbGlkX3JlZmVyZW5jZRgIIAEoDjIcLnB4ZWwud2lyZS52MS5SZWZlcmVuY2VFcnJvckgAEigKBXVuYXJ5GAkgASgLMhcucHhlbC53aXJlLnYxLlVuYXJ5Tm9kZUgAEioKBmJpbmFyeRgKIAEoCzIYLnB4ZWwud2lyZS52MS5CaW5hcnlOb2RlSAASJgoEY2FsbBgLIAEoCzIWLnB4ZWwud2lyZS52MS5DYWxsTm9kZUgAQgYKBGtpbmQiSQoRQXhpc1JlZmVyZW5jZU1vZGUSEgoIYWJzb2x1dGUYASABKAhIABIYCg5yZWxhdGl2ZV9kZWx0YRgCIAEoEkgAQgYKBGtpbmQisgEKEkJvdW5kQ2VsbFJlZmVyZW5jZRIQCghzaGVldF9pZBgBIAEoDBIOCgZyb3dfaWQYAiABKAwSEQoJY29sdW1uX2lkGAMgASgMEjEKCHJvd19tb2RlGAQgASgLMh8ucHhlbC53aXJlLnYxLkF4aXNSZWZlcmVuY2VNb2RlEjQKC2NvbHVtbl9tb2RlGAUgASgLMh8ucHhlbC53aXJlLnYxLkF4aXNSZWZlcmVuY2VNb2RlInUKE0JvdW5kUmFuZ2VSZWZlcmVuY2USLwoFc3RhcnQYASABKAsyIC5weGVsLndpcmUudjEuQm91bmRDZWxsUmVmZXJlbmNlEi0KA2VuZBgCIAEoCzIgLnB4ZWwud2lyZS52MS5Cb3VuZENlbGxSZWZlcmVuY2UiSwoJVW5hcnlOb2RlEi0KCG9wZXJhdG9yGAEgASgOMhsucHhlbC53aXJlLnYxLlVuYXJ5T3BlcmF0b3ISDwoHb3BlcmFuZBgCIAEoDSJZCgpCaW5hcnlOb2RlEi4KCG9wZXJhdG9yGAEgASgOMhwucHhlbC53aXJlLnYxLkJpbmFyeU9wZXJhdG9yEgwKBGxlZnQYAiABKA0SDQoFcmlnaHQYAyABKA0iKwoIQ2FsbE5vZGUSDAoEbmFtZRgBIAEoCRIRCglhcmd1bWVudHMYAiADKA0qpgEKCUVycm9yQ29kZRIaChZFUlJPUl9DT0RFX1VOU1BFQ0lGSUVEEAASIwofRVJST1JfQ09ERV9VTlNVUFBPUlRFRF9QUk9UT0NPTBABEh4KGkVSUk9SX0NPREVfSU5WQUxJRF9NRVNTQUdFEAISHAoYRVJST1JfQ09ERV9BVVRIX1JFUVVJUkVEEAMSGgoWRVJST1JfQ09ERV9TRVJWRVJfQlVTWRAEKq0FCg1SZWplY3Rpb25Db2RlEh4KGlJFSkVDVElPTl9DT0RFX1VOU1BFQ0lGSUVEEAASHwobUkVKRUNUSU9OX0NPREVfVU5BVVRIT1JJWkVEEAESHAoYUkVKRUNUSU9OX0NPREVfTk9UX0ZPVU5EEAISIgoeUkVKRUNUSU9OX0NPREVfSU5WQUxJRF9DT01NQU5EEAMSJQohUkVKRUNUSU9OX0NPREVfQkFTRV9WRVJTSU9OX0FIRUFEEAQSJQohUkVKRUNUSU9OX0NPREVfUkVUUllBQkxFX0NPTkZMSUNUEAUSJwojUkVKRUNUSU9OX0NPREVfSURFTVBPVEVOQ1lfQ09ORkxJQ1QQBhIdChlSRUpFQ1RJT05fQ09ERV9RVUVVRV9GVUxMEAcSHgoaUkVKRUNUSU9OX0NPREVfVU5BVkFJTEFCTEUQCBIhCh1SRUpFQ1RJT05fQ09ERV9ERUxFVEVEX1RBUkdFVBAJEikKJVJFSkVDVElPTl9DT0RFX1JFQkFTRV9XSU5ET1dfRVhDRUVERUQQChIiCh5SRUpFQ1RJT05fQ09ERV9JTlZBTElEX0ZPUk1VTEEQCxI0CjBSRUpFQ1RJT05fQ09ERV9VTlNVUFBPUlRFRF9TVFJVQ1RVUkFMX0RFUEVOREVOQ1kQDBIgChxSRUpFQ1RJT05fQ09ERV9VTkRPX0NPTkZMSUNUEA0SHwobUkVKRUNUSU9OX0NPREVfTk9UX1VORE9BQkxFEA4SJwojUkVKRUNUSU9OX0NPREVfVU5ET19XSU5ET1dfRVhDRUVERUQQDxIkCiBSRUpFQ1RJT05fQ09ERV9QQVlMT0FEX1RPT19MQVJHRRAQEikKJVJFSkVDVElPTl9DT0RFX1NPVVJDRV9WRVJTSU9OX0NIQU5HRUQQESqKAgoUQ2FsY3VsYXRpb25FcnJvckNvZGUSJgoiQ0FMQ1VMQVRJT05fRVJST1JfQ09ERV9VTlNQRUNJRklFRBAAEikKJUNBTENVTEFUSU9OX0VSUk9SX0NPREVfTElNSVRfRVhDRUVERUQQARIkCiBDQUxDVUxBVElPTl9FUlJPUl9DT0RFX0NBTkNFTExFRBACEiYKIkNBTENVTEFUSU9OX0VSUk9SX0NPREVfVU5BVkFJTEFCTEUQAxItCilDQUxDVUxBVElPTl9FUlJPUl9DT0RFX0lOVkFMSURfUFJPSkVDVElPThAEEiIKHkNBTENVTEFUSU9OX0VSUk9SX0NPREVfVElNRU9VVBAFKmgKFENvbXBhdGliaWxpdHlQcm9maWxlEiUKIUNPTVBBVElCSUxJVFlfUFJPRklMRV9VTlNQRUNJRklFRBAAEikKJUNPTVBBVElCSUxJVFlfUFJPRklMRV9FWENFTF9TVUJTRVRfVjEQASp+Cg1VbmFyeU9wZXJhdG9yEh4KGlVOQVJZX09QRVJBVE9SX1VOU1BFQ0lGSUVEEAASFwoTVU5BUllfT1BFUkFUT1JfUExVUxABEhgKFFVOQVJZX09QRVJBVE9SX01JTlVTEAISGgoWVU5BUllfT1BFUkFUT1JfUEVSQ0VOVBADKo0DCg5CaW5hcnlPcGVyYXRvchIfChtCSU5BUllfT1BFUkFUT1JfVU5TUEVDSUZJRUQQABIXChNCSU5BUllfT1BFUkFUT1JfQUREEAESHAoYQklOQVJZX09QRVJBVE9SX1NVQlRSQUNUEAISHAoYQklOQVJZX09QRVJBVE9SX01VTFRJUExZEAMSGgoWQklOQVJZX09QRVJBVE9SX0RJVklERRAEEhkKFUJJTkFSWV9PUEVSQVRPUl9QT1dFUhAFEhoKFkJJTkFSWV9PUEVSQVRPUl9DT05DQVQQBhIZChVCSU5BUllfT1BFUkFUT1JfRVFVQUwQBxIdChlCSU5BUllfT1BFUkFUT1JfTk9UX0VRVUFMEAgSGAoUQklOQVJZX09QRVJBVE9SX0xFU1MQCRIeChpCSU5BUllfT1BFUkFUT1JfTEVTU19FUVVBTBAKEhsKF0JJTkFSWV9PUEVSQVRPUl9HUkVBVEVSEAsSIQodQklOQVJZX09QRVJBVE9SX0dSRUFURVJfRVFVQUwQDCqEAgoMRm9ybXVsYUVycm9yEh0KGUZPUk1VTEFfRVJST1JfVU5TUEVDSUZJRUQQABIWChJGT1JNVUxBX0VSUk9SX05VTEwQARIWChJGT1JNVUxBX0VSUk9SX0RJVjAQAhIXChNGT1JNVUxBX0VSUk9SX1ZBTFVFEAMSFQoRRk9STVVMQV9FUlJPUl9SRUYQBBIWChJGT1JNVUxBX0VSUk9SX05BTUUQBRIVChFGT1JNVUxBX0VSUk9SX05VTRAGEhQKEEZPUk1VTEFfRVJST1JfTkEQBxIXChNGT1JNVUxBX0VSUk9SX1NQSUxMEAgSFwoTRk9STVVMQV9FUlJPUl9DWUNMRRAJKpsBCg5SZWZlcmVuY2VFcnJvchIfChtSRUZFUkVOQ0VfRVJST1JfVU5TUEVDSUZJRUQQABIiCh5SRUZFUkVOQ0VfRVJST1JfREVMRVRFRF9UQVJHRVQQARIhCh1SRUZFUkVOQ0VfRVJST1JfT1VUX09GX0JPVU5EUxACEiEKHVJFRkVSRU5DRV9FUlJPUl9NSVNTSU5HX1NIRUVUEANiBnByb3RvMw");
 
 /**
  * Additive v1 messages; unsupported payloads are rejected atomically.
@@ -469,6 +469,12 @@ export type CanonicalOperation = Message<"pxel.wire.v1.CanonicalOperation"> & {
      */
     value: SetCellValues;
     case: "setCellValues";
+  } | {
+    /**
+     * @generated from field: pxel.wire.v1.AddSheet add_sheet = 10;
+     */
+    value: AddSheet;
+    case: "addSheet";
   } | { case: undefined; value?: undefined };
 };
 
@@ -478,6 +484,41 @@ export type CanonicalOperation = Message<"pxel.wire.v1.CanonicalOperation"> & {
  */
 export const CanonicalOperationSchema: GenMessage<CanonicalOperation> = /*@__PURE__*/
   messageDesc(file_pxel_wire_v1_session, 12);
+
+/**
+ * The client proposes stable IDs; the server validates every axis ID and
+ * persists the entire empty sheet as one authenticated operation.
+ *
+ * @generated from message pxel.wire.v1.AddSheet
+ */
+export type AddSheet = Message<"pxel.wire.v1.AddSheet"> & {
+  /**
+   * @generated from field: bytes sheet_id = 1;
+   */
+  sheetId: Uint8Array;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: repeated bytes rows = 3;
+   */
+  rows: Uint8Array[];
+
+  /**
+   * @generated from field: repeated bytes columns = 4;
+   */
+  columns: Uint8Array[];
+};
+
+/**
+ * Describes the message pxel.wire.v1.AddSheet.
+ * Use `create(AddSheetSchema)` to create a new message.
+ */
+export const AddSheetSchema: GenMessage<AddSheet> = /*@__PURE__*/
+  messageDesc(file_pxel_wire_v1_session, 13);
 
 /**
  * Appends at the current end. Rows have stable identities; stale commands
@@ -502,7 +543,7 @@ export type ExtendRows = Message<"pxel.wire.v1.ExtendRows"> & {
  * Use `create(ExtendRowsSchema)` to create a new message.
  */
 export const ExtendRowsSchema: GenMessage<ExtendRows> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 13);
+  messageDesc(file_pxel_wire_v1_session, 14);
 
 /**
  * Inserts immediately before an existing stable row ID. Formula references
@@ -532,7 +573,7 @@ export type InsertRows = Message<"pxel.wire.v1.InsertRows"> & {
  * Use `create(InsertRowsSchema)` to create a new message.
  */
 export const InsertRowsSchema: GenMessage<InsertRows> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 14);
+  messageDesc(file_pxel_wire_v1_session, 15);
 
 /**
  * Removes 1–1,000 stable row IDs in one canonical operation. Deleted scalar
@@ -557,7 +598,7 @@ export type DeleteRows = Message<"pxel.wire.v1.DeleteRows"> & {
  * Use `create(DeleteRowsSchema)` to create a new message.
  */
 export const DeleteRowsSchema: GenMessage<DeleteRows> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 15);
+  messageDesc(file_pxel_wire_v1_session, 16);
 
 /**
  * Inserts before a stable column ID; formula targets remain bound to IDs.
@@ -586,7 +627,7 @@ export type InsertColumns = Message<"pxel.wire.v1.InsertColumns"> & {
  * Use `create(InsertColumnsSchema)` to create a new message.
  */
 export const InsertColumnsSchema: GenMessage<InsertColumns> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 16);
+  messageDesc(file_pxel_wire_v1_session, 17);
 
 /**
  * Removes stable column IDs. Bound scalar targets in removed columns become #REF!.
@@ -610,7 +651,7 @@ export type DeleteColumns = Message<"pxel.wire.v1.DeleteColumns"> & {
  * Use `create(DeleteColumnsSchema)` to create a new message.
  */
 export const DeleteColumnsSchema: GenMessage<DeleteColumns> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 17);
+  messageDesc(file_pxel_wire_v1_session, 18);
 
 /**
  * One atomic version for up to 1,000 distinct value writes. Formula source
@@ -630,7 +671,7 @@ export type SetCellValues = Message<"pxel.wire.v1.SetCellValues"> & {
  * Use `create(SetCellValuesSchema)` to create a new message.
  */
 export const SetCellValuesSchema: GenMessage<SetCellValues> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 18);
+  messageDesc(file_pxel_wire_v1_session, 19);
 
 /**
  * @generated from message pxel.wire.v1.DocumentCommand
@@ -690,7 +731,7 @@ export type DocumentCommand = Message<"pxel.wire.v1.DocumentCommand"> & {
  * Use `create(DocumentCommandSchema)` to create a new message.
  */
 export const DocumentCommandSchema: GenMessage<DocumentCommand> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 19);
+  messageDesc(file_pxel_wire_v1_session, 20);
 
 /**
  * @generated from message pxel.wire.v1.UndoCell
@@ -707,7 +748,7 @@ export type UndoCell = Message<"pxel.wire.v1.UndoCell"> & {
  * Use `create(UndoCellSchema)` to create a new message.
  */
 export const UndoCellSchema: GenMessage<UndoCell> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 20);
+  messageDesc(file_pxel_wire_v1_session, 21);
 
 /**
  * Source and destination are stable-ID top-left cells on the same sheet.
@@ -743,7 +784,7 @@ export type CopyRangeCommand = Message<"pxel.wire.v1.CopyRangeCommand"> & {
  * Use `create(CopyRangeCommandSchema)` to create a new message.
  */
 export const CopyRangeCommandSchema: GenMessage<CopyRangeCommand> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 21);
+  messageDesc(file_pxel_wire_v1_session, 22);
 
 /**
  * @generated from message pxel.wire.v1.SetCellFormulaCommand
@@ -765,7 +806,7 @@ export type SetCellFormulaCommand = Message<"pxel.wire.v1.SetCellFormulaCommand"
  * Use `create(SetCellFormulaCommandSchema)` to create a new message.
  */
 export const SetCellFormulaCommandSchema: GenMessage<SetCellFormulaCommand> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 22);
+  messageDesc(file_pxel_wire_v1_session, 23);
 
 /**
  * @generated from message pxel.wire.v1.OperationCommitted
@@ -812,7 +853,7 @@ export type OperationCommitted = Message<"pxel.wire.v1.OperationCommitted"> & {
  * Use `create(OperationCommittedSchema)` to create a new message.
  */
 export const OperationCommittedSchema: GenMessage<OperationCommitted> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 23);
+  messageDesc(file_pxel_wire_v1_session, 24);
 
 /**
  * @generated from message pxel.wire.v1.OperationReceipt
@@ -849,7 +890,7 @@ export type OperationReceipt = Message<"pxel.wire.v1.OperationReceipt"> & {
  * Use `create(OperationReceiptSchema)` to create a new message.
  */
 export const OperationReceiptSchema: GenMessage<OperationReceipt> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 24);
+  messageDesc(file_pxel_wire_v1_session, 25);
 
 /**
  * @generated from message pxel.wire.v1.OperationRejected
@@ -886,7 +927,7 @@ export type OperationRejected = Message<"pxel.wire.v1.OperationRejected"> & {
  * Use `create(OperationRejectedSchema)` to create a new message.
  */
 export const OperationRejectedSchema: GenMessage<OperationRejected> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 25);
+  messageDesc(file_pxel_wire_v1_session, 26);
 
 /**
  * Explicit asynchronous calculation request; does not mutate document history.
@@ -910,7 +951,7 @@ export type RequestCalculation = Message<"pxel.wire.v1.RequestCalculation"> & {
  * Use `create(RequestCalculationSchema)` to create a new message.
  */
 export const RequestCalculationSchema: GenMessage<RequestCalculation> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 26);
+  messageDesc(file_pxel_wire_v1_session, 27);
 
 /**
  * A subscription captures a barrier and replays up to 128 representable
@@ -935,7 +976,7 @@ export type SubscribeDocument = Message<"pxel.wire.v1.SubscribeDocument"> & {
  * Use `create(SubscribeDocumentSchema)` to create a new message.
  */
 export const SubscribeDocumentSchema: GenMessage<SubscribeDocument> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 27);
+  messageDesc(file_pxel_wire_v1_session, 28);
 
 /**
  * @generated from message pxel.wire.v1.DocumentHeadChanged
@@ -965,7 +1006,7 @@ export type DocumentHeadChanged = Message<"pxel.wire.v1.DocumentHeadChanged"> & 
  * Use `create(DocumentHeadChangedSchema)` to create a new message.
  */
 export const DocumentHeadChangedSchema: GenMessage<DocumentHeadChanged> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 28);
+  messageDesc(file_pxel_wire_v1_session, 29);
 
 /**
  * Marks the captured subscribe barrier. A resync flag means the bounded
@@ -995,7 +1036,7 @@ export type ReplayComplete = Message<"pxel.wire.v1.ReplayComplete"> & {
  * Use `create(ReplayCompleteSchema)` to create a new message.
  */
 export const ReplayCompleteSchema: GenMessage<ReplayComplete> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 29);
+  messageDesc(file_pxel_wire_v1_session, 30);
 
 /**
  * @generated from message pxel.wire.v1.CalculatedValue
@@ -1042,7 +1083,7 @@ export type CalculatedValue = Message<"pxel.wire.v1.CalculatedValue"> & {
  * Use `create(CalculatedValueSchema)` to create a new message.
  */
 export const CalculatedValueSchema: GenMessage<CalculatedValue> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 30);
+  messageDesc(file_pxel_wire_v1_session, 31);
 
 /**
  * @generated from message pxel.wire.v1.CalculatedCell
@@ -1064,7 +1105,7 @@ export type CalculatedCell = Message<"pxel.wire.v1.CalculatedCell"> & {
  * Use `create(CalculatedCellSchema)` to create a new message.
  */
 export const CalculatedCellSchema: GenMessage<CalculatedCell> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 31);
+  messageDesc(file_pxel_wire_v1_session, 32);
 
 /**
  * v1 sends a complete result set across ordered chunks, each <=256 KiB.
@@ -1140,7 +1181,7 @@ export type CalculationCommitted = Message<"pxel.wire.v1.CalculationCommitted"> 
  * Use `create(CalculationCommittedSchema)` to create a new message.
  */
 export const CalculationCommittedSchema: GenMessage<CalculationCommitted> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 32);
+  messageDesc(file_pxel_wire_v1_session, 33);
 
 /**
  * Independent public formula DTOs; never import the persisted event schema.
@@ -1164,7 +1205,7 @@ export type SetCellFormula = Message<"pxel.wire.v1.SetCellFormula"> & {
  * Use `create(SetCellFormulaSchema)` to create a new message.
  */
 export const SetCellFormulaSchema: GenMessage<SetCellFormula> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 33);
+  messageDesc(file_pxel_wire_v1_session, 34);
 
 /**
  * @generated from message pxel.wire.v1.BoundFormula
@@ -1206,7 +1247,7 @@ export type BoundFormula = Message<"pxel.wire.v1.BoundFormula"> & {
  * Use `create(BoundFormulaSchema)` to create a new message.
  */
 export const BoundFormulaSchema: GenMessage<BoundFormula> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 34);
+  messageDesc(file_pxel_wire_v1_session, 35);
 
 /**
  * @generated from message pxel.wire.v1.BoundAst
@@ -1233,7 +1274,7 @@ export type BoundAst = Message<"pxel.wire.v1.BoundAst"> & {
  * Use `create(BoundAstSchema)` to create a new message.
  */
 export const BoundAstSchema: GenMessage<BoundAst> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 35);
+  messageDesc(file_pxel_wire_v1_session, 36);
 
 /**
  * @generated from message pxel.wire.v1.FormulaNode
@@ -1316,7 +1357,7 @@ export type FormulaNode = Message<"pxel.wire.v1.FormulaNode"> & {
  * Use `create(FormulaNodeSchema)` to create a new message.
  */
 export const FormulaNodeSchema: GenMessage<FormulaNode> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 36);
+  messageDesc(file_pxel_wire_v1_session, 37);
 
 /**
  * @generated from message pxel.wire.v1.AxisReferenceMode
@@ -1345,7 +1386,7 @@ export type AxisReferenceMode = Message<"pxel.wire.v1.AxisReferenceMode"> & {
  * Use `create(AxisReferenceModeSchema)` to create a new message.
  */
 export const AxisReferenceModeSchema: GenMessage<AxisReferenceMode> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 37);
+  messageDesc(file_pxel_wire_v1_session, 38);
 
 /**
  * @generated from message pxel.wire.v1.BoundCellReference
@@ -1382,7 +1423,7 @@ export type BoundCellReference = Message<"pxel.wire.v1.BoundCellReference"> & {
  * Use `create(BoundCellReferenceSchema)` to create a new message.
  */
 export const BoundCellReferenceSchema: GenMessage<BoundCellReference> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 38);
+  messageDesc(file_pxel_wire_v1_session, 39);
 
 /**
  * @generated from message pxel.wire.v1.BoundRangeReference
@@ -1404,7 +1445,7 @@ export type BoundRangeReference = Message<"pxel.wire.v1.BoundRangeReference"> & 
  * Use `create(BoundRangeReferenceSchema)` to create a new message.
  */
 export const BoundRangeReferenceSchema: GenMessage<BoundRangeReference> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 39);
+  messageDesc(file_pxel_wire_v1_session, 40);
 
 /**
  * @generated from message pxel.wire.v1.UnaryNode
@@ -1426,7 +1467,7 @@ export type UnaryNode = Message<"pxel.wire.v1.UnaryNode"> & {
  * Use `create(UnaryNodeSchema)` to create a new message.
  */
 export const UnaryNodeSchema: GenMessage<UnaryNode> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 40);
+  messageDesc(file_pxel_wire_v1_session, 41);
 
 /**
  * @generated from message pxel.wire.v1.BinaryNode
@@ -1453,7 +1494,7 @@ export type BinaryNode = Message<"pxel.wire.v1.BinaryNode"> & {
  * Use `create(BinaryNodeSchema)` to create a new message.
  */
 export const BinaryNodeSchema: GenMessage<BinaryNode> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 41);
+  messageDesc(file_pxel_wire_v1_session, 42);
 
 /**
  * @generated from message pxel.wire.v1.CallNode
@@ -1475,7 +1516,7 @@ export type CallNode = Message<"pxel.wire.v1.CallNode"> & {
  * Use `create(CallNodeSchema)` to create a new message.
  */
 export const CallNodeSchema: GenMessage<CallNode> = /*@__PURE__*/
-  messageDesc(file_pxel_wire_v1_session, 42);
+  messageDesc(file_pxel_wire_v1_session, 43);
 
 /**
  * @generated from enum pxel.wire.v1.ErrorCode

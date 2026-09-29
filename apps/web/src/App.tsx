@@ -313,11 +313,22 @@ export function App() {
 
       <footer className="sheet-footer">
         <div className="sheet-navigation">
-          <Tool label="Добавить лист">
+          <button
+            type="button"
+            className="tool"
+            aria-label="Добавить лист"
+            title="Добавить лист"
+            disabled={
+              !document.sheet ||
+              document.projection?.sheets.length === 64 ||
+              state.kind !== 'online'
+            }
+            onClick={() => document.addSheet()}
+          >
             <Icon size={19}>
               <path d="M12 5v14M5 12h14" />
             </Icon>
-          </Tool>
+          </button>
           <span className="sheet-list-icon" aria-hidden="true">
             <Icon size={18}>
               <path d="M7 6h13M7 12h13M7 18h13M3 6h.01M3 12h.01M3 18h.01" />
