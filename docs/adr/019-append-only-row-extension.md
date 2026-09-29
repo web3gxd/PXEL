@@ -20,4 +20,4 @@ Append is a low-risk entry point for durable structure and stable identity; it d
 
 ## Verification
 
-Domain tests cover stable cell identity, duplicate rejection and direct/replay hash equality. Integration tests cover two concurrent clients, idempotent retry, stale formula rejection and replay. Recovery tests cover process restart; Chromium tests at DPR 1 and 2 cover automatic extension, second-tab refresh and reload. The remaining phase 4 gate requires insert/delete, reference transformation, batch copy/paste and guarded compensating undo.
+Domain tests cover stable cell identity, duplicate rejection and direct/replay hash equality. Integration tests cover two concurrent clients, idempotent retry, stale formula rejection, an existing formula target and replay. Recovery tests cover process restart; Chromium tests at DPR 1 and 2 cover automatic extension, second-tab refresh and reload. The remaining phase 4 gate requires insert/delete, reference transformation, batch copy/paste and guarded compensating undo.

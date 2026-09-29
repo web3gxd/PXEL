@@ -200,6 +200,39 @@ test('concurrent row extensions append stable IDs in server order and survive re
   }
 });
 
+test('appending rows preserves an existing formula target and calculated value', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    const value = await client.send(setCommand(client, snapshot, 17, { sequence: 1 }));
+    assert.equal(value.case, 'committed');
+    const formula = await client.send(
+      formulaCommand(client, { ...snapshot, version: '2' }, '=A1', {
+        column: 1,
+        sequence: 2,
+      }),
+    );
+    assert.equal(formula.case, 'committed');
+    const before = await calculation(base, cookie, snapshot.document_id, 3);
+    assert.deepEqual(before.values[0].value, { type: 'number', value: 17 });
+    const extension = await client.send(
+      extendRowsCommand(client, { ...snapshot, version: '3' }, [uuid7()], { sequence: 3 }),
+    );
+    assert.equal(extension.case, 'committed');
+    const after = await calculation(base, cookie, snapshot.document_id, 4);
+    assert.deepEqual(after.values[0].value, before.values[0].value);
+    const current = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(current.sheets[0].rows.length, snapshot.sheets[0].rows.length + 1);
+    assert.equal(
+      current.sheets[0].cells.find((cell) => cell.value.type === 'formula')?.value.value.source,
+      '=A1',
+    );
+  } finally {
+    client.socket.close();
+  }
+});
+
 test('late subscriber receives every missed version in order before the replay barrier', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);
