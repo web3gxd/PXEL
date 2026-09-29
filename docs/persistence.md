@@ -1,7 +1,9 @@
 # Persistence и recovery
 
 Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
-operations реализованы локально; snapshots относятся к фазе 5. Ниже
+operations реализованы локально; первый доменный срез фазы 5 создаёт
+`SnapshotImage` и проверяет tail replay. Бинарный формат, metadata и
+activation ещё не подключены. Ниже
 смешаны действующие контракты журнала и отдельно названные будущие требования.
 
 ## PostgreSQL authority
@@ -50,6 +52,11 @@ Contract suite проверяет binary round-trip, head size/checksum, checksu
 S3 MVP subset: PutObject/GetObject/HeadObject/DeleteObject, позднее multipart. Наличие S3-compatible label не гарантирует контракт: [Garage API matrix](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/). MinIO и Garage не входят в phase 0 Compose. Никаких bucket/credentials без реального потребителя.
 
 ## Snapshot activation (фаза 5)
+
+ADR-031 реализует только внутренний образ и восстановление в domain crate.
+Он сохраняет tombstones, bound formulas, calculation context и последнюю
+версию изменения осей. Reader пока не выбирает его при запуске; перечисленные
+ниже переходы состояния остаются контрактом следующего storage среза.
 
 Snapshot имеет immutable document version, schema version, engine/profile/context, domain encoding version, length, byte checksum и content hash. Scheduler берет согласованный immutable candidate на V, не читает изменяемую книгу во время записи.
 

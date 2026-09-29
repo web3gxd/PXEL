@@ -122,6 +122,12 @@ server-side `CopyRange` смешанного прямоугольника до 1
 Устаревший source отклоняется; текущий wire v1 передаёт head/version/hash,
 после чего клиент обновляет projection по HTTP. Cut/move, стили и batch undo
 по-прежнему открыты. Результаты полного gate записываются в RUNBOOK.
+Первый срез фазы 5 ([ADR-031](adr/031-snapshot-image-and-tail-replay.md))
+добавляет внутренний `SnapshotImage` и проверенное восстановление sparse
+projection: bound formulas, retired stable IDs, CalculationContext и
+`last_axis_change_version` сохраняются; применение хвоста даёт тот же
+domain hash, что непрерывный replay. Бинарный format, PostgreSQL metadata,
+BlobStore activation, corruption fallback и S3 adapter ещё не реализованы.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).
