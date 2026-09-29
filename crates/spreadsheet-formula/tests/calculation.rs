@@ -85,6 +85,48 @@ fn formula(
     })
 }
 #[test]
+fn engine_upgrade_requires_a_new_persisted_context() -> TestResult {
+    use spreadsheet_formula::calculation::{COMPATIBILITY_PROFILE, ENGINE_VERSION};
+    let mut book = fixture(vec![], 1, 1)?;
+    let context = |epoch, engine: &str| {
+        CalculationContext::new(
+            CalculationContextId::from_bytes([epoch as u8; 16])?,
+            epoch,
+            0,
+            0,
+            0,
+            [7; 32],
+            engine.into(),
+            COMPATIBILITY_PROFILE.into(),
+            CalculationReason::Explicit,
+        )
+    };
+    book = book.candidate(
+        &Operation::AdvanceCalculationEpoch {
+            context: context(1, "pxel-formula-0.1.0")?,
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    assert!(matches!(
+        CalculationProjection::from_workbook(&book, CalculationLimits::default()),
+        Err(CalculationError::InvalidProjection)
+    ));
+    book = book.candidate(
+        &Operation::AdvanceCalculationEpoch {
+            context: context(2, ENGINE_VERSION)?,
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        book.calculation_context().map(CalculationContext::epoch),
+        Some(2)
+    );
+    Ok(())
+}
+
+#[test]
 fn ten_thousand_chain_evaluates_real_values_without_recursing_the_graph() -> TestResult {
     let mut cells = vec![(address(0, 0)?, CellContent::Value(CellValue::Number(1.0)))];
     for row in 1..=10000 {

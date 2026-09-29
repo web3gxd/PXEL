@@ -38,7 +38,7 @@ Phase 2 `^` ограничен integer exponent [-1024,1024]. Алгоритм: 
 
 `=`; numbers/strings/booleans; unary/binary operators; Excel precedence; parentheses; A1/$A$1/A$1/$A1; bounded ranges; quoted sheet names с doubled apostrophe; cross-sheet references; function calls. Canonical function names English. Locale adapter token-aware: decimal/argument separators не заменяются внутри strings или quoted names. UTF-8 parser spans переводятся в UTF-16 UI offsets явно.
 
-Текущий реализованный срез: SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, IF, IFS, IFERROR и arithmetic/comparisons. Остальные logical, math, text, date, lookup, criteria groups добавляются последовательно после specs/fixtures. Array literals, dynamic spill, structured/3D/external refs, UDF/LET/LAMBDA и iterative cycles пока вне профиля.
+Текущий реализованный срез: SUM, AVERAGE, MIN, MAX, COUNT, COUNTA, IF, IFS, IFERROR, AND, OR, NOT и arithmetic/comparisons. Math, text, date, lookup, criteria groups добавляются последовательно после specs/fixtures. Array literals, dynamic spill, structured/3D/external refs, UDF/LET/LAMBDA и iterative cycles пока вне профиля.
 
 | Функция   | Arity | Начальный контракт                                                                                                                                  |
 | --------- | ----: | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -54,6 +54,14 @@ Phase 2 `^` ограничен integer exponent [-1024,1024]. Алгоритм: 
 IFS вычисляет условия слева направо и только результат первой TRUE-пары; более поздние условия и пропущенные результаты не вычисляет. Ошибка вычисленного условия распространяется. Это проектный контракт для ленивости и Blank; фактические Excel results ещё не внесены как golden fixtures. Максимум 127 пар следует из [описания Microsoft IFS](https://support.microsoft.com/en-us/excel/functions/ifs-function).
 
 IFERROR перехватывает только spreadsheet Error values. Ограничение вычисления, отмена и неисправность resolver остаются typed engine errors и не заменяются fallback. Выбранный Blank даёт пустой Text по [описанию Microsoft IFERROR](https://support.microsoft.com/en-us/excel/functions/iferror-function). Array-formula behavior вне профиля.
+
+| Функция | Arity | Coercion и ошибки                                                                                                            |
+| ------- | ----- | ---------------------------------------------------------------------------------------------------------------------------- |
+| AND     | 1–255 | Все участвующие значения должны быть true; zero → false. Text/Blank в ссылках пропускаются; без участвующих значений → VALUE |
+| OR      | 1–255 | Достаточно одного true; zero → false. Text/Blank в ссылках пропускаются; без участвующих значений → VALUE                    |
+| NOT     | 1     | Scalar logical coercion и инверсия; Blank → true, zero → true, ненулевое finite number → false; error распространяется       |
+
+AND/OR не прекращают вычисление после решающего boolean: `AND(FALSE,1/0)` и `OR(TRUE,1/0)` дают DIV/0. Порядок аргументов слева направо, диапазонов — row-major. Первая spreadsheet error сохраняется; typed cancellation/budget/resolver error имеет приоритет и не маскируется. В непосредственном аргументе Text("TRUE")/Text("FALSE") приводятся к boolean, иной текст даёт VALUE. NOT использует те же scalar rules; диапазоны/arrays и implicit intersection вне профиля. Microsoft описывает [AND](https://support.microsoft.com/en-us/excel/functions/and-function), [OR](https://support.microsoft.com/en-us/excel/functions/or-function), [NOT](https://support.microsoft.com/en-us/excel/functions/not-function); дополнительные edge cases — provisional project rules до ручного Excel golden corpus. [ADR-055](adr/055-logical-function-profile.md) фиксирует engine identity 0.2.0 и переход старых persisted contexts через новый durable epoch, без изменения исторических событий.
 
 Coercion не сводится к универсальному to_number. Operators, direct arguments, references и ranges имеют отдельные rules. Blank и Text("") различаются. Ошибка выбранной ветви IF распространяется; невыбранная не вычисляется. Начальная static dependency analysis обеих ветвей может консервативно считать cycle; такое отличие явно тестируется и документируется до acceptance.
 

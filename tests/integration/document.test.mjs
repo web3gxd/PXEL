@@ -1390,6 +1390,69 @@ test('COUNT and COUNTA bind as durable formulas and calculate distinct reference
   }
 });
 
+test('logical functions commit, recalculate and survive a persisted context advance', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 2, { sequence: 1 }))).case,
+      'committed',
+    );
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 3, { column: 1, sequence: 2 }))).case,
+      'committed',
+    );
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, snapshot, '=AND(A1>0,NOT(B1=0),OR(A1:A2))', {
+            column: 2,
+            sequence: 3,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    const valueAt = async (version) => {
+      const state = await calculation(base, cookie, snapshot.document_id, version);
+      assert.equal(state.status, 'complete');
+      assert.equal(state.engine_version, 'pxel-formula-0.2.0');
+      return state.values.find((cell) => cell.column_id === snapshot.sheets[0].columns[2])?.value;
+    };
+    assert.deepEqual(await valueAt(4), { type: 'boolean', value: true });
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 0, { column: 1, sequence: 4 }))).case,
+      'committed',
+    );
+    assert.deepEqual(await valueAt(5), { type: 'boolean', value: false });
+    const response = await api(
+      base,
+      cookie,
+      `/api/documents/${snapshot.document_id}/recalculate`,
+      'POST',
+      { operation_id: uuid7() },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await valueAt(6), { type: 'boolean', value: false });
+    assert.equal(
+      (await getDocument(base, cookie, snapshot.document_id)).calculation_context.epoch,
+      '1',
+    );
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, snapshot, '=OR(TRUE,1/0)', { column: 2, sequence: 5 }),
+        )
+      ).case,
+      'committed',
+    );
+    assert.deepEqual(await valueAt(7), { type: 'error', value: '#DIV/0!' });
+  } finally {
+    client.socket.close();
+  }
+});
+
 test('IFS commits and recalculates the selected branch after input changes', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);

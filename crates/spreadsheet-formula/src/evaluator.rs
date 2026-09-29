@@ -193,6 +193,17 @@ fn eval(
                 conditions(ast, arguments, resolver, budget, depth + 1)?
             } else if name == "IFERROR" {
                 if_error(ast, arguments, resolver, budget, depth + 1)?
+            } else if matches!(name.as_str(), "AND" | "OR") {
+                logical_aggregate(ast, name == "AND", arguments, resolver, budget, depth + 1)?
+            } else if name == "NOT" {
+                if arguments.len() != 1 {
+                    Value::Error(FormulaError::Value)
+                } else {
+                    match logical(eval(ast, arguments[0], resolver, budget, depth + 1)?) {
+                        Ok(value) => Value::Boolean(!value),
+                        Err(error) => Value::Error(error),
+                    }
+                }
             } else if matches!(name.as_str(), "SUM" | "AVERAGE" | "MIN" | "MAX") {
                 aggregate(ast, name, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "COUNT" | "COUNTA") {
@@ -208,6 +219,81 @@ fn eval(
                 Value::Error(FormulaError::Name)
             }
         }
+    })
+}
+fn logical_aggregate(
+    ast: &Ast,
+    all: bool,
+    args: &[NodeId],
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Value, EvaluationError> {
+    if args.is_empty() || args.len() > 255 {
+        return Ok(Value::Error(FormulaError::Value));
+    }
+    let mut result = all;
+    let mut seen = false;
+    let mut error = None;
+    let mut add = |value: Value, reference: bool| -> Result<(), EvaluationError> {
+        if matches!(value, Value::Array { .. }) {
+            return Err(EvaluationError::UnsupportedCompatibilityFeature);
+        }
+        if reference && matches!(value, Value::Blank | Value::Text(_)) {
+            return Ok(());
+        }
+        match logical(value) {
+            Ok(value) => {
+                seen = true;
+                // Do not skip later arguments after a decisive boolean: their
+                // spreadsheet errors and resource failures still matter.
+                result = if all { result & value } else { result | value };
+            }
+            Err(value) => {
+                if error.is_none() {
+                    error = Some(value);
+                }
+            }
+        }
+        Ok(())
+    };
+    for arg in args {
+        match ast.nodes.get(arg.0).ok_or(EvaluationError::InvalidAst)? {
+            Node::Range(range) => {
+                budget.charge()?;
+                if range.start.sheet != range.end.sheet || range.cell_count() > MAX_RANGE_CELLS {
+                    return Err(EvaluationError::CalculationLimitExceeded);
+                }
+                if range.start.row >= 1_048_576
+                    || range.end.row >= 1_048_576
+                    || range.start.column >= 16_384
+                    || range.end.column >= 16_384
+                {
+                    return Err(EvaluationError::InvalidAst);
+                }
+                let mut visits = 0u64;
+                resolver.visit_range(range, &mut |value| {
+                    budget.charge()?;
+                    visits += 1;
+                    if visits > range.cell_count() {
+                        return Err(EvaluationError::InvalidResolverResult);
+                    }
+                    add(value, true)
+                })?;
+                if visits != range.cell_count() {
+                    return Err(EvaluationError::InvalidResolverResult);
+                }
+            }
+            Node::Cell(_) => add(eval(ast, *arg, resolver, budget, depth)?, true)?,
+            _ => add(eval(ast, *arg, resolver, budget, depth)?, false)?,
+        }
+    }
+    Ok(if let Some(error) = error {
+        Value::Error(error)
+    } else if seen {
+        Value::Boolean(result)
+    } else {
+        Value::Error(FormulaError::Value)
     })
 }
 fn conditions(

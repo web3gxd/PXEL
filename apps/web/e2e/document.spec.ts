@@ -36,6 +36,43 @@ test('owner downloads the confirmed scalar workbook as XLSX', async ({ page }) =
   await expect(page.getByTestId('export-xlsx')).toBeEnabled();
 });
 
+test('logical formula recalculates after editing its input and survives reload', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('2');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  await bar.fill('=AND(A1>0,NOT(A1=0),OR(A1=2,FALSE))');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await expect(page.getByTestId('active-cell')).toHaveText('B1: TRUE');
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+  await page.keyboard.press('ArrowLeft');
+  await bar.fill('-1');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByTestId('active-cell')).toHaveText('B1: FALSE');
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+  await page.reload();
+  await expect(bar).toHaveValue('-1');
+  await grid.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByTestId('active-cell')).toHaveText('B1: FALSE');
+});
+
 test('copying one formula shifts relative references in WASM and commits server-bound text', async ({
   page,
 }) => {

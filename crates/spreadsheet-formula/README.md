@@ -65,6 +65,14 @@ Source provenance and documentation conflicts are retained in the corpus.
   are not implemented here. Arithmetic can coerce a DateTime serial; timezone is
   never consulted.
 
+- AND/OR take 1–255 arguments, ignore referenced text/blanks and return VALUE
+  when no logical values participate. Numeric zero is false. They evaluate all
+  conditions, preserving later errors even after a decisive boolean; range
+  traversal is budgeted and checked. NOT takes one scalar and inverts the same
+  scalar coercion as IF. Arrays/implicit intersection remain unsupported.
+  Engine identity is `pxel-formula-0.2.0`; old persisted contexts require a new
+  authorized calculation epoch. See ADR-055 and the common fixture corpus.
+
 Bounds: 32 KiB source, 4,096 AST nodes, AST depth 128 (parser call depth 256 to
 admit canonical parentheses), 255 call arguments, 100,000
 cells per rectangular range, 1,000,000 work units per evaluation. Resource limits

@@ -32,7 +32,7 @@ function harness() {
     preview: true,
     complete: true,
     full: request.kind === 'init',
-    formula_engine_version: 'pxel-formula-0.1.0',
+    formula_engine_version: 'pxel-formula-0.2.0',
     compatibility_profile: 'pxel-excel-subset-v1',
     normalized_result_hash: 'a'.repeat(64),
     evaluated_cells: 1,
@@ -103,6 +103,17 @@ it('refuses incorrect result stamps without publishing values', () => {
   const init = h.requests[0]!;
   h.reply({ id: init.id, result: { ...h.result(init), input_version: '2' } });
   expect(h.update.mock.lastCall?.[0]).toBe('failed');
+  expect(h.worker.terminate).toHaveBeenCalledOnce();
+});
+it('refuses a cached worker from the previous engine release', () => {
+  const h = harness();
+  const init = h.requests[0]!;
+  h.reply({
+    id: init.id,
+    result: { ...h.result(init), formula_engine_version: 'pxel-formula-0.1.0' },
+  });
+  expect(h.update.mock.lastCall?.[0]).toBe('failed');
+  expect(h.update.mock.calls.some(([status]) => status === 'ready')).toBe(false);
   expect(h.worker.terminate).toHaveBeenCalledOnce();
 });
 it('fails without synthetic values when the worker cannot load and ignores late disposed replies', () => {

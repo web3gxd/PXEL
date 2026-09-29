@@ -65,6 +65,21 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/iferror-function",
       "title": "IFERROR function",
       "retrieved_at": "2026-09-29"
+    },
+    "and": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/and-function",
+      "title": "AND function",
+      "retrieved_at": "2026-09-29"
+    },
+    "or": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/or-function",
+      "title": "OR function",
+      "retrieved_at": "2026-09-29"
+    },
+    "not": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/not-function",
+      "title": "NOT function",
+      "retrieved_at": "2026-09-29"
     }
   },
   "cases": [
@@ -1384,188 +1399,880 @@
       "formula": "=COUNT(1,TRUE,\"2\",\"word\",#DIV/0!)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 3 },
-      "provenance": { "sources": ["count"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["count"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "count_reference_types",
       "formula": "=COUNT(A1:A6)",
       "origin": "Sheet1!C1",
       "cells": {
-        "Sheet1!A1": { "type": "number", "value": 0 },
-        "Sheet1!A2": { "type": "number", "value": 7 },
-        "Sheet1!A3": { "type": "text", "value": "8" },
-        "Sheet1!A4": { "type": "boolean", "value": true },
-        "Sheet1!A5": { "type": "error", "value": "#DIV/0!" }
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 7
+        },
+        "Sheet1!A3": {
+          "type": "text",
+          "value": "8"
+        },
+        "Sheet1!A4": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A5": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
       },
-      "expected": { "type": "number", "value": 2 },
-      "provenance": { "sources": ["count"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["count"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "counta_range_counts_error_and_empty_text",
       "formula": "=COUNTA(A1:A6)",
       "origin": "Sheet1!C1",
       "cells": {
-        "Sheet1!A1": { "type": "number", "value": 0 },
-        "Sheet1!A2": { "type": "text", "value": "" },
-        "Sheet1!A3": { "type": "boolean", "value": false },
-        "Sheet1!A4": { "type": "error", "value": "#N/A" },
-        "Sheet1!A5": { "type": "text", "value": "x" }
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A3": {
+          "type": "boolean",
+          "value": false
+        },
+        "Sheet1!A4": {
+          "type": "error",
+          "value": "#N/A"
+        },
+        "Sheet1!A5": {
+          "type": "text",
+          "value": "x"
+        }
       },
-      "expected": { "type": "number", "value": 5 },
-      "provenance": { "sources": ["counta"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 5
+      },
+      "provenance": {
+        "sources": ["counta"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "counta_direct_values",
       "formula": "=COUNTA(\"\",#DIV/0!,TRUE)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 3 },
-      "provenance": { "sources": ["counta"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["counta"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "count_zero_arguments",
       "formula": "=COUNT()",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "error", "value": "#VALUE!" },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "counta_zero_arguments",
       "formula": "=COUNTA()",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "error", "value": "#VALUE!" },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "ifs_second_true",
       "formula": "=IFS(FALSE,1,TRUE,2)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 2 },
-      "provenance": { "sources": ["ifs"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["ifs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "ifs_no_true",
       "formula": "=IFS(FALSE,1,FALSE,2)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "error", "value": "#N/A" },
-      "provenance": { "sources": ["ifs"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["ifs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "ifs_non_boolean_test",
       "formula": "=IFS(1,2)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "error", "value": "#VALUE!" },
-      "provenance": { "sources": ["ifs"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["ifs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "ifs_skips_unselected_result",
       "formula": "=IFS(FALSE,1/0,TRUE,9)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 9 },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 9
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "ifs_empty_selected_result",
       "formula": "=IFS(TRUE,)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 0 },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "ifs_unpaired_test",
       "formula": "=IFS(TRUE,1,FALSE)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "error", "value": "#VALUE!" },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "ifs_first_true_wins",
       "formula": "=IFS(TRUE,1,TRUE,2)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 1 },
-      "provenance": { "sources": ["ifs"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["ifs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "ifs_error_in_evaluated_condition",
       "formula": "=IFS(#DIV/0!,1,TRUE,2)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "error", "value": "#DIV/0!" },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "ifs_skips_later_condition",
       "formula": "=IFS(TRUE,1,1/0,2)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 1 },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "iferror_catches_division_by_zero",
       "formula": "=IFERROR(1/0,7)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 7 },
-      "provenance": { "sources": ["iferror"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": ["iferror"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "iferror_preserves_nonerror",
       "formula": "=IFERROR(4,7)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 4 },
-      "provenance": { "sources": ["iferror"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 4
+      },
+      "provenance": {
+        "sources": ["iferror"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "iferror_skips_unused_fallback",
       "formula": "=IFERROR(4,1/0)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "number", "value": 4 },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "number",
+        "value": 4
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "iferror_propagates_fallback_error",
       "formula": "=IFERROR(1/0,2/0)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "error", "value": "#DIV/0!" },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "iferror_empty_value_is_empty_text",
       "formula": "=IFERROR(,7)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "text", "value": "" },
-      "provenance": { "sources": ["iferror"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["iferror"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "iferror_empty_fallback_is_empty_text",
       "formula": "=IFERROR(1/0,)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "text", "value": "" },
-      "provenance": { "sources": ["iferror"], "basis": "derived", "verified_in_excel": false }
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["iferror"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     },
     {
       "id": "iferror_wrong_arity",
       "formula": "=IFERROR(1)",
       "origin": "Sheet1!C1",
       "cells": {},
-      "expected": { "type": "error", "value": "#VALUE!" },
-      "provenance": { "sources": [], "basis": "project_contract", "verified_in_excel": false }
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": [],
+        "basis": "project_contract",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_truth",
+      "formula": "=AND(TRUE,TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_false",
+      "formula": "=AND(TRUE,FALSE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_truth",
+      "formula": "=OR(FALSE,TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_false",
+      "formula": "=OR(FALSE,FALSE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_numeric",
+      "formula": "=AND(1,-3,0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_numeric",
+      "formula": "=OR(0,-3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_direct_text",
+      "formula": "=AND(\"TRUE\",TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_direct_text",
+      "formula": "=OR(\"FALSE\",FALSE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_invalid_text",
+      "formula": "=AND(\"word\",TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_eager_error",
+      "formula": "=OR(TRUE,1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_eager_error",
+      "formula": "=AND(FALSE,1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_empty",
+      "formula": "=AND()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_empty",
+      "formula": "=OR()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_range_mixed",
+      "formula": "=AND(A1:A4)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A3": {
+          "type": "text",
+          "value": "FALSE"
+        }
+      },
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_range_mixed",
+      "formula": "=OR(A1:A4)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "boolean",
+          "value": false
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A3": {
+          "type": "text",
+          "value": "TRUE"
+        }
+      },
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_range_no_logicals",
+      "formula": "=AND(A1:A3)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "TRUE"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_range_no_logicals",
+      "formula": "=OR(A1:A3)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "FALSE"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_cell_text_ignored",
+      "formula": "=AND(A1,TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "FALSE"
+        }
+      },
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_cell_text_ignored",
+      "formula": "=OR(A1,FALSE)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "TRUE"
+        }
+      },
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "and_range_error",
+      "formula": "=AND(A1:A3)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "boolean",
+          "value": false
+        },
+        "Sheet1!A2": {
+          "type": "error",
+          "value": "#N/A"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["and"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "or_range_error",
+      "formula": "=OR(A1:A3)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A2": {
+          "type": "error",
+          "value": "#REF!"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#REF!"
+      },
+      "provenance": {
+        "sources": ["or"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "not_true",
+      "formula": "=NOT(TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["not"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "not_false",
+      "formula": "=NOT(FALSE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["not"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "not_zero",
+      "formula": "=NOT(0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["not"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "not_nonzero",
+      "formula": "=NOT(-4)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": false
+      },
+      "provenance": {
+        "sources": ["not"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "not_blank_cell",
+      "formula": "=NOT(A1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "boolean",
+        "value": true
+      },
+      "provenance": {
+        "sources": ["not"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "not_error",
+      "formula": "=NOT(1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["not"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "not_wrong_arity",
+      "formula": "=NOT(TRUE,FALSE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["not"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "logical_nested_if",
+      "formula": "=IF(AND(A1>0,NOT(OR(B1=0,B1<0))),7,9)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 3
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": ["not"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
     }
   ]
 }

@@ -18,7 +18,9 @@ impl ReferenceResolver for Range {
     }
 }
 fn benchmarks(c: &mut Criterion) {
-    for function in ["SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA"] {
+    for function in [
+        "SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA", "AND", "OR",
+    ] {
         let parsed = match parse(&format!("={function}(A1:A100000)")) {
             Ok(value) => value,
             Err(_) => {
@@ -28,6 +30,13 @@ fn benchmarks(c: &mut Criterion) {
         };
         if evaluate(&parsed.ast, &Range, &mut EvaluationBudget::default()).is_err() {
             eprintln!("invalid benchmark evaluation");
+            std::process::exit(1);
+        }
+        if matches!(function, "AND" | "OR")
+            && evaluate(&parsed.ast, &Range, &mut EvaluationBudget::default())
+                != Ok(Value::Boolean(true))
+        {
+            eprintln!("invalid logical benchmark result");
             std::process::exit(1);
         }
         c.bench_function(&format!("{function}_range_100k"), |b| {

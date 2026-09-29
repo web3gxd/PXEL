@@ -11,8 +11,15 @@
 patches с одинаковыми normalized hashes; инкрементальность, cycle и parser
 limits покрыты Rust tests. Полная цепочка 10 000 bound formulas измерена
 Criterion: 41.822–42.905 ms (optimized, Windows/Ultra 9 185H, 10 samples).
-Это не p95 UI и не Excel golden parity. AND/OR/NOT, volatile-функции, широкий
+Это не p95 UI и не Excel golden parity. Volatile-функции, широкий
 совместимый профиль и Linux gate остаются отдельными работами.
+
+Следующий формульный срез [ADR-055](adr/055-logical-function-profile.md) добавил
+AND/OR/NOT в engine 0.2.0: общий корпус расширен до 128 native/browser cases,
+stateful parity 1001 книг/2002 patches включает логические функции. Живой
+PostgreSQL/WebSocket test подтверждает изменение boolean результата после
+правки входа и persisted epoch. [Замер](benchmarks/2026-09-29-logical-ranges-local.md)
+100k диапазонов относится к чистому evaluator; manual Excel parity открыта.
 
 Фаза 3 идёт отдельными срезами: bounded PostgreSQL replay/barrier (ADR-015),
 durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалённым

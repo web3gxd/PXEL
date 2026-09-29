@@ -10,7 +10,7 @@ Google Sheets задает пользовательскую модель мгн�
 
 | Статус целевого профиля      | Formula feature                                                                                                                      |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Supported после phase 2 gate | Literals, basic operators, A1/mixed references, bounded ranges, SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/IF/IFS/IFERROR                      |
+| Supported после phase 2 gate | Literals, basic operators, A1/mixed references, bounded ranges, SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/IF/IFS/IFERROR/AND/OR/NOT           |
 | Partially supported          | Integer-only exponent first; static dependency treatment IF; range caps; date system semantics до ввода date functions               |
 | Preserved but not editable   | Unknown function при распознаваемом normalized AST: source/AST сохраняются, canonical result NAME; UI показывает unsupported feature |
 | Dropped with warning         | Импортированные calculated caches не считаются canonical values; могут показываться только как untrusted preview                     |

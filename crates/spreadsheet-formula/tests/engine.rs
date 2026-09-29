@@ -51,6 +51,44 @@ fn ifs_selects_first_true_pair_without_evaluating_later_pairs()
 }
 
 #[test]
+fn logical_functions_evaluate_all_conditions_and_validate_arity()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (formula, expected) in [
+        ("=AND(TRUE,2,-3)", Value::Boolean(true)),
+        ("=AND(TRUE,0)", Value::Boolean(false)),
+        ("=OR(FALSE,0,-3)", Value::Boolean(true)),
+        ("=OR(FALSE,0)", Value::Boolean(false)),
+        ("=AND(\"TRUE\",TRUE)", Value::Boolean(true)),
+        ("=OR(\"FALSE\",FALSE)", Value::Boolean(false)),
+        ("=AND(TRUE,\"word\")", Value::Error(FormulaError::Value)),
+        ("=AND(FALSE,1/0)", Value::Error(FormulaError::Div0)),
+        ("=OR(TRUE,1/0)", Value::Error(FormulaError::Div0)),
+        ("=AND()", Value::Error(FormulaError::Value)),
+        ("=OR()", Value::Error(FormulaError::Value)),
+        ("=NOT(TRUE)", Value::Boolean(false)),
+        ("=NOT(0)", Value::Boolean(true)),
+        ("=NOT(-3)", Value::Boolean(false)),
+        ("=NOT(1/0)", Value::Error(FormulaError::Div0)),
+        ("=NOT()", Value::Error(FormulaError::Value)),
+        ("=NOT(TRUE,FALSE)", Value::Error(FormulaError::Value)),
+    ] {
+        assert_eq!(eval(formula)?, expected, "{formula}");
+    }
+    for function in ["AND", "OR"] {
+        assert_eq!(
+            eval(&format!("={function}({}TRUE)", "TRUE,".repeat(254)))?,
+            Value::Boolean(true)
+        );
+        let ast = parse(&format!("=IFERROR({function}(A1:A100000),7)"))?.ast;
+        assert_eq!(
+            evaluate(&ast, &Ones, &mut EvaluationBudget::new(100)),
+            Err(EvaluationError::CalculationLimitExceeded)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn iferror_does_not_turn_work_exhaustion_into_a_fallback() -> Result<(), Box<dyn std::error::Error>>
 {
     let ast = parse("=IFERROR(SUM(A1:A100000),7)")?.ast;
@@ -101,7 +139,7 @@ impl ReferenceResolver for FailedRange {
 #[test]
 fn range_resource_failure_is_never_hidden_by_a_spreadsheet_error()
 -> Result<(), Box<dyn std::error::Error>> {
-    for function in ["SUM", "COUNT", "COUNTA"] {
+    for function in ["SUM", "COUNT", "COUNTA", "AND", "OR"] {
         let ast = parse(&format!("={function}(A1:A2)"))?.ast;
         for error in [
             EvaluationError::Cancelled,
