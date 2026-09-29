@@ -80,6 +80,10 @@ backup-restore-postgres:
     cargo build --locked -p pxel-server --features dev-auth
     node --test tests/recovery/backup-restore.test.mjs
 
+pitr-restore-postgres:
+    cargo build --locked -p pxel-server --features dev-auth
+    node --test tests/recovery/pitr-restore.test.mjs
+
 audit:
     cargo deny check
     cargo audit

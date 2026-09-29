@@ -170,7 +170,13 @@ actor поднял ACTIVE snapshot v3 и одно committed событие хв�
 Локальный restore drill ([ADR-041](adr/041-quiescent-backup-restore.md)) прошёл:
 `pg_basebackup` + `pg_verifybackup` и snapshot objects восстановили v4 в новом
 кластере, хотя источник после backup уже достиг v5; actor взял snapshot v3 +
-один event. Online-consistent backup, WAL archive/PITR и off-site копии открыты.
+один event. Online-consistent backup, production WAL archive/PITR и off-site
+копии открыты.
+Локальный PITR drill ([ADR-042](adr/042-named-point-in-time-recovery.md)) прошёл:
+WAL archive и named restore point после v4 восстановили документ до v4,
+исключив committed v5; snapshot v3 + один event совпали с ACK v4. Это не
+подтверждает production archive, online согласованность blobs, RPO/RTO или
+off-site retention.
 Read-only historical endpoint восстанавливает точную версию из подходящего
 snapshot и хвоста журнала ([ADR-036](adr/036-historical-version-read.md));
 PostgreSQL и HTTP tests проверили v1/v2, fallback, ACL и неизменность head.

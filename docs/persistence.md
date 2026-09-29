@@ -128,7 +128,16 @@ snapshot v3 + один event. Это подтверждает, что прове
 копий пригодна для восстановления при выбранной последовательности действий.
 Для online backup без остановки писателей потребуется точный порядок захвата
 blobs и БД, retention/fencing, manifest и регулярный restore drill; отдельно
-нужны WAL archive и PITR.
+нужны production WAL archive и PITR.
+
+Локальный PITR drill (ADR-042) включает `archive_mode`, создаёт base backup
+после v3, затем подтверждает v4, записывает именованный restore point и
+подтверждает v5. После принудительного переключения WAL восстановленный
+кластер читает archive до маркера, делает promotion и содержит только v4.
+Backend подтверждает hash v4 и snapshot v3 + одно событие хвоста. Команда
+архивации в этом тесте — локальное копирование, а не production-хранилище:
+автоматическое off-site retention, monitor archive lag, проверка утраты
+сегмента и согласование S3 объектов с online backup ещё открыты.
 
 ## Replay и hashes
 

@@ -1,5 +1,43 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — локальный PITR до named restore point
+
+Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-004/041, recovery
+harness и документация PostgreSQL 18 по continuous archiving,
+`pg_create_restore_point`, `recovery.signal`, `restore_command` и promotion.
+Цель — восстановить книгу на выбранной точке после ACK v4 и до ACK v5.
+Инварианты: журнал и snapshot должны дать canonical hash v4, поздняя v5 не
+должна попасть в восстановленный head, тестовые archive files не должны
+попасть в обычные логи приложения. Риски: локальная команда копирования не
+равна надежному production WAL archiver; S3 online consistency не проверяется.
+
+`tests/recovery/pitr-restore.test.mjs` поднимает отдельный PostgreSQL 18 с
+`archive_mode=on` и durable настройками, публикует ACTIVE snapshot v3,
+останавливает backend для копирования blobs и проверенного base backup.
+Затем v4 получает ACK, PostgreSQL пишет `pxel_v4` restore point, v5 получает
+ACK, сегмент WAL принудительно переключается и дожидается архивации. Новый
+кластер применяет `recovery.signal` + `restore_command`, доходит до маркера
+и продвигается в writable состояние. Тест сверяет head/hash v4, содержимое,
+историческую v3 и runtime загрузку snapshot v3 + одного события. Решение
+ADR-042; добавлен рецепт `just pitr-restore-postgres`, обновлены README,
+persistence/roadmap и промежуточная презентация.
+
+Первый прогон дошёл до recovery, но Windows `cmd copy` не принял путь с `/`
+перед `%f`; архивные сегменты были на месте. Путь в test config приведён к
+Windows separators. Следующий прогон восстановил точку, но backend начал
+миграции во временном read-only состоянии до promotion; harness теперь ждёт
+`pg_is_in_recovery() = false`. После исправлений адресный тест прошёл 1/1
+за 13.31 s (время runner, не измерение RTO). Этот прогон сохранял приватный
+диагностический каталог под игнорируемой `.local`; финальный рецепт без
+`PXEL_TEST_KEEP_RECOVERY` должен удалить свой новый каталог. Не проверены
+Linux, целевой S3, production WAL archive, off-site retention, RPO/RTO и
+повреждение сегмента.
+Повторный `just pitr-restore-postgres` без keep-флага прошёл 1/1 за 12.32 s
+и удалил собственный тестовый каталог. `pnpm format:check`, `node --check`,
+`git diff --check` и presentation check (10 слайдов, 1440×900 и 390×844)
+прошли. Полный `just check` не повторялся: Rust/runtime/dependencies не
+менялись, этот срез затронул JS recovery harness и документацию.
+
 ## 2026-09-29 — изолированный physical backup + snapshot restore drill
 
 Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-004/040, snapshot

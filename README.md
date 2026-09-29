@@ -88,6 +88,7 @@ just audit      # cargo-deny 0.20.2, cargo-audit 0.22.2, pnpm audit
 pnpm test:recovery # собирает dev-auth binary и проверяет hard restart
 just crash-recovery-postgres # отдельный PostgreSQL 18: immediate stop, WAL recovery, snapshot+tail
 just backup-restore-postgres # pg_basebackup + pg_verifybackup + snapshot objects → новый кластер
+just pitr-restore-postgres # локальный WAL archive и named restore point между v4 и v5
 just bench-collab # отдельный локальный замер ACK и доставки второму клиенту
 ```
 
@@ -107,6 +108,11 @@ Cargo-nextest закреплен на 0.9.146. `cargo test --workspace --all-fea
 backup, проверяет manifest, затем восстанавливает PostgreSQL и blobs вместе.
 Это restore drill для согласованной копии; WAL archiving/PITR и резервирование
 S3 в присутствии писателей остаются отдельными production gates.
+`pitr-restore-postgres` проверяет локальный WAL archive и named restore point:
+после v4 и до v5 создаётся маркер, а восстановленная копия должна содержать
+ровно v4. Архиватор использует простую локальную команду копирования только
+в изолированном тесте; production archiver, off-site retention и RPO/RTO
+этим не проверены.
 
 GitHub Actions выполняет те же команды на Ubuntu 24.04. Наличие workflow
 не означает выполненный remote CI: фактический статус записывается в RUNBOOK.
