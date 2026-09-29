@@ -1422,6 +1422,18 @@ test('explicit recalc persists one system epoch per operation identity and survi
     assert.equal(receipt.current_head_version, '3');
     const head = await getDocument(base, cookie, snapshot.document_id);
     assert.equal(head.calculation_context.epoch, '1');
+    const context = head.calculation_context;
+    assert.equal(context.schema_version, 1);
+    assert.equal(context.engine_version, 'pxel-formula-0.7.0');
+    assert.equal(context.compatibility_profile, 'pxel-excel-subset-v1');
+    assert.equal(context.reason, 'explicit');
+    assert.match(context.random_seed, /^[0-9a-f]{64}$/);
+    assert.match(context.effective_timestamp_utc_ms, /^[0-9]{1,19}$/);
+    assert.equal(context.utc_offset_minutes, 0);
+    assert.equal(
+      context.civil_day_since_unix_epoch,
+      Number(BigInt(context.effective_timestamp_utc_ms) / 86400000n),
+    );
     assert.equal(head.version, '3');
     assert.equal(head.sheets[0].cells[0].value.value.source, '=2+3');
     const { chunks } = await requestCalculation(client, snapshot.document_id, 3);
@@ -1435,6 +1447,10 @@ test('explicit recalc persists one system epoch per operation identity and survi
     const duplicate = await api(base, cookie, path, 'POST', { operation_id: operationId });
     assert.equal(duplicate.status, 200);
     assert.equal((await duplicate.json()).committed_version, '3');
+    assert.deepEqual(
+      (await getDocument(base, cookie, snapshot.document_id)).calculation_context,
+      context,
+    );
     assert.equal(
       (await getDocument(base, cookie, snapshot.document_id)).state_hash,
       head.state_hash,

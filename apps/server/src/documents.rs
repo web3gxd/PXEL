@@ -305,8 +305,16 @@ pub struct DocumentView {
 }
 #[derive(Serialize)]
 struct CalculationContextView {
+    schema_version: u32,
     context_id: String,
     epoch: String,
+    effective_timestamp_utc_ms: String,
+    utc_offset_minutes: i16,
+    civil_day_since_unix_epoch: i32,
+    random_seed: String,
+    engine_version: String,
+    compatibility_profile: String,
+    reason: &'static str,
 }
 #[derive(Serialize)]
 struct SheetView {
@@ -610,8 +618,26 @@ fn document_view(id: DocumentId, workbook: &Workbook) -> Result<Json<DocumentVie
         calculation_context: workbook
             .calculation_context()
             .map(|context| CalculationContextView {
+                schema_version: 1,
                 context_id: id_string(context.context_id().as_bytes()),
                 epoch: context.epoch().to_string(),
+                effective_timestamp_utc_ms: context.effective_timestamp_utc_ms().to_string(),
+                utc_offset_minutes: context.utc_offset_minutes(),
+                civil_day_since_unix_epoch: context.civil_day_since_unix_epoch(),
+                random_seed: context
+                    .random_seed()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect(),
+                engine_version: context.engine_version().to_owned(),
+                compatibility_profile: context.compatibility_profile().to_owned(),
+                reason: match context.reason() {
+                    CalculationReason::Open => "open",
+                    CalculationReason::Explicit => "explicit",
+                    CalculationReason::Timer => "timer",
+                    CalculationReason::VolatileDependency => "volatile_dependency",
+                    CalculationReason::EngineUpgrade => "engine_upgrade",
+                },
             }),
         sheets,
     }))

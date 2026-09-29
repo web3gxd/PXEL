@@ -142,6 +142,26 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     patches: [patch(1, 9), patch(2, 4)],
   });
 }
+// A persisted context is transported unchanged through native/browser hydration
+// and ordinary patches. Current profile functions remain nonvolatile here.
+const contextTemplate = {
+  schema_version: 1,
+  context_id: id(3000),
+  epoch: '1',
+  effective_timestamp_utc_ms: '86400000',
+  utc_offset_minutes: 180,
+  civil_day_since_unix_epoch: 1,
+  random_seed: '01'.repeat(32),
+  engine_version: 'pxel-formula-0.7.0',
+  compatibility_profile: 'pxel-excel-subset-v1',
+  reason: 'explicit',
+};
+for (const request of [requests[0], requests.at(-1)]) {
+  requests.push({
+    ...request,
+    init: { ...request.init, schema_version: 3, calculation_context: contextTemplate },
+  });
+}
 const input = JSON.stringify(requests);
 const native = spawnSync(
   'cargo',

@@ -15,6 +15,78 @@ const COLUMN_TWO: &str = "00000000-0000-0000-0000-000000000009";
 fn init() -> Value {
     json!({"schema_version":1,"document_id":DOC,"input_version":"3","pending_revision":"0","sheets":[{"id":SHEET,"name":"Лист 1","rows":[ROW],"columns":[A,B,C],"cells":[{"row_id":ROW,"column_id":A,"value":{"type":"number","value":2}},{"row_id":ROW,"column_id":B,"value":{"type":"formula","value":{"source":"=A1+1"}}},{"row_id":ROW,"column_id":C,"value":{"type":"formula","value":{"source":"=7"}}}]}]})
 }
+fn context() -> Value {
+    json!({"schema_version":1,"context_id":DOC,"epoch":"1","effective_timestamp_utc_ms":"86400000",
+        "utc_offset_minutes":180,"civil_day_since_unix_epoch":1,"random_seed":"01".repeat(32),
+        "engine_version":spreadsheet_formula::calculation::ENGINE_VERSION,
+        "compatibility_profile":spreadsheet_formula::calculation::COMPATIBILITY_PROFILE,"reason":"explicit"})
+}
+#[test]
+fn malformed_contexts_are_rejected_before_hydration() {
+    let mut base = init();
+    base["schema_version"] = json!(3);
+    base["calculation_context"] = context();
+    for (key, value) in [
+        ("schema_version", json!(2)),
+        ("epoch", json!("4")),
+        ("epoch", json!("0")),
+        ("effective_timestamp_utc_ms", json!("9223372036854775808")),
+        ("utc_offset_minutes", json!(841)),
+        ("civil_day_since_unix_epoch", json!(2)),
+        ("random_seed", json!("00".repeat(31))),
+        ("random_seed", json!("AA".repeat(32))),
+        ("reason", json!("unknown")),
+        ("engine_version", json!("old-engine")),
+        ("compatibility_profile", json!("unknown")),
+    ] {
+        let mut input = base.clone();
+        input["calculation_context"][key] = value;
+        assert!(
+            PreviewWorkbook::from_json(&input.to_string()).is_err(),
+            "field {key}"
+        );
+    }
+    for schema in [1, 2, 4] {
+        let mut input = base.clone();
+        input["schema_version"] = json!(schema);
+        assert!(matches!(
+            PreviewWorkbook::from_json(&input.to_string()),
+            Err(PreviewError::UnsupportedProfile)
+        ));
+    }
+    let mut input = base.clone();
+    input["calculation_context"]["engine_version"] = json!("old-engine");
+    input["sheets"][0]["cells"][1]["value"]["value"]["source"] = json!("=(");
+    assert!(
+        matches!(
+            PreviewWorkbook::from_json(&input.to_string()),
+            Err(PreviewError::UnsupportedProfile)
+        ),
+        "incompatible context must be rejected before formula binding"
+    );
+}
+#[test]
+fn preview_hydrates_complete_context_without_advancing_version()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut input = init();
+    input["schema_version"] = json!(3);
+    input["calculation_context"] = context();
+    let mut book = PreviewWorkbook::from_json(&input.to_string())?;
+    let received = book
+        .workbook()
+        .calculation_context()
+        .ok_or("missing context")?;
+    assert_eq!(received.effective_timestamp_utc_ms(), 86400000);
+    assert_eq!(received.utc_offset_minutes(), 180);
+    assert_eq!(received.random_seed(), &[1u8; 32]);
+    assert_eq!(book.workbook().version().get(), 3);
+    book.apply_json(&patch(vec![cell(A, json!({"type":"number","value":4}))]).to_string())?;
+    assert_eq!(
+        book.workbook().calculation_context().map(|c| c.epoch()),
+        Some(1)
+    );
+    Ok(())
+}
 fn cell(column: &str, value: Value) -> Value {
     json!({"sheet_id":SHEET,"row_id":ROW,"column_id":column,"value":value})
 }

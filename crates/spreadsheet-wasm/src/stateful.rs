@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use spreadsheet_domain::{
     formula::Formula,
     workbook::{
-        CellAddress, CellContent, CellValue, ColumnId, DocumentId, DocumentVersion, DomainError,
-        Operation, RowId, SheetId, SheetSeed, Workbook,
+        CalculationContext, CalculationContextId, CalculationReason, CellAddress, CellContent,
+        CellValue, ColumnId, DocumentId, DocumentVersion, DomainError, Operation, RowId, SheetId,
+        SheetSeed, Workbook,
     },
 };
 use spreadsheet_formula::{
@@ -83,10 +84,92 @@ impl From<CalculationError> for PreviewError {
 #[serde(deny_unknown_fields)]
 struct Initialize {
     schema_version: u32,
+    #[serde(default)]
+    calculation_context: Option<ContextInput>,
     document_id: String,
     input_version: String,
     pending_revision: String,
     sheets: Vec<SheetInput>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContextInput {
+    schema_version: u32,
+    context_id: String,
+    epoch: String,
+    effective_timestamp_utc_ms: String,
+    utc_offset_minutes: i16,
+    civil_day_since_unix_epoch: i32,
+    random_seed: String,
+    engine_version: String,
+    compatibility_profile: String,
+    reason: String,
+}
+impl ContextInput {
+    fn decode(self, version: DocumentVersion) -> Result<CalculationContext, PreviewError> {
+        if self.schema_version != 1
+            || self.engine_version != ENGINE_VERSION
+            || self.compatibility_profile != COMPATIBILITY_PROFILE
+        {
+            return Err(PreviewError::UnsupportedProfile);
+        }
+        let epoch = revision(&self.epoch)?;
+        if epoch == 0 || epoch > version.get() {
+            return Err(PreviewError::InvalidProjection);
+        }
+        if self.effective_timestamp_utc_ms.is_empty()
+            || self.effective_timestamp_utc_ms.len() > 19
+            || !self
+                .effective_timestamp_utc_ms
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+        {
+            return Err(PreviewError::InvalidJson);
+        }
+        let timestamp = self
+            .effective_timestamp_utc_ms
+            .parse::<i64>()
+            .map_err(|_| PreviewError::InvalidJson)?;
+        if self.random_seed.len() != 64
+            || !self
+                .random_seed
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(PreviewError::InvalidJson);
+        }
+        let mut seed = [0u8; 32];
+        for (index, part) in self
+            .random_seed
+            .as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .enumerate()
+        {
+            let digit = |b: u8| if b <= b'9' { b - b'0' } else { b - b'a' + 10 };
+            seed[index] = (digit(part[0]) << 4) | digit(part[1]);
+        }
+        let reason = match self.reason.as_str() {
+            "open" => CalculationReason::Open,
+            "explicit" => CalculationReason::Explicit,
+            "timer" => CalculationReason::Timer,
+            "volatile_dependency" => CalculationReason::VolatileDependency,
+            "engine_upgrade" => CalculationReason::EngineUpgrade,
+            _ => return Err(PreviewError::InvalidJson),
+        };
+        Ok(CalculationContext::new(
+            CalculationContextId::from_bytes(identity(&self.context_id)?)?,
+            epoch,
+            timestamp,
+            self.utc_offset_minutes,
+            self.civil_day_since_unix_epoch,
+            seed,
+            self.engine_version,
+            self.compatibility_profile,
+            reason,
+        )?)
+    }
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -383,10 +466,11 @@ impl PreviewWorkbook {
             return Err(PreviewError::LimitExceeded);
         }
         let init: Initialize = serde_json::from_str(json).map_err(|_| PreviewError::InvalidJson)?;
-        if !matches!(init.schema_version, 1 | 2)
+        if !matches!(init.schema_version, 1..=3)
             || init.sheets.is_empty()
             || init.sheets.len() > 64
             || (init.schema_version == 1 && init.sheets.len() != 1)
+            || ((init.schema_version == 3) != init.calculation_context.is_some())
         {
             return Err(PreviewError::UnsupportedProfile);
         }
@@ -396,6 +480,10 @@ impl PreviewWorkbook {
         }
         let document_id = DocumentId::from_bytes(identity(&init.document_id)?)?;
         let version = DocumentVersion::new(revision(&init.input_version)?)?;
+        let context = init
+            .calculation_context
+            .map(|context| context.decode(version))
+            .transpose()?;
         let mut seeds = Vec::with_capacity(init.sheets.len());
         let mut sheet_cells = Vec::with_capacity(init.sheets.len());
         let mut total_cells = 0usize;
@@ -438,7 +526,12 @@ impl PreviewWorkbook {
                 cells.push((at, content));
             }
         }
-        let workbook = Workbook::hydrate_sheets(document_id, version, seeds, cells)?;
+        let workbook = match context {
+            Some(context) => {
+                Workbook::hydrate_sheets_with_context(document_id, version, seeds, cells, context)?
+            }
+            None => Workbook::hydrate_sheets(document_id, version, seeds, cells)?,
+        };
         let calculation =
             CalculationProjection::from_workbook(&workbook, CalculationLimits::default())?;
         Ok(Self {

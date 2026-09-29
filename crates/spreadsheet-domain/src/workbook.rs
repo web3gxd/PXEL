@@ -892,6 +892,22 @@ impl Workbook {
         }
         Ok(workbook)
     }
+    /// Hydrates an authenticated projection context without inventing a journal event.
+    /// This is an adapter entry point, not a canonical write path.
+    pub fn hydrate_sheets_with_context(
+        document_id: DocumentId,
+        version: DocumentVersion,
+        seeds: impl IntoIterator<Item = SheetSeed>,
+        cells: impl IntoIterator<Item = (CellAddress, CellContent)>,
+        context: CalculationContext,
+    ) -> Result<Self, DomainError> {
+        if context.epoch() > version.get() {
+            return Err(DomainError::InvalidCalculationContext);
+        }
+        let mut book = Self::hydrate_sheets(document_id, version, seeds, cells)?;
+        book.calculation_context = Some(context);
+        Ok(book)
+    }
     pub fn candidate(
         &self,
         operation: &Operation,

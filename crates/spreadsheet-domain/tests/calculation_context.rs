@@ -14,6 +14,39 @@ fn genesis() -> Result<Workbook, DomainError> {
         DocumentVersion::new(1)?,
     )
 }
+#[test]
+fn authenticated_context_hydration_preserves_version_and_rejects_future_epoch()
+-> Result<(), DomainError> {
+    let book = genesis()?;
+    let image = book.snapshot_image()?;
+    let seeds = image
+        .sheets
+        .into_iter()
+        .map(|sheet| sheet.sheet)
+        .collect::<Vec<_>>();
+    let received = context(5, 1)?;
+    let hydrated = Workbook::hydrate_sheets_with_context(
+        book.document_id(),
+        book.version(),
+        seeds.clone(),
+        [],
+        received.clone(),
+    )?;
+    assert_eq!(hydrated.version(), book.version());
+    assert_eq!(hydrated.calculation_context(), Some(&received));
+    assert!(book.calculation_context().is_none());
+    assert!(matches!(
+        Workbook::hydrate_sheets_with_context(
+            book.document_id(),
+            book.version(),
+            seeds,
+            [],
+            context(6, 2)?
+        ),
+        Err(DomainError::InvalidCalculationContext)
+    ));
+    Ok(())
+}
 
 fn context(id: u8, epoch: u64) -> Result<CalculationContext, DomainError> {
     CalculationContext::new(

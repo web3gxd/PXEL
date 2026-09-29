@@ -1,6 +1,7 @@
 import type { CalculatedValue } from '../document/store';
 import {
   addressKey,
+  toPreviewValue,
   type PreviewCell,
   type PreviewInit,
   type PreviewResult,
@@ -52,7 +53,20 @@ export class PreviewClient {
     worker.onerror = () => {
       if (this.worker === worker) this.fail();
     };
-    this.send({ id: ++this.id, kind: 'init', data });
+    this.send({
+      id: ++this.id,
+      kind: 'init',
+      data: {
+        ...data,
+        sheets: data.sheets.map((sheet) => ({
+          id: sheet.id,
+          name: sheet.name,
+          rows: sheet.rows,
+          columns: sheet.columns,
+          cells: sheet.cells.map((cell) => ({ ...cell, value: toPreviewValue(cell.value) })),
+        })),
+      },
+    });
   }
   patch(stamp: Stamp, cells: PreviewCell[]) {
     if (!this.worker || !this.desired) return;
@@ -65,7 +79,8 @@ export class PreviewClient {
       return;
     }
     this.desired = stamp;
-    for (const cell of cells) this.queued.set(addressKey(cell), cell);
+    for (const cell of cells)
+      this.queued.set(addressKey(cell), { ...cell, value: toPreviewValue(cell.value) });
     if (
       this.queued.size > 256 ||
       new TextEncoder().encode(JSON.stringify([...this.queued.values()])).length > 1_048_576

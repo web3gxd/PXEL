@@ -379,3 +379,9 @@ profile1900/1904, checked normalization/fake day, five Rust calendar tests,
 и новый dependent-edit/reload DPR1/2 прошли; календарный benchmark записан.
 Durable workbook1904 metadata, injected NOW/TODAY/RAND, manual Excel goldens,
 lookup/conditional aggregates и оставшиеся общие MVP gates ещё открыты.
+
+ADR-064 закрывает полный persisted context transport HTTP→WASM schema3:
+domain3/stateful9/frontend82 tests, native/browser1003books/2006patches,
+real context/reload/lostACK DPR1/2. Исправлен прежний leak HTTP formula display
+metadata в strict Worker DTO. NOW/TODAY/RAND evaluator и автоматические
+volatile triggers ещё открыты; wire/storage schemas не менялись.

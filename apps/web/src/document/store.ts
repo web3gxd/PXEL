@@ -1,7 +1,7 @@
 import { create, toBinary } from '@bufbuild/protobuf';
 import { PreviewClient, type PreviewStatus } from '../calculation/client';
 import { copyFormulaInWorker } from '../calculation/formula-copy';
-import type { Stamp, PreviewCell } from '../calculation/protocol';
+import type { Stamp, PreviewCell, PreviewContext } from '../calculation/protocol';
 import {
   ClientEnvelopeSchema,
   CanonicalOperationSchema,
@@ -43,7 +43,7 @@ export type Projection = {
   document_id: string;
   version: string;
   state_hash: string;
-  calculation_context?: { context_id: string; epoch: string } | null;
+  calculation_context?: PreviewContext | null;
   sheets: Sheet[];
 };
 export type Position = { row: number; column: number };
@@ -256,13 +256,36 @@ export function decodeProjection(input: unknown): Projection {
     p.sheets.length > 64
   )
     throw invalid();
-  if (
-    p.calculation_context != null &&
-    (!isUuid(p.calculation_context.context_id) ||
-      typeof p.calculation_context.epoch !== 'string' ||
-      !/^[1-9]\d*$/.test(p.calculation_context.epoch))
-  )
-    throw invalid();
+  if (p.calculation_context != null) {
+    const c = p.calculation_context;
+    if (
+      c.schema_version !== 1 ||
+      !isUuid(c.context_id) ||
+      typeof c.epoch !== 'string' ||
+      !/^[1-9]\d{0,19}$/.test(c.epoch) ||
+      BigInt(c.epoch) > BigInt(p.version) ||
+      BigInt(c.epoch) > 18446744073709551615n ||
+      typeof c.effective_timestamp_utc_ms !== 'string' ||
+      !/^\d{1,19}$/.test(c.effective_timestamp_utc_ms) ||
+      BigInt(c.effective_timestamp_utc_ms) > 9223372036854775807n ||
+      !Number.isInteger(c.utc_offset_minutes) ||
+      Math.abs(c.utc_offset_minutes) > 840 ||
+      !Number.isInteger(c.civil_day_since_unix_epoch) ||
+      c.civil_day_since_unix_epoch < -2147483648 ||
+      c.civil_day_since_unix_epoch > 2147483647 ||
+      typeof c.random_seed !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(c.random_seed) ||
+      typeof c.engine_version !== 'string' ||
+      !/^[A-Za-z0-9._-]{1,64}$/.test(c.engine_version) ||
+      typeof c.compatibility_profile !== 'string' ||
+      !/^[A-Za-z0-9._-]{1,64}$/.test(c.compatibility_profile) ||
+      !['open', 'explicit', 'timer', 'volatile_dependency', 'engine_upgrade'].includes(c.reason)
+    )
+      throw invalid();
+    const ms = BigInt(c.effective_timestamp_utc_ms) + BigInt(c.utc_offset_minutes) * 60000n;
+    const day = (ms >= 0n ? ms : ms - 86399999n) / 86400000n;
+    if (day !== BigInt(c.civil_day_since_unix_epoch)) throw invalid();
+  }
   const sheetIds = new Set<string>();
   const sheetNames = new Set<string>();
   const rowIds = new Set<string>();
@@ -542,7 +565,9 @@ export class DocumentStore {
       }
       this.preview.reset({
         ...stamp,
-        schema_version: projection.sheets.length === 1 ? 1 : 2,
+        ...(projection.calculation_context
+          ? { schema_version: 3 as const, calculation_context: projection.calculation_context }
+          : { schema_version: projection.sheets.length === 1 ? (1 as const) : (2 as const) }),
         sheets: projection.sheets.map((item) => ({
           ...item,
           cells: cellsBySheet.get(item.id) ?? [],

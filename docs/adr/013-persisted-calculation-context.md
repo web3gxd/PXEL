@@ -4,6 +4,12 @@ Date: 2026-09-29. Status: partial implementation in phase 2. Persistence,
 system principal, replay, explicit trigger and context-aware delivery are
 implemented; volatile native/WASM evaluation and snapshot recovery are open.
 
+Update2026-09-30: ADR-064 closes authenticated HTTP/Worker transport of the full
+context, including schema3 hydration and retention across patches. Existing
+snapshot-image tests cover context retention, but production snapshot/recovery
+matrix remains a broader gate. Volatile evaluation/open/timer triggers remain
+open; context transport alone does not enable NOW/TODAY/RAND.
+
 ## Context
 
 The present evaluator implements only nonvolatile formulas. Calculation

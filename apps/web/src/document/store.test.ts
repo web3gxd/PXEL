@@ -22,11 +22,54 @@ const documentId = '01994100-0000-7000-8000-000000000001';
 const rowId = '01994100-0000-7000-8000-000000000002';
 const columnId = '01994100-0000-7000-8000-000000000003';
 const sheetId = '01994100-0000-7000-8000-000000000004';
+const previewContext = (
+  context_id: string,
+  epoch: string,
+): NonNullable<Projection['calculation_context']> => ({
+  schema_version: 1,
+  context_id,
+  epoch,
+  effective_timestamp_utc_ms: '86400000',
+  utc_offset_minutes: 180,
+  civil_day_since_unix_epoch: 1,
+  random_seed: '01'.repeat(32),
+  engine_version: 'pxel-formula-0.7.0',
+  compatibility_profile: 'pxel-excel-subset-v1',
+  reason: 'explicit',
+});
 const projection = (): Projection => ({
   document_id: documentId,
   version: '1',
   state_hash: '0'.repeat(64),
   sheets: [{ id: sheetId, name: 'Лист 1', rows: [rowId], columns: [columnId], cells: [] }],
+});
+it('validates the complete persisted context before preview initialization', () => {
+  const valid = { ...projection(), version: '2', calculation_context: previewContext(rowId, '2') };
+  expect(decodeProjection(valid).calculation_context).toEqual(valid.calculation_context);
+  for (const [key, value] of [
+    ['schema_version', 2],
+    ['epoch', '3'],
+    ['epoch', '18446744073709551616'],
+    ['effective_timestamp_utc_ms', '9223372036854775808'],
+    ['utc_offset_minutes', 841],
+    ['civil_day_since_unix_epoch', 2],
+    ['random_seed', 'aa'],
+    ['reason', 'unknown'],
+  ]) {
+    const broken = structuredClone(valid);
+    Object.assign(broken.calculation_context, { [String(key)]: value });
+    expect(() => decodeProjection(broken)).toThrow();
+  }
+  const negativeDay = {
+    ...valid,
+    calculation_context: {
+      ...valid.calculation_context,
+      effective_timestamp_utc_ms: '0',
+      utc_offset_minutes: -1,
+      civil_day_since_unix_epoch: -1,
+    },
+  };
+  expect(decodeProjection(negativeDay).calculation_context?.civil_day_since_unix_epoch).toBe(-1);
 });
 it('renders only valid remote presence without changing confirmed document state', async () => {
   const store = new DocumentStore();
@@ -256,7 +299,7 @@ describe('document projection and pending intents', () => {
         json: async () => ({
           ...projection(),
           version: '2',
-          calculation_context: { context_id: uuidV7(), epoch: '1' },
+          calculation_context: previewContext(uuidV7(), '1'),
         }),
       };
     });
@@ -1717,7 +1760,7 @@ describe('formula intents and versioned server calculation', () => {
   it('accepts only results for the persisted context after an epoch change', async () => {
     const { store } = await connectedStore();
     const projection = formulaProjection();
-    projection.calculation_context = { context_id: rowId, epoch: '2' };
+    projection.calculation_context = previewContext(rowId, '2');
     store.load(projection);
     await store.receive(calculation('2'));
     expect(store.calculationStatus).toBe('failed');

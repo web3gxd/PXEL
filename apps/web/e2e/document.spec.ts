@@ -101,6 +101,77 @@ test('ABS and MOD update a referenced input and survive reload', async ({ page }
   await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
 });
 
+test('persisted server context reaches real WASM initialization and survives reload', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const target = window as Window & {
+      __pxelPreviewInitializations?: unknown[];
+      __pxelPreviewErrors?: string[];
+    };
+    target.__pxelPreviewInitializations = [];
+    target.__pxelPreviewErrors = [];
+    const Original = window.Worker;
+    window.Worker = class extends Original {
+      constructor(...args: ConstructorParameters<typeof Worker>) {
+        super(...args);
+        this.addEventListener(
+          'message',
+          (event: MessageEvent<{ error?: string; phase?: string }>) => {
+            if (event.data.error)
+              target.__pxelPreviewErrors?.push(`${event.data.error}:${event.data.phase}`);
+          },
+        );
+      }
+      override postMessage(
+        message: unknown,
+        options?: StructuredSerializeOptions | Transferable[],
+      ) {
+        const request = message as { kind?: string; data?: unknown };
+        if (request?.kind === 'init') target.__pxelPreviewInitializations?.push(request.data);
+        if (Array.isArray(options)) super.postMessage(message, options);
+        else super.postMessage(message, options ?? {});
+      }
+    };
+  });
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('=1+2');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await page.getByTestId('recalculate').click();
+  const id = new URL(page.url()).searchParams.get('document');
+  const state = async () => (await page.request.get(`/api/documents/${id}`)).json();
+  await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('1');
+  const context = (await state()).calculation_context;
+  const latest = () =>
+    page.evaluate(() => {
+      const entries = (window as Window & { __pxelPreviewInitializations?: unknown[] })
+        .__pxelPreviewInitializations;
+      return entries?.at(-1) as
+        { schema_version: number; calculation_context: unknown } | undefined;
+    });
+  await expect.poll(async () => (await latest())?.calculation_context).toEqual(context);
+  expect((await latest())?.schema_version).toBe(3);
+  await page.reload();
+  await expect.poll(async () => (await latest())?.calculation_context).toEqual(context);
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(page.getByTestId('active-cell')).toHaveText('A1: 3');
+  await bar.fill('=2+3');
+  await expect
+    .poll(async () => ({
+      cell: await page.getByTestId('active-cell').textContent(),
+      errors: await page.evaluate(
+        () => (window as Window & { __pxelPreviewErrors?: string[] }).__pxelPreviewErrors,
+      ),
+    }))
+    .toEqual({ cell: 'A1: 5', errors: [] });
+  await expect(page.getByTestId('calculation-preview')).toContainText('не подтверждено');
+  expect((await state()).version).toBe('3');
+});
+
 test('delayed formula retains its target after another tab inserts a row', async ({
   page,
   context,
