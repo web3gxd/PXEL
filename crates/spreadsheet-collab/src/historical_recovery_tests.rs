@@ -15,6 +15,14 @@ macro_rules! reject {
     };
 }
 impl OperationJournal for RejectJournal {
+    async fn calculation_epoch_version(
+        &self,
+        _: AuthenticatedActor,
+        _: DocumentId,
+        _: DocumentVersion,
+    ) -> Result<Option<DocumentVersion>, JournalError> {
+        Err(JournalError::Unavailable)
+    }
     reject!(quarantine(_document: DocumentId) -> ());
     reject!(access(_identity: AuthenticatedActor, _document: DocumentId) -> DocumentAccess);
     reject!(create(_identity: AuthenticatedActor, _event: CommittedEvent) -> CommitReceipt);

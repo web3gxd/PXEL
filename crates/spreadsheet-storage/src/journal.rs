@@ -290,6 +290,37 @@ async fn insert(
     })
 }
 impl OperationJournal for PgDatabase {
+    async fn calculation_epoch_version(
+        &self,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        through: DocumentVersion,
+    ) -> Result<Option<DocumentVersion>, JournalError> {
+        let access = self.access(identity, document_id).await?;
+        if through > access.head {
+            return Err(JournalError::Conflict);
+        }
+        let row = sqlx::query!("SELECT committed_version,operation_id,actor_id,principal_kind,schema_version,payload,payload_checksum,canonical_event_hash FROM document_operations WHERE document_id = $1 AND committed_version <= $2 AND principal_kind = 'system' ORDER BY committed_version DESC LIMIT 1", uuid(document_id.as_bytes()), number(through.get())?)
+            .fetch_optional(&self.pool).await.map_err(error)?;
+        row.map(|row| {
+            let event = verified_event(StoredEventRow {
+                document: document_id,
+                committed_version: row.committed_version,
+                operation_id: row.operation_id,
+                actor_id: row.actor_id,
+                principal_kind: &row.principal_kind,
+                schema_version: row.schema_version,
+                payload: &row.payload,
+                payload_checksum: &row.payload_checksum,
+                canonical_event_hash: &row.canonical_event_hash,
+            })?;
+            if !matches!(event.operation, Operation::AdvanceCalculationEpoch { .. }) {
+                return Err(JournalError::Corrupt);
+            }
+            Ok(event.version)
+        })
+        .transpose()
+    }
     async fn quarantine(&self, document_id: DocumentId) -> Result<(), JournalError> {
         sqlx::query!(
             "UPDATE documents SET state='quarantined' WHERE document_id=$1",
@@ -889,6 +920,7 @@ mod tests {
         database: PgDatabase,
         event: std::sync::Arc<SystemCommitRequest>,
         pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        followup: Option<std::sync::Arc<CommitRequest>>,
     }
     macro_rules! delegate_journal {
         ($name:ident ($($arg:ident: $ty:ty),*) -> $output:ty) => {
@@ -896,6 +928,16 @@ mod tests {
         };
     }
     impl OperationJournal for ReceiptRaceJournal {
+        async fn calculation_epoch_version(
+            &self,
+            identity: AuthenticatedActor,
+            document_id: DocumentId,
+            through: DocumentVersion,
+        ) -> Result<Option<DocumentVersion>, JournalError> {
+            self.database
+                .calculation_epoch_version(identity, document_id, through)
+                .await
+        }
         delegate_journal!(quarantine(document:DocumentId) -> ());
         delegate_journal!(access(identity:AuthenticatedActor,document:DocumentId) -> DocumentAccess);
         delegate_journal!(create(identity:AuthenticatedActor,event:CommittedEvent) -> CommitReceipt);
@@ -916,6 +958,9 @@ mod tests {
                 .swap(false, std::sync::atomic::Ordering::SeqCst)
             {
                 self.database.commit_system(&self.event).await?;
+                if let Some(request) = &self.followup {
+                    self.database.commit(request).await?;
+                }
             }
             self.database
                 .system_receipt(identity, document, operation, context)
@@ -963,6 +1008,7 @@ mod tests {
         let expected = authored.candidate(&operation, DocumentVersion::new(3)?)?;
         let operation_id = OperationId::from_bytes([112; 16])?;
         let journal = ReceiptRaceJournal {
+            followup: None,
             database: database.clone(),
             pending: Arc::new(AtomicBool::new(true)),
             event: Arc::new(SystemCommitRequest {
@@ -2165,6 +2211,216 @@ mod tests {
         pool: sqlx::PgPool,
     ) -> TestResult {
         bootstrap_external_progress_case(pool, 2).await
+    }
+    async fn volatile_edit_recovery_case(pool: sqlx::PgPool, mode: u8) -> TestResult {
+        use spreadsheet_collab::SessionDirectory;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let pending = mode == 1;
+        let (db, identity, mut book) = fixture(pool).await?;
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        async fn formula_request(
+            db: &PgDatabase,
+            identity: AuthenticatedActor,
+            book: &Workbook,
+            address: CellAddress,
+            source: &str,
+            id: u8,
+        ) -> Result<CommitRequest, Box<dyn std::error::Error>> {
+            let mut write = request(db, identity, book, id).await?;
+            write.command.operation = CommandPayload::SetCellFormula {
+                address,
+                source: spreadsheet_domain::formula::FormulaSource::new(source.into())?,
+            };
+            write.event.operation = Operation::SetCellFormula {
+                address,
+                formula: spreadsheet_formula::binder::bind(source, book, address)?,
+            };
+            write.event.state_hash = book
+                .candidate(&write.event.operation, write.event.version)?
+                .hash();
+            Ok(write)
+        }
+        let first = formula_request(&db, identity, &book, address, "=RAND()", 120).await?;
+        db.commit(&first).await?;
+        book.apply_event(&first.event)?;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let sampler = move |reason| {
+            let count = counter.fetch_add(1, Ordering::SeqCst) as u8;
+            Ok((
+                OperationId::from_bytes([150 + count; 16])?,
+                CalculationContext::new(
+                    CalculationContextId::from_bytes([160 + count; 16])?,
+                    1,
+                    0,
+                    0,
+                    0,
+                    [170 + count; 32],
+                    spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                    spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                    reason,
+                )?,
+            ))
+        };
+        let directory = spreadsheet_collab::InProcessSessionDirectory::new(db.clone())
+            .with_context_sampler(sampler.clone());
+        let session = directory.session(identity, book.document_id()).await?;
+        book = session.read(identity).await?;
+        assert_eq!(book.version().get(), 3);
+        let edit = formula_request(&db, identity, &book, address, "=RAND()+1", 121).await?;
+        if pending {
+            sqlx::raw_sql("CREATE FUNCTION fail_edit_epoch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.principal_kind='system' THEN RAISE EXCEPTION 'injected'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_edit_epoch BEFORE INSERT ON document_operations FOR EACH ROW EXECUTE FUNCTION fail_edit_epoch()") .execute(&db.pool).await?;
+            assert!(matches!(
+                session.submit(identity, edit.command.clone()).await?,
+                spreadsheet_collab::Submission::Committed { .. }
+            ));
+            assert_eq!(session.head(identity).await?.get(), 4);
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            sqlx::raw_sql("DROP TRIGGER fail_edit_epoch ON document_operations")
+                .execute(&db.pool)
+                .await?;
+            // Refresh the expected canonical CellWrite chosen by the actor.
+            for event in db
+                .load_events(identity, book.document_id(), book.version(), 128)
+                .await?
+            {
+                book.apply_event(&event)?;
+            }
+            let operation = Operation::AdvanceCalculationEpoch {
+                context: CalculationContext::new(
+                    CalculationContextId::from_bytes([140; 16])?,
+                    2,
+                    86400000,
+                    0,
+                    1,
+                    [141; 32],
+                    spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                    spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                    CalculationReason::Explicit,
+                )?,
+            };
+            let candidate = book.candidate(&operation, DocumentVersion::new(5)?)?;
+            db.commit_system(&SystemCommitRequest {
+                identity,
+                expected_access: db.access(identity, book.document_id()).await?,
+                expected_head: book.version(),
+                event: CommittedEvent {
+                    document_id: book.document_id(),
+                    operation_id: OperationId::from_bytes([142; 16])?,
+                    principal: EventPrincipal::System,
+                    version: candidate.version(),
+                    operation,
+                    state_hash: candidate.hash(),
+                },
+            })
+            .await?;
+            book = candidate;
+            let later = formula_request(&db, identity, &book, address, "=RAND()+2", 122).await?;
+            db.commit(&later).await?;
+            book.apply_event(&later.event)?;
+            book = session.read(identity).await?;
+            assert_eq!(book.version().get(), 7);
+            assert_eq!(
+                book.calculation_context().ok_or("context missing")?.epoch(),
+                3
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 3);
+        } else {
+            // Durable user event with no matching epoch: simulate the crash gap.
+            db.commit(&edit).await?;
+            book.apply_event(&edit.event)?;
+        }
+        let restored = if mode == 2 {
+            // Inject E2 then edit B only after ensure's initial recovery scan,
+            // during advance_context receipt lookup/CAS retry.
+            let operation = Operation::AdvanceCalculationEpoch {
+                context: CalculationContext::new(
+                    CalculationContextId::from_bytes([140; 16])?,
+                    2,
+                    86400000,
+                    0,
+                    1,
+                    [141; 32],
+                    spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                    spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                    CalculationReason::Explicit,
+                )?,
+            };
+            let candidate = book.candidate(&operation, DocumentVersion::new(5)?)?;
+            let later =
+                formula_request(&db, identity, &candidate, address, "=RAND()+2", 122).await?;
+            let mut later = later;
+            later.expected_access.head = candidate.version();
+            let journal = ReceiptRaceJournal {
+                database: db.clone(),
+                pending: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                followup: Some(Arc::new(later)),
+                event: Arc::new(SystemCommitRequest {
+                    identity,
+                    expected_access: db.access(identity, book.document_id()).await?,
+                    expected_head: book.version(),
+                    event: CommittedEvent {
+                        document_id: book.document_id(),
+                        operation_id: OperationId::from_bytes([142; 16])?,
+                        principal: EventPrincipal::System,
+                        version: candidate.version(),
+                        operation,
+                        state_hash: candidate.hash(),
+                    },
+                }),
+            };
+            spreadsheet_collab::InProcessSessionDirectory::new(journal)
+                .with_context_sampler(sampler)
+                .session(identity, book.document_id())
+                .await?
+                .read(identity)
+                .await?
+        } else {
+            spreadsheet_collab::InProcessSessionDirectory::new(db.clone())
+                .with_context_sampler(sampler)
+                .session(identity, book.document_id())
+                .await?
+                .read(identity)
+                .await?
+        };
+        assert_eq!(restored.version().get(), if mode != 0 { 7 } else { 5 });
+        assert_eq!(
+            restored
+                .calculation_context()
+                .ok_or("context missing")?
+                .epoch(),
+            if mode != 0 { 3 } else { 2 }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), if mode != 0 { 3 } else { 2 });
+        assert_eq!(
+            db.calculation_epoch_version(identity, book.document_id(), restored.version())
+                .await?,
+            Some(restored.version())
+        );
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
+    async fn volatile_edit_restart_recovers_missing_epoch(pool: sqlx::PgPool) -> TestResult {
+        volatile_edit_recovery_case(pool, 0).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn volatile_edit_newer_external_edit_outlives_old_pending_context(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        volatile_edit_recovery_case(pool, 1).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn volatile_edit_refresh_race_recovers_newer_edit_after_external_epoch(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        volatile_edit_recovery_case(pool, 2).await
     }
     #[sqlx::test(migrations = false)]
     async fn system_trigger_checks_role_epochs_and_revocation_inside_commit(

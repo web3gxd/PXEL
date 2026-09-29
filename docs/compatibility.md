@@ -67,3 +67,5 @@ Round-trip acceptance: supported workbook import → edit → export → import 
 ADR-065: NOW/TODAY/RAND — Partially supported: persisted epoch, native/WASM convergence, numeric serial без автоматического date formatting. ADR-066 создаёт первый контекст автоматически; кнопка «Пересчитать» создаёт следующий epoch. Automatic open-renewal/timer/dependency triggers и ручные Excel goldens остаются открыты. RAND sequence является собственным deterministic profile, не Excel RNG parity.
 
 ADR-066 снимает ручной bootstrap prerequisite для NOW/TODAY/RAND: первый durable контекст создаётся сервером автоматически. Статус всё ещё Partially supported до automatic dependency/timer epochs и Excel verification; compatible context/value сохраняется после reload.
+
+ADR-067 добавляет automatic edit epochs, в том числе после независимой content правки, и recovery отсутствующего epoch из журнала. Volatile functions остаются Partially supported: timer, open-renewal, date formatting и Excel goldens не закрыты.

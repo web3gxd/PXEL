@@ -37,6 +37,37 @@ beforeEach(async () => {
   await delay(1100);
 });
 
+test('committed content edits advance volatile epoch once and receipt retries do not', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal(
+      (await client.send(formulaCommand(client, snapshot, '=RAND()'))).case,
+      'committed',
+    );
+    const initial = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(initial.version, '3');
+    const edit = setCommand(client, initial, 7, { column: 1, sequence: 2 });
+    const committed = await client.send(edit);
+    assert.equal(committed.case, 'committed');
+    assert.equal(committed.value.committedVersion, 4n);
+    const after = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(after.version, '5');
+    assert.equal(after.calculation_context.epoch, '2');
+    assert.equal(after.calculation_context.reason, 'volatile_dependency');
+    assert.notDeepEqual(after.calculation_context, initial.calculation_context);
+    assert.equal((await calculation(base, cookie, snapshot.document_id, 5)).status, 'complete');
+    assert.equal((await client.send(edit)).case, 'receipt');
+    assert.deepEqual(
+      (await getDocument(base, cookie, snapshot.document_id)).calculation_context,
+      after.calculation_context,
+    );
+  } finally {
+    client.socket.terminate();
+  }
+});
+
 test('volatile first edit bootstraps one durable context without manual recalculation', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);
@@ -68,9 +99,10 @@ test('volatile first edit bootstraps one durable context without manual recalcul
     assert.equal(later.case, 'committed');
     assert.equal(later.value.committedVersion, 4n);
     const after = await getDocument(base, cookie, snapshot.document_id);
-    assert.equal(after.version, '4');
-    assert.deepEqual(after.calculation_context, projection.calculation_context);
-    assert.equal((await calculation(base, cookie, snapshot.document_id, 4)).status, 'complete');
+    assert.equal(after.version, '5');
+    assert.equal(after.calculation_context.epoch, '2');
+    assert.equal(after.calculation_context.reason, 'volatile_dependency');
+    assert.equal((await calculation(base, cookie, snapshot.document_id, 5)).status, 'complete');
   } finally {
     first.socket.terminate();
     second.socket.terminate();
@@ -142,13 +174,14 @@ test('volatile formulas use durable context and survive epoch change and reload'
       assert.equal(result.engine_version, 'pxel-formula-0.8.0');
       return { context, random: expected, hash: result.calculated_state_hash };
     };
-    const first = await verify(5);
-    assert.deepEqual(await verify(5), first);
+    const first = await verify(8);
+    assert.equal(first.context.epoch, '4');
+    assert.deepEqual(await verify(8), first);
     assert.equal((await advance()).status, 200);
-    const second = await verify(6);
-    assert.equal(second.context.epoch, '2');
+    const second = await verify(9);
+    assert.equal(second.context.epoch, '5');
     assert.notEqual(second.random, first.random);
-    assert.deepEqual(await verify(6), second);
+    assert.deepEqual(await verify(9), second);
   } finally {
     client.socket.terminate();
   }

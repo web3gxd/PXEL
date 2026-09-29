@@ -1,6 +1,35 @@
 //! First-context admission. Sampling is injected by the application boundary.
 use super::*;
+use spreadsheet_domain::workbook::CalculationContextId;
 use spreadsheet_domain::{formula::Node, workbook::CalculationReason};
+
+#[derive(Clone, Copy)]
+pub(crate) enum Admission {
+    Explicit,
+    Bootstrap,
+    AfterEdit {
+        context_id: CalculationContextId,
+        watermark: DocumentVersion,
+    },
+}
+impl Admission {
+    pub fn permits(self, book: &Workbook) -> bool {
+        match self {
+            Self::Explicit => true,
+            Self::Bootstrap => needed(book).is_some(),
+            Self::AfterEdit { context_id, .. } => {
+                book.calculation_context()
+                    .is_some_and(|context| context.context_id() == context_id)
+                    && has_volatile(book)
+            }
+        }
+    }
+}
+pub(crate) struct ContextAdvance<'a> {
+    pub operation_id: OperationId,
+    pub context: &'a CalculationContext,
+    pub admission: Admission,
+}
 
 pub(crate) type Sampler = Arc<
     dyn Fn(CalculationReason) -> Result<(OperationId, CalculationContext), SessionError>
@@ -9,8 +38,9 @@ pub(crate) type Sampler = Arc<
 >;
 pub(crate) struct Bootstrap {
     pub sampler: Option<Sampler>,
-    pending: Option<(OperationId, CalculationContext)>,
+    pending: Option<(OperationId, CalculationContext, Admission)>,
     inspected: Option<DocumentVersion>,
+    required_edit: Option<DocumentVersion>,
 }
 impl Bootstrap {
     pub fn new(sampler: Option<Sampler>) -> Self {
@@ -18,6 +48,12 @@ impl Bootstrap {
             sampler,
             pending: None,
             inspected: None,
+            required_edit: None,
+        }
+    }
+    pub fn edited(&mut self, book: &Workbook, operation: &Operation) {
+        if affects_calculation(operation) && (self.pending.is_some() || has_volatile(book)) {
+            self.required_edit = Some(book.version());
         }
     }
     pub async fn ensure<J: OperationJournal>(
@@ -31,42 +67,140 @@ impl Bootstrap {
         let Some(sampler) = &self.sampler else {
             return Ok(());
         };
-        if self.pending.is_none() {
-            if self.inspected == Some(workbook.version()) {
-                return Ok(());
-            }
-            let Some(reason) = needed(workbook) else {
-                self.inspected = Some(workbook.version());
-                return Ok(());
-            };
-            let sampled = sampler(reason)?;
-            if sampled.1.reason() != reason
-                || sampled.1.engine_version() != calculation::ENGINE_VERSION
-                || sampled.1.compatibility_profile() != calculation::COMPATIBILITY_PROFILE
-            {
-                return Err(SessionError::InvalidCommand);
-            }
-            self.pending = Some(sampled);
+        // Recover admission intent from durable input history after an actor restart.
+        // Stop at the first relevant edit; each decoded page remains bounded.
+        if self.inspected != Some(workbook.version())
+            && needed(workbook).is_none()
+            && has_volatile(workbook)
+        {
+            self.required_edit = recover_edit(journal, identity, workbook).await?;
         }
-        let Some((id, context)) = &self.pending else {
-            return Err(SessionError::InvalidCommand);
-        };
-        advance_context(journal, identity, workbook, *id, context, calculation, axes).await?;
-        self.pending = None;
-        self.inspected = Some(workbook.version());
-        Ok(())
+        // At most an older uncertain trigger plus one trigger for newer edits.
+        for _ in 0..2 {
+            if self.pending.is_none() {
+                if self.required_edit.is_none()
+                    && self.inspected == Some(workbook.version())
+                    && needed(workbook).is_none()
+                {
+                    return Ok(());
+                }
+                let trigger = if let Some(reason) = needed(workbook) {
+                    Some((reason, Admission::Bootstrap))
+                } else if let Some(watermark) =
+                    self.required_edit.filter(|_| has_volatile(workbook))
+                {
+                    workbook.calculation_context().map(|context| {
+                        (
+                            CalculationReason::VolatileDependency,
+                            Admission::AfterEdit {
+                                context_id: context.context_id(),
+                                watermark,
+                            },
+                        )
+                    })
+                } else {
+                    None
+                };
+                let Some((reason, admission)) = trigger else {
+                    self.required_edit = None;
+                    self.inspected = Some(workbook.version());
+                    return Ok(());
+                };
+                let sampled = sampler(reason)?;
+                if sampled.1.reason() != reason
+                    || sampled.1.engine_version() != calculation::ENGINE_VERSION
+                    || sampled.1.compatibility_profile() != calculation::COMPATIBILITY_PROFILE
+                {
+                    return Err(SessionError::InvalidCommand);
+                }
+                self.pending = Some((sampled.0, sampled.1, admission));
+            }
+            let Some((id, context, admission)) = &self.pending else {
+                return Err(SessionError::InvalidCommand);
+            };
+            let admission = *admission;
+            let prepared_head = workbook.version();
+            let receipt = advance_context(
+                journal,
+                identity,
+                workbook,
+                ContextAdvance {
+                    operation_id: *id,
+                    context,
+                    admission,
+                },
+                calculation,
+                axes,
+            )
+            .await?;
+            if workbook.version() != prepared_head {
+                // Refresh/receipt/CAS retry may discover an epoch followed by a
+                // newer edit. Resolve that ordering before caching this head.
+                self.required_edit = recover_edit(journal, identity, workbook).await?;
+            } else {
+                let covered = self.required_edit.is_some_and(|required| {
+                    receipt.as_ref().is_some_and(|receipt| receipt.committed_version > required)
+                        || (receipt.is_none() && matches!(admission, Admission::AfterEdit { watermark, .. } if watermark >= required))
+                });
+                if covered || !has_volatile(workbook) {
+                    self.required_edit = None;
+                }
+            }
+            self.pending = None;
+            self.inspected = Some(workbook.version());
+            if self.required_edit.is_none() && needed(workbook).is_none() {
+                return Ok(());
+            }
+        }
+        Err(SessionError::Unavailable)
     }
+}
+async fn recover_edit<J: OperationJournal>(
+    journal: &J,
+    identity: AuthenticatedActor,
+    book: &Workbook,
+) -> Result<Option<DocumentVersion>, SessionError> {
+    if needed(book).is_some() || !has_volatile(book) {
+        return Ok(None);
+    }
+    let mut after = journal
+        .calculation_epoch_version(identity, book.document_id(), book.version())
+        .await?
+        .ok_or(JournalError::Corrupt)?;
+    let start = after;
+    while after < book.version() {
+        if after.get().saturating_sub(start.get()) >= 4096 {
+            return Err(SessionError::Unavailable);
+        }
+        let events = journal
+            .load_events(identity, book.document_id(), after, 128)
+            .await?;
+        if events.is_empty() {
+            return Err(JournalError::Corrupt.into());
+        }
+        for event in events {
+            if event.version > book.version() {
+                break;
+            }
+            if event.version.get()
+                != after
+                    .get()
+                    .checked_add(1)
+                    .ok_or(SessionError::InvalidCommand)?
+            {
+                return Err(JournalError::Corrupt.into());
+            }
+            after = event.version;
+            if affects_calculation(&event.operation) {
+                return Ok(Some(book.version()));
+            }
+        }
+        tokio::task::yield_now().await;
+    }
+    Ok(None)
 }
 fn formula_is_volatile(formula: &spreadsheet_domain::formula::Formula) -> bool {
     formula.ast().nodes().iter().any(|node| matches!(node, Node::Call { name, .. } if matches!(name.as_str(), "NOW" | "TODAY" | "RAND")))
-}
-pub(crate) fn operation_is_volatile(operation: &Operation) -> bool {
-    match operation {
-        Operation::SetCellFormula { formula, .. } => formula_is_volatile(formula),
-        Operation::CellWrite { content: Some(CellContent::Formula(formula)), .. } => formula_is_volatile(formula),
-        Operation::CopyRange { writes } => writes.iter().any(|write| matches!(&write.content, Some(CellContent::Formula(formula)) if formula_is_volatile(formula))),
-        _ => false,
-    }
 }
 pub(crate) fn needed(book: &Workbook) -> Option<CalculationReason> {
     if book.calculation_context().is_some_and(|context| {
@@ -75,8 +209,7 @@ pub(crate) fn needed(book: &Workbook) -> Option<CalculationReason> {
     }) {
         return None;
     }
-    let volatile = book.sheets().iter().any(|sheet| sheet.cells().values().any(|content| matches!(content, CellContent::Formula(formula) if formula_is_volatile(formula))));
-    if !volatile {
+    if !has_volatile(book) {
         return None;
     }
     Some(if book.calculation_context().is_some() {
@@ -84,6 +217,17 @@ pub(crate) fn needed(book: &Workbook) -> Option<CalculationReason> {
     } else {
         CalculationReason::Open
     })
+}
+fn has_volatile(book: &Workbook) -> bool {
+    book.sheets().iter().any(|sheet| sheet.cells().values().any(|content| matches!(content, CellContent::Formula(formula) if formula_is_volatile(formula))))
+}
+fn affects_calculation(operation: &Operation) -> bool {
+    !matches!(
+        operation,
+        Operation::CreateWorkbook { .. }
+            | Operation::AdvanceCalculationEpoch { .. }
+            | Operation::ExtendRows { .. }
+    )
 }
 
 #[cfg(test)]
@@ -190,7 +334,7 @@ mod tests {
                 bootstrap
                     .pending
                     .as_ref()
-                    .map(|(id, context)| (*id, context.random_seed())),
+                    .map(|(id, context, _)| (*id, context.random_seed())),
                 Some((OperationId::from_bytes([7; 16])?, &[6; 32]))
             );
             assert_eq!(book.hash(), before);

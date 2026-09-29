@@ -32,6 +32,43 @@ test('first volatile formula calculates without manual recalc and keeps context 
   expect(restored.calculation_context).toEqual(state.calculation_context);
 });
 
+test('editing another cell advances RAND epoch automatically and survives reload', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  const active = page.getByTestId('active-cell');
+  await bar.fill('=RAND()');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const id = new URL(page.url()).searchParams.get('document');
+  const state = async () => (await page.request.get(`/api/documents/${id}`)).json();
+  await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('1');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await expect(active).toHaveText(/^A1: 0\./);
+  const first = await active.textContent();
+  await page.keyboard.press('ArrowRight');
+  await expect(active).toHaveText(/^B1:/);
+  await bar.fill('7');
+  await bar.press('Enter');
+  await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('2');
+  expect((await state()).version).toBe('5');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowLeft');
+  await expect(active).toHaveText(/^A1: 0\./);
+  await expect(active).not.toHaveText(first!);
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+  const second = await active.textContent();
+  await page.reload();
+  await expect(active).toHaveText(second!);
+  expect((await state()).calculation_context.epoch).toBe('2');
+});
+
 test('volatile RAND preview stays separate and durable epoch survives reload', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
@@ -46,6 +83,7 @@ test('volatile RAND preview stays separate and durable epoch survives reload', a
   await bar.fill('=RAND()');
   await bar.press('Enter');
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('2');
   await grid.focus();
   await page.keyboard.press('ArrowUp');
   await expect(active).toHaveText(/^A1: 0\./);
@@ -56,11 +94,11 @@ test('volatile RAND preview stays separate and durable epoch survives reload', a
   await bar.fill('=RAND()+1');
   await expect.poll(async () => Number((await active.textContent())?.slice(4))).toBe(number + 1);
   await expect(page.getByTestId('calculation-preview')).toContainText('не подтверждено');
-  expect((await state()).version).toBe('3');
+  expect((await state()).version).toBe('4');
   await bar.press('Escape');
   await expect(active).toHaveText(first!);
   await page.getByTestId('recalculate').click();
-  await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('2');
+  await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('3');
   await expect(active).not.toHaveText(first!);
   await expect(active).toHaveText(/^A1: 0\./);
   await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
@@ -68,7 +106,7 @@ test('volatile RAND preview stays separate and durable epoch survives reload', a
   await page.reload();
   await expect(active).toHaveText(second!);
   await expect(bar).toHaveValue('=RAND()');
-  expect((await state()).calculation_context.epoch).toBe('2');
+  expect((await state()).calculation_context.epoch).toBe('3');
 });
 
 for (const scenario of [

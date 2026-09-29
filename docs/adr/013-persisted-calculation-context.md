@@ -1,5 +1,11 @@
 # ADR-013: Persisted calculation context and system event
 
+Current update2026-09-30: ADR-065 enables deterministic volatile evaluation;
+ADR-066 initializes context automatically and ADR-067 admits durable edit epochs
+with journal-based restart/refresh recovery. Timer/open-renewal and the full
+production snapshot crash matrix remain open. Earlier notes below record the
+original decision and intermediate verification scope.
+
 Date: 2026-09-29. Status: partial implementation in phase 2. Persistence,
 system principal, replay, explicit trigger and context-aware delivery are
 implemented; volatile native/WASM evaluation and snapshot recovery are open.

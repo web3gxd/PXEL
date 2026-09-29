@@ -69,6 +69,13 @@ pub enum JournalError {
     UndoWindowExceeded,
 }
 pub trait OperationJournal: Send + Sync {
+    /// Last calculation system event through a recovered projection's head.
+    fn calculation_epoch_version(
+        &self,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        through: DocumentVersion,
+    ) -> impl Future<Output = Result<Option<DocumentVersion>, JournalError>> + Send;
     fn quarantine(
         &self,
         document_id: DocumentId,

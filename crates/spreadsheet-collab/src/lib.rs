@@ -478,10 +478,11 @@ async fn run<J: OperationJournal>(
                         event: Some(Arc::new((**event).clone())),
                     });
                     maybe_snapshot(snapshots.as_ref(), &workbook);
+                    bootstrap.edited(&workbook, &event.operation);
                 }
-                let volatile = matches!(&result, Ok(Submission::Committed { event, .. }) if bootstrap::operation_is_volatile(&event.operation));
+                let committed = matches!(&result, Ok(Submission::Committed { .. }));
                 let _ = reply.send(result);
-                if volatile {
+                if committed {
                     let before = workbook.version();
                     if bootstrap
                         .ensure(&journal, identity, &mut workbook, &calculation, &mut axes)
@@ -505,8 +506,11 @@ async fn run<J: OperationJournal>(
                     &journal,
                     identity,
                     &mut workbook,
-                    operation_id,
-                    &sampled_context,
+                    bootstrap::ContextAdvance {
+                        operation_id,
+                        context: &sampled_context,
+                        admission: bootstrap::Admission::Explicit,
+                    },
                     &calculation,
                     &mut axes,
                 )
@@ -805,11 +809,15 @@ async fn advance_context<J: OperationJournal>(
     journal: &J,
     identity: AuthenticatedActor,
     workbook: &mut Arc<Workbook>,
-    operation_id: OperationId,
-    sampled_context: &CalculationContext,
+    trigger: bootstrap::ContextAdvance<'_>,
     calculation: &CalculationHandle,
     axes: &mut axis_history::AxisHistory,
 ) -> Result<Option<CommitReceipt>, SessionError> {
+    let bootstrap::ContextAdvance {
+        operation_id,
+        context: sampled_context,
+        admission,
+    } = trigger;
     for attempt in 0..3 {
         let access = refresh(journal, identity, workbook, calculation, axes).await?;
         if sampled_context.reason() == spreadsheet_domain::workbook::CalculationReason::Explicit
@@ -831,9 +839,7 @@ async fn advance_context<J: OperationJournal>(
             }
             return Ok(Some(receipt));
         }
-        if sampled_context.reason() != spreadsheet_domain::workbook::CalculationReason::Explicit
-            && bootstrap::needed(workbook).is_none()
-        {
+        if !admission.permits(workbook) {
             return Ok(None);
         }
         let next = DocumentVersion::new(
