@@ -69,7 +69,7 @@ Source provenance and documentation conflicts are retained in the corpus.
   conditions, preserving later errors even after a decisive boolean; range
   traversal is budgeted and checked. NOT takes one scalar and inverts the same
   scalar coercion as IF. Arrays/implicit intersection remain unsupported.
-  Engine identity is `pxel-formula-0.7.0`; old persisted contexts require a new
+  Engine identity is `pxel-formula-0.8.0`; old persisted contexts require a new
   authorized calculation epoch. See ADR-055 and the common fixture corpus.
 
 - ABS takes one scalar; MOD takes two and follows the divisor sign. Blank is
@@ -90,8 +90,14 @@ Source provenance and documentation conflicts are retained in the corpus.
 - DATE/YEAR/MONTH/DAY use a trusted explicit calendar profile. DATE returns a
   numeric serial; fake 1900-02-29 and both 1900/1904 systems are covered by the
   common native/browser corpus. Workbooks currently use 1900; persisted system
-  selection, date-text parsing/formatting and NOW/TODAY remain separate work.
+  selection and date-text parsing/formatting remain separate work.
   See ADR-063 for normalization, bounds and serial-zero behavior.
+
+- NOW/TODAY/RAND read a trusted persisted EvaluationContext (ADR-065). No host
+  clock or mutable RNG is consulted. RAND uses versioned SHA-256 derivation with
+  document/epoch/stable cell/AST node/seed, returning 53-bit values in [0,1).
+  Missing or incompatible context is a typed error. Explicit epoch changes dirty
+  all formulas; automatic open/timer/dependency epoch triggers remain pending.
 
 Bounds: 32 KiB source, 4,096 AST nodes, AST depth 128 (parser call depth 256 to
 admit canonical parentheses), 255 call arguments, 100,000

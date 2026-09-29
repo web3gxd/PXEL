@@ -33,7 +33,7 @@ const previewContext = (
   utc_offset_minutes: 180,
   civil_day_since_unix_epoch: 1,
   random_seed: '01'.repeat(32),
-  engine_version: 'pxel-formula-0.7.0',
+  engine_version: 'pxel-formula-0.8.0',
   compatibility_profile: 'pxel-excel-subset-v1',
   reason: 'explicit',
 });
@@ -142,7 +142,7 @@ it('keeps draft WASM preview separate from authored and canonical state, then re
         document_id: documentId,
         input_version: request.data.input_version,
         pending_revision: request.data.pending_revision,
-        formula_engine_version: 'pxel-formula-0.7.0',
+        formula_engine_version: 'pxel-formula-0.8.0',
         compatibility_profile: 'pxel-excel-subset-v1',
         normalized_result_hash: 'a'.repeat(64),
         evaluated_cells: 1,
@@ -229,7 +229,7 @@ it('initializes every sheet once and addresses preview patches by the owning she
       document_id: documentId,
       input_version: '1',
       pending_revision: '0',
-      formula_engine_version: 'pxel-formula-0.7.0',
+      formula_engine_version: 'pxel-formula-0.8.0',
       compatibility_profile: 'pxel-excel-subset-v1',
       normalized_result_hash: 'a'.repeat(64),
       evaluated_cells: 1,
@@ -277,6 +277,48 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('retires a committed recalculation ID when a concurrent refresh supersedes hydration', async () => {
+    const { store } = await connectedStore();
+    const operationIds: string[] = [];
+    let release: (() => void) | undefined;
+    let firstGet = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, options?: RequestInit) => {
+        if (options?.method === 'POST') {
+          const body = JSON.parse(String(options.body)) as { operation_id: string };
+          operationIds.push(body.operation_id);
+          return {
+            ok: true,
+            json: async () => ({ operation_id: body.operation_id, committed_version: '2' }),
+          };
+        }
+        if (firstGet) {
+          firstGet = false;
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            ...projection(),
+            version: '2',
+            calculation_context: previewContext(uuidV7(), '1'),
+          }),
+        };
+      }),
+    );
+    const initial = store.recalculate();
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    await store.refresh(2n);
+    release?.();
+    await initial;
+    await store.recalculate();
+    expect(operationIds).toHaveLength(2);
+    expect(operationIds[1]).not.toBe(operationIds[0]);
+    store.dispose();
+  });
   it('retries uncertain epoch advancement with the same operation ID and waits for confirmed projection', async () => {
     const { store } = await connectedStore();
     const operationIds: string[] = [];
@@ -1505,7 +1547,7 @@ function calculation(
         documentId: uuidBytes(documentId),
         inputVersion: BigInt(version),
         calculationEpoch: 0n,
-        formulaEngineVersion: 'pxel-formula-0.7.0',
+        formulaEngineVersion: 'pxel-formula-0.8.0',
         compatibilityProfile: 'pxel-excel-subset-v1',
         contextId: uuidBytes(documentId),
         patchSequence: options.sequence ?? 0,

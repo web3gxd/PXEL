@@ -659,7 +659,7 @@ export class DocumentStore {
         bytesUuid(message.contextId) !==
           (this.projection.calculation_context?.context_id ?? this.projection.document_id) ||
         message.calculationEpoch !== BigInt(this.projection.calculation_context?.epoch ?? '0') ||
-        message.formulaEngineVersion !== 'pxel-formula-0.7.0' ||
+        message.formulaEngineVersion !== 'pxel-formula-0.8.0' ||
         message.compatibilityProfile !== formulaProfile ||
         !message.fullSnapshot ||
         bytes > 256 * 1024 ||
@@ -988,8 +988,10 @@ export class DocumentStore {
         !/^[1-9]\d*$/.test(receipt.committed_version)
       )
         throw new Error('Invalid calculation receipt');
-      if (!(await this.refresh(BigInt(receipt.committed_version)))) return;
+      // The validated receipt proves commit. A concurrent WebSocket resync can
+      // supersede this HTTP refresh, but must not reuse this ID for a new epoch.
       this.recalculationRequest = undefined;
+      if (!(await this.refresh(BigInt(receipt.committed_version)))) return;
     } catch {
       // Keep the request ID: a lost response may follow a durable system commit.
       this.error = 'Не удалось пересчитать таблицу. Повторите запрос.';

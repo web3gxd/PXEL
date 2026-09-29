@@ -127,6 +127,109 @@ fn engine_upgrade_requires_a_new_persisted_context() -> TestResult {
 }
 
 #[test]
+fn volatile_epoch_is_replayable_and_recalculates_all_formulas() -> TestResult {
+    use spreadsheet_formula::calculation::{COMPATIBILITY_PROFILE, ENGINE_VERSION};
+    let mut book = fixture(vec![], 1, 2)?;
+    let mut p = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    let context = |epoch: u64, timestamp: i64| {
+        CalculationContext::new(
+            CalculationContextId::from_bytes([epoch as u8; 16])?,
+            epoch,
+            timestamp,
+            0,
+            i32::try_from(timestamp.div_euclid(86400000))
+                .map_err(|_| DomainError::InvalidCalculationContext)?,
+            [7; 32],
+            ENGINE_VERSION.into(),
+            COMPATIBILITY_PROFILE.into(),
+            CalculationReason::Explicit,
+        )
+    };
+    edit(
+        &mut book,
+        &mut p,
+        Operation::AdvanceCalculationEpoch {
+            context: context(1, 0)?,
+        },
+    )?;
+    for (column, source) in [(0, "=RAND()"), (1, "=NOW()")] {
+        let op = formula(&book, address(0, column)?, source)?;
+        edit(&mut book, &mut p, op)?;
+    }
+    p.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    let before = p.results().clone();
+    edit(
+        &mut book,
+        &mut p,
+        Operation::AdvanceCalculationEpoch {
+            context: context(2, 86400000)?,
+        },
+    )?;
+    let patch = p.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(patch.evaluated_cells, 2);
+    assert_ne!(
+        p.results().get(&address(0, 0)?),
+        before.get(&address(0, 0)?)
+    );
+    assert_eq!(
+        p.results().get(&address(0, 1)?),
+        Some(&Value::Number(25570.0))
+    );
+    let again = p.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(again.evaluated_cells, 0);
+    let restored = Workbook::restore_snapshot(book.snapshot_image()?, book.hash())?;
+    let mut replay = CalculationProjection::from_workbook(&restored, CalculationLimits::default())?;
+    replay.calculate(
+        &restored,
+        CalculationLimits::default(),
+        &AtomicBool::new(false),
+    )?;
+    assert_eq!(replay.results(), p.results());
+    assert_eq!(replay.result_hash()?, p.result_hash()?);
+    // A context event and a formula replacement may be coalesced by the worker.
+    let epoch = Operation::AdvanceCalculationEpoch {
+        context: context(3, 172800000)?,
+    };
+    let epoch_book = book.candidate(&epoch, DocumentVersion::new(book.version().get() + 1)?)?;
+    let replacement = formula(&epoch_book, address(0, 0)?, "=RAND()+B1")?;
+    let latest = epoch_book.candidate(
+        &replacement,
+        DocumentVersion::new(epoch_book.version().get() + 1)?,
+    )?;
+    let changed = BTreeSet::from([address(0, 0)?]);
+    let previous_hash = p.result_hash()?;
+    assert!(
+        p.prepare_reconcile(
+            &latest,
+            &changed,
+            CalculationLimits {
+                graph_work: 0,
+                ..CalculationLimits::default()
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(p.result_hash()?, previous_hash);
+    assert_eq!(p.results(), replay.results());
+    let delta = p.prepare_reconcile(&latest, &changed, CalculationLimits::default())?;
+    p.apply(delta);
+    let calculated = p.calculate(
+        &latest,
+        CalculationLimits::default(),
+        &AtomicBool::new(false),
+    )?;
+    assert_eq!(calculated.evaluated_cells, 2);
+    assert_eq!(
+        p.results().get(&address(0, 1)?),
+        Some(&Value::Number(25571.0))
+    );
+    assert!(
+        matches!(p.results().get(&address(0,0)?),Some(Value::Number(n)) if (25571.0..25572.0).contains(n))
+    );
+    Ok(())
+}
+
+#[test]
 fn ten_thousand_chain_evaluates_real_values_without_recursing_the_graph() -> TestResult {
     let mut cells = vec![(address(0, 0)?, CellContent::Value(CellValue::Number(1.0)))];
     for row in 1..=10000 {

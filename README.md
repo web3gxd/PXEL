@@ -9,8 +9,8 @@ reload/restart. Формулы сохраняются как source и серв�
 передавая cell patches после начальной загрузки. CalculationContext теперь
 записывается отдельным системным событием и восстанавливается из журнала;
 полный контекст теперь передаётся через авторизованную HTTP-проекцию в WASM
-Worker (schema3). `RAND`/`NOW`/`TODAY` ещё не включены: транспорт контекста
-проверен, evaluator и volatile triggers относятся к следующему срезу.
+Worker (schema3). `RAND`/`NOW`/`TODAY` используют этот сохранённый контекст:
+для начала нажмите «Пересчитать». Автоматические volatile triggers ещё впереди.
 Две открытые вкладки получают подтвержденные события по WebSocket. При
 переподключении сервер воспроизводит из PostgreSQL до 128 операций по порядку,
 фиксирует `ReplayComplete` и затем доставляет новые версии. Больший разрыв или
@@ -65,9 +65,10 @@ PXEL_DEV_AUTH=1 cargo run --locked -q -p pxel-server --features dev-auth -- xlsx
 
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Поддержаны AND/OR/NOT с диапазонами и typed resource limits. Текущий engine
-identity — `pxel-formula-0.7.0`; доступны DATE/YEAR/MONTH/DAY в календарном
+identity — `pxel-formula-0.8.0`; доступны DATE/YEAR/MONTH/DAY в календарном
 профиле ADR-063 (книги редактора используют 1900; чистый evaluator проверен также
-для 1904; NOW/TODAY и выбор системы книги ещё впереди).
+для 1904; выбор системы книги ещё впереди). NOW/TODAY/RAND работают в явно
+сохранённом epoch по ADR-065; новое «Пересчитать» записывает следующий epoch.
 Доступны CONCAT/LEFT/RIGHT/MID/LEN/TRIM/LOWER/UPPER
 в Unicode profile по ADR-062; POWER и `^` принимают дробные степени по ADR-061;
 доступны ROUND/ROUNDUP/ROUNDDOWN в ограниченном

@@ -16,7 +16,7 @@ use std::{
 };
 use thiserror::Error;
 
-pub const ENGINE_VERSION: &str = "pxel-formula-0.7.0";
+pub const ENGINE_VERSION: &str = "pxel-formula-0.8.0";
 pub const COMPATIBILITY_PROFILE: &str = "pxel-excel-subset-v1";
 
 #[derive(Clone, Copy, Debug)]
@@ -403,7 +403,13 @@ impl CalculationProjection {
             replacement = Some(next);
         }
         let structure = replacement.as_ref().unwrap_or(&self.structure);
-        let dirty = structure.dirty(book, changed.iter().copied(), &mut work)?;
+        let mut dirty = structure.dirty(book, changed.iter().copied(), &mut work)?;
+        // A persisted epoch changes evaluation inputs even without cell edits.
+        // Reconciliation may coalesce the system event with subsequent edits.
+        if self.context.as_ref() != book.calculation_context() {
+            charge(&mut work, structure.dependencies.len())?;
+            dirty.extend(structure.dependencies.keys().copied());
+        }
         Ok(CalculationDelta {
             version: book.version(),
             context: book.calculation_context().cloned(),

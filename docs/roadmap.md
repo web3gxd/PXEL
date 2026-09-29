@@ -385,3 +385,5 @@ domain3/stateful9/frontend82 tests, native/browser1003books/2006patches,
 real context/reload/lostACK DPR1/2. Исправлен прежний leak HTTP formula display
 metadata в strict Worker DTO. NOW/TODAY/RAND evaluator и автоматические
 volatile triggers ещё открыты; wire/storage schemas не менялись.
+
+ADR-065 включает deterministic NOW/TODAY/RAND в engine0.8.0 через explicit durable epoch. Native boundary/resource/golden tests, snapshot restoration, stateful native/browser parity и live PostgreSQL/reload/preview проверяются. Следующий обязательный срез — bounded/coalesced automatic epoch admission при open/volatile changes и timer только для volatile consumers. Общие MVP gates остаются открыты.

@@ -17,7 +17,7 @@ fn year_start(year: i64) -> Option<i64> {
         .checked_sub(y.div_euclid(100))?
         .checked_add(y.div_euclid(400))
 }
-fn maximum(system: DateSystem) -> i64 {
+pub(crate) fn maximum(system: DateSystem) -> i64 {
     match system {
         DateSystem::Excel1900 => 2958465,
         DateSystem::Excel1904 => 2957003,

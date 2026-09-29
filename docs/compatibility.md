@@ -23,7 +23,8 @@ DATE/YEAR/MONTH/DAY — partially supported по ADR-063: numeric serials,
 Gregorian1900/1904 и fake1900-02-29, bounded normalization. Shared corpus337
 проверен native/browser с обоими профилями, но текущая durable workbook model
 использует1900. Workbook date-system metadata/import, locale date text/number
-formatting и manual Excel goldens ещё открыты; NOW/TODAY пока не включены.
+formatting и manual Excel goldens ещё открыты; NOW/TODAY включены только
+с persisted explicit context по ADR-065.
 
 ## XLSX profile: phase 6
 
@@ -62,3 +63,5 @@ Malware scanning interface добавляется с upload flow; он не тр
 Wire compatibility: additive optional fields, reserved retired tags, explicit capability/major gates; unknown operation не применяется частично. Durable events имеют отдельные schema versions/read migrations. XLSX golden corpus хранит source provenance, license и ожидаемый compatibility report. Fixtures с реальными персональными данными не коммитятся.
 
 Round-trip acceptance: supported workbook import → edit → export → import сохраняет поддержанные values/formulas/styles и сообщает об отличиях. Нельзя назвать функцию Excel-compatible на основании одной интуитивной формулы или отсутствия panic.
+
+ADR-065: NOW/TODAY/RAND — Partially supported: persisted explicit epoch, native/WASM convergence, numeric serial без автоматического date formatting. Перед первым использованием нужно «Пересчитать»; automatic open/timer/dependency triggers и ручные Excel goldens остаются открыты. RAND sequence является собственным deterministic profile, не Excel RNG parity.

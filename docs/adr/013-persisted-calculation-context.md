@@ -81,3 +81,5 @@ clock. Timer scheduling is needed only while a workbook has volatile consumers.
 
 The first implementation slice should persist and replay the context with
 these invariants before enabling volatile functions or timer triggers.
+
+Update2026-09-30 ADR-065: explicit-epoch NOW/TODAY/RAND evaluator реализован; смена контекста dirty-all с budget, native snapshot restoration сохраняет calculated hash. Automatic open/timer/dependency admission и общая production snapshot/recovery matrix остаются открыты.

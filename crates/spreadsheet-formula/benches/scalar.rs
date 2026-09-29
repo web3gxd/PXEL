@@ -18,6 +18,10 @@ impl ReferenceResolver for Range {
     }
 }
 fn benchmarks(c: &mut Criterion) {
+    if volatile_benchmarks(c).is_err() {
+        eprintln!("invalid volatile benchmark fixture");
+        std::process::exit(1);
+    }
     for (name, source, expected) in [
         ("ABS_scalar", "=ABS(-123.5)", Value::Number(123.5)),
         ("DATE_scalar", "=DATE(2000,1,1)", Value::Number(36526.0)),
@@ -122,6 +126,62 @@ fn benchmarks(c: &mut Criterion) {
     c.bench_function("parse_scalar_if", |b| {
         b.iter(|| black_box(parse(black_box("=IF(A1>0,SUM($B$1:B100),-2^2)"))))
     });
+}
+fn volatile_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>> {
+    use spreadsheet_domain::workbook::*;
+    use std::collections::BTreeMap;
+    let cell = CellAddress {
+        sheet: SheetId::from_bytes([1; 16])?,
+        row: RowId::from_bytes([2; 16])?,
+        column: ColumnId::from_bytes([5; 16])?,
+    };
+    let context = CalculationContext::new(
+        CalculationContextId::from_bytes([6; 16])?,
+        1,
+        86400000,
+        180,
+        1,
+        [7; 32],
+        calculation::ENGINE_VERSION.into(),
+        calculation::COMPATIBILITY_PROFILE.into(),
+        CalculationReason::Explicit,
+    )?;
+    let book = Workbook::hydrate_sheets_with_context(
+        DocumentId::from_bytes([3; 16])?,
+        DocumentVersion::new(3)?,
+        [SheetSeed {
+            id: cell.sheet,
+            name: "Sheet1".into(),
+            rows: vec![cell.row],
+            columns: vec![cell.column],
+        }],
+        [],
+        context,
+    )?;
+    let cache = BTreeMap::new();
+    for (name, source, expected) in [
+        ("volatile_TODAY", "=TODAY()", 25570.0),
+        ("volatile_NOW", "=NOW()", 25570.125),
+        ("volatile_RAND", "=RAND()", 0.8435600626462038),
+    ] {
+        let formula = binder::bind(source, &book, cell)?;
+        if bound::evaluate_bound(&formula, &book, &cache, &mut EvaluationBudget::default())?
+            != Value::Number(expected)
+        {
+            return Err("invalid volatile expected result".into());
+        }
+        c.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(bound::evaluate_bound(
+                    black_box(&formula),
+                    &book,
+                    &cache,
+                    &mut EvaluationBudget::default(),
+                ))
+            })
+        });
+    }
+    Ok(())
 }
 criterion_group!(scalar, benchmarks);
 criterion_main!(scalar);

@@ -279,6 +279,8 @@ fn valid_result(value: &Value) -> bool {
     true
 }
 struct ProjectionResolver<'a> {
+    workbook: &'a Workbook,
+    origin: CellAddress,
     sheets: BTreeMap<String, &'a Sheet>,
     results: &'a BTreeMap<CellAddress, Value>,
     overlay: &'a BTreeMap<CellAddress, Value>,
@@ -321,6 +323,15 @@ impl ProjectionResolver<'_> {
     }
 }
 impl ReferenceResolver for ProjectionResolver<'_> {
+    fn evaluation_context(&self) -> Option<crate::EvaluationContext<'_>> {
+        self.workbook
+            .calculation_context()
+            .map(|calculation| crate::EvaluationContext {
+                calculation,
+                document_id: self.workbook.document_id(),
+                formula_cell: self.origin,
+            })
+    }
     fn resolve_cell(&self, r: &syntax::CellReference) -> Value {
         let Some(sheet) = r.sheet.as_ref().and_then(|key| self.sheets.get(key)) else {
             return Value::Error(syntax::FormulaError::Ref);
@@ -375,6 +386,8 @@ pub fn evaluate_bound_with_overlay(
     }
     let ast = project(formula, workbook)?;
     let resolver = ProjectionResolver {
+        workbook,
+        origin: formula.origin(),
         sheets: workbook
             .sheets()
             .iter()

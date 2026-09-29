@@ -2,6 +2,45 @@ import { expect, test } from '@playwright/test';
 import { fromBinary } from '@bufbuild/protobuf';
 import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
 
+test('volatile RAND preview stays separate and durable epoch survives reload', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await page.getByTestId('recalculate').click();
+  const id = new URL(page.url()).searchParams.get('document');
+  const state = async () => (await page.request.get(`/api/documents/${id}`)).json();
+  await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('1');
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  const active = page.getByTestId('active-cell');
+  await bar.fill('=RAND()');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await expect(active).toHaveText(/^A1: 0\./);
+  const first = await active.textContent();
+  const number = Number(first?.slice(4));
+  expect(number).toBeGreaterThanOrEqual(0);
+  expect(number).toBeLessThan(1);
+  await bar.fill('=RAND()+1');
+  await expect.poll(async () => Number((await active.textContent())?.slice(4))).toBe(number + 1);
+  await expect(page.getByTestId('calculation-preview')).toContainText('не подтверждено');
+  expect((await state()).version).toBe('3');
+  await bar.press('Escape');
+  await expect(active).toHaveText(first!);
+  await page.getByTestId('recalculate').click();
+  await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('2');
+  await expect(active).not.toHaveText(first!);
+  await expect(active).toHaveText(/^A1: 0\./);
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+  const second = await active.textContent();
+  await page.reload();
+  await expect(active).toHaveText(second!);
+  await expect(bar).toHaveValue('=RAND()');
+  expect((await state()).calculation_context.epoch).toBe('2');
+});
+
 for (const scenario of [
   {
     name: 'calendar date functions',
@@ -94,6 +133,9 @@ test('ABS and MOD update a referenced input and survive reload', async ({ page }
   await bar.press('Enter');
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await page.reload();
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(page.getByTestId('active-cell')).toHaveText('A1: 4');
   await grid.focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.getByTestId('active-cell')).toHaveText('B1: 0');

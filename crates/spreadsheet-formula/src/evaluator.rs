@@ -51,6 +51,10 @@ impl EvaluationBudget {
 /// Trusted adapter must visit all addressed cells in row-major order, including
 /// Blank cells, and immediately propagate visitor errors without more work.
 pub trait ReferenceResolver {
+    /// Persisted calculation inputs supplied by a trusted workbook adapter.
+    fn evaluation_context(&self) -> Option<crate::EvaluationContext<'_>> {
+        None
+    }
     /// Calendar profile supplied by the trusted adapter, never the host locale.
     fn date_system(&self) -> DateSystem {
         DateSystem::Excel1900
@@ -196,6 +200,8 @@ pub(crate) fn eval(
                 "CONCAT" | "LEFT" | "RIGHT" | "MID" | "LEN" | "TRIM" | "LOWER" | "UPPER"
             ) {
                 crate::text::call(ast, name, arguments, resolver, budget, depth + 1)?
+            } else if matches!(name.as_str(), "NOW" | "TODAY" | "RAND") {
+                crate::volatile::call(name, arguments, id, resolver, budget)?
             } else if matches!(name.as_str(), "DATE" | "YEAR" | "MONTH" | "DAY") {
                 crate::calendar::call(ast, name, arguments, resolver, budget, depth + 1)?
             } else if name == "IF" {

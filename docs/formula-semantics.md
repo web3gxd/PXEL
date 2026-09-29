@@ -107,7 +107,8 @@ serial0 YEAR1900/MONTH1/DAY0. Fractional arguments усекаются; month/day
 resource failures не скрываются IFERROR. Общие337 fixtures включают53 calendar
 cases с обоими системами; manual Excel verification не заявлена. Текущие книги
 редактора используют1900. Durable выбор1904, locale date parsing/formatting и
-NOW/TODAY с persisted injected context остаются следующими срезами.
+NOW/TODAY с persisted injected context реализованы в ADR-065; их automatic
+epoch triggers остаются следующим срезом.
 
 Forward/reverse direct edges, range nodes и reverse range index: сначала row intervals per sheet с column filtering, без полного scan всех ranges при каждом edit. Maximum 100 000 addressed cells/range, 256 range dependencies/formula и 1 000 000 deterministic work units/job. Подтверждение разумности caps — benchmark фазы 2.
 
@@ -161,3 +162,5 @@ Relative column copy offsets are recomputed from the new axes. Authored
 source/canonical text is retained; `current_text` reflects the transformed
 bound AST. Native replay and browser display are verified, while full Excel
 range parity remains outside the current profile. See ADR-024.
+
+ADR-065: engine0.8.0 включает NOW/TODAY/RAND только в сохранённом explicit epoch. NOW/TODAY возвращают numeric serial с fixed offset, RAND — 53-bit SHA256 derivation по document/epoch/stable cell/AST node/seed. Missing context — typed error, не host clock fallback. Смена контекста помечает все formulas dirty с graph budget. Automatic open/timer/dependency admission ещё не реализован; legacy context требует нового «Пересчитать».

@@ -152,7 +152,7 @@ const contextTemplate = {
   utc_offset_minutes: 180,
   civil_day_since_unix_epoch: 1,
   random_seed: '01'.repeat(32),
-  engine_version: 'pxel-formula-0.7.0',
+  engine_version: 'pxel-formula-0.8.0',
   compatibility_profile: 'pxel-excel-subset-v1',
   reason: 'explicit',
 };
@@ -160,6 +160,62 @@ for (const request of [requests[0], requests.at(-1)]) {
   requests.push({
     ...request,
     init: { ...request.init, schema_version: 3, calculation_context: contextTemplate },
+  });
+}
+const volatileExpectations = [];
+const repeatedId = (byte) => {
+  const hex = byte.toString(16).padStart(2, '0').repeat(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+for (const [source, value] of [
+  ['=TODAY()', { type: 'number', value: 25570 }],
+  ['=NOW()', { type: 'number', value: 25570.125 }],
+  ['=RAND()', { type: 'number', value: 0.8435600626462038 }],
+  ['=RAND()+A1*0', { type: 'number', value: 0.8435600626462038 }],
+  ['=RAND()=RAND()', { type: 'boolean', value: false }],
+  ['=IF(FALSE,RAND(),7)', { type: 'number', value: 7 }],
+  ['=RAND(1)', { type: 'error', value: '#VALUE!' }],
+]) {
+  const document = repeatedId(3),
+    sheet = repeatedId(1),
+    row = repeatedId(2),
+    a = repeatedId(4),
+    b = repeatedId(5);
+  const mutation = (revision, value) => ({
+    schema_version: 1,
+    document_id: document,
+    expected_input_version: '3',
+    input_version: '3',
+    expected_pending_revision: String(revision - 1),
+    pending_revision: String(revision),
+    cells: [{ sheet_id: sheet, row_id: row, column_id: a, value: { type: 'number', value } }],
+  });
+  volatileExpectations.push({ index: requests.length, value, source });
+  requests.push({
+    init: {
+      schema_version: 3,
+      document_id: document,
+      input_version: '3',
+      pending_revision: '0',
+      calculation_context: {
+        ...contextTemplate,
+        context_id: repeatedId(6),
+        random_seed: '07'.repeat(32),
+      },
+      sheets: [
+        {
+          id: sheet,
+          name: 'Sheet1',
+          rows: [row],
+          columns: [a, b],
+          cells: [
+            { row_id: row, column_id: a, value: { type: 'number', value: 0 } },
+            { row_id: row, column_id: b, value: { type: 'formula', value: { source } } },
+          ],
+        },
+      ],
+    },
+    patches: [mutation(1, 1), mutation(2, 0)],
   });
 }
 const input = JSON.stringify(requests);
@@ -180,6 +236,13 @@ const native = spawnSync(
 if (native.error || native.status !== 0)
   throw new Error(`Native stateful runner failed: ${native.stderr}`);
 const expected = JSON.parse(native.stdout);
+for (const fixture of volatileExpectations) {
+  assert.deepEqual(
+    expected[fixture.index][0].results[0].value,
+    fixture.value,
+    `Volatile expected fixture ${fixture.source}`,
+  );
+}
 assert.equal(expected.length, requests.length);
 for (const outputs of expected) {
   assert.equal(outputs.length, 3);
