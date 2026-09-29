@@ -20,6 +20,9 @@ stateful parity 1001 книг/2002 patches включает логические
 PostgreSQL/WebSocket test подтверждает изменение boolean результата после
 правки входа и persisted epoch. [Замер](benchmarks/2026-09-29-logical-ranges-local.md)
 100k диапазонов относится к чистому evaluator; manual Excel parity открыта.
+UI-действие «Пересчитать» по [ADR-056](adr/056-explicit-recalculation-ui.md)
+доступно без pending commands и сохраняет ID при неопределённом HTTP-результате.
+Browser fault test подтвердил одну durable epoch после response loss/retry.
 
 Фаза 3 идёт отдельными срезами: bounded PostgreSQL replay/barrier (ADR-015),
 durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалённым

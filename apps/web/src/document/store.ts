@@ -364,6 +364,7 @@ export class DocumentStore {
   error = '';
   loading = false;
   exporting = false;
+  recalculating = false;
   calculated = new Map<string, CalculatedValue>();
   calculatedVersion: string | undefined;
   calculationStatus: 'idle' | 'pending' | 'complete' | 'failed' = 'idle';
@@ -388,6 +389,7 @@ export class DocumentStore {
   private connectionGeneration = 0;
   private syncing = false;
   private creation: { document_id: string; operation_id: string } | undefined;
+  private recalculationRequest: { document_id: string; operation_id: string } | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -923,6 +925,51 @@ export class DocumentStore {
       this.error = error instanceof Error ? error.message : 'Не удалось создать таблицу';
     } finally {
       this.loading = false;
+      this.notify();
+    }
+  }
+  async recalculate() {
+    const id = this.projection?.document_id;
+    if (!id || !this.sender || this.recalculating || this.pending.length) return;
+    if (this.recalculationRequest?.document_id !== id)
+      this.recalculationRequest = { document_id: id, operation_id: uuidV7() };
+    const request = this.recalculationRequest;
+    this.recalculating = true;
+    this.error = '';
+    this.notify();
+    try {
+      const response = await fetch(`/api/documents/${encodeURIComponent(id)}/recalculate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operation_id: request.operation_id }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) {
+        this.error =
+          response.status === 403
+            ? 'Нет права пересчитывать эту таблицу.'
+            : 'Не удалось пересчитать таблицу. Повторите запрос.';
+        return;
+      }
+      const receipt = (await response.json()) as {
+        operation_id?: unknown;
+        committed_version?: unknown;
+      };
+      if (
+        !receipt ||
+        typeof receipt !== 'object' ||
+        receipt.operation_id !== request.operation_id ||
+        typeof receipt.committed_version !== 'string' ||
+        !/^[1-9]\d*$/.test(receipt.committed_version)
+      )
+        throw new Error('Invalid calculation receipt');
+      if (!(await this.refresh(BigInt(receipt.committed_version)))) return;
+      this.recalculationRequest = undefined;
+    } catch {
+      // Keep the request ID: a lost response may follow a durable system commit.
+      this.error = 'Не удалось пересчитать таблицу. Повторите запрос.';
+    } finally {
+      this.recalculating = false;
       this.notify();
     }
   }

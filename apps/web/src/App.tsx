@@ -100,6 +100,21 @@ export function App() {
             <button
               type="button"
               className="insert-row-action"
+              data-testid="recalculate"
+              disabled={
+                !document.sheet ||
+                state.kind !== 'online' ||
+                document.recalculating ||
+                document.pending.length > 0
+              }
+              title="Пересчитать подтверждённую версию книги"
+              onClick={() => void document.recalculate()}
+            >
+              {document.recalculating ? 'Пересчитываем…' : 'Пересчитать'}
+            </button>
+            <button
+              type="button"
+              className="insert-row-action"
               data-testid="export-xlsx"
               disabled={
                 !document.sheet ||

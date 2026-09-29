@@ -18,4 +18,4 @@ Bump calculation engine identity from `pxel-formula-0.1.0` to `pxel-formula-0.2.
 
 ## Verification and consequences
 
-Use the common fixture corpus for native/browser outputs and hashes, bounded scalar and resolver tests, live PostgreSQL command/recalculation tests, and real 100k-range Criterion benchmarks. No formula-source or cell-value logging is added. No runtime dependency is added. A UI action for explicit epoch advancement and automated upgrade orchestration remain separate work; local operators can use the existing HTTP endpoint. The phase-2 broader math/text/date/lookup profile and manual Excel verification remain open.
+Use the common fixture corpus for native/browser outputs and hashes, bounded scalar and resolver tests, live PostgreSQL command/recalculation tests, and real 100k-range Criterion benchmarks. No formula-source or cell-value logging is added. No runtime dependency is added. [ADR-056](056-explicit-recalculation-ui.md) subsequently adds the UI action for explicit epoch advancement; automated upgrade orchestration remains separate work. The phase-2 broader math/text/date/lookup profile and manual Excel verification remain open.

@@ -64,8 +64,10 @@ PXEL_DEV_AUTH=1 cargo run --locked -q -p pxel-server --features dev-auth -- xlsx
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Поддержаны AND/OR/NOT с диапазонами и typed resource limits. Текущий engine
 identity — `pxel-formula-0.2.0`; старый явно сохранённый CalculationContext
-требует авторизованного `POST /api/documents/{id}/recalculate` с новым
-`operation_id`, чтобы получить следующий durable epoch без переписывания журнала.
+требует действия «Пересчитать» в меню или авторизованного
+`POST /api/documents/{id}/recalculate` с новым `operation_id`, чтобы получить
+следующий durable epoch без переписывания журнала. Повтор кнопки после потери
+HTTP-ответа использует прежний ID до получения подтверждённой версии.
 Нужны wasm32 target, wasm-bindgen-cli **0.2.129** и установленный Playwright Chromium.
 Команда собирает WASM из исходников; generated binaries не хранятся в Git.
 

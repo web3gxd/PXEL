@@ -234,6 +234,62 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('retries uncertain epoch advancement with the same operation ID and waits for confirmed projection', async () => {
+    const { store } = await connectedStore();
+    const operationIds: string[] = [];
+    let failed = false;
+    const fetchMock = vi.fn(async (_url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') {
+        const body = JSON.parse(String(options.body)) as { operation_id: string };
+        operationIds.push(body.operation_id);
+        if (!failed) {
+          failed = true;
+          throw new Error('Network response lost');
+        }
+        return {
+          ok: true,
+          json: async () => ({ operation_id: body.operation_id, committed_version: '2' }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          ...projection(),
+          version: '2',
+          calculation_context: { context_id: uuidV7(), epoch: '1' },
+        }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await store.recalculate();
+    expect(store.projection?.version).toBe('1');
+    expect(store.recalculating).toBe(false);
+    expect(store.error).not.toBe('');
+    await store.recalculate();
+    expect(operationIds).toHaveLength(2);
+    expect(operationIds[1]).toBe(operationIds[0]);
+    expect(store.projection?.version).toBe('2');
+    expect(store.projection?.calculation_context?.epoch).toBe('1');
+    expect(store.error).toBe('');
+    await store.recalculate();
+    expect(operationIds[2]).not.toBe(operationIds[1]);
+    store.dispose();
+  });
+
+  it('does not advance an epoch with pending cell commands or after a permission refusal', async () => {
+    const { store } = await connectedStore();
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 403 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await store.recalculate();
+    expect(store.error).toContain('Нет права');
+    expect(store.projection?.version).toBe('1');
+    store.begin('7');
+    store.commit();
+    await store.recalculate();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    store.dispose();
+  });
+
   it('sends a bounded stable-ID AddSheet and selects it only after canonical commit', async () => {
     const { store, sent } = await connectedStore();
     expect(store.addSheet()).toBe(true);

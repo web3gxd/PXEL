@@ -36,6 +36,46 @@ test('owner downloads the confirmed scalar workbook as XLSX', async ({ page }) =
   await expect(page.getByTestId('export-xlsx')).toBeEnabled();
 });
 
+test('recalculate retries a lost HTTP response without committing a second epoch', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('=AND(TRUE,TRUE)');
+  await bar.press('Enter');
+  const id = new URL(page.url()).searchParams.get('document');
+  const state = async () => (await page.request.get(`/api/documents/${id}`)).json();
+  await expect.poll(async () => (await state()).version).toBe('2');
+  const requests: string[] = [];
+  await page.route('**/api/documents/*/recalculate', async (route) => {
+    requests.push((route.request().postDataJSON() as { operation_id: string }).operation_id);
+    if (requests.length === 1) {
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      await route.abort('failed');
+    } else {
+      await route.continue();
+    }
+  });
+  const button = page.getByTestId('recalculate');
+  await button.click();
+  await expect.poll(async () => (await state()).version).toBe('3');
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expect.poll(() => requests.length).toBe(2);
+  await expect(button).toBeEnabled();
+  expect(requests[1]).toBe(requests[0]);
+  const confirmed = await state();
+  expect(confirmed.version).toBe('3');
+  expect(confirmed.calculation_context.epoch).toBe('1');
+  await page.reload();
+  await expect(bar).toHaveValue('=AND(TRUE,TRUE)');
+  await expect(page.getByTestId('active-cell')).toHaveText('A1: TRUE');
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+});
+
 test('logical formula recalculates after editing its input and survives reload', async ({
   page,
 }) => {
