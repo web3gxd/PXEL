@@ -42,6 +42,13 @@ stable IDs должны быть живыми и уникальными; пос�
 domain hash. Матрица ниже задаёт целевой контракт полного набора операций;
 inverse/undo для `DeleteRows` в текущем срезе ещё нет.
 
+`InsertColumns` (ADR-023) использует stable column anchor и отдельное
+schema-8 событие. Конкурентные вставки перед одним anchor следуют server
+commit order; target IDs формул не меняются. Relative column offsets и
+отображаемый A1-текст пересчитываются в candidate до CAS. Stale new formula
+после изменения оси по-прежнему требует resync. Column deletion и inverse
+остаются планом из матрицы, а не реализованной функцией.
+
 ## Command, validation, event, projection
 
 Command — намерение клиента: protocol_version, operation_id (UUIDv7), document_id, actor_id, base_version, client_sequence, client_instance_id, typed payload. Server AuthContext является authority; actor_id проверяется на совпадение, не дает права. ValidatedOperation — проверенное и нормализованное действие. CommittedEvent — неизменяемый durable факт с document version и schema version. Projection — восстанавливаемое состояние, не транспортный DTO.

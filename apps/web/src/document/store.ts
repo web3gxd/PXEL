@@ -78,7 +78,14 @@ type PendingDeletion = {
   bytes: Uint8Array;
   attempts: number;
 };
-type Pending = PendingCell | PendingExtension | PendingInsertion | PendingDeletion;
+type PendingColumnInsertion = {
+  kind: 'insertColumns';
+  id: string;
+  bytes: Uint8Array;
+  attempts: number;
+};
+type Pending =
+  PendingCell | PendingExtension | PendingInsertion | PendingDeletion | PendingColumnInsertion;
 export function uuidBytes(id: string) {
   return Uint8Array.from(id.replaceAll('-', '').match(/../g) ?? [], (pair) => parseInt(pair, 16));
 }
@@ -989,6 +996,52 @@ export class DocumentStore {
     this.flush();
     return true;
   }
+  insertColumnBeforeSelection() {
+    const sheet = this.sheet,
+      projection = this.projection,
+      actor = this.actor;
+    const before = sheet?.columns[this.selected.column];
+    if (
+      !sheet ||
+      !projection ||
+      !actor ||
+      !before ||
+      sheet.columns.length >= 1_000 ||
+      this.pending.some((pending) => pending.kind === 'insertColumns') ||
+      this.pending.length >= 128
+    )
+      return false;
+    const id = uuidV7();
+    const message = create(ClientEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'command',
+        value: {
+          operationId: uuidBytes(id),
+          documentId: uuidBytes(projection.document_id),
+          actorId: actor,
+          baseVersion: BigInt(projection.version),
+          clientSequence: ++this.sequence,
+          operation: {
+            kind: {
+              case: 'insertColumns',
+              value: {
+                sheetId: uuidBytes(sheet.id),
+                beforeColumnId: uuidBytes(before),
+                columns: [uuidBytes(uuidV7())],
+              },
+            },
+          },
+        },
+      },
+    });
+    const bytes = toBinary(ClientEnvelopeSchema, message);
+    if (bytes.byteLength > 1_048_576) return false;
+    this.pending.push({ kind: 'insertColumns', id, bytes, attempts: 0 });
+    this.notify();
+    this.flush();
+    return true;
+  }
   deleteSelectedRow() {
     const sheet = this.sheet,
       projection = this.projection,
@@ -1056,7 +1109,8 @@ export class DocumentStore {
     if (
       operation.kind.case === 'extendRows' ||
       operation.kind.case === 'insertRows' ||
-      operation.kind.case === 'deleteRows'
+      operation.kind.case === 'deleteRows' ||
+      operation.kind.case === 'insertColumns'
     )
       throw new Error('Structural operation requires a canonical projection refresh');
     const entry = operation.kind.value;
@@ -1199,7 +1253,8 @@ export class DocumentStore {
           hint.headVersion === BigInt(this.projection.version) + 1n &&
           event.canonicalOperation?.kind.case !== 'extendRows' &&
           event.canonicalOperation?.kind.case !== 'insertRows' &&
-          event.canonicalOperation?.kind.case !== 'deleteRows'
+          event.canonicalOperation?.kind.case !== 'deleteRows' &&
+          event.canonicalOperation?.kind.case !== 'insertColumns'
         ) {
           if (
             event.documentId.length !== 16 ||
@@ -1264,7 +1319,8 @@ export class DocumentStore {
         payload.value.canonicalOperation &&
         payload.value.canonicalOperation.kind.case !== 'extendRows' &&
         payload.value.canonicalOperation.kind.case !== 'insertRows' &&
-        payload.value.canonicalOperation.kind.case !== 'deleteRows'
+        payload.value.canonicalOperation.kind.case !== 'deleteRows' &&
+        payload.value.canonicalOperation.kind.case !== 'insertColumns'
       ) {
         if (payload.value.confirmedStateHash.length !== 32) throw new Error('Invalid state hash');
         this.apply(payload.value.canonicalOperation);

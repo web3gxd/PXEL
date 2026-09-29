@@ -9,6 +9,7 @@ import {
   createDocument,
   deleteRowsCommand,
   extendRowsCommand,
+  insertColumnsCommand,
   insertRowsCommand,
   formulaCommand,
   calculation,
@@ -300,6 +301,88 @@ test('row insertion uses stable anchors, server order and rebases formulas', asy
     const calculated = await calculation(base, cookie, snapshot.document_id, 7);
     assert.equal(calculated.status, 'complete');
     assert.deepEqual(calculated.values[0].value, { type: 'number', value: 100 });
+  } finally {
+    left.socket.close();
+    right.socket.close();
+  }
+});
+
+test('column insertion preserves bound formula targets and survives durable replay', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 17, { sequence: 1 }))).case,
+      'committed',
+    );
+    const formula = await client.send(
+      formulaCommand(client, { ...snapshot, version: '2' }, '=A1', {
+        column: 1,
+        sequence: 2,
+      }),
+    );
+    assert.equal(formula.case, 'committed');
+    const newColumn = uuid7();
+    const command = insertColumnsCommand(
+      client,
+      { ...snapshot, version: '3' },
+      snapshot.sheets[0].columns[0],
+      [newColumn],
+      { sequence: 3 },
+    );
+    const inserted = await client.send(command);
+    assert.equal(inserted.case, 'committed');
+    assert.equal(inserted.value.committedVersion, 4n);
+    const current = await getDocument(base, cookie, snapshot.document_id);
+    assert.deepEqual(current.sheets[0].columns.slice(0, 3), [
+      newColumn,
+      snapshot.sheets[0].columns[0],
+      snapshot.sheets[0].columns[1],
+    ]);
+    assert.equal(
+      current.sheets[0].cells.find((cell) => cell.value.type === 'formula')?.value.value
+        .current_text,
+      '=B1',
+    );
+    assert.equal(
+      current.sheets[0].cells.find((cell) => cell.value.type === 'formula')?.column_id,
+      snapshot.sheets[0].columns[1],
+    );
+    const calculated = await calculation(base, cookie, snapshot.document_id, 4);
+    assert.deepEqual(calculated.values[0].value, { type: 'number', value: 17 });
+    const retry = await client.send(command);
+    assert.equal(retry.case, 'receipt');
+    assert.equal(retry.value.committedVersion, 4n);
+  } finally {
+    client.socket.close();
+  }
+});
+
+test('concurrent column inserts before one stable anchor follow server order', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const left = await connect(base, cookie);
+  const right = await connect(base, cookie);
+  try {
+    const anchor = snapshot.sheets[0].columns[0];
+    const leftId = uuid7();
+    const rightId = uuid7();
+    const [first, second] = await Promise.all([
+      left.send(insertColumnsCommand(left, snapshot, anchor, [leftId])),
+      right.send(insertColumnsCommand(right, snapshot, anchor, [rightId])),
+    ]);
+    assert.equal(first.case, 'committed');
+    assert.equal(second.case, 'committed');
+    assert.deepEqual(
+      [first.value.committedVersion, second.value.committedVersion].sort((a, b) => Number(a - b)),
+      [2n, 3n],
+    );
+    const earlier = first.value.committedVersion === 2n ? leftId : rightId;
+    const later = first.value.committedVersion === 3n ? leftId : rightId;
+    const current = await getDocument(base, cookie, snapshot.document_id);
+    assert.deepEqual(current.sheets[0].columns.slice(0, 3), [earlier, later, anchor]);
+    assert.equal(current.version, '3');
   } finally {
     left.socket.close();
     right.socket.close();

@@ -13,6 +13,7 @@ import {
   createDocument,
   deleteRowsCommand,
   extendRowsCommand,
+  insertColumnsCommand,
   insertRowsCommand,
   getDocument,
   login,
@@ -208,6 +209,38 @@ test(
         assert.equal(
           deletedRecovery.state_hash,
           Buffer.from(deletion.value.confirmedStateHash).toString('hex'),
+        );
+        const { snapshot: columnBase } = await createDocument(base, cookie);
+        const columnWriter = await connect(base, cookie);
+        const formulaBeforeColumn = await columnWriter.send(
+          formulaCommand(columnWriter, columnBase, '=A1', { column: 1, sequence: 1 }),
+        );
+        assert.equal(formulaBeforeColumn.case, 'committed');
+        const insertedColumn = uuid7();
+        const columnInsertion = await columnWriter.send(
+          insertColumnsCommand(
+            columnWriter,
+            { ...columnBase, version: '2' },
+            columnBase.sheets[0].columns[0],
+            [insertedColumn],
+            { sequence: 2 },
+          ),
+        );
+        assert.equal(columnInsertion.case, 'committed');
+        columnWriter.socket.terminate();
+        await kill();
+        await start();
+        const columnRecovery = await getDocument(base, cookie, columnBase.document_id);
+        assert.equal(columnRecovery.version, '3');
+        assert.equal(columnRecovery.sheets[0].columns[0], insertedColumn);
+        assert.equal(
+          columnRecovery.sheets[0].cells.find((cell) => cell.value.type === 'formula')?.value.value
+            .current_text,
+          '=B1',
+        );
+        assert.equal(
+          columnRecovery.state_hash,
+          Buffer.from(columnInsertion.value.confirmedStateHash).toString('hex'),
         );
       } finally {
         client.socket.terminate();

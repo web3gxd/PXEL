@@ -299,6 +299,32 @@ export function deleteRowsCommand(
   };
 }
 
+export function insertColumnsCommand(
+  client,
+  snapshot,
+  beforeColumnId,
+  columnIds,
+  { sequence = 1, operationId = uuid7() } = {},
+) {
+  return {
+    operationId: bytes(operationId),
+    documentId: bytes(snapshot.document_id),
+    actorId: client.actorId,
+    baseVersion: BigInt(snapshot.version),
+    clientSequence: BigInt(sequence),
+    operation: {
+      kind: {
+        case: 'insertColumns',
+        value: {
+          sheetId: bytes(snapshot.sheets[0].id),
+          beforeColumnId: bytes(beforeColumnId),
+          columns: columnIds.map(bytes),
+        },
+      },
+    },
+  };
+}
+
 export function formulaCommand(client, snapshot, source, options = {}) {
   const command = setCommand(client, snapshot, 0, options);
   const address = command.operation.kind.value.address;
@@ -311,7 +337,10 @@ export async function calculation(base, cookie, documentId, version) {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     const response = await api(base, cookie, `/api/documents/${documentId}/calculation`);
-    assert.ok(response.status === 200 || response.status === 202);
+    assert.ok(
+      response.status === 200 || response.status === 202,
+      `Unexpected calculation status ${response.status}`,
+    );
     const result = await response.json();
     if (response.status === 200 && result.input_version === String(version)) return result;
     await new Promise((resolve) => setTimeout(resolve, 30));

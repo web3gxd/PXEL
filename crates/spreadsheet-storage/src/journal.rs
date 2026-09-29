@@ -277,6 +277,15 @@ impl OperationJournal for PgDatabase {
                 sheet: *sheet,
                 rows: rows.clone(),
             },
+            Operation::InsertColumnsRebased {
+                sheet,
+                before,
+                columns,
+            } => CommandPayload::InsertColumns {
+                sheet: *sheet,
+                before: *before,
+                columns: columns.clone(),
+            },
             Operation::ClearCell { address } => CommandPayload::ClearCell { address: *address },
             Operation::SetCellFormula { address, formula } => {
                 if formula.origin() != *address
@@ -416,7 +425,7 @@ impl OperationJournal for PgDatabase {
         let mut events = Vec::with_capacity(rows.len());
         let mut expected = after.get();
         for r in rows {
-            if !matches!(r.schema_version, 1..=7) {
+            if !matches!(r.schema_version, 1..=8) {
                 return Err(JournalError::UnsupportedSchema);
             }
             if codec::checksum(&r.payload).as_slice() != r.payload_checksum {

@@ -25,9 +25,9 @@ runnerEnvironment.PXEL_PLAYWRIGHT_AUTH_PATH = authState;
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
-  // The development server limits session/WS requests to 64 per second globally.
-  // More browser workers can exhaust that shared bucket during StrictMode reconnects.
-  workers: 4,
+  // Functional browser cases share the development server's 64/s global bucket.
+  // Run them serially; concurrency and slow readers have separate stress suites.
+  workers: 1,
   forbidOnly: true,
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],

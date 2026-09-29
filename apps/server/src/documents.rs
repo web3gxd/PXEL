@@ -728,6 +728,27 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
                 }
                 CommandPayload::DeleteRows { sheet, rows }
             }
+            v1::canonical_operation::Kind::InsertColumns(insertion) => {
+                if insertion.columns.is_empty() || insertion.columns.len() > 100 {
+                    return Err(SessionError::InvalidCommand);
+                }
+                let sheet = SheetId::from_bytes(bytes_id(&insertion.sheet_id)?)?;
+                let before = ColumnId::from_bytes(bytes_id(&insertion.before_column_id)?)?;
+                let mut columns = Vec::with_capacity(insertion.columns.len());
+                let mut seen = std::collections::BTreeSet::new();
+                for raw in insertion.columns {
+                    let column = ColumnId::from_bytes(bytes_id(&raw)?)?;
+                    if !seen.insert(column) {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    columns.push(column);
+                }
+                CommandPayload::InsertColumns {
+                    sheet,
+                    before,
+                    columns,
+                }
+            }
             v1::canonical_operation::Kind::SetCellFormula(_) => {
                 return Err(SessionError::InvalidCommand);
             }
@@ -803,6 +824,15 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
                 rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
             })
         }
+        Operation::InsertColumnsRebased {
+            sheet,
+            before,
+            columns,
+        } => v1::canonical_operation::Kind::InsertColumns(v1::InsertColumns {
+            sheet_id: sheet.as_bytes().to_vec(),
+            before_column_id: before.as_bytes().to_vec(),
+            columns: columns.iter().map(|id| id.as_bytes().to_vec()).collect(),
+        }),
         Operation::CreateWorkbook { .. } | Operation::AdvanceCalculationEpoch { .. } => {
             return None;
         }

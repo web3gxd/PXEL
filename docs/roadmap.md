@@ -59,8 +59,13 @@ browser DPR 1/2 и hard restart recovery прошли. Criterion для candidat
 и hard restart recovery прошли. Criterion дал 14.974–17.812 ms для удаления
 target строки при 10 000 формулах в domain candidate, без БД/сети;
 [условия](benchmarks/2026-09-29-row-deletion-local.md). Browser результаты
-находятся в RUNBOOK. Фаза 4 всё ещё открыта: columns, copy/paste, undo и multi-sheet
-compatibility не завершены.
+находятся в RUNBOOK. Пятый срез фазы 4 (ADR-023) добавляет `InsertColumns`
+со schema 8: stable targets и source текста сохраняются, относительные
+column offsets и текущий A1-текст меняются до CAS. PostgreSQL/WebSocket,
+hard restart и browser DPR 1/2 проверены. Criterion: 11.853–14.140 ms
+для domain candidate с 10 000 формулами;
+[условия](benchmarks/2026-09-29-column-insertion-local.md). Фаза 4 всё ещё
+открыта: удаление столбцов, copy/paste, undo и multi-sheet compatibility.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

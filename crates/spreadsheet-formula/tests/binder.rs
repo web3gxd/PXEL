@@ -169,6 +169,44 @@ fn current_a1_text_follows_stable_targets_and_expands_range()
 }
 
 #[test]
+fn inserted_column_updates_current_a1_text_without_changing_stable_targets()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (book, origin) = workbook(false)?;
+    let formula = bind("=A1+B1+SUM(A1:B1)", &book, origin)?;
+    let before = book.candidate(
+        &Operation::SetCellFormula {
+            address: origin,
+            formula,
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let sheet = before.sheets().first().ok_or("missing sheet")?;
+    let target = sheet.columns()[1];
+    let inserted = ColumnId::from_bytes([20; 16])?;
+    let after = before.candidate(
+        &Operation::InsertColumnsRebased {
+            sheet: sheet.id(),
+            before: target,
+            columns: vec![inserted],
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let CellContent::Formula(rebased) = after.sheets()[0]
+        .cells()
+        .get(&origin)
+        .ok_or("missing formula")?
+    else {
+        return Err("missing formula".into());
+    };
+    assert_eq!(rebased.source(), "=A1+B1+SUM(A1:B1)");
+    assert_eq!(
+        render_current(rebased, &after)?,
+        canonical(&parse("=A1+C1+SUM(A1:C1)")?.ast)?
+    );
+    Ok(())
+}
+
+#[test]
 fn deleted_rows_render_shrunken_ranges_and_typed_ref_errors()
 -> Result<(), Box<dyn std::error::Error>> {
     let (book, origin) = workbook(false)?;

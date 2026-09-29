@@ -321,6 +321,11 @@ pub enum Operation {
         sheet: SheetId,
         rows: Vec<RowId>,
     },
+    InsertColumnsRebased {
+        sheet: SheetId,
+        before: ColumnId,
+        columns: Vec<ColumnId>,
+    },
     SetCellValue {
         address: CellAddress,
         value: CellValue,
@@ -353,6 +358,11 @@ pub enum CommandPayload {
     DeleteRows {
         sheet: SheetId,
         rows: Vec<RowId>,
+    },
+    InsertColumns {
+        sheet: SheetId,
+        before: ColumnId,
+        columns: Vec<ColumnId>,
     },
     SetCellValue {
         address: CellAddress,
@@ -484,6 +494,22 @@ impl Sheet {
         if new_rows
             .iter()
             .any(|row| self.row_positions.contains_key(row) || !seen.insert(*row))
+        {
+            return Err(DomainError::InvalidAxis);
+        }
+        Ok(())
+    }
+    fn validate_column_extension(&self, columns: &[ColumnId]) -> Result<(), DomainError> {
+        if columns.is_empty() || columns.len() > 100 {
+            return Err(DomainError::LimitExceeded);
+        }
+        if self.columns.len().saturating_add(columns.len()) > MAX_COLUMNS {
+            return Err(DomainError::LimitExceeded);
+        }
+        let mut seen = BTreeSet::new();
+        if columns
+            .iter()
+            .any(|id| self.column_positions.contains_key(id) || !seen.insert(*id))
         {
             return Err(DomainError::InvalidAxis);
         }
@@ -655,12 +681,15 @@ impl Workbook {
                 | Operation::InsertRows { .. }
                 | Operation::InsertRowsRebased { .. }
                 | Operation::DeleteRows { .. }
+                | Operation::InsertColumnsRebased { .. }
         ) {
             next.last_axis_change_version = next_version;
         }
         if matches!(
             operation,
-            Operation::InsertRowsRebased { .. } | Operation::DeleteRows { .. }
+            Operation::InsertRowsRebased { .. }
+                | Operation::DeleteRows { .. }
+                | Operation::InsertColumnsRebased { .. }
         ) {
             for sheet in &next.sheets {
                 for (address, content) in &sheet.cells {
@@ -696,6 +725,9 @@ impl Workbook {
                 Operation::InsertRows { .. } => return Err(DomainError::VersionConflict),
                 Operation::InsertRowsRebased { .. } => return Err(DomainError::VersionConflict),
                 Operation::DeleteRows { .. } => return Err(DomainError::VersionConflict),
+                Operation::InsertColumnsRebased { .. } => {
+                    return Err(DomainError::VersionConflict);
+                }
                 Operation::AdvanceCalculationEpoch { .. } => {
                     return Err(DomainError::VersionConflict);
                 }
@@ -802,6 +834,23 @@ impl Workbook {
                         .ok_or(DomainError::InvalidFormula)?,
                 )
             }
+            Operation::InsertColumnsRebased {
+                sheet,
+                before,
+                columns,
+            } => {
+                self.validate_new_columns(columns)?;
+                let target = self
+                    .sheets
+                    .iter()
+                    .find(|current| current.id == *sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                target.validate_column_extension(columns)?;
+                target
+                    .column_position(*before)
+                    .ok_or(DomainError::MissingColumn)?;
+                (self.text_bytes, self.ast_memory_bytes)
+            }
             Operation::AdvanceCalculationEpoch { context } => {
                 let expected_epoch = self
                     .calculation_context
@@ -836,6 +885,16 @@ impl Workbook {
                     .sheets
                     .iter()
                     .any(|sheet| sheet.row_positions.contains_key(row))
+        }) {
+            return Err(DomainError::InvalidAxis);
+        }
+        Ok(())
+    }
+    fn validate_new_columns(&self, columns: &[ColumnId]) -> Result<(), DomainError> {
+        if columns.iter().any(|id| {
+            self.sheets
+                .iter()
+                .any(|sheet| sheet.column_positions.contains_key(id))
         }) {
             return Err(DomainError::InvalidAxis);
         }
@@ -929,6 +988,13 @@ impl Workbook {
             Operation::DeleteRows { sheet, rows } => {
                 self.apply_row_deletion(*sheet, rows, next_version)?;
             }
+            Operation::InsertColumnsRebased {
+                sheet,
+                before,
+                columns,
+            } => {
+                self.apply_column_insertion(*sheet, *before, columns, next_version)?;
+            }
             Operation::SetCellValue { address, value } => {
                 let normalized = value.normalized()?;
                 let sheet = self
@@ -971,6 +1037,61 @@ impl Workbook {
         }
         self.text_bytes = text_bytes;
         self.ast_memory_bytes = ast_memory_bytes;
+        Ok(())
+    }
+    fn apply_column_insertion(
+        &mut self,
+        sheet_id: SheetId,
+        before: ColumnId,
+        columns: &[ColumnId],
+        next_version: DocumentVersion,
+    ) -> Result<(), DomainError> {
+        let target = self
+            .sheets
+            .iter_mut()
+            .find(|sheet| sheet.id == sheet_id)
+            .ok_or(DomainError::MissingSheet)?;
+        target.validate_column_extension(columns)?;
+        let position = target
+            .column_position(before)
+            .ok_or(DomainError::MissingColumn)? as usize;
+        target
+            .columns
+            .splice(position..position, columns.iter().copied());
+        target.column_positions = target
+            .columns
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(position, id)| (id, position as u32))
+            .collect();
+        let mut replacements = Vec::new();
+        for (sheet_index, sheet) in self.sheets.iter().enumerate() {
+            for (address, content) in &sheet.cells {
+                let CellContent::Formula(formula) = content else {
+                    continue;
+                };
+                let origin_position = sheet
+                    .column_position(address.column)
+                    .ok_or(DomainError::MissingColumn)?;
+                let rebased = formula
+                    .rebase_column_offsets(next_version, origin_position, |id, column| {
+                        self.sheets
+                            .iter()
+                            .find(|sheet| sheet.id == id)
+                            .and_then(|sheet| sheet.column_position(column))
+                    })
+                    .map_err(|_| DomainError::InvalidFormula)?;
+                replacements.push((sheet_index, *address, rebased));
+            }
+        }
+        for (sheet_index, address, formula) in replacements {
+            let sheet = self
+                .sheets
+                .get_mut(sheet_index)
+                .ok_or(DomainError::MissingSheet)?;
+            sheet.cells.insert(address, CellContent::Formula(formula));
+        }
         Ok(())
     }
     fn apply_row_deletion(

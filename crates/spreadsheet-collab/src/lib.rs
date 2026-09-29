@@ -427,7 +427,9 @@ async fn submit<J: OperationJournal>(
         let candidate = Arc::new(workbook.candidate(&operation, next)?);
         if matches!(
             operation,
-            Operation::InsertRowsRebased { .. } | Operation::DeleteRows { .. }
+            Operation::InsertRowsRebased { .. }
+                | Operation::DeleteRows { .. }
+                | Operation::InsertColumnsRebased { .. }
         ) {
             for sheet in candidate.sheets() {
                 for content in sheet.cells().values() {
@@ -555,6 +557,15 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
         CommandPayload::DeleteRows { sheet, rows } => Ok(Operation::DeleteRows {
             sheet: *sheet,
             rows: rows.clone(),
+        }),
+        CommandPayload::InsertColumns {
+            sheet,
+            before,
+            columns,
+        } => Ok(Operation::InsertColumnsRebased {
+            sheet: *sheet,
+            before: *before,
+            columns: columns.clone(),
         }),
         CommandPayload::SetCellValue { address, value } => Ok(Operation::SetCellValue {
             address: *address,

@@ -1,5 +1,48 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — schema-8 InsertColumns with stable formula targets
+
+Перед срезом прочитаны AGENTS.md, roadmap, ADR-021/022 и текущие domain,
+formula, codec, actor, server и browser paths. Цель: вставлять столбец перед
+stable anchor без перепривязки ячеек или формульных целей. Инварианты:
+server order, candidate до CAS, separate wire/storage schema, hash-equal replay,
+авторизация каждой команды. Риск: преобразование сканирует все формулы; stale
+formula после изменения оси по-прежнему требует resync.
+
+Добавлены `InsertColumns` client intent и `InsertColumnsRebased` schema-8
+durable event, SQL migration 008, отдельные protobuf fields, semantic hash
+tag и command fingerprint. Кандидат проверяет 1–100 новых уникальных IDs,
+живой anchor и общий предел 1,000 столбцов; после вставки пересчитывает
+relative column offsets, сохраняет stable targets и исходный текст, проверяет
+выводимый current A1 text до CAS. Calculation graph перестраивается.
+UI-кнопка вставляет столбец перед выделенным, WebSocket pending queue ждёт
+canonical projection. Изменены domain/formula/collab, codec/journal/server,
+web store/UI, protobuf и generated TypeScript, migration и тесты. Решение —
+ADR-023, benchmark report, collaboration/formula semantics, roadmap и слайды.
+
+Реально выполнено: `pnpm proto:generate`; `cargo run --locked -p pxel-server
+--features dev-auth -- migrate` (migration 008); точечные domain, binder,
+codec, PostgreSQL/WebSocket и browser DPR 1/2 tests; `pnpm test:recovery`
+1/1 с hard restart и проверкой schema-8 hash; `just check` pass (Rust
+fmt/clippy/tests/build/WASM, protobuf drift, Prettier/ESLint/TypeScript,
+Vitest 59/59, Vite build); `just sqlx-check` pass; окончательный
+`pnpm test:integration` 34/34 и `pnpm test:e2e` 30/30 на реальном dev-сервере.
+Презентация открыта Chromium при ширине 1280/390 px: 10 слайдов,
+горизонтального переполнения нет.
+Criterion `insert_front_column_10000_formulas` дал 11.853–14.140 ms,
+point estimate 12.883 ms, 10 samples/220 iterations; условия —
+docs/benchmarks/2026-09-29-column-insertion-local.md. Это стоимость
+optimized domain candidate, не p95 commit.
+
+Параллельный browser прогон с 2 workers дал 2 сбоя создания документа на
+общем dev rate limit 64/s; последовательный 30/30 прошёл. Playwright
+functional config переведён на 1 worker, concurrency/slow-reader проверяются
+отдельно. Первый полный integration прогон дал transient failure endpoint
+расчёта; повторный и окончательный 34/34 прошли. Тестовый helper теперь
+показывает HTTP status при такой ошибке без содержимого документа.
+Нереализованы удаление столбцов, copy/paste, undo, multi-sheet и snapshots.
+Linux/Compose/remote CI не запускались.
+
 ## 2026-09-29 — schema-7 DeleteRows with durable tombstones
 
 Перед срезом проверены AGENTS.md, roadmap, ADR-021 и текущие domain,

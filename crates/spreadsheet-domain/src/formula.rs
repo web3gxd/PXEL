@@ -377,6 +377,43 @@ pub struct Formula {
     profile: CompatibilityProfile,
 }
 impl Formula {
+    /// Preserve bound column targets while updating relative copy offsets.
+    pub fn rebase_column_offsets(
+        &self,
+        next_version: DocumentVersion,
+        origin_column_position: u32,
+        column_position: impl Fn(SheetId, ColumnId) -> Option<u32>,
+    ) -> Result<Self, FormulaValidationError> {
+        let mut nodes = self.ast.nodes().to_vec();
+        let rebase = |reference: &mut BoundCellReference| -> Result<(), FormulaValidationError> {
+            if let AxisReferenceMode::Relative { .. } = reference.column_mode {
+                let target = column_position(reference.target_sheet, reference.target_column)
+                    .ok_or(FormulaValidationError::InvalidReference)?;
+                reference.column_mode = AxisReferenceMode::Relative {
+                    original_delta: i64::from(target) - i64::from(origin_column_position),
+                };
+            }
+            Ok(())
+        };
+        for node in &mut nodes {
+            match node {
+                Node::Cell(reference) => rebase(reference)?,
+                Node::Range(range) => {
+                    rebase(&mut range.start)?;
+                    rebase(&mut range.end)?;
+                }
+                _ => {}
+            }
+        }
+        let ast = BoundAst::new(self.ast.schema_version(), self.ast.root(), nodes)?;
+        Self::new(
+            self.source.clone(),
+            self.canonical.clone(),
+            ast,
+            self.origin,
+            next_version,
+        )
+    }
     /// Rebase a surviving formula after deletion. Deleted scalar targets become
     /// typed REF nodes; ranges keep the surviving portion of their old span.
     pub fn rebase_deleted_rows(

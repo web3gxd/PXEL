@@ -117,6 +117,15 @@ export function App() {
             >
               Строка −
             </button>
+            <button
+              type="button"
+              className="insert-row-action"
+              disabled={!document.sheet || state.kind !== 'online'}
+              title="Вставить столбец перед выделенным"
+              onClick={() => document.insertColumnBeforeSelection()}
+            >
+              Столбец ↑
+            </button>
           </nav>
         </div>
         <div className="connection-area">

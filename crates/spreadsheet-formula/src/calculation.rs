@@ -307,7 +307,8 @@ impl CalculationProjection {
             Operation::ExtendRows { .. } => return Err(CalculationError::InvalidProjection),
             Operation::InsertRows { .. }
             | Operation::InsertRowsRebased { .. }
-            | Operation::DeleteRows { .. } => {
+            | Operation::DeleteRows { .. }
+            | Operation::InsertColumnsRebased { .. } => {
                 return Err(CalculationError::InvalidProjection);
             }
             Operation::AdvanceCalculationEpoch { .. } => {

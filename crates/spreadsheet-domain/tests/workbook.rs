@@ -25,6 +25,77 @@ fn seed() -> Result<(Workbook, CellAddress), DomainError> {
 }
 
 #[test]
+fn inserted_column_keeps_bound_target_and_rebases_relative_copy_offset() -> Result<(), DomainError>
+{
+    let (book, first) = seed()?;
+    let second_column = ColumnId::from_bytes([21; 16])?;
+    let third_column = ColumnId::from_bytes([22; 16])?;
+    let book = book.candidate(
+        &Operation::InsertColumnsRebased {
+            sheet: first.sheet,
+            before: first.column,
+            columns: vec![second_column],
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let origin = CellAddress {
+        column: first.column,
+        ..first
+    };
+    let reference = BoundCellReference {
+        target_sheet: first.sheet,
+        target_row: first.row,
+        target_column: second_column,
+        row_mode: AxisReferenceMode::Relative { original_delta: 0 },
+        column_mode: AxisReferenceMode::Relative { original_delta: -1 },
+    };
+    let ast = BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Cell(reference)])
+        .map_err(|_| DomainError::InvalidFormula)?;
+    let formula = Formula::new("=A1".into(), "=A1".into(), ast, origin, book.version())
+        .map_err(|_| DomainError::InvalidFormula)?;
+    let before = book.candidate(
+        &Operation::SetCellFormula {
+            address: origin,
+            formula,
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let operation = Operation::InsertColumnsRebased {
+        sheet: first.sheet,
+        before: first.column,
+        columns: vec![third_column],
+    };
+    let after = before.candidate(&operation, DocumentVersion::new(4)?)?;
+    assert_eq!(
+        after.sheets()[0].columns(),
+        &[second_column, third_column, first.column]
+    );
+    let CellContent::Formula(rebased) = after.sheets()[0]
+        .cells()
+        .get(&origin)
+        .ok_or(DomainError::InvalidFormula)?
+    else {
+        return Err(DomainError::InvalidFormula);
+    };
+    assert!(matches!(&rebased.ast().nodes()[0], Node::Cell(reference)
+        if reference.target_column == second_column
+        && reference.column_mode == AxisReferenceMode::Relative { original_delta: -2 }));
+    assert_eq!(rebased.bound_at_version().get(), 4);
+    assert_eq!(after.sheets()[0].column_position(first.column), Some(2));
+    let mut replay = before;
+    replay.apply_event(&CommittedEvent {
+        document_id: after.document_id(),
+        operation_id: OperationId::from_bytes([23; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([24; 16])?),
+        version: DocumentVersion::new(4)?,
+        operation,
+        state_hash: after.hash(),
+    })?;
+    assert_eq!(replay.hash(), after.hash());
+    Ok(())
+}
+
+#[test]
 fn row_extension_preserves_stable_cells_and_replays_atomically() -> Result<(), DomainError> {
     let (book, address) = seed()?;
     let filled = book.candidate(

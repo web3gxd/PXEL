@@ -96,3 +96,13 @@ copy offsets of surviving references are recomputed from the new axes.
 is derived from the transformed bound AST. This behavior is verified for
 native replay and browser display, but has not yet been certified against
 Excel for every range case. See ADR-022.
+
+# Column insertion in the current single-sheet profile
+
+Schema-8 `InsertColumnsRebased` inserts stable column IDs before a live anchor.
+Bound targets keep their IDs; relative column copy offsets are recalculated
+against the new origin position, while absolute modes remain absolute. Ranges
+continue to span their stable endpoints and therefore include inserted columns
+between them. The displayed `current_text` is rendered from the new axes;
+authored source/canonical text remain historical. Native replay, browser and
+the domain benchmark cover this slice. See ADR-023.

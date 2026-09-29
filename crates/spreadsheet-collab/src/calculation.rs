@@ -91,7 +91,8 @@ impl CalculationHandle {
             Operation::ExtendRows { .. } => pending.rebuild = true,
             Operation::InsertRows { .. }
             | Operation::InsertRowsRebased { .. }
-            | Operation::DeleteRows { .. } => pending.rebuild = true,
+            | Operation::DeleteRows { .. }
+            | Operation::InsertColumnsRebased { .. } => pending.rebuild = true,
             Operation::AdvanceCalculationEpoch { .. } => pending.rebuild = true,
         }
         if pending.changed.len() > 100_000 {

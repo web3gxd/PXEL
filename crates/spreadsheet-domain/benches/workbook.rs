@@ -190,6 +190,24 @@ fn benches(c: &mut Criterion) {
             black_box(formula_book.candidate(black_box(&formula_deletion), insertion_version))
         })
     });
+    let formula_column_insertion = Operation::InsertColumnsRebased {
+        sheet: formula_book.sheets()[0].id(),
+        before: formula_book.sheets()[0].columns()[0],
+        columns: vec![match ColumnId::from_bytes([4; 16]) {
+            Ok(id) => id,
+            Err(error) => {
+                eprintln!("column benchmark ID invalid: {error}");
+                std::process::exit(1);
+            }
+        }],
+    };
+    c.bench_function("insert_front_column_10000_formulas", |b| {
+        b.iter(|| {
+            black_box(
+                formula_book.candidate(black_box(&formula_column_insertion), insertion_version),
+            )
+        })
+    });
     for count in [1_000, 100_000] {
         let book = match fixture(count) {
             Ok(book) => book,

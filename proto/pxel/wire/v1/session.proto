@@ -105,6 +105,7 @@ message CanonicalOperation {
     ExtendRows extend_rows = 4;
     InsertRows insert_rows = 5;
     DeleteRows delete_rows = 6;
+    InsertColumns insert_columns = 7;
   }
 }
 
@@ -128,6 +129,13 @@ message InsertRows {
 message DeleteRows {
   bytes sheet_id = 1;
   repeated bytes rows = 2;
+}
+
+// Inserts before a stable column ID; formula targets remain bound to IDs.
+message InsertColumns {
+  bytes sheet_id = 1;
+  bytes before_column_id = 2;
+  repeated bytes columns = 3;
 }
 
 message DocumentCommand {
