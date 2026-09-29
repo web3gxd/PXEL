@@ -31,6 +31,10 @@ close, discarding any queued replay or calculation frames. Repeated identical
 Rollback releases the gate without changing its signal. Process crash closes
 all sockets, and reconnect reads durable ACL/epoch state from PostgreSQL.
 
+ADR-018 moved the actual socket send to a byte-bounded writer task. That writer
+now owns the final access check and read gate; queued old-epoch frames fail
+closed after revoke. The linearization rule above remains unchanged.
+
 Local development accounts can request a workspace in their dev session only
 when they are members. This is feature-flagged development authentication,
 not the production identity provider. Grant/revoke uses server-authenticated

@@ -3,6 +3,7 @@ mod calculation_stream;
 mod config;
 mod delivery;
 mod documents;
+mod outbound;
 mod presence;
 
 use axum::{
@@ -16,6 +17,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use futures_util::StreamExt;
 use prost::Message as ProstMessage;
 use serde::Serialize;
 use spreadsheet_application::journal::{DocumentAccess, OperationJournal};
@@ -60,12 +62,7 @@ struct HeadSubscription {
     last_sent: DocumentVersion,
 }
 
-#[derive(Clone, Copy)]
-struct DocumentDelivery<'a> {
-    document: DocumentId,
-    gate: &'a delivery::DeliveryGate,
-    ticket: DocumentAccess,
-}
+use outbound::DocumentDelivery;
 
 enum SubscriptionEvent {
     Head(HeadUpdate),
@@ -99,43 +96,29 @@ async fn next_subscription_event(
     Some(event)
 }
 
-async fn send_document_payload(
-    socket: &mut WebSocket,
-    state: &AppState,
-    principal: &auth::Principal,
-    delivery: DocumentDelivery<'_>,
+fn send_document_payload(
+    outbound: &outbound::Outbound,
+    delivery: &DocumentDelivery,
     payload: Vec<u8>,
 ) -> bool {
-    let _send = delivery.gate.lock.read().await;
-    let access = state
-        .database
-        .access(principal.identity, delivery.document)
-        .await;
-    if !matches!(access, Ok(current)
-        if current.document_access_epoch == delivery.ticket.document_access_epoch
-        && current.membership_access_epoch == delivery.ticket.membership_access_epoch)
-        || !matches!(state.auth.active(principal).await, Ok(true))
-    {
-        return false;
-    }
-    send(socket, Message::Binary(payload.into())).await
+    outbound.enqueue(Message::Binary(payload.into()), Some(delivery.clone()))
 }
 
 const MAX_REPLAY_EVENTS: u64 = 128;
 const MAX_REPLAY_BYTES: usize = 1024 * 1024;
 
 async fn send_replay(
-    socket: &mut WebSocket,
+    outbound: &outbound::Outbound,
     state: &AppState,
     principal: &auth::Principal,
     session: &DocumentSession,
-    delivery: DocumentDelivery<'_>,
+    delivery: &DocumentDelivery,
     after: DocumentVersion,
     barrier: DocumentVersion,
 ) -> Result<bool, ()> {
     let gap = barrier.get().checked_sub(after.get()).ok_or(())?;
     if gap > MAX_REPLAY_EVENTS {
-        return send_replay_fallback(socket, state, principal, session, delivery, barrier).await;
+        return send_replay_fallback(outbound, principal, session, delivery, barrier).await;
     }
     let mut cursor = after.get();
     let mut sent_bytes = 0usize;
@@ -160,8 +143,7 @@ async fn send_replay(
                 return Err(());
             }
             if documents::committed_message(&event).is_none() {
-                return send_replay_fallback(socket, state, principal, session, delivery, barrier)
-                    .await;
+                return send_replay_fallback(outbound, principal, session, delivery, barrier).await;
             }
             let payload = head_hint(
                 delivery.document,
@@ -173,11 +155,10 @@ async fn send_replay(
             // Bound encoded bytes in addition to each journal read batch.
             sent_bytes = sent_bytes.checked_add(payload.len()).ok_or(())?;
             if sent_bytes > MAX_REPLAY_BYTES {
-                return send_replay_fallback(socket, state, principal, session, delivery, barrier)
-                    .await;
+                return send_replay_fallback(outbound, principal, session, delivery, barrier).await;
             }
             if !matches!(session.head(principal.identity).await, Ok(head) if head >= barrier)
-                || !send_document_payload(socket, state, principal, delivery, payload).await
+                || !send_document_payload(outbound, delivery, payload)
             {
                 return Err(());
             }
@@ -187,18 +168,15 @@ async fn send_replay(
 }
 
 async fn send_replay_fallback(
-    socket: &mut WebSocket,
-    state: &AppState,
+    outbound: &outbound::Outbound,
     principal: &auth::Principal,
     session: &DocumentSession,
-    delivery: DocumentDelivery<'_>,
+    delivery: &DocumentDelivery,
     barrier: DocumentVersion,
 ) -> Result<bool, ()> {
     if !matches!(session.head(principal.identity).await, Ok(head) if head >= barrier)
         || !send_document_payload(
-            socket,
-            state,
-            principal,
+            outbound,
             delivery,
             head_hint(
                 delivery.document,
@@ -208,7 +186,6 @@ async fn send_replay_fallback(
                 },
             ),
         )
-        .await
     {
         return Err(());
     }
@@ -216,11 +193,11 @@ async fn send_replay_fallback(
 }
 
 async fn send_replay_complete(
-    socket: &mut WebSocket,
+    outbound: &outbound::Outbound,
     state: &AppState,
     principal: &auth::Principal,
     session: &DocumentSession,
-    delivery: DocumentDelivery<'_>,
+    delivery: &DocumentDelivery,
     barrier: DocumentVersion,
     resync_required: bool,
 ) -> bool {
@@ -240,7 +217,7 @@ async fn send_replay_complete(
         )),
     }
     .encode_to_vec();
-    send_document_payload(socket, state, principal, delivery, payload).await
+    send_document_payload(outbound, delivery, payload)
 }
 
 fn head_hint(document: DocumentId, update: &HeadUpdate) -> Vec<u8> {
@@ -480,12 +457,12 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
         _ => Err(wire::DecodeError::InvalidMessage),
     };
     if let Err(error) = result {
-        let _ = send(
+        let _ = send_direct(
             &mut socket,
             Message::Binary(wire::error_message(error).into()),
         )
         .await;
-        let _ = send(
+        let _ = send_direct(
             &mut socket,
             Message::Close(Some(CloseFrame {
                 code: 1002,
@@ -506,9 +483,12 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
         })),
     }
     .encode_to_vec();
-    if !send(&mut socket, Message::Binary(welcome.into())).await {
+    if !send_direct(&mut socket, Message::Binary(welcome.into())).await {
         return;
     }
+    let (sink, mut source) = socket.split();
+    let (outbound, mut outbound_closed, mut writer) =
+        outbound::start(sink, state.clone(), principal.clone());
     tracing::info!(event = "session_connected", %session_id);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -518,6 +498,9 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
     let mut last_presence = Instant::now() - Duration::from_millis(50);
     loop {
         tokio::select! {
+            changed = outbound_closed.changed() => {
+                if changed.is_err() || *outbound_closed.borrow() { break; }
+            }
             event = next_subscription_event(&mut head_subscription) => {
                 let Some(event) = event else { continue; };
                 let update = match event {
@@ -534,10 +517,10 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                             )),
                         }.encode_to_vec();
                         if !send_document_payload(
-                            &mut socket, &state, &principal,
-                            DocumentDelivery { document: active.document, gate: &active.gate, ticket: active.ticket },
+                            &outbound,
+                            &DocumentDelivery { document: active.document, gate: active.gate.clone(), ticket: active.ticket },
                             payload,
-                        ).await { break; }
+                        ) { break; }
                         continue;
                     }
                     SubscriptionEvent::AccessChanged => break,
@@ -553,11 +536,11 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 if current > active.last_sent {
                     let delivery = DocumentDelivery {
                         document: active.document,
-                        gate: &active.gate,
+                        gate: active.gate.clone(),
                         ticket: active.ticket,
                     };
                     let replay = send_replay(
-                        &mut socket, &state, &principal, &active.session, delivery,
+                        &outbound, &state, &principal, &active.session, &delivery,
                         active.last_sent, current,
                     ).await;
                     if replay.is_err() { break; }
@@ -570,19 +553,19 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 let allowed = matches!(frame.session.head(principal.identity).await,
                     Ok(current) if current == frame.version);
                 if !allowed || !send_document_payload(
-                    &mut socket, &state, &principal,
-                    DocumentDelivery { document: frame.document, gate: &frame.gate, ticket: frame.ticket },
+                    &outbound,
+                    &DocumentDelivery { document: frame.document, gate: frame.gate, ticket: frame.ticket },
                     frame.bytes,
-                ).await { break; }
+                ) { break; }
             }
             _ = heartbeat.tick() => {
                 if last_pong.elapsed() >= Duration::from_secs(45)
                     || !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
-                if !send(&mut socket, Message::Ping(Vec::new().into())).await { break; }
+                if !outbound.enqueue(Message::Ping(Vec::new().into()), None) { break; }
             }
-            message = socket.recv() => match message {
+            message = source.next() => match message {
                 Some(Ok(Message::Pong(_))) => last_pong = Instant::now(),
-                Some(Ok(Message::Ping(bytes))) => { if !send(&mut socket, Message::Pong(bytes)).await { break; } },
+                Some(Ok(Message::Ping(bytes))) => { if !outbound.enqueue(Message::Pong(bytes), None) { break; } },
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                 Some(Ok(Message::Binary(bytes))) => {
                     if !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
@@ -594,15 +577,22 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 state.database.access(principal.identity, document).await.ok()
                             } else { None };
                             let result = documents::handle_command(&state, &principal, *command).await;
+                            let safe_without_access = matches!(
+                                result.payload.as_ref(),
+                                Some(v1::server_envelope::Payload::Rejected(_)
+                                    | v1::server_envelope::Payload::Error(_))
+                            );
                             let payload = result.encode_to_vec();
                             let delivered = if let (Some(document), Some(ticket)) = (document, authorization) {
                                 let gate = state.delivery.get(document).await;
                                 send_document_payload(
-                                    &mut socket, &state, &principal,
-                                    DocumentDelivery { document, gate: &gate, ticket }, payload,
-                                ).await
+                                    &outbound,
+                                    &DocumentDelivery { document, gate, ticket }, payload,
+                                )
+                            } else if safe_without_access {
+                                outbound.enqueue(Message::Binary(payload.into()), None)
                             } else {
-                                send(&mut socket, Message::Binary(payload.into())).await
+                                false
                             };
                             if !delivered { break; }
                         }
@@ -616,7 +606,7 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                         payload: Some(v1::server_envelope::Payload::Error(v1::ProtocolError {
                                             code: v1::ErrorCode::AuthRequired.into(), supported_protocol_version: wire::PROTOCOL_VERSION,
                                         })) }.encode_to_vec();
-                                    let _ = send(&mut socket, Message::Binary(error.into())).await;
+                                    let _ = outbound.enqueue(Message::Binary(error.into()), None);
                                     break;
                                 }
                             }
@@ -665,16 +655,16 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 Err(_) => break,
                             };
                             let resync_required = match send_replay(
-                                &mut socket, &state, &principal, &session,
-                                DocumentDelivery { document, gate: &gate, ticket },
+                                &outbound, &state, &principal, &session,
+                                &DocumentDelivery { document, gate: gate.clone(), ticket },
                                 after, current,
                             ).await {
                                 Ok(value) => value,
                                 Err(()) => break,
                             };
                             if !send_replay_complete(
-                                &mut socket, &state, &principal, &session,
-                                DocumentDelivery { document, gate: &gate, ticket },
+                                &outbound, &state, &principal, &session,
+                                &DocumentDelivery { document, gate: gate.clone(), ticket },
                                 current, resync_required,
                             ).await { break; }
                             if let Some(previous) = head_subscription.take() {
@@ -696,13 +686,13 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                             });
                         }
                         Err(error) => {
-                            let _ = send(&mut socket, Message::Binary(wire::error_message(error).into())).await;
+                            let _ = outbound.enqueue(Message::Binary(wire::error_message(error).into()), None);
                             break;
                         }
                     }
                 }
                 _ => {
-                    let _ = send(&mut socket, Message::Binary(wire::error_message(wire::DecodeError::InvalidMessage).into())).await;
+                    let _ = outbound.enqueue(Message::Binary(wire::error_message(wire::DecodeError::InvalidMessage).into()), None);
                     break;
                 }
             }
@@ -711,11 +701,19 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
     if let Some(active) = head_subscription.take() {
         state.presence.leave(active.document, session_id).await;
     }
-    let _ = send(&mut socket, Message::Close(None)).await;
+    let _ = outbound.enqueue(Message::Close(None), None);
+    drop(outbound);
+    if tokio::time::timeout(Duration::from_secs(2), &mut writer)
+        .await
+        .is_err()
+    {
+        writer.abort();
+        let _ = writer.await;
+    }
     tracing::info!(event = "session_disconnected", %session_id);
 }
 
-async fn send(socket: &mut WebSocket, message: Message) -> bool {
+async fn send_direct(socket: &mut WebSocket, message: Message) -> bool {
     matches!(
         tokio::time::timeout(Duration::from_secs(2), socket.send(message)).await,
         Ok(Ok(()))

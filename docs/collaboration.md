@@ -10,8 +10,10 @@ PostgreSQL до `ReplayComplete`, а затем догоняет live head из 
 process-local payload send gate (ADR-016). Два разных dev-пользователя,
 закрытие подписки и restart recovery проверены. Ephemeral presence и удалённое
 выделение реализованы отдельно от журнала (ADR-017); два пользователя и
-браузерный disconnect проверены. Membership revoke, distributed fencing,
-dedicated outbound byte queue и полный семантический gate фазы 3 остаются открытыми.
+браузерный disconnect проверены. Outbound queue теперь ограничивает каждый
+сокет по кадрам и байтам (ADR-018). Membership revoke, distributed fencing и
+полный семантический gate фазы 3, включая сетевой stress и измерение latency,
+остаются открытыми.
 Подробные результаты находятся в RUNBOOK.
 
 ## Command, validation, event, projection

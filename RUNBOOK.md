@@ -1,5 +1,43 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — byte-bounded WebSocket writer (фаза 3, срез)
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-015/016/017, server WebSocket,
+collaboration и текущие интеграционные тесты. Цель — ограничить исходящие
+кадры медленного клиента по количеству и сумме байт без блокировки document
+actor. Инварианты: queued payload не считается отправленным; перед физической
+отправкой проверяются ACL, session и исходный `access_epoch` под delivery gate;
+отзыв прав после COMMIT запрещает дальнейшую передачу старой подписке.
+
+После Welcome WebSocket разделён на reader и writer task. У каждого сокета
+bounded `mpsc` на 160 кадров и semaphore budget 2 MiB payload bytes.
+Admission неблокирующий: overflow возвращает false, connection закрывается,
+а tracing получает только `outbound_queue_overflow`/тип лимита без содержимого.
+Writer выполняет финальную авторизацию и держит read gate до завершения
+физической отправки с таймаутом 2 s. Writer failure сигналит reader;
+завершение соединения ограничено 2 s и затем aborts writer. Replay cap 128
+events/1 MiB умещается в очереди. Добавлен `futures-util` из уже закреплённого
+workspace, ADR-018, обновлены ADR-016, collaboration, roadmap, README и
+презентация.
+
+Проверено: unit tests отдельно переполняют byte budget и frame count; после
+рефакторинга `cargo clippy -p pxel-server --all-targets --all-features` прошёл,
+живой `pnpm test:integration` — 26/26 (replay, ACL revoke, calculation,
+presence), `pnpm test:e2e` — 16/16 при DPR 1/2, `pnpm test:recovery` — 1/1.
+Security review нашёл возможный путь отправки committed/receipt без ACL gate,
+если предварительная проверка не дала ticket, а command обработался успешно;
+теперь без ticket передаются только rejected/protocol error, иначе сокет
+закрывается для replay. После исправления повторный live integration — 26/26.
+Первый полный `just check` остановился на Prettier для обновлённого слайда;
+после форматирования повторный `just check` завершился exit 0: fmt, оба
+Clippy режима, workspace Rust tests/build, wasm32, protobuf drift,
+Prettier, ESLint, TS, 53 Vitest и Vite build. Presentation check после
+форматирования прошёл 10 слайдов на 1440×900 и 390×844.
+Kernel-level slow-reader test, queue depth histogram, p95 latency и
+cross-process fanout в этом срезе не проверены; фаза 3 остаётся открытой.
+
+---
+
 ## 2026-09-29 — seeded domain convergence harness (фаза 3, срез)
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-014/015/016/017, testing и
