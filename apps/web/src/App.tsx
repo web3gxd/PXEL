@@ -100,6 +100,21 @@ export function App() {
             <button
               type="button"
               className="insert-row-action"
+              data-testid="export-xlsx"
+              disabled={
+                !document.sheet ||
+                state.kind !== 'online' ||
+                document.exporting ||
+                document.pending.length > 0
+              }
+              title="Скачать подтверждённую версию книги в XLSX"
+              onClick={() => void document.exportXlsx()}
+            >
+              {document.exporting ? 'Готовим XLSX…' : 'Скачать XLSX'}
+            </button>
+            <button
+              type="button"
+              className="insert-row-action"
               disabled={!document.sheet || state.kind !== 'online'}
               title="Вставить одну строку перед выделенной"
               onClick={() => document.insertRowBeforeSelection()}

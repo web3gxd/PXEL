@@ -226,6 +226,10 @@ Append-only запись аудита с версией, размером и che
 отправки ответа; viewer не может скачать файл. Проверены PostgreSQL storage
 test и живой HTTP/WebSocket integration. Это ещё не import/edit/export/reimport:
 стили, даты, merges, Excel golden fixtures и document import остаются открыты.
+Седьмой узкий срез добавляет кнопку скачивания подтверждённого scalar XLSX в
+интерфейсе. Она недоступна, пока есть неподтверждённые операции, и сообщает
+viewer об отсутствии права на экспорт. Браузерный download проверяется при
+DPR 1/2; импорт и полный phase-6 gate остаются открытыми.
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU

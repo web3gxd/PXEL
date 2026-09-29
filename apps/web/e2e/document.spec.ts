@@ -13,6 +13,29 @@ function uuidV7() {
   return `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20)}`;
 }
 
+test('owner downloads the confirmed scalar workbook as XLSX', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('23');
+  await bar.press('Enter');
+  const id = new URL(page.url()).searchParams.get('document');
+  expect(id).not.toBeNull();
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/documents/${id}`);
+      return (await response.json()).version;
+    })
+    .toBe('2');
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByTestId('export-xlsx').click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('PXEL.xlsx');
+  expect(await download.path()).toBeTruthy();
+  await expect(page.getByTestId('export-xlsx')).toBeEnabled();
+});
+
 test('copying one formula shifts relative references in WASM and commits server-bound text', async ({
   page,
 }) => {
@@ -62,6 +85,7 @@ test('TSV paste commits one durable batch and survives reload', async ({ page })
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
   await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   await grid.focus();
   await grid.evaluate((element) => {

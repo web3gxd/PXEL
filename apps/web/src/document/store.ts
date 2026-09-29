@@ -331,6 +331,7 @@ export class DocumentStore {
   editing: { position: Position; text: string; source: 'cell' | 'bar' } | undefined;
   error = '';
   loading = false;
+  exporting = false;
   calculated = new Map<string, CalculatedValue>();
   calculatedVersion: string | undefined;
   calculationStatus: 'idle' | 'pending' | 'complete' | 'failed' = 'idle';
@@ -837,6 +838,40 @@ export class DocumentStore {
       this.error = error instanceof Error ? error.message : 'Не удалось создать таблицу';
     } finally {
       this.loading = false;
+      this.notify();
+    }
+  }
+  async exportXlsx() {
+    const id = this.projection?.document_id;
+    if (!id || this.exporting || this.pending.length) return;
+    this.exporting = true;
+    this.error = '';
+    this.notify();
+    try {
+      const response = await fetch(`/api/documents/${encodeURIComponent(id)}/export.xlsx`, {
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        throw new Error(
+          response.status === 403
+            ? 'Экспорт доступен только владельцу таблицы.'
+            : response.status === 422
+              ? 'Эта таблица содержит данные вне поддерживаемого XLSX-профиля.'
+              : 'Не удалось скачать XLSX.',
+        );
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'PXEL.xlsx';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'Не удалось скачать XLSX.';
+    } finally {
+      this.exporting = false;
       this.notify();
     }
   }
