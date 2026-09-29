@@ -1,5 +1,24 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — authenticated snapshot tail recovery API
+
+Цель следующего среза фазы 5 — доказать восстановление из снимка и хвоста
+реального PostgreSQL log до подключения actor startup. Инварианты: ACL на
+каждом чтении, только `ACTIVE` snapshot, непрерывный журнал, проверка
+конечной версии и hash; повреждённый снимок не скрывает событие. Риск:
+конкурентный новый head при восстановлении — reader фиксирует target head в
+начале и ограничивает каждый page этим target.
+
+`PgDatabase::recover_document` возвращает книгу и provenance: версию
+использованного снимка и число применённых событий. В том же
+PostgreSQL/BlobStore тесте проверены 0 событий после актуального v2,
+1 событие после повреждения v2 и выбора snapshot v1, затем 2 события после
+удаления v1 и полного journal replay. Большие async futures теста вынесены
+на heap, чтобы штатный Windows test thread не переполнял стек.
+`cargo test -p spreadsheet-storage
+active_snapshot_round_trip_and_corrupt_newest_falls_back -- --nocapture`
+прошёл 1/1. Actor startup wiring остаётся следующим шагом.
+
 ## 2026-09-29 — локальная activation snapshots (фаза 5, внутренний срез)
 
 Перед срезом прочитаны AGENTS.md, roadmap, ADR-004/031/032 и domain,

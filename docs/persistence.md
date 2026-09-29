@@ -2,10 +2,11 @@
 
 Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
 operations реализованы локально. `SnapshotImage` и binary codec проверены.
-ADR-033 добавил PostgreSQL snapshot metadata и внутренние publish/read API:
+ADR-033 добавил PostgreSQL snapshot metadata и внутренние publish/read/recover API:
 локальный объект проходит повторное чтение перед `ACTIVE`, reader выбирает
-предыдущее поколение при повреждении нового. Actor startup, scheduler,
-tail replay wiring, GC и S3 contract ещё не подключены. Ниже отдельно
+предыдущее поколение при повреждении нового. Authenticated recovery API
+дочитывает непрерывный проверенный хвост журнала после снимка и сверяет
+конечную версию. Actor startup, scheduler, GC и S3 contract ещё не подключены. Ниже отдельно
 названы действующие механизмы и будущие требования.
 
 ## PostgreSQL authority
@@ -58,8 +59,8 @@ S3 MVP subset: PutObject/GetObject/HeadObject/DeleteObject, позднее multi
 ADR-031 реализует внутренний образ и восстановление в domain crate.
 Он сохраняет tombstones, bound formulas, calculation context и последнюю
 версию изменения осей. ADR-032 добавляет отдельный бинарный codec. ADR-033
-реализует metadata state machine и внутренний reader; runtime actor пока не
-выбирает снимок при запуске.
+реализует metadata state machine и внутренний reader/recovery; runtime actor
+пока не выбирает снимок при запуске.
 
 Snapshot имеет immutable document version, schema version, engine/profile/context, domain encoding version, length, byte checksum и content hash. Scheduler берет согласованный immutable candidate на V, не читает изменяемую книгу во время записи.
 

@@ -1,7 +1,10 @@
 use crate::PgDatabase;
 use bytes::Bytes;
 use futures_util::{TryStreamExt, stream};
-use spreadsheet_application::{BlobStore, BlobStoreError};
+use spreadsheet_application::{
+    BlobStore, BlobStoreError,
+    journal::{AuthenticatedActor, JournalError, OperationJournal},
+};
 use spreadsheet_domain::{
     BlobKey, Checksum,
     workbook::{DocumentId, DocumentVersion, SnapshotId, Workbook},
@@ -24,6 +27,8 @@ pub enum SnapshotError {
     Blob(#[from] BlobStoreError),
     #[error("snapshot metadata storage failed")]
     Database(#[from] sqlx::Error),
+    #[error("journal replay failed")]
+    Journal(#[from] JournalError),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,6 +36,12 @@ pub struct SnapshotReceipt {
     pub snapshot_id: SnapshotId,
     pub document_id: DocumentId,
     pub version: DocumentVersion,
+}
+
+pub struct RecoveryResult {
+    pub workbook: Workbook,
+    pub snapshot_version: Option<DocumentVersion>,
+    pub replayed_events: u64,
 }
 
 fn uuid(bytes: &[u8; 16]) -> Uuid {
@@ -77,6 +88,46 @@ async fn read_verified<B: BlobStore>(
 }
 
 impl PgDatabase {
+    /// Authenticated point-in-time recovery. Each tail page is checked by the
+    /// journal adapter, including contiguous versions, checksums and ACL.
+    pub async fn recover_document<B: BlobStore>(
+        &self,
+        blobs: &B,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+    ) -> Result<RecoveryResult, SnapshotError> {
+        let target = self.access(identity, document_id).await?.head;
+        let snapshot = self
+            .latest_valid_snapshot(blobs, document_id, target)
+            .await?;
+        let snapshot_version = snapshot.as_ref().map(Workbook::version);
+        let mut workbook = snapshot.unwrap_or_else(|| Workbook::empty(document_id));
+        let mut replayed_events = 0_u64;
+        while workbook.version() < target {
+            let limit = (target.get() - workbook.version().get()).min(1000) as u32;
+            let events = self
+                .load_events(identity, document_id, workbook.version(), limit)
+                .await?;
+            if events.is_empty() {
+                return Err(SnapshotError::Corrupt);
+            }
+            for event in events {
+                workbook
+                    .apply_event(&event)
+                    .map_err(|_| SnapshotError::Corrupt)?;
+                replayed_events += 1;
+            }
+        }
+        if workbook.version() != target {
+            return Err(SnapshotError::Corrupt);
+        }
+        Ok(RecoveryResult {
+            workbook,
+            snapshot_version,
+            replayed_events,
+        })
+    }
+
     /// Internal checkpoint operation. Only a journal-backed projection is eligible.
     /// The object is verified through a fresh read before the short activation transaction.
     pub async fn publish_snapshot<B: BlobStore>(
@@ -250,6 +301,7 @@ mod tests {
     async fn assert_full_replay_fallback(
         db: &PgDatabase,
         blobs: &LocalFilesystemBlobStore,
+        identity: AuthenticatedActor,
         document_id: DocumentId,
         through: DocumentVersion,
         older_id: SnapshotId,
@@ -261,6 +313,9 @@ mod tests {
                 .await?
                 .is_none()
         );
+        let recovered = Box::pin(db.recover_document(blobs, identity, document_id)).await?;
+        assert_eq!(recovered.snapshot_version, None);
+        assert_eq!(recovered.replayed_events, through.get());
         Ok(())
     }
 
@@ -369,6 +424,10 @@ mod tests {
                 .hash(),
             book2.hash()
         );
+        let from_newest = Box::pin(db.recover_document(&blobs, identity, document_id)).await?;
+        assert_eq!(from_newest.snapshot_version, Some(book2.version()));
+        assert_eq!(from_newest.replayed_events, 0);
+        assert_eq!(from_newest.workbook.hash(), book2.hash());
         let newer_key = BlobKey::parse(&uuid(newer_id.as_bytes()).to_string())?;
         let blob_path = temp.path().join("blobs").join(newer_key.as_str());
         let mut damaged = tokio::fs::read(&blob_path).await?;
@@ -381,7 +440,19 @@ mod tests {
             .ok_or("missing fallback snapshot")?;
         assert_eq!(fallback.version(), book1.version());
         assert_eq!(fallback.hash(), book1.hash());
-        assert_full_replay_fallback(&db, &blobs, document_id, book2.version(), older_id).await?;
+        let recovered = Box::pin(db.recover_document(&blobs, identity, document_id)).await?;
+        assert_eq!(recovered.snapshot_version, Some(book1.version()));
+        assert_eq!(recovered.replayed_events, 1);
+        assert_eq!(recovered.workbook.hash(), book2.hash());
+        assert_full_replay_fallback(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            book2.version(),
+            older_id,
+        )
+        .await?;
         Ok(())
     }
 }
