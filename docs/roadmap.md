@@ -24,6 +24,11 @@ durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалё
 Живой integration test одновременной записи в одну ячейку подтвердил версии
 2/3, серверный порядок и значение победителя после replay. Это не заменяет
 случайные multi-user сценарии с разными задержками и отказами.
+Browser E2E при DPR 1/2 проверил, что отключенная вкладка после удаленной
+правки вновь подключается и показывает canonical значение. Восстановление
+может использовать HTTP projection refresh; тест не доказывает исключительно
+operation replay. Он прошел в двух полных suites 18/18 после ограничения
+параллелизма Playwright до четырех workers из-за dev rate limit 64/s.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

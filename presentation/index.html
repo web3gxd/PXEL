@@ -344,8 +344,9 @@
         </div>
         <p class="roadmap-note">
           Презентация обновляется после каждого пройденного gate. Для фазы 3 и далее проектный
-          контракт есть; очередь отправки уже ограничена 160 кадрами / 2 MiB, но latency и сетевой
-          slow-reader stress ещё не проверены. Linux/Compose/remote CI — отдельные открытые gates.
+          контракт есть; очередь отправки ограничена 160 кадрами / 2 MiB. Локальная latency
+          измерена; сетевой slow-reader stress ещё не проверен. Linux/Compose/remote CI — отдельные
+          открытые gates.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>
@@ -356,8 +357,9 @@
         <div class="eyebrow">09 — Дальше</div>
         <h2 id="closing-title">Таблица —<br /><em>наша система.</em></h2>
         <p class="lead">
-          Сейчас главное: завершить формульный контекст, права активных подписок и convergence
-          tests. Ограниченный replay уже работает. Затем — структура, snapshots и XLSX.
+          Сейчас главное: завершить сетевые convergence tests и проверить медленного клиента.
+          Ограниченный replay, отзыв прав и повторное подключение уже проверены. Затем — структура,
+          snapshots и XLSX.
         </p>
         <div class="closing-links">
           <a href="../README.md"><span>Начать локально</span><b>README ↗</b></a>

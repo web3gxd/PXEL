@@ -34,7 +34,7 @@ test('WASM previews an unsaved draft and cancellation leaves the durable documen
   const id = new URL(page.url()).searchParams.get('document');
   const before = await page.evaluate(async (documentId) => {
     const response = await fetch(`/api/documents/${documentId}`);
-    if (!response.ok) throw new Error('Document read failed');
+    if (!response.ok) throw new Error(`Document read failed (${response.status})`);
     return response.json();
   }, id);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
@@ -48,7 +48,7 @@ test('WASM previews an unsaved draft and cancellation leaves the durable documen
   await expect(page.getByTestId('active-cell')).toHaveText('A1: ');
   const after = await page.evaluate(async (documentId) => {
     const response = await fetch(`/api/documents/${documentId}`);
-    if (!response.ok) throw new Error('Document read failed');
+    if (!response.ok) throw new Error(`Document read failed (${response.status})`);
     return response.json();
   }, id);
   expect(after.version).toBe(before.version);
@@ -184,6 +184,66 @@ test('two browser tabs see each other’s committed cell after a head hint', asy
     await expect(firstBar).toHaveValue('23');
   } finally {
     await second.close();
+  }
+});
+
+test('two tabs converge after one tab disconnects during a remote edit', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const documentUrl = page.url();
+  const secondContext = await page
+    .context()
+    .browser()!
+    .newContext({
+      storageState: await page.context().storageState(),
+    });
+  await secondContext.addInitScript(() => {
+    const original = window.WebSocket;
+    const sockets: WebSocket[] = [];
+    (window as Window & { __pxelTestSockets?: WebSocket[] }).__pxelTestSockets = sockets;
+    window.WebSocket = new Proxy(original, {
+      construct(target, args, newTarget) {
+        const socket = Reflect.construct(target, args, newTarget) as WebSocket;
+        sockets.push(socket);
+        return socket;
+      },
+    });
+  });
+  const second = await secondContext.newPage();
+  try {
+    await second.goto(documentUrl);
+    await expect(second.getByTestId('connection-status')).toHaveText('Подключено');
+    await expect(second.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('');
+    await expect
+      .poll(() =>
+        second.evaluate(
+          () =>
+            (window as Window & { __pxelTestSockets?: WebSocket[] }).__pxelTestSockets?.filter(
+              (socket) => socket.readyState === 1,
+            ).length,
+        ),
+      )
+      .toBeGreaterThan(0);
+    await second.evaluate(() => {
+      for (const socket of (window as Window & { __pxelTestSockets?: WebSocket[] })
+        .__pxelTestSockets ?? [])
+        if (socket.readyState === 1) socket.close(4000);
+    });
+    await expect(second.getByTestId('connection-status')).toContainText(
+      /Восстанавливаем|Нет подключения/,
+    );
+    await secondContext.setOffline(true);
+    const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+    await bar.fill('317');
+    await bar.press('Enter');
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await secondContext.setOffline(false);
+    await expect(second.getByTestId('connection-status')).toHaveText('Подключено');
+    await expect(second.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('317');
+  } finally {
+    await secondContext.close();
   }
 });
 

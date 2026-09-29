@@ -1,5 +1,34 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — браузерное восстановление после разрыва связи
+
+Перед срезом прочитаны AGENTS, roadmap, collaboration contract, `useSession`
+и текущие Playwright tests. Цель — проверить сходимость двух реальных вкладок,
+когда одна пропускает правку и затем переподключается. Инвариант: отключенная
+вкладка не получает live event до восстановления; после него видит canonical
+значение. Тест не утверждает, что догон происходит только через operation
+replay: клиент может выполнить авторизованный projection refresh.
+
+В `apps/web/e2e/document.spec.ts` добавлен сценарий для DPR 1/2 с отдельным
+контекстом и общей сессией. Test-only WebSocket proxy закрывает открытые
+сокеты до перехода context в offline; после удаленной правки context
+возвращается online и проверяет значение. Первые попытки выявили две причины
+нестабильности harness: Chromium offline до socket.close не гарантировал
+ожидаемый `onclose`, а 11 параллельных workers вызывали HTTP 429 от
+глобального dev session/WS limiter 64/s. Последовательность разрыва
+исправлена; `playwright.config.ts` ограничен четырьмя workers. Для диагностики
+старый WASM E2E теперь указывает HTTP status при неуспешном чтении.
+
+После исправления три focused runs прошли 2/2 при DPR 1/2; два полных
+`pnpm test:e2e` прошли 18/18. До исправления были реальные красные прогоны,
+тесты не удалялись и assertions не ослаблялись. Сетевой slow-reader stress и
+массовые randomized browser scenarios пока не выполнены.
+`presentation:check` прошёл 10 слайдов на 1440×900 и 390×844. `just check`
+завершился exit 0: Rust fmt/Clippy/tests/build, wasm32, protobuf drift,
+WASM build, Prettier, ESLint, TS, 53 Vitest и Vite build.
+
+---
+
 ## 2026-09-29 — конкурентная запись одного свойства
 
 Перед срезом прочитаны AGENTS, roadmap, collaboration contract и действующие
