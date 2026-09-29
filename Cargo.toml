@@ -9,6 +9,7 @@ members = [
     "crates/spreadsheet-collab",
     "crates/spreadsheet-formula",
     "crates/spreadsheet-wasm",
+    "crates/spreadsheet-xlsx",
     "apps/server",
 ]
 
@@ -27,6 +28,7 @@ spreadsheet-storage = { path = "crates/spreadsheet-storage", version = "=0.1.0" 
 spreadsheet-storage-codec = { path = "crates/spreadsheet-storage-codec", version = "=0.1.0" }
 spreadsheet-collab = { path = "crates/spreadsheet-collab", version = "=0.1.0" }
 spreadsheet-formula = { path = "crates/spreadsheet-formula", version = "=0.1.0" }
+spreadsheet-xlsx = { path = "crates/spreadsheet-xlsx", version = "=0.1.0" }
 anyhow = "=1.0.104"
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.12.1"
@@ -46,6 +48,8 @@ tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "json"] }
 uuid = { version = "=1.26.1", features = ["v7"] }
 url = "=2.5.8"
 tempfile = "=3.27.0"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
+quick-xml = "=0.42.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

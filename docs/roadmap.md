@@ -242,15 +242,15 @@ SortRange не входит в ранний MVP. Будущий отдельны
 
 ## Отложенные задачи с критериями завершения
 
-| Задача           | Причина и зависимость                                 | Критерий завершения                                                                        |
-| ---------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| AUTH-PROD        | Phase 0 dev auth не является production identity      | Выбран self-hosted provider, audited auth/CSRF/session integration до production           |
-| CALC-CONTRACT    | Формулы не входят в phase 0                           | Подтверждены semantics и fixture corpus до фазы 2                                          |
-| COLLAB-CONTRACT  | Протокол команд пока отсутствует                      | Подтверждены rebase/revoke/barrier contracts до фазы 3                                     |
-| S3-CONTRACT      | Snapshots появятся только в фазе 5                    | Один BlobStore suite проходит filesystem, Garage candidate и российский S3                 |
-| XLSX-ISOLATION   | Недоверенный parser появится в фазе 6                 | Worker process sandbox, resource limits и malicious corpus проходят Linux/Windows adapters |
-| SORT-RECTANGLE   | Full-row sort нарушает ожидания выделенного диапазона | Отдельный ADR, transformation fixtures и atomic rectangle tests перед добавлением          |
-| HISTORY-UI       | Фаза 5 пока даёт только точное read-only HTTP-чтение  | Список версий и безопасный просмотр diff доступны в UI без изменения head                  |
-| HISTORY-HTTP-ACL | HTTP body send не ограждён WebSocket delivery gate    | Тест гонки revoke/read доказывает отсутствие payload после завершённого revoke             |
+| Задача           | Причина и зависимость                                  | Критерий завершения                                                                        |
+| ---------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| AUTH-PROD        | Phase 0 dev auth не является production identity       | Выбран self-hosted provider, audited auth/CSRF/session integration до production           |
+| CALC-CONTRACT    | Формулы не входят в phase 0                            | Подтверждены semantics и fixture corpus до фазы 2                                          |
+| COLLAB-CONTRACT  | Протокол команд пока отсутствует                       | Подтверждены rebase/revoke/barrier contracts до фазы 3                                     |
+| S3-CONTRACT      | Snapshots появятся только в фазе 5                     | Один BlobStore suite проходит filesystem, Garage candidate и российский S3                 |
+| XLSX-ISOLATION   | Bounded package inspector появился без process sandbox | Worker process sandbox, resource limits и malicious corpus проходят Linux/Windows adapters |
+| SORT-RECTANGLE   | Full-row sort нарушает ожидания выделенного диапазона  | Отдельный ADR, transformation fixtures и atomic rectangle tests перед добавлением          |
+| HISTORY-UI       | Фаза 5 пока даёт только точное read-only HTTP-чтение   | Список версий и безопасный просмотр diff доступны в UI без изменения head                  |
+| HISTORY-HTTP-ACL | HTTP body send не ограждён WebSocket delivery gate     | Тест гонки revoke/read доказывает отсутствие payload после завершённого revoke             |
 
 Ни одна запись этой roadmap сама по себе не означает реализованную или протестированную возможность.

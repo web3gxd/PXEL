@@ -331,6 +331,24 @@ fn head_hint(document: DocumentId, update: &HeadUpdate) -> Vec<u8> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let mut arguments = std::env::args_os();
+    let _program = arguments.next();
+    if arguments.next().as_deref() == Some(std::ffi::OsStr::new("xlsx-inspect")) {
+        let path = arguments
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("xlsx-inspect requires a file path"))?;
+        if arguments.next().is_some() {
+            anyhow::bail!("xlsx-inspect accepts one file path");
+        }
+        let inspected = spreadsheet_xlsx::inspect_file(std::path::Path::new(&path))?;
+        println!(
+            "XLSX package: {} sheets, {} entries, {} uncompressed bytes",
+            inspected.sheets.len(),
+            inspected.entry_count,
+            inspected.uncompressed_bytes
+        );
+        return Ok(());
+    }
     tracing_subscriber::fmt()
         .json()
         .with_target(false)
