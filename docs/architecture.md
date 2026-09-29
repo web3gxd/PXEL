@@ -7,7 +7,7 @@ Foundation: **ACCEPTED FOR PHASE 0**, 2026-09-28. Последующее пор�
 
 ## Границы системы
 
-MVP — modular monolith: один основной Axum binary, PostgreSQL как источник истины и переключаемый BlobStore (локальный filesystem или optional S3 feature). В фазе 6 тот же binary может запускаться в изолированном режиме xlsx-worker. Redis, NATS, Kafka, микросервисы и distributed leader election не нужны.
+MVP — modular monolith: один основной Axum binary, PostgreSQL как источник истины и переключаемый BlobStore (локальный filesystem или optional S3 feature). Для локального XLSX preview тот же binary уже запускается отдельным процессом `xlsx-worker` с ограниченным framed protocol; OS sandbox ещё не установлен. Redis, NATS, Kafka, микросервисы и distributed leader election не нужны.
 
 Сервер определяет порядок, canonical operations и результаты формул. Клиент хранит confirmed projection отдельно от pending intents; WASM preview остается предварительным. Никакой ACK committed до durable COMMIT. Все публичные и сохраненные форматы versioned; неизвестная обязательная семантика отклоняется целиком.
 
@@ -42,7 +42,7 @@ calculation executor и stateful preview worker приложения еще не
 | spreadsheet-formula       | Lexer/parser/binder/evaluator/graph/scheduler/locale/diagnostics            | domain                                               | 2                                   |
 | spreadsheet-wasm          | Тонкий commands/patches adapter                                             | domain, formula, wire-protocol                       | 2                                   |
 | spreadsheet-testkit       | Общие seeded generators, virtual clients, fault injection                   | Используемые domain/application/collab/formula       | При двух реальных потребителях      |
-| spreadsheet-xlsx          | OOXML package reader/writer и отдельная normalized IR                       | domain, formula                                      | 6                                   |
+| spreadsheet-xlsx          | Bounded OOXML reader и отдельная scalar IR; writer позднее                  | Нет; только general-purpose ZIP/XML                  | 6                                   |
 | apps/server               | Composition root, transport/auth/runtime adapters                           | Только используемые crates                           | 0                                   |
 
 `storage` никогда не импортирует `collab`; `collab` никогда не импортирует SQLx/storage types. OperationJournal, AuthorizationRepository, SnapshotRepository и CalculationExecutor вводятся в application только вместе с потребителями. Clock/IdGenerator не создаются ради каталогов интерфейсов. SessionDirectory вводится с actor по прямому требованию масштабирования.

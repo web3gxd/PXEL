@@ -20,7 +20,7 @@ Google Sheets задает пользовательскую модель мгн�
 
 ## XLSX profile: phase 6
 
-Фактически реализованы два локальных шага: `xlsx-inspect <path>` проверяет ограниченный ZIP/OOXML пакет, `xlsx-preview <path>` извлекает числа, boolean, простые shared/inline strings и исходный текст формулы в XLSX-specific IR, выводя только счетчики. Формульный cache отбрасывается. Ни одна команда не создаёт документ. Подробные лимиты и незакрытые границы — [ADR-043](adr/043-bounded-xlsx-package-inspection.md) и [ADR-044](adr/044-normalized-xlsx-scalar-ir.md). Таблица ниже описывает целевой профиль, не текущую полноту реализации.
+Фактически реализован локальный `xlsx-preview <path>`: дочерний процесс проверяет ограниченный ZIP/OOXML пакет, извлекает числа, boolean, простые shared/inline strings и исходный текст формулы в XLSX-specific IR; родителю возвращает только счетчики. Формульный cache отбрасывается. Команда не создаёт документ. Подробные лимиты и незакрытые границы — [ADR-043](adr/043-bounded-xlsx-package-inspection.md), [ADR-044](adr/044-normalized-xlsx-scalar-ir.md), [ADR-045](adr/045-xlsx-worker-framed-process.md). Таблица ниже описывает целевой профиль, не текущую полноту реализации.
 
 ZIP → OOXML package relationships → streaming XML → NormalizedImportWorkbook → parent schema validation → server formula binding → canonical document publication. Export идет из согласованной document version через отдельную Export IR. XLSX DTO не становится внутренней workbook model.
 
@@ -38,7 +38,7 @@ ZIP → OOXML package relationships → streaming XML → NormalizedImportWorkbo
 
 ## Недоверенный файл
 
-ZIP limits проверяют реально распакованные bytes, не только headers. Ограничены input size, entry count, expansion ratio, XML depth/attributes/text, relationships, row/cell/formula counts и elapsed/CPU/RAM. Запрещены traversal, duplicate ambiguous entries, external entities/DTD и network relationship fetch. Cancellation убивает всю worker process group/Job Object.
+ZIP limits проверяют реально распакованные bytes, не только headers. Ограничены input size, entry count, expansion ratio, XML depth/attributes/text, relationships, row/cell/formula counts и elapsed budget. Запрещены traversal, duplicate ambiguous entries, external entities/DTD и network relationship fetch. Текущий parent убивает дочерний процесс по таймауту; завершение всей process group/Job Object и жёсткие CPU/RAM лимиты ещё не реализованы.
 
 Linux production adapter: cgroups v2 memory/CPU, process timeout, FD limits, isolated private working directory и read-only input. Windows development adapter: Job Objects с kill-on-close/memory/time, private temp directory и restricted child environment. Child не получает DB/S3 credentials; stdin/stdout — versioned framed protocol с length caps. Parent повторно валидирует IR; exit 0 не доказывает безопасность данных.
 

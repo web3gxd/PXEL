@@ -34,8 +34,9 @@ snapshots уже проходят проверенную активацию и �
 cargo run --locked -q -p pxel-server -- xlsx-preview fixtures/xlsx/minimal_scalars.xlsx
 ```
 
-Команда печатает только количество листов и ячеек. Загрузка XLSX в редактор
-и экспорт ещё не реализованы.
+Команда запускает отдельный дочерний процесс и печатает только количество
+листов и ячеек. OS sandbox, загрузка XLSX в редактор и экспорт ещё не
+реализованы.
 
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Нужны wasm32 target, wasm-bindgen-cli **0.2.129** и установленный Playwright Chromium.

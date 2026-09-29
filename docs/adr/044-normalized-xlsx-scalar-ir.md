@@ -7,8 +7,8 @@ returns an XLSX-specific `NormalizedWorkbook`. It contains sheet names, one-base
 OOXML coordinates and scalar values. It assigns no stable row/column/sheet IDs,
 does not parse or bind formulas with the canonical engine, and cannot publish a
 document. The server binary exposes a local `xlsx-preview <path>` CLI mode that
-prints only sheet/cell counts, so this parser has a real consumer without
-accepting uploads into the server process.
+prints only sheet/cell counts through the child process specified in ADR-045.
+No upload enters the server process.
 
 Supported extraction is deliberately narrow: finite numeric values, booleans,
 simple shared strings, simple inline strings and formula source text. XLSX

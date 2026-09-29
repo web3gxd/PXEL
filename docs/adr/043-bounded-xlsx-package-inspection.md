@@ -1,10 +1,11 @@
 # ADR-043: bounded XLSX package inspection before import
 
-Status: accepted for the first phase-6 slice (2026-09-29).
+Status: accepted for the first phase-6 slice (2026-09-29); direct CLI entry
+point replaced by the child-process preview in ADR-045.
 
 The untrusted XLSX reader is a separate `spreadsheet-xlsx` crate. Its first
-consumer is the server binary's `xlsx-inspect <path>` mode, which starts before
-database configuration and prints only counts. This mode does not publish a
+consumer was the server binary's `xlsx-inspect <path>` mode, which started before
+database configuration and printed only counts. That mode did not publish a
 document, parse cell values, or expose file contents in logs.
 
 Inspection reads at most 32 MiB of ZIP input, 256 entries, 8 MiB per entry,

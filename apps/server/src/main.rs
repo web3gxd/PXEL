@@ -5,6 +5,7 @@ mod delivery;
 mod documents;
 mod outbound;
 mod presence;
+mod xlsx_worker;
 
 use axum::{
     Json, Router,
@@ -334,35 +335,25 @@ async fn main() -> anyhow::Result<()> {
     let mut arguments = std::env::args_os();
     let _program = arguments.next();
     let command = arguments.next();
-    if matches!(command.as_deref(), Some(value) if value == std::ffi::OsStr::new("xlsx-inspect") || value == std::ffi::OsStr::new("xlsx-preview"))
-    {
+    if command.as_deref() == Some(std::ffi::OsStr::new("xlsx-worker")) {
+        if arguments.next().is_some() {
+            anyhow::bail!("XLSX worker accepts no command-line arguments");
+        }
+        xlsx_worker::run()?;
+        return Ok(());
+    }
+    if command.as_deref() == Some(std::ffi::OsStr::new("xlsx-preview")) {
         let path = arguments
             .next()
             .ok_or_else(|| anyhow::anyhow!("XLSX command requires a file path"))?;
         if arguments.next().is_some() {
             anyhow::bail!("XLSX command accepts one file path");
         }
-        if command.as_deref() == Some(std::ffi::OsStr::new("xlsx-preview")) {
-            let normalized = spreadsheet_xlsx::normalize_file(std::path::Path::new(&path))?;
-            let cells: usize = normalized
-                .sheets
-                .iter()
-                .map(|sheet| sheet.cells.len())
-                .sum();
-            println!(
-                "XLSX preview: {} sheets, {} cells",
-                normalized.sheets.len(),
-                cells
-            );
-        } else {
-            let inspected = spreadsheet_xlsx::inspect_file(std::path::Path::new(&path))?;
-            println!(
-                "XLSX package: {} sheets, {} entries, {} uncompressed bytes",
-                inspected.sheets.len(),
-                inspected.entry_count,
-                inspected.uncompressed_bytes
-            );
-        }
+        let counts = xlsx_worker::preview(std::path::Path::new(&path)).await?;
+        println!(
+            "XLSX preview: {} sheets, {} cells",
+            counts.sheets, counts.cells
+        );
         return Ok(());
     }
     tracing_subscriber::fmt()

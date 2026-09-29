@@ -2005,6 +2005,7 @@ dependencies = [
  "spreadsheet-storage",
  "spreadsheet-wire-protocol",
  "spreadsheet-xlsx",
+ "tempfile",
  "thiserror",
  "tokio",
  "tower-http",
