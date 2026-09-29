@@ -86,7 +86,8 @@ async fn snapshot_worker(
 async fn snapshot_cleanup_worker(
     database: PgDatabase,
     blobs: LocalFilesystemBlobStore,
-    retention: Duration,
+    incomplete_retention: Duration,
+    active_retention: Duration,
 ) {
     let Some(batch) = NonZeroU16::new(100) else {
         return;
@@ -96,7 +97,14 @@ async fn snapshot_cleanup_worker(
     loop {
         ticker.tick().await;
         match database
-            .cleanup_incomplete_snapshots(&blobs, retention, batch)
+            .retire_old_active_snapshots(active_retention, batch)
+            .await
+        {
+            Ok(retired) => tracing::info!(event = "snapshot_active_retirement", retired),
+            Err(_) => tracing::warn!(event = "snapshot_active_retirement_failed"),
+        }
+        match database
+            .cleanup_incomplete_snapshots(&blobs, incomplete_retention, batch)
             .await
         {
             Ok(report) => tracing::info!(
@@ -339,6 +347,7 @@ async fn main() -> anyhow::Result<()> {
         database.clone(),
         blobs.clone(),
         config.snapshot_cleanup_retention,
+        config.snapshot_active_retention,
     ));
     let snapshot_interval = config.snapshot_interval;
     let state = Arc::new(AppState {

@@ -374,6 +374,24 @@ impl PgDatabase {
         })
     }
 
+    /// Retires old ACTIVE checkpoints only when at least two newer committed
+    /// versions still have ACTIVE checkpoints. The journal remains intact, so
+    /// historical reads can replay from genesis after retirement.
+    pub async fn retire_old_active_snapshots(
+        &self,
+        min_age: Duration,
+        max_rows: NonZeroU16,
+    ) -> Result<u64, SnapshotError> {
+        let retired = sqlx::query!(
+            "WITH candidates AS (SELECT s.snapshot_id FROM document_snapshots s JOIN documents d ON d.document_id=s.document_id WHERE s.state='ACTIVE' AND s.created_at < now() - ($1::bigint * interval '1 second') AND s.snapshot_id IS DISTINCT FROM d.preferred_snapshot_id AND (SELECT count(DISTINCT newer.snapshot_version) FROM document_snapshots newer WHERE newer.document_id=s.document_id AND newer.state='ACTIVE' AND newer.snapshot_version>s.snapshot_version) >= 2 ORDER BY s.created_at, s.snapshot_id LIMIT $2 FOR UPDATE OF s SKIP LOCKED) UPDATE document_snapshots s SET state='REJECTED' FROM candidates c WHERE s.snapshot_id=c.snapshot_id AND s.state='ACTIVE' RETURNING s.snapshot_id",
+            sql_number(min_age.as_secs())?,
+            i64::from(max_rows.get())
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(retired.len() as u64)
+    }
+
     /// Returns the newest verified ACTIVE image. A corrupt or missing object is
     /// skipped so replay can continue from an older checkpoint or the genesis log.
     pub async fn latest_valid_snapshot<B: BlobStore>(
@@ -852,6 +870,164 @@ mod tests {
         .await?;
         assert_eq!(metadata.state, "REJECTED");
         assert_preferred(db, document_id, SnapshotId::from_bytes([25; 16])?).await?;
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn old_active_snapshots_retire_without_losing_history_or_fallback(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        Box::pin(active_retention_scenario(pool)).await
+    }
+
+    async fn active_retention_scenario(pool: sqlx::PgPool) -> TestResult {
+        let db = PgDatabase { pool };
+        db.migrate().await?;
+        let identity = AuthenticatedActor {
+            actor_id: ActorId::from_bytes([1; 16])?,
+            workspace_id: WorkspaceId::from_bytes([2; 16])?,
+        };
+        db.issue_development_session([3; 32], identity.actor_id, identity.workspace_id)
+            .await?;
+        let document_id = DocumentId::from_bytes([4; 16])?;
+        let sheet = SheetId::from_bytes([5; 16])?;
+        let row = RowId::from_bytes([6; 16])?;
+        let column = ColumnId::from_bytes([7; 16])?;
+        let address = CellAddress { sheet, row, column };
+        let genesis = Operation::CreateWorkbook {
+            sheet: SheetSeed {
+                id: sheet,
+                name: "Retention".into(),
+                rows: vec![row],
+                columns: vec![column],
+            },
+        };
+        let mut book =
+            Workbook::empty(document_id).candidate(&genesis, DocumentVersion::new(1)?)?;
+        db.create(
+            identity,
+            CommittedEvent {
+                document_id,
+                operation_id: OperationId::from_bytes([21; 16])?,
+                principal: EventPrincipal::User(identity.actor_id),
+                version: book.version(),
+                operation: genesis,
+                state_hash: book.hash(),
+            },
+        )
+        .await?;
+        let temp = tempfile::tempdir()?;
+        let blobs = LocalFilesystemBlobStore::new(
+            temp.path().join("blobs"),
+            codec::MAX_SNAPSHOT_BYTES as u64,
+        )
+        .await?;
+        let first_hash = book.hash();
+        for number in 1_u8..=4 {
+            if number > 1 {
+                let value = CellValue::Text(format!("version-{number}"));
+                let operation = Operation::SetCellValue {
+                    address,
+                    value: value.clone(),
+                };
+                let candidate =
+                    book.candidate(&operation, DocumentVersion::new(u64::from(number))?)?;
+                let operation_id = OperationId::from_bytes([20 + number; 16])?;
+                let request = CommitRequest {
+                    identity,
+                    expected_head: book.version(),
+                    expected_access: db.access(identity, document_id).await?,
+                    command: Command {
+                        operation_id,
+                        document_id,
+                        actor_id: identity.actor_id,
+                        base_version: book.version(),
+                        client_sequence: u64::from(number),
+                        operation: CommandPayload::SetCellValue { address, value },
+                    },
+                    event: CommittedEvent {
+                        document_id,
+                        operation_id,
+                        principal: EventPrincipal::User(identity.actor_id),
+                        version: candidate.version(),
+                        operation,
+                        state_hash: candidate.hash(),
+                    },
+                };
+                assert!(matches!(
+                    db.commit(&request).await?,
+                    CommitOutcome::Committed(_)
+                ));
+                book = candidate;
+            }
+            let snapshot_id = SnapshotId::from_bytes([10 + number; 16])?;
+            Box::pin(db.publish_snapshot(
+                &blobs,
+                snapshot_id,
+                Arc::new(book.clone()),
+                "engine-v1",
+                "pxel-v1",
+            ))
+            .await?;
+        }
+        let one = NonZeroU16::new(1).ok_or("invalid retention batch")?;
+        assert_eq!(
+            db.retire_old_active_snapshots(Duration::from_secs(3600), one)
+                .await?,
+            0
+        );
+        assert_eq!(
+            db.retire_old_active_snapshots(Duration::ZERO, one).await?,
+            1
+        );
+        assert_eq!(
+            db.retire_old_active_snapshots(Duration::ZERO, one).await?,
+            1
+        );
+        assert_eq!(
+            db.retire_old_active_snapshots(Duration::ZERO, one).await?,
+            0
+        );
+        let states = sqlx::query!(
+            "SELECT snapshot_version, state FROM document_snapshots WHERE document_id=$1 ORDER BY snapshot_version",
+            uuid(document_id.as_bytes())
+        )
+        .fetch_all(&db.pool)
+        .await?;
+        assert_eq!(
+            states
+                .iter()
+                .map(|row| row.state.as_str())
+                .collect::<Vec<_>>(),
+            ["REJECTED", "REJECTED", "ACTIVE", "ACTIVE"]
+        );
+        assert_preferred(&db, document_id, SnapshotId::from_bytes([14; 16])?).await?;
+        let historical = Box::pin(db.recover_document_at_version(
+            &blobs,
+            identity,
+            document_id,
+            DocumentVersion::new(1)?,
+        ))
+        .await?;
+        assert_eq!(historical.snapshot_version, None);
+        assert_eq!(historical.workbook.hash(), first_hash);
+        assert_eq!(historical.replayed_events, 1);
+        let batch = NonZeroU16::new(10).ok_or("invalid cleanup batch")?;
+        db.cleanup_incomplete_snapshots(&blobs, Duration::ZERO, batch)
+            .await?;
+        for number in 1_u8..=2 {
+            let key = BlobKey::parse(&uuid(&[10 + number; 16]).to_string())?;
+            assert!(matches!(
+                blobs.head(&key).await,
+                Err(BlobStoreError::NotFound)
+            ));
+        }
+        let newest_key = BlobKey::parse(&uuid(&[14; 16]).to_string())?;
+        blobs.delete(&newest_key).await?;
+        let recovered = Box::pin(db.recover_document(&blobs, identity, document_id)).await?;
+        assert_eq!(recovered.snapshot_version, Some(DocumentVersion::new(3)?));
+        assert_eq!(recovered.replayed_events, 1);
+        assert_eq!(recovered.workbook.hash(), book.hash());
         Ok(())
     }
 

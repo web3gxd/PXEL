@@ -1,5 +1,38 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — ограниченный retention старых ACTIVE snapshots
+
+Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-004/033/037,
+snapshot publisher/reader, cleanup worker и миграции. Цель — ограничить
+накопление старых снимков без сокращения журнала и потери fallback.
+Инварианты: PostgreSQL остаётся authority; preferred snapshot не выводится;
+как минимум два более новых ACTIVE снимка разных версий остаются;
+историческая версия восстанавливается из журнала при отсутствии снимка.
+Риски: повреждение обоих оставшихся объектов ведёт к полному replay;
+конкурентные GC workers, S3 consistency и power-loss не проверены этим тестом.
+
+`retire_old_active_snapshots` переводит в REJECTED не более 100 старых ACTIVE
+записей за проход, только при двух более новых ACTIVE версиях. Возраст задаётся
+`PXEL_SNAPSHOT_ACTIVE_RETENTION_DAYS` (default 30, диапазон 1..3650).
+Существующий почасовой cleanup worker сначала выводит кандидатов, затем
+повторно удаляет объекты REJECTED через BlobStore. Metadata и append-only
+operation log сохраняются. Решение записано в ADR-038, README/persistence/
+roadmap и отображено в промежуточной презентации.
+
+Реально выполнено: адресный PostgreSQL/LocalFilesystemBlobStore test 1/1:
+четыре committed версии и ACTIVE снимка, cutoff, bounded batch size 1,
+сохранение v3/v4, preferred pointer, удаление объектов v1/v2, historical v1
+через full replay и восстановление head через v3+tail после потери v4.
+Server config test 1/1 и clippy storage/server прошли. `cargo sqlx prepare`
+обновил checked query metadata; `just check` прошёл Rust fmt, workspace
+Clippy/tests/build, WASM, protobuf drift, frontend format/lint/typecheck,
+Vitest 71/71 и production Vite build. `just sqlx-check` прошёл.
+Presentation check проверил 10 слайдов на 1440×900 и 390×844;
+`git diff --check` прошёл. Новый latency benchmark не запускался; один
+локальный SQLx test не доказывает поведение при десятках тысяч снимков.
+Linux/Compose/remote CI, S3 contracts, power-loss, parallel GC и PITR/backup
+остаются открытыми; фаза 5 не закрыта.
+
 ## 2026-09-29 — статус презентации во время разработки MVP
 
 Пользователь уточнил, почему презентация появилась до завершения всех фаз.

@@ -10,8 +10,8 @@ ADR-033 добавил PostgreSQL snapshot metadata и внутренние publ
 расчёт restored projection. ADR-035 добавил неблокирующий scheduler после
 каждой 1000-й committed операции по умолчанию и отдельный sequential worker.
 Локальный smoke с порогом 1 подтвердил ACTIVE v2 и чтение после restart.
-ADR-037 добавил уборку incomplete/rejected объектов; полный retention GC и S3
-contract ещё не подключены. Ниже отдельно
+ADR-037/038 добавили уборку incomplete и старых ACTIVE snapshots; S3 adapter
+и contract suite ещё не подключены. Ниже отдельно
 названы действующие механизмы и будущие требования.
 
 Controlled interruption test останавливает публикацию на шести границах
@@ -91,13 +91,13 @@ UPLOADING -> STORED -> VERIFIED -> ACTIVE
 7. Предыдущие ACTIVE generations остаются доступными для fallback. ACTIVE означает «прошел activation», а preferred pointer указывает рекомендуемое новейшее поколение. Это не единственная строка ACTIVE на документ.
 8. GC отдельно удаляет неиспользуемые incomplete/rejected/retired objects после retention, проверяя metadata и fencing незавершённых publisher jobs. Старый ACTIVE нельзя удалять до верификации и восстановления более нового поколения. Объекты без metadata требуют отдельного безопасного inventory. Retention не означает удаление log живого документа.
 
-Текущий локальный GC (ADR-037) покрывает только incomplete/rejected metadata
-старше настроенного порога: PostgreSQL атомарно переводит их в `REJECTED`,
-publisher проверяет результат каждого перехода, а worker ограниченными
-пачками повторяет идемпотентное удаление объекта. `cleanup_attempted_at`
-обеспечивает обход всех `REJECTED` записей без starvation. `ACTIVE`
-поколения сохраняются; политика их удаления и обнаружение объектов без
-metadata остаются отдельными задачами.
+Локальный GC (ADR-037/038) переводит старые incomplete records в `REJECTED`
+и выводит старые `ACTIVE` поколения, только если остались два более новых
+ACTIVE снимка разных версий. Preferred snapshot не выводится. Publisher
+проверяет результат каждого перехода; worker ограниченными пачками повторяет
+идемпотентное удаление объектов. `cleanup_attempted_at` обеспечивает обход
+всех `REJECTED` записей без starvation. Обнаружение объектов без metadata,
+S3 consistency и backup/PITR остаются отдельными задачами.
 
 Crash после object upload, до metadata update оставляет незавершенный record/object: recovery reader его не использует, будущий reconciler/GC решит судьбу. Crash после activation transaction дает читателю ACTIVE record. Corrupt ACTIVE при загрузке сейчас пропускается без изменения metadata и выбирается предыдущий ACTIVE; автоматический аудируемый `REJECTED` переход будет отдельным срезом. Object existence alone никогда не активирует snapshot.
 

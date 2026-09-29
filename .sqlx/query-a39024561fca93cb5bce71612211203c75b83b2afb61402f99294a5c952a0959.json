@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT snapshot_version, state FROM document_snapshots WHERE document_id=$1 ORDER BY snapshot_version",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "snapshot_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "snapshot_version"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a39024561fca93cb5bce71612211203c75b83b2afb61402f99294a5c952a0959"
+}

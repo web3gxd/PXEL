@@ -102,17 +102,18 @@ GitHub Actions выполняет те же команды на Ubuntu 24.04. Н
 
 ## Конфигурация и границы
 
-| Переменная                                | Назначение                                                                  |
-| ----------------------------------------- | --------------------------------------------------------------------------- |
-| `DATABASE_URL` / `PXEL_DATABASE_URL_FILE` | DB URL из environment или файла; default file `.local/database-url`         |
-| `PXEL_BIND`                               | Backend bind; default `127.0.0.1:8080`                                      |
-| `PXEL_ALLOWED_ORIGINS`                    | Список точных Origin через запятую, без wildcard                            |
-| `PXEL_DEV_AUTH`                           | `1` работает только с compile feature `dev-auth` и loopback bind            |
-| `PXEL_BLOB_ROOT`                          | Private writable directory; default `.local/blobs`                          |
-| `PXEL_SNAPSHOT_INTERVAL`                  | Число committed событий между snapshots; default `1000`, предел `1..100000` |
-| `PXEL_SNAPSHOT_CLEANUP_HOURS`             | Возраст incomplete snapshot до уборки; default `24`, предел `1..8760`       |
-| `PXEL_DB_PORT`                            | Порт только локального bootstrap; default `55432`                           |
-| `PXEL_PG_BIN`                             | Каталог binaries для native bootstrap                                       |
+| Переменная                                | Назначение                                                                                                 |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL` / `PXEL_DATABASE_URL_FILE` | DB URL из environment или файла; default file `.local/database-url`                                        |
+| `PXEL_BIND`                               | Backend bind; default `127.0.0.1:8080`                                                                     |
+| `PXEL_ALLOWED_ORIGINS`                    | Список точных Origin через запятую, без wildcard                                                           |
+| `PXEL_DEV_AUTH`                           | `1` работает только с compile feature `dev-auth` и loopback bind                                           |
+| `PXEL_BLOB_ROOT`                          | Private writable directory; default `.local/blobs`                                                         |
+| `PXEL_SNAPSHOT_INTERVAL`                  | Число committed событий между snapshots; default `1000`, предел `1..100000`                                |
+| `PXEL_SNAPSHOT_CLEANUP_HOURS`             | Возраст incomplete snapshot до уборки; default `24`, предел `1..8760`                                      |
+| `PXEL_SNAPSHOT_ACTIVE_RETENTION_DAYS`     | Возраст старых ACTIVE snapshots до вывода; default `30`, предел `1..3650`; два новых поколения сохраняются |
+| `PXEL_DB_PORT`                            | Порт только локального bootstrap; default `55432`                                                          |
+| `PXEL_PG_BIN`                             | Каталог binaries для native bootstrap                                                                      |
 
 `GET /healthz` проверяет процесс, `GET /readyz` — подключение, точную версию/checksum
 миграций и writable blob root. Dev login требует проверенный Origin, создает

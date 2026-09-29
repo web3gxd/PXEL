@@ -151,13 +151,16 @@ release harness с реальными PostgreSQL, checksum/codec и LocalFilesys
 дал p95 71.356–87.611 ms для snapshot + 10 000 tail events в двух локальных
 прогонах; full replay p95 131.171–139.006 ms. Условия и ограничения —
 [отчёт](benchmarks/2026-09-29-snapshot-replay-persisted-local.md). Полная crash
-matrix, retention GC и S3 contract остаются открытыми.
+matrix и S3 contract остаются открытыми.
 Controlled interruption на шести границах publication уже проверил
 metadata/BlobStore/activation rollback; power-loss не проверен.
 Уборка incomplete/rejected snapshots ([ADR-037](adr/037-incomplete-snapshot-cleanup.md))
 проверена на PostgreSQL/LocalFilesystemBlobStore, включая гонку с publisher.
-ACTIVE поколения пока сохраняются; полный retention GC, inventory orphan
-objects и S3 contract остаются открытыми.
+Ограниченный GC старых ACTIVE поколений ([ADR-038](adr/038-active-snapshot-retention.md))
+оставляет два последних снимка разных версий и полный журнал. Historical
+read версии без снимка проверен через replay; после потери newest восстановление
+идёт из предпоследнего. Inventory orphan objects и S3 contract остаются
+открытыми.
 Read-only historical endpoint восстанавливает точную версию из подходящего
 snapshot и хвоста журнала ([ADR-036](adr/036-historical-version-read.md));
 PostgreSQL и HTTP tests проверили v1/v2, fallback, ACL и неизменность head.

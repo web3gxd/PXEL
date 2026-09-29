@@ -8,6 +8,7 @@ pub struct Config {
     pub dev_auth: bool,
     pub snapshot_interval: NonZeroU64,
     pub snapshot_cleanup_retention: Duration,
+    pub snapshot_active_retention: Duration,
 }
 
 impl Config {
@@ -68,6 +69,12 @@ impl Config {
             Err(_) => anyhow::bail!("PXEL_SNAPSHOT_CLEANUP_HOURS must be Unicode"),
         };
         let snapshot_cleanup_retention = parse_snapshot_cleanup_hours(&cleanup_hours)?;
+        let active_days = match std::env::var("PXEL_SNAPSHOT_ACTIVE_RETENTION_DAYS") {
+            Ok(value) => value,
+            Err(std::env::VarError::NotPresent) => "30".into(),
+            Err(_) => anyhow::bail!("PXEL_SNAPSHOT_ACTIVE_RETENTION_DAYS must be Unicode"),
+        };
+        let snapshot_active_retention = parse_snapshot_active_days(&active_days)?;
         Ok(Self {
             database_url,
             address,
@@ -75,11 +82,20 @@ impl Config {
             dev_auth,
             snapshot_interval,
             snapshot_cleanup_retention,
+            snapshot_active_retention,
             blob_root: std::env::var_os("PXEL_BLOB_ROOT")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(".local/blobs")),
         })
     }
+}
+
+fn parse_snapshot_active_days(raw: &str) -> anyhow::Result<Duration> {
+    let days = raw.parse::<u64>()?;
+    if !(1..=3650).contains(&days) {
+        anyhow::bail!("PXEL_SNAPSHOT_ACTIVE_RETENTION_DAYS must be between 1 and 3650");
+    }
+    Ok(Duration::from_secs(days * 86_400))
 }
 
 fn parse_snapshot_cleanup_hours(raw: &str) -> anyhow::Result<Duration> {
@@ -100,7 +116,9 @@ fn parse_snapshot_interval(raw: &str) -> anyhow::Result<NonZeroU64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_snapshot_cleanup_hours, parse_snapshot_interval};
+    use super::{
+        parse_snapshot_active_days, parse_snapshot_cleanup_hours, parse_snapshot_interval,
+    };
 
     #[test]
     fn snapshot_interval_has_a_bounded_nonzero_configuration() {
@@ -118,6 +136,16 @@ mod tests {
         );
         for value in ["0", "8761", "invalid"] {
             assert!(parse_snapshot_cleanup_hours(value).is_err());
+        }
+    }
+
+    #[test]
+    fn active_snapshot_retention_has_a_bounded_configuration() {
+        assert!(
+            matches!(parse_snapshot_active_days("30"), Ok(value) if value.as_secs() == 2_592_000)
+        );
+        for value in ["0", "3651", "invalid"] {
+            assert!(parse_snapshot_active_days(value).is_err());
         }
     }
 }
