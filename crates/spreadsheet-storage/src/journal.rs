@@ -46,7 +46,7 @@ struct StoredEventRow<'a> {
     canonical_event_hash: &'a [u8],
 }
 fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=14) {
+    if !matches!(row.schema_version, 1..=15) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -114,6 +114,7 @@ fn touches_address(operation: &Operation, address: CellAddress) -> bool {
             *sheet == address.sheet && columns.contains(&address.column)
         }
         Operation::CreateWorkbook { .. }
+        | Operation::AddSheet { .. }
         | Operation::ExtendRows { .. }
         | Operation::InsertRows { .. }
         | Operation::InsertRowsRebased { .. }
@@ -420,7 +421,9 @@ impl OperationJournal for PgDatabase {
             return Err(JournalError::Corrupt);
         }
         let canonical_payload = match &e.operation {
-            Operation::CreateWorkbook { .. } | Operation::AdvanceCalculationEpoch { .. } => {
+            Operation::CreateWorkbook { .. }
+            | Operation::AddSheet { .. }
+            | Operation::AdvanceCalculationEpoch { .. } => {
                 return Err(JournalError::Corrupt);
             }
             Operation::SetCellValue { address, value } => CommandPayload::SetCellValue {
@@ -725,7 +728,7 @@ impl PgDatabase {
         identity: AuthenticatedActor,
         events: &[CommittedEvent],
     ) -> Result<CommitReceipt, JournalError> {
-        if events.is_empty() || events.len() > MAX_IMPORT_CELLS + 1 {
+        if events.is_empty() || events.len() > MAX_IMPORT_CELLS + 64 {
             return Err(JournalError::Corrupt);
         }
         let genesis = events.first().ok_or(JournalError::Corrupt)?;
@@ -743,7 +746,9 @@ impl PgDatabase {
             } else {
                 matches!(
                     event.operation,
-                    Operation::SetCellValues { .. } | Operation::SetCellFormula { .. }
+                    Operation::AddSheet { .. }
+                        | Operation::SetCellValues { .. }
+                        | Operation::SetCellFormula { .. }
                 )
             };
             if !permitted

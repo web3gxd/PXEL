@@ -71,86 +71,107 @@ pub fn prepare(
     if !imported.issues.is_empty() && loss_policy == LossPolicy::Reject {
         return Err(ImportError::UnsupportedProfile);
     }
-    let sheet = imported.sheets.first().ok_or(ImportError::InvalidIr)?;
-    if imported.sheets.len() != 1 || sheet.cells.len() > MAX_IMPORT_CELLS {
+    if imported.sheets.is_empty()
+        || imported.sheets.len() > 64
+        || imported
+            .sheets
+            .iter()
+            .map(|sheet| sheet.cells.len())
+            .sum::<usize>()
+            > MAX_IMPORT_CELLS
+    {
         return Err(ImportError::UnsupportedProfile);
     }
-    let row_extent = sheet
-        .cells
-        .last()
-        .map_or(1000_usize, |cell| cell.row as usize)
-        .max(1000);
-    let column_extent = sheet
-        .cells
+    let seeds = imported
+        .sheets
         .iter()
-        .map(|cell| cell.column as usize)
-        .max()
-        .unwrap_or(26)
-        .max(26);
-    if row_extent > MAX_ROWS || column_extent > MAX_COLUMNS {
-        return Err(ImportError::UnsupportedProfile);
-    }
-    let seed = SheetSeed {
-        id: SheetId::from_bytes(*Uuid::now_v7().as_bytes())?,
-        name: sheet.name.clone(),
-        rows: (0..row_extent)
-            .map(|_| RowId::from_bytes(*Uuid::now_v7().as_bytes()))
-            .collect::<Result<_, _>>()?,
-        columns: (0..column_extent)
-            .map(|_| ColumnId::from_bytes(*Uuid::now_v7().as_bytes()))
-            .collect::<Result<_, _>>()?,
-    };
-    let mut events = Vec::with_capacity(sheet.cells.len().saturating_add(2));
+        .map(|sheet| {
+            let row_extent = sheet
+                .cells
+                .iter()
+                .map(|cell| cell.row as usize)
+                .max()
+                .unwrap_or(0)
+                .max(1000);
+            let column_extent = sheet
+                .cells
+                .iter()
+                .map(|cell| cell.column as usize)
+                .max()
+                .unwrap_or(0)
+                .max(26);
+            if row_extent > MAX_ROWS || column_extent > MAX_COLUMNS {
+                return Err(ImportError::UnsupportedProfile);
+            }
+            Ok(SheetSeed {
+                id: SheetId::from_bytes(*Uuid::now_v7().as_bytes())?,
+                name: sheet.name.clone(),
+                rows: (0..row_extent)
+                    .map(|_| RowId::from_bytes(*Uuid::now_v7().as_bytes()))
+                    .collect::<Result<_, _>>()?,
+                columns: (0..column_extent)
+                    .map(|_| ColumnId::from_bytes(*Uuid::now_v7().as_bytes()))
+                    .collect::<Result<_, _>>()?,
+            })
+        })
+        .collect::<Result<Vec<_>, ImportError>>()?;
+    let mut events = Vec::with_capacity(
+        MAX_IMPORT_CELLS
+            .saturating_add(seeds.len())
+            .saturating_add(1),
+    );
     let (created, mut current) = event(
         document,
         actor,
         &Workbook::empty(document),
         Operation::CreateWorkbook {
-            sheet: seed.clone(),
+            sheet: seeds[0].clone(),
         },
     )?;
     events.push(created);
+    for seed in seeds.iter().skip(1) {
+        let (added, next) = event(
+            document,
+            actor,
+            &current,
+            Operation::AddSheet {
+                sheet: seed.clone(),
+            },
+        )?;
+        events.push(added);
+        current = next;
+    }
     let mut values = Vec::new();
     let mut formulas = Vec::new();
-    for cell in &sheet.cells {
-        let address = CellAddress {
-            sheet: seed.id,
-            row: *seed
-                .rows
-                .get((cell.row - 1) as usize)
-                .ok_or(ImportError::UnsupportedProfile)?,
-            column: *seed
-                .columns
-                .get((cell.column - 1) as usize)
-                .ok_or(ImportError::UnsupportedProfile)?,
-        };
-        match &cell.value {
-            NormalizedCellValue::Number(value) => values.push(CellWrite {
-                address,
-                value: CellValue::Number(*value),
-            }),
-            NormalizedCellValue::Text(value) => values.push(CellWrite {
-                address,
-                value: CellValue::Text(value.clone()),
-            }),
-            NormalizedCellValue::Boolean(value) => values.push(CellWrite {
-                address,
-                value: CellValue::Boolean(*value),
-            }),
-            NormalizedCellValue::Formula(raw) => {
-                let source = FormulaSource::new(format!("={raw}"))
-                    .map_err(|_| ImportError::InvalidFormula)?;
-                let formula = binder::bind(source.as_str(), &current, address)
-                    .map_err(|_| ImportError::InvalidFormula)?;
-                if formula
-                    .ast()
-                    .nodes()
-                    .iter()
-                    .any(|node| matches!(node, Node::InvalidReference(_)))
-                {
-                    return Err(ImportError::InvalidFormula);
+    for (sheet, seed) in imported.sheets.iter().zip(&seeds) {
+        for cell in &sheet.cells {
+            let address = CellAddress {
+                sheet: seed.id,
+                row: *seed
+                    .rows
+                    .get((cell.row - 1) as usize)
+                    .ok_or(ImportError::UnsupportedProfile)?,
+                column: *seed
+                    .columns
+                    .get((cell.column - 1) as usize)
+                    .ok_or(ImportError::UnsupportedProfile)?,
+            };
+            match &cell.value {
+                NormalizedCellValue::Number(value) => values.push(CellWrite {
+                    address,
+                    value: CellValue::Number(*value),
+                }),
+                NormalizedCellValue::Text(value) => values.push(CellWrite {
+                    address,
+                    value: CellValue::Text(value.clone()),
+                }),
+                NormalizedCellValue::Boolean(value) => values.push(CellWrite {
+                    address,
+                    value: CellValue::Boolean(*value),
+                }),
+                NormalizedCellValue::Formula(raw) => {
+                    formulas.push((address, raw));
                 }
-                formulas.push((address, formula));
             }
         }
     }
@@ -164,7 +185,19 @@ pub fn prepare(
         events.push(saved);
         current = next;
     }
-    for (address, formula) in formulas {
+    for (address, raw) in formulas {
+        let source =
+            FormulaSource::new(format!("={raw}")).map_err(|_| ImportError::InvalidFormula)?;
+        let formula = binder::bind(source.as_str(), &current, address)
+            .map_err(|_| ImportError::InvalidFormula)?;
+        if formula
+            .ast()
+            .nodes()
+            .iter()
+            .any(|node| matches!(node, Node::InvalidReference(_)))
+        {
+            return Err(ImportError::InvalidFormula);
+        }
         let (saved, next) = event(
             document,
             actor,

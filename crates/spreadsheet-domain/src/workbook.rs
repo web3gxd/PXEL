@@ -321,6 +321,9 @@ pub enum Operation {
     CreateWorkbook {
         sheet: SheetSeed,
     },
+    AddSheet {
+        sheet: SheetSeed,
+    },
     ExtendRows {
         sheet: SheetId,
         rows: Vec<RowId>,
@@ -476,11 +479,16 @@ pub struct SnapshotImage {
     pub document_id: DocumentId,
     pub version: DocumentVersion,
     pub last_axis_change_version: DocumentVersion,
-    pub sheet: SheetSeed,
-    pub cells: Vec<(CellAddress, CellContent)>,
+    pub sheets: Vec<SnapshotSheetImage>,
     pub retired_rows: Vec<RowId>,
     pub retired_columns: Vec<ColumnId>,
     pub calculation_context: Option<CalculationContext>,
+}
+
+#[derive(Clone)]
+pub struct SnapshotSheetImage {
+    pub sheet: SheetSeed,
+    pub cells: Vec<(CellAddress, CellContent)>,
 }
 impl Sheet {
     pub const fn id(&self) -> SheetId {
@@ -687,21 +695,27 @@ impl Workbook {
         self.ast_memory_bytes
     }
     pub fn snapshot_image(&self) -> Result<SnapshotImage, DomainError> {
-        if self.version == DocumentVersion::ZERO || self.sheets.len() != 1 {
+        if self.version == DocumentVersion::ZERO || self.sheets.is_empty() || self.sheets.len() > 64
+        {
             return Err(DomainError::VersionConflict);
         }
-        let sheet = self.sheets.first().ok_or(DomainError::MissingSheet)?;
         Ok(SnapshotImage {
             document_id: self.document_id,
             version: self.version,
             last_axis_change_version: self.last_axis_change_version,
-            sheet: SheetSeed {
-                id: sheet.id,
-                name: sheet.name.clone(),
-                rows: sheet.rows.clone(),
-                columns: sheet.columns.clone(),
-            },
-            cells: sheet.cells.iter().map(|(a, c)| (*a, c.clone())).collect(),
+            sheets: self
+                .sheets
+                .iter()
+                .map(|sheet| SnapshotSheetImage {
+                    sheet: SheetSeed {
+                        id: sheet.id,
+                        name: sheet.name.clone(),
+                        rows: sheet.rows.clone(),
+                        columns: sheet.columns.clone(),
+                    },
+                    cells: sheet.cells.iter().map(|(a, c)| (*a, c.clone())).collect(),
+                })
+                .collect(),
             retired_rows: self.retired_row_ids.iter().copied().collect(),
             retired_columns: self.retired_column_ids.iter().copied().collect(),
             calculation_context: self.calculation_context.clone(),
@@ -718,20 +732,35 @@ impl Workbook {
         {
             return Err(DomainError::InvalidAxis);
         }
-        let mut workbook =
-            Self::hydrate(image.document_id, image.version, image.sheet, image.cells)?;
+        let seeds = image
+            .sheets
+            .iter()
+            .map(|sheet| sheet.sheet.clone())
+            .collect::<Vec<_>>();
+        let mut workbook = Self::hydrate_many(
+            image.document_id,
+            image.version,
+            seeds,
+            image.sheets.into_iter().flat_map(|sheet| sheet.cells),
+        )?;
         let retired_row_count = image.retired_rows.len();
         let retired_column_count = image.retired_columns.len();
         let retired_rows: BTreeSet<_> = image.retired_rows.into_iter().collect();
         let retired_columns: BTreeSet<_> = image.retired_columns.into_iter().collect();
         if retired_rows.len() > MAX_RETIRED_ROWS
             || retired_columns.len() > MAX_RETIRED_COLUMNS
-            || retired_rows
-                .iter()
-                .any(|id| workbook.sheets[0].row_positions.contains_key(id))
-            || retired_columns
-                .iter()
-                .any(|id| workbook.sheets[0].column_positions.contains_key(id))
+            || retired_rows.iter().any(|id| {
+                workbook
+                    .sheets
+                    .iter()
+                    .any(|sheet| sheet.row_positions.contains_key(id))
+            })
+            || retired_columns.iter().any(|id| {
+                workbook
+                    .sheets
+                    .iter()
+                    .any(|sheet| sheet.column_positions.contains_key(id))
+            })
         {
             return Err(DomainError::InvalidAxis);
         }
@@ -786,14 +815,41 @@ impl Workbook {
         seed: SheetSeed,
         cells: impl IntoIterator<Item = (CellAddress, CellContent)>,
     ) -> Result<Self, DomainError> {
+        Self::hydrate_many(document_id, version, std::iter::once(seed), cells)
+    }
+    fn hydrate_many(
+        document_id: DocumentId,
+        version: DocumentVersion,
+        seeds: impl IntoIterator<Item = SheetSeed>,
+        cells: impl IntoIterator<Item = (CellAddress, CellContent)>,
+    ) -> Result<Self, DomainError> {
         if version == DocumentVersion::ZERO {
             return Err(DomainError::VersionConflict);
+        }
+        let mut sheets = Vec::new();
+        let mut sheet_ids = BTreeSet::new();
+        let mut names = BTreeSet::new();
+        let mut row_ids = BTreeSet::new();
+        let mut column_ids = BTreeSet::new();
+        for seed in seeds {
+            if sheets.len() >= 64
+                || !sheet_ids.insert(seed.id)
+                || !names.insert(seed.name.to_lowercase())
+                || seed.rows.iter().any(|id| !row_ids.insert(*id))
+                || seed.columns.iter().any(|id| !column_ids.insert(*id))
+            {
+                return Err(DomainError::InvalidAxis);
+            }
+            sheets.push(Sheet::from_seed(&seed)?);
+        }
+        if sheets.is_empty() {
+            return Err(DomainError::MissingSheet);
         }
         let mut workbook = Self {
             document_id,
             version,
             last_axis_change_version: version,
-            sheets: vec![Sheet::from_seed(&seed)?],
+            sheets,
             retired_row_ids: BTreeSet::new(),
             retired_column_ids: BTreeSet::new(),
             calculation_context: None,
@@ -820,7 +876,8 @@ impl Workbook {
             if value != CellContent::Value(CellValue::Blank) {
                 let sheet = workbook
                     .sheets
-                    .first_mut()
+                    .iter_mut()
+                    .find(|sheet| sheet.id == address.sheet)
                     .ok_or(DomainError::MissingSheet)?;
                 if sheet.cells.insert(address, value).is_some() {
                     return Err(DomainError::InvalidAxis);
@@ -899,6 +956,7 @@ impl Workbook {
         if matches!(
             operation,
             Operation::CreateWorkbook { .. }
+                | Operation::AddSheet { .. }
                 | Operation::ExtendRows { .. }
                 | Operation::InsertRows { .. }
                 | Operation::InsertRowsRebased { .. }
@@ -945,6 +1003,7 @@ impl Workbook {
         for operation in operations {
             let address = match operation {
                 Operation::CreateWorkbook { .. } => return Err(DomainError::VersionConflict),
+                Operation::AddSheet { .. } => return Err(DomainError::VersionConflict),
                 Operation::ExtendRows { .. } => return Err(DomainError::VersionConflict),
                 Operation::InsertRows { .. } => return Err(DomainError::VersionConflict),
                 Operation::InsertRowsRebased { .. } => return Err(DomainError::VersionConflict),
@@ -980,6 +1039,10 @@ impl Workbook {
         // projection. Replacements subtract their former allocation in constant time.
         Ok(match operation {
             Operation::CreateWorkbook { .. } => (self.text_bytes, self.ast_memory_bytes),
+            Operation::AddSheet { sheet } => {
+                self.validate_new_sheet(sheet)?;
+                (self.text_bytes, self.ast_memory_bytes)
+            }
             Operation::ExtendRows { sheet, rows } => {
                 self.validate_new_rows(rows)?;
                 self.sheets
@@ -1200,6 +1263,20 @@ impl Workbook {
         }
         Ok(())
     }
+    fn validate_new_sheet(&self, seed: &SheetSeed) -> Result<(), DomainError> {
+        if self.sheets.is_empty()
+            || self.sheets.len() >= 64
+            || self.sheets.iter().any(|sheet| {
+                sheet.id == seed.id || sheet.name.to_lowercase() == seed.name.to_lowercase()
+            })
+        {
+            return Err(DomainError::InvalidAxis);
+        }
+        Sheet::from_seed(seed)?;
+        self.validate_new_rows(&seed.rows)?;
+        self.validate_new_columns(&seed.columns)?;
+        Ok(())
+    }
     fn validate_new_columns(&self, columns: &[ColumnId]) -> Result<(), DomainError> {
         if columns.iter().any(|id| {
             self.retired_column_ids.contains(id)
@@ -1226,6 +1303,10 @@ impl Workbook {
                 if self.version != DocumentVersion::ZERO || !self.sheets.is_empty() {
                     return Err(DomainError::VersionConflict);
                 }
+                self.sheets.push(Sheet::from_seed(sheet)?);
+            }
+            Operation::AddSheet { sheet } => {
+                self.validate_new_sheet(sheet)?;
                 self.sheets.push(Sheet::from_seed(sheet)?);
             }
             Operation::ExtendRows { sheet, rows } => {

@@ -42,6 +42,9 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+const initial = slides.findIndex((slide) => `#${slide.id}` === location.hash);
+show(initial < 0 ? 0 : initial, false);
+
 const observer = new IntersectionObserver(
   (entries) => {
     const visible = entries
@@ -61,6 +64,3 @@ const observer = new IntersectionObserver(
   { threshold: [0.45, 0.75] },
 );
 slides.forEach((slide) => observer.observe(slide));
-
-const initial = slides.findIndex((slide) => `#${slide.id}` === location.hash);
-show(initial < 0 ? 0 : initial, false);

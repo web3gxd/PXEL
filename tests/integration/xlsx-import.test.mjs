@@ -47,14 +47,22 @@ test('local XLSX import publishes one replayable document atomically', async () 
   assert.equal((await api(base, owner, `/api/documents/${match[1]}/export.xlsx`)).status, 200);
 });
 
-test('unsupported multi-sheet XLSX is rejected without publishing a document', async () => {
+test('multi-sheet XLSX is committed, replayed and exported with both sheets', async () => {
   const owner = await login(base);
   const identity = await (await api(base, owner, '/api/dev/identity')).json();
   const result = importFixture('fixtures/xlsx/minimal_scalars.xlsx', identity);
-  assert.notEqual(result.status, 0);
-  assert.equal(result.stdout, '');
-  assert.match(result.stderr, /supported import profile/);
-  assert.doesNotMatch(result.stderr, /hello|world/);
+  assert.equal(result.status, 0, result.stderr);
+  const documentId = /Imported document ([0-9a-f-]+)/i.exec(result.stdout)?.[1];
+  assert.ok(documentId);
+  const document = await getDocument(base, owner, documentId);
+  assert.equal(document.sheets.length, 2);
+  assert.equal(document.sheets[0].name, 'Budget');
+  assert.equal(document.sheets[1].name, 'Plan');
+  assert.equal(
+    document.sheets.reduce((count, sheet) => count + sheet.cells.length, 0),
+    5,
+  );
+  assert.equal((await api(base, owner, `/api/documents/${documentId}/export.xlsx`)).status, 200);
 });
 
 test('merge metadata is reported and cannot be silently dropped during import', async () => {

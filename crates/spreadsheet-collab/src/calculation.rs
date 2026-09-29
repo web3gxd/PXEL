@@ -98,7 +98,7 @@ impl CalculationHandle {
                     .changed
                     .extend(writes.iter().map(|write| write.address));
             }
-            Operation::CreateWorkbook { .. } => pending.rebuild = true,
+            Operation::CreateWorkbook { .. } | Operation::AddSheet { .. } => pending.rebuild = true,
             Operation::ExtendRows { .. } => pending.rebuild = true,
             Operation::InsertRows { .. }
             | Operation::InsertRowsRebased { .. }

@@ -32,6 +32,7 @@ message Operation {
   CellWrite authored_cell_write = 13;
   CellWrite compensating_cell_write = 14;
   CopyRange copy_range = 15;
+  CreateWorkbook add_sheet = 16;
  }
 }
 message AdvanceCalculationEpoch {

@@ -248,6 +248,13 @@ Renderer добавляет скобки к формуле `=A1+B1`, получ�
 а `--allow-loss` требует явного решения оператора и выводит коды. Живой тест
 проверяет merge fixture в обоих режимах. Полный compatibility report и
 публичная загрузка остаются открытыми.
+Десятый срез ([ADR-051](adr/051-durable-multiple-sheets.md)) расширяет
+локальный scalar import на 1–64 листа и суммарно 1000 ячеек. `AddSheet`
+получает отдельную durable event schema 15; snapshot schema 2 хранит
+упорядоченные листы и sparse cells, а reader сохраняет совместимость со
+schema 1. Клиент wire v1 при встрече `AddSheet` делает projection resync.
+Интерактивные вкладки, add/delete/reorder sheet, стили и публичная загрузка
+остаются отдельными срезами. Результаты smoke и benchmark фиксируются в RUNBOOK.
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU

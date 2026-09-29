@@ -139,20 +139,40 @@ fn validate_copy_writes(writes: &[ContentWrite]) -> Result<(), CodecError> {
     }
     Ok(())
 }
+fn encode_sheet(sheet: &SheetSeed) -> v1::CreateWorkbook {
+    v1::CreateWorkbook {
+        sheet_id: sheet.id.as_bytes().to_vec(),
+        name: sheet.name.clone(),
+        rows: sheet.rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
+        columns: sheet
+            .columns
+            .iter()
+            .map(|id| id.as_bytes().to_vec())
+            .collect(),
+    }
+}
+fn decode_sheet(sheet: v1::CreateWorkbook) -> Result<SheetSeed, CodecError> {
+    Ok(SheetSeed {
+        id: SheetId::from_bytes(id(&sheet.sheet_id)?).map_err(|_| CodecError::Invalid)?,
+        name: sheet.name,
+        rows: sheet
+            .rows
+            .iter()
+            .map(|value| RowId::from_bytes(id(value)?).map_err(|_| CodecError::Invalid))
+            .collect::<Result<_, _>>()?,
+        columns: sheet
+            .columns
+            .iter()
+            .map(|value| ColumnId::from_bytes(id(value)?).map_err(|_| CodecError::Invalid))
+            .collect::<Result<_, _>>()?,
+    })
+}
 fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
     use v1::operation::Kind;
     Ok(v1::Operation {
         kind: Some(match o {
-            Operation::CreateWorkbook { sheet } => Kind::CreateWorkbook(v1::CreateWorkbook {
-                sheet_id: sheet.id.as_bytes().to_vec(),
-                name: sheet.name.clone(),
-                rows: sheet.rows.iter().map(|i| i.as_bytes().to_vec()).collect(),
-                columns: sheet
-                    .columns
-                    .iter()
-                    .map(|i| i.as_bytes().to_vec())
-                    .collect(),
-            }),
+            Operation::CreateWorkbook { sheet } => Kind::CreateWorkbook(encode_sheet(sheet)),
+            Operation::AddSheet { sheet } => Kind::AddSheet(encode_sheet(sheet)),
             Operation::ExtendRows { sheet, rows } => Kind::ExtendRows(v1::ExtendRows {
                 sheet_id: sheet.as_bytes().to_vec(),
                 rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
@@ -354,21 +374,11 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
             )
             .map_err(|_| CodecError::Invalid)?,
         },
-        Kind::CreateWorkbook(s) => Operation::CreateWorkbook {
-            sheet: SheetSeed {
-                id: SheetId::from_bytes(id(&s.sheet_id)?).map_err(|_| CodecError::Invalid)?,
-                name: s.name,
-                rows: s
-                    .rows
-                    .iter()
-                    .map(|v| RowId::from_bytes(id(v)?).map_err(|_| CodecError::Invalid))
-                    .collect::<Result<_, _>>()?,
-                columns: s
-                    .columns
-                    .iter()
-                    .map(|v| ColumnId::from_bytes(id(v)?).map_err(|_| CodecError::Invalid))
-                    .collect::<Result<_, _>>()?,
-            },
+        Kind::CreateWorkbook(sheet) => Operation::CreateWorkbook {
+            sheet: decode_sheet(sheet)?,
+        },
+        Kind::AddSheet(sheet) => Operation::AddSheet {
+            sheet: decode_sheet(sheet)?,
         },
         Kind::ExtendRows(extension) => {
             if extension.rows.is_empty() || extension.rows.len() > 1_000 {
@@ -658,6 +668,7 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::AddSheet { .. } => 15,
         Operation::CopyRange { .. } => 14,
         Operation::CellWrite {
             content: Some(CellContent::Formula(_)),
@@ -713,7 +724,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=14) {
+    if !matches!(e.schema_version, 1..=15) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -730,7 +741,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         &operation,
     ) {
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -738,7 +749,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14, 0, actor, _) => {
+        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -795,6 +806,19 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
             h.update((sheet.columns.len() as u64).to_le_bytes());
             for id in &sheet.columns {
                 h.update(id.as_bytes())
+            }
+        }
+        Operation::AddSheet { sheet } => {
+            h.update([16]);
+            h.update(sheet.id.as_bytes());
+            field(h, sheet.name.as_bytes());
+            h.update((sheet.rows.len() as u64).to_le_bytes());
+            for id in &sheet.rows {
+                h.update(id.as_bytes());
+            }
+            h.update((sheet.columns.len() as u64).to_le_bytes());
+            for id in &sheet.columns {
+                h.update(id.as_bytes());
             }
         }
         Operation::ExtendRows { sheet, rows } => {
@@ -1095,6 +1119,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
     match (e.principal, &e.operation) {
         (EventPrincipal::User(_), Operation::AdvanceCalculationEpoch { .. })
         | (EventPrincipal::System, Operation::CreateWorkbook { .. })
+        | (EventPrincipal::System, Operation::AddSheet { .. })
         | (EventPrincipal::System, Operation::SetCellValue { .. })
         | (EventPrincipal::System, Operation::SetCellFormula { .. })
         | (EventPrincipal::System, Operation::ExtendRows { .. })
@@ -1890,6 +1915,38 @@ mod formula_tests {
         old_schema.schema_version = 13;
         assert!(matches!(
             decode(&old_schema.encode_to_vec()),
+            Err(CodecError::UnsupportedSchema)
+        ));
+        Ok(())
+    }
+    #[test]
+    fn add_sheet_has_own_durable_schema_and_roundtrips() -> Result<(), Box<dyn std::error::Error>> {
+        let event = CommittedEvent {
+            document_id: DocumentId::from_bytes([1; 16])?,
+            operation_id: OperationId::from_bytes([2; 16])?,
+            principal: EventPrincipal::User(ActorId::from_bytes([3; 16])?),
+            version: DocumentVersion::new(2)?,
+            operation: Operation::AddSheet {
+                sheet: SheetSeed {
+                    id: SheetId::from_bytes([4; 16])?,
+                    name: "Plan".into(),
+                    rows: vec![RowId::from_bytes([5; 16])?],
+                    columns: vec![ColumnId::from_bytes([6; 16])?],
+                },
+            },
+            state_hash: [7; 32],
+        };
+        let encoded = encode(&event)?;
+        assert_eq!(
+            v1::EventEnvelope::decode(encoded.as_slice())?.schema_version,
+            15
+        );
+        assert_eq!(decode(&encoded)?, event);
+        assert_eq!(event_hash(&decode(&encoded)?)?, event_hash(&event)?);
+        let mut old = v1::EventEnvelope::decode(encoded.as_slice())?;
+        old.schema_version = 14;
+        assert!(matches!(
+            decode(&old.encode_to_vec()),
             Err(CodecError::UnsupportedSchema)
         ));
         Ok(())

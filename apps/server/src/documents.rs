@@ -1141,6 +1141,7 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
             })
         }
         Operation::CreateWorkbook { .. }
+        | Operation::AddSheet { .. }
         | Operation::AdvanceCalculationEpoch { .. }
         | Operation::CopyRange { .. } => {
             return None;

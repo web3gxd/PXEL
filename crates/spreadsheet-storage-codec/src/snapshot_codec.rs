@@ -1,18 +1,53 @@
 use super::{
-    CodecError, addr, decode_addr, decode_content, decode_operation, encode_content, id, operation,
-    v1,
+    CodecError, addr, decode_addr, decode_content, decode_operation, decode_sheet, encode_content,
+    encode_sheet, id, operation, v1,
 };
 use prost::Message;
 use spreadsheet_domain::workbook::{
-    CalculationContext, ColumnId, DocumentId, DocumentVersion, MAX_CELLS, MAX_COLUMNS,
-    MAX_RETIRED_COLUMNS, MAX_RETIRED_ROWS, MAX_ROWS, Operation, RowId, SheetId, SheetSeed,
-    SnapshotImage, Workbook,
+    CalculationContext, ColumnId, DocumentId, DocumentVersion, MAX_CELLS, MAX_RETIRED_COLUMNS,
+    MAX_RETIRED_ROWS, Operation, RowId, SnapshotImage, SnapshotSheetImage, Workbook,
 };
 
 /// The first reader is deliberately bounded; a larger snapshot needs a new
 /// streaming decoder or a measured increase to this cap before activation.
 pub const MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
-const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 2;
+
+fn encode_cells(
+    cells: &[(
+        spreadsheet_domain::workbook::CellAddress,
+        spreadsheet_domain::workbook::CellContent,
+    )],
+) -> Result<Vec<v1::SnapshotCell>, CodecError> {
+    cells
+        .iter()
+        .map(|(address, content)| {
+            Ok(v1::SnapshotCell {
+                address: Some(addr(address)),
+                content: Some(encode_content(content)?),
+            })
+        })
+        .collect()
+}
+
+fn decode_cells(
+    cells: Vec<v1::SnapshotCell>,
+) -> Result<
+    Vec<(
+        spreadsheet_domain::workbook::CellAddress,
+        spreadsheet_domain::workbook::CellContent,
+    )>,
+    CodecError,
+> {
+    cells
+        .into_iter()
+        .map(|cell| {
+            let address = decode_addr(cell.address.ok_or(CodecError::Invalid)?)?;
+            let content = decode_content(cell.content.ok_or(CodecError::Invalid)?, address)?;
+            Ok((address, content))
+        })
+        .collect()
+}
 
 fn label(value: &str) -> bool {
     !value.is_empty()
@@ -62,29 +97,15 @@ pub fn encode_snapshot(
         document_id: image.document_id.as_bytes().to_vec(),
         document_version: image.version.get(),
         last_axis_change_version: image.last_axis_change_version.get(),
-        sheet: Some(v1::CreateWorkbook {
-            sheet_id: image.sheet.id.as_bytes().to_vec(),
-            name: image.sheet.name,
-            rows: image
-                .sheet
-                .rows
-                .iter()
-                .map(|id| id.as_bytes().to_vec())
-                .collect(),
-            columns: image
-                .sheet
-                .columns
-                .iter()
-                .map(|id| id.as_bytes().to_vec())
-                .collect(),
-        }),
-        cells: image
-            .cells
+        sheet: None,
+        cells: Vec::new(),
+        sheets: image
+            .sheets
             .iter()
-            .map(|(address, content)| {
-                Ok(v1::SnapshotCell {
-                    address: Some(addr(address)),
-                    content: Some(encode_content(content)?),
+            .map(|sheet| {
+                Ok(v1::SnapshotSheet {
+                    sheet: Some(encode_sheet(&sheet.sheet)),
+                    cells: encode_cells(&sheet.cells)?,
                 })
             })
             .collect::<Result<_, CodecError>>()?,
@@ -129,7 +150,10 @@ pub fn decode_snapshot(
         return Err(CodecError::SnapshotTooLarge);
     }
     let envelope = v1::SnapshotEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if envelope.snapshot_schema_version != SNAPSHOT_SCHEMA_VERSION {
+    if !matches!(
+        envelope.snapshot_schema_version,
+        1 | SNAPSHOT_SCHEMA_VERSION
+    ) {
         return Err(CodecError::UnsupportedSchema);
     }
     if envelope.document_id.as_slice() != expected_document.as_bytes()
@@ -146,12 +170,34 @@ pub fn decode_snapshot(
     {
         return Err(CodecError::Invalid);
     }
-    let sheet = envelope.sheet.ok_or(CodecError::Invalid)?;
-    if sheet.rows.is_empty()
-        || sheet.rows.len() > MAX_ROWS
-        || sheet.columns.is_empty()
-        || sheet.columns.len() > MAX_COLUMNS
-    {
+    let sheets = if envelope.snapshot_schema_version == 1 {
+        if !envelope.sheets.is_empty() {
+            return Err(CodecError::Invalid);
+        }
+        vec![SnapshotSheetImage {
+            sheet: decode_sheet(envelope.sheet.ok_or(CodecError::Invalid)?)?,
+            cells: decode_cells(envelope.cells)?,
+        }]
+    } else {
+        if envelope.sheet.is_some()
+            || !envelope.cells.is_empty()
+            || envelope.sheets.is_empty()
+            || envelope.sheets.len() > 64
+        {
+            return Err(CodecError::Invalid);
+        }
+        envelope
+            .sheets
+            .into_iter()
+            .map(|entry| {
+                Ok(SnapshotSheetImage {
+                    sheet: decode_sheet(entry.sheet.ok_or(CodecError::Invalid)?)?,
+                    cells: decode_cells(entry.cells)?,
+                })
+            })
+            .collect::<Result<Vec<_>, CodecError>>()?
+    };
+    if sheets.iter().map(|sheet| sheet.cells.len()).sum::<usize>() > MAX_CELLS {
         return Err(CodecError::Invalid);
     }
     let image = SnapshotImage {
@@ -159,29 +205,7 @@ pub fn decode_snapshot(
         version: expected_version,
         last_axis_change_version: DocumentVersion::new(envelope.last_axis_change_version)
             .map_err(|_| CodecError::Invalid)?,
-        sheet: SheetSeed {
-            id: SheetId::from_bytes(id(&sheet.sheet_id)?).map_err(|_| CodecError::Invalid)?,
-            name: sheet.name,
-            rows: sheet
-                .rows
-                .iter()
-                .map(|value| RowId::from_bytes(id(value)?).map_err(|_| CodecError::Invalid))
-                .collect::<Result<_, _>>()?,
-            columns: sheet
-                .columns
-                .iter()
-                .map(|value| ColumnId::from_bytes(id(value)?).map_err(|_| CodecError::Invalid))
-                .collect::<Result<_, _>>()?,
-        },
-        cells: envelope
-            .cells
-            .into_iter()
-            .map(|cell| {
-                let address = decode_addr(cell.address.ok_or(CodecError::Invalid)?)?;
-                let content = decode_content(cell.content.ok_or(CodecError::Invalid)?, address)?;
-                Ok((address, content))
-            })
-            .collect::<Result<_, CodecError>>()?,
+        sheets,
         retired_rows: envelope
             .retired_rows
             .iter()
@@ -213,9 +237,82 @@ mod tests {
         formula::{AST_SCHEMA_VERSION, BoundAst, Formula, Node, NodeId},
         workbook::{
             ActorId, CalculationContextId, CalculationReason, CellAddress, CellValue,
-            CommittedEvent, EventPrincipal, OperationId,
+            CommittedEvent, EventPrincipal, OperationId, SheetId, SheetSeed,
         },
     };
+
+    #[test]
+    fn two_sheet_binary_snapshot_preserves_order_and_sparse_cells()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document = DocumentId::from_bytes([21; 16])?;
+        let seeds = [
+            SheetSeed {
+                id: SheetId::from_bytes([22; 16])?,
+                name: "Budget".into(),
+                rows: vec![RowId::from_bytes([23; 16])?],
+                columns: vec![spreadsheet_domain::workbook::ColumnId::from_bytes(
+                    [24; 16],
+                )?],
+            },
+            SheetSeed {
+                id: SheetId::from_bytes([25; 16])?,
+                name: "Plan".into(),
+                rows: vec![RowId::from_bytes([26; 16])?],
+                columns: vec![spreadsheet_domain::workbook::ColumnId::from_bytes(
+                    [27; 16],
+                )?],
+            },
+        ];
+        let mut book = Workbook::empty(document);
+        book = book.candidate(
+            &Operation::CreateWorkbook {
+                sheet: seeds[0].clone(),
+            },
+            DocumentVersion::new(1)?,
+        )?;
+        book = book.candidate(
+            &Operation::AddSheet {
+                sheet: seeds[1].clone(),
+            },
+            DocumentVersion::new(2)?,
+        )?;
+        let address = CellAddress {
+            sheet: seeds[1].id,
+            row: seeds[1].rows[0],
+            column: seeds[1].columns[0],
+        };
+        book = book.candidate(
+            &Operation::SetCellValue {
+                address,
+                value: CellValue::Number(42.0),
+            },
+            DocumentVersion::new(3)?,
+        )?;
+        let bytes = encode_snapshot(&book, "engine-v1", "pxel-excel-subset-v1")?;
+        let encoded = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
+        assert_eq!(encoded.snapshot_schema_version, 2);
+        assert_eq!(encoded.sheets.len(), 2);
+        let restored = decode_snapshot(
+            &bytes,
+            document,
+            book.version(),
+            book.last_axis_change_version(),
+            book.hash(),
+            "engine-v1",
+            "pxel-excel-subset-v1",
+        )?;
+        assert_eq!(restored.hash(), book.hash());
+        assert_eq!(
+            restored
+                .sheets()
+                .iter()
+                .map(|sheet| sheet.name())
+                .collect::<Vec<_>>(),
+            vec!["Budget", "Plan"]
+        );
+        assert_eq!(restored.cell_content(address)?, book.cell_content(address)?);
+        Ok(())
+    }
 
     #[test]
     fn binary_snapshot_roundtrip_tail_and_bad_metadata() -> Result<(), Box<dyn std::error::Error>> {
@@ -330,7 +427,30 @@ mod tests {
         assert_eq!(restored.hash(), direct.hash());
 
         let mut envelope = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-        envelope.snapshot_schema_version = 2;
+        let legacy_sheet = envelope
+            .sheets
+            .first()
+            .ok_or("missing snapshot sheet")?
+            .clone();
+        let mut legacy = envelope.clone();
+        legacy.snapshot_schema_version = 1;
+        legacy.sheet = legacy_sheet.sheet;
+        legacy.cells = legacy_sheet.cells;
+        legacy.sheets.clear();
+        assert_eq!(
+            decode_snapshot(
+                &legacy.encode_to_vec(),
+                document,
+                book.version(),
+                book.last_axis_change_version(),
+                expected_hash,
+                "engine-v1",
+                "pxel-excel-subset-v1"
+            )?
+            .hash(),
+            expected_hash
+        );
+        envelope.snapshot_schema_version = 3;
         assert!(matches!(
             decode_snapshot(
                 &envelope.encode_to_vec(),
@@ -343,7 +463,7 @@ mod tests {
             ),
             Err(CodecError::UnsupportedSchema)
         ));
-        envelope.snapshot_schema_version = 1;
+        envelope.snapshot_schema_version = 2;
         if let Some(context) = envelope.calculation_context.as_mut() {
             context.engine_version = "engine-v2".into();
         }
