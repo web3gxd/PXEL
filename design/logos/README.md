@@ -4,4 +4,4 @@
 
 Знаки не встроены в приложение. Из верхней панели убраны исходный знак и wordmark, название документа сохранено. Нижняя подпись PXEL не менялась.
 
-Варианты 01–10 используют SVG squircle paths: cornerRadius = 22,37% ширины, cornerSmoothing = 0.6. Для viewBox 64×64 радиус равен 14.3168. У открытой сетки 07 параметры применены к каждой плитке 23×23 (радиус 5.1451). Внутренние знаки и исторический reference.svg сохранены. Геометрия рассчитана offline через figma-squircle 1.1.0 (MIT, https://github.com/phamfoo/figma-squircle); runtime dependency не добавлена.
+Варианты 01–10 используют SVG squircle paths: cornerRadius = 22,37% ширины, cornerSmoothing = 0.6. Для viewBox 64×64 радиус равен 14.3168. У «Квартета» 01 те же параметры применены к четырём внутренним плиткам 15×15 (радиус 3.3555), у «Открытой сетки» 07 — к каждой плитке 23×23 (радиус 5.1451). Остальные внутренние знаки и исторический reference.svg сохранены. Геометрия рассчитана offline через figma-squircle 1.1.0 (MIT, https://github.com/phamfoo/figma-squircle); runtime dependency не добавлена.
