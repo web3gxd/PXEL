@@ -47,6 +47,13 @@ Fuzz targets появляются с parsers: formulas, protobuf decode, snapsho
 
 Начальный протокол latency: 100 warm-up, >=1000 measured samples, пять runs, p50/p95/p99. Render — 20 page loads, cold/warm assets отдельно. Official thresholds на закрепленном self-hosted стенде; shared CI запускает functional benchmark/regression smoke без жестких p95 gates.
 
+`just bench-collab` запускается отдельно от CI на уже поднятом release-сервере
+и реальной PostgreSQL: 5 новых документов, по 100 warm-up + 1000 measured
+sequential edits. Он проверяет версии ACK/второго клиента и печатает p50/p95/p99
+в JSON, не сохраняя значения ячеек. Для атрибуции сборки установите
+`PXEL_BENCH_SERVER_PROFILE=release`. Последний проверенный локальный результат
+и ограничения: [2026-09-29-phase3-local.md](benchmarks/2026-09-29-phase3-local.md).
+
 | Цель                                      | Target / measurement                                     |
 | ----------------------------------------- | -------------------------------------------------------- |
 | First usable grid после готовности данных | p95 <1 s                                                 |

@@ -84,6 +84,7 @@ just sqlx-check  # sqlx-cli 0.9.0; сверка .sqlx с реальной Postgr
 just smoke      # запускает/останавливает приложение; HTTP/WS + Playwright
 just audit      # cargo-deny 0.20.2, cargo-audit 0.22.2, pnpm audit
 pnpm test:recovery # собирает dev-auth binary и проверяет hard restart
+just bench-collab # отдельный локальный замер ACK и доставки второму клиенту
 ```
 
 До `check/test/sqlx-check` задайте `DATABASE_URL` из `.local/database-url` без вывода

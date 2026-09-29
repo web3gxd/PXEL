@@ -235,13 +235,15 @@
             <p>Criterion, release: создание projection + расчет; один Windows стенд.</p>
           </div>
           <div class="metric">
-            <strong>0.239–0.260 <small>мс</small></strong
-            ><span>COUNT / COUNTA по 100 000 числам</span>
-            <p>Изолированный aggregate benchmark, не задержка ввода в UI.</p>
+            <strong>7.86 / 11.11 <small>мс</small></strong
+            ><span>Худший p95: ACK / второй клиент</span>
+            <p>5×1000 правок, release, PostgreSQL на той же машине; не удалённая сеть.</p>
           </div>
         </div>
         <p class="metric-footnote">
-          Замеры не являются p95 продукта. Условия и команды: <a href="../RUNBOOK.md">RUNBOOK</a> и
+          Замеры относятся к указанным локальным стендам, не являются SLA. Условия:
+          <a href="../RUNBOOK.md">RUNBOOK</a>,
+          <a href="../docs/benchmarks/2026-09-29-phase3-local.md">collaboration benchmark</a> и
           <a href="../docs/wasm-plan.md">WASM plan</a>.
         </p>
         <div class="slide-footer">

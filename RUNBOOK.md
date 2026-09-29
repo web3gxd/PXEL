@@ -1,5 +1,40 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — локальный benchmark ACK и доставки второму клиенту
+
+Перед срезом прочитаны AGENTS, roadmap, testing, ADR-018 и текущий WS/actor
+код. Цель — получить измеряемый end-to-end baseline фазы 3 на durable
+PostgreSQL, не выдавая локальную цифру за SLA. Инварианты: каждый sample
+подтверждает новую версию и тот же canonical head у второго клиента;
+разогрев и измерения разделены; никакие значения ячеек не пишутся в отчёт.
+
+Добавлены `tests/performance/collaboration.test.mjs`, `just bench-collab`,
+[полный отчёт](docs/benchmarks/2026-09-29-phase3-local.md), пояснение в
+testing/README и слайд с фактическим p95. Harness создаёт новый документ
+на каждый из 5 прогонов, делает 100 warm-up и 1000 measured последовательных
+перезаписей одной числовой ячейки, меряет время до `OperationCommitted` и до
+`DocumentHeadChanged` у второго WebSocket-клиента. Сервер запущен через
+`cargo run --release --locked -p pxel-server --features dev-auth`; Node и
+сервер на loopback, PostgreSQL 18.6 нативно на `127.0.0.1:55432`.
+Реальные `SHOW` подтвердили `synchronous_commit=on`, `fsync=on`,
+`full_page_writes=on`. Host: Windows 10.0.26100, Intel Ultra 9 185H,
+22 logical CPUs, 15.61 GiB RAM, Samsung MZAL81T0HDLB-00BL2, Node 24.18.0.
+
+`just bench-collab` прошёл 1/1 за 33.55 s. p95 ACK по пяти runs:
+4.61/5.73/5.55/5.58/7.86 ms; p95 второй клиент:
+6.48/8.29/7.88/7.88/11.11 ms. Хуже всего 7.86 и 11.11 ms соответственно;
+локальные targets <50/<100 ms на этом узком dataset выполнены. После
+добавления безопасной топологии в JSON отчёт короткий smoke 1×10/2 warm-up
+прошёл 1/1; он не заменяет полный замер выше. `just check` после изменений
+завершился exit 0 (fmt, Clippy, Rust tests/build, wasm32, protobuf drift,
+Prettier, ESLint, TS, 53 Vitest, Vite build), presentation check прошёл
+10 слайдов на 1440×900 и 390×844. Это не
+разделяет actor queue wait, DB checkout, transaction и fsync и не проверяет
+большую книгу, распределённую сеть или concurrent writers. Optimistic UI p95
+и first grid render p95 ещё не измерены; phase 3 gate остаётся открытым.
+
+---
+
 ## 2026-09-29 — byte-bounded WebSocket writer (фаза 3, срез)
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-015/016/017, server WebSocket,

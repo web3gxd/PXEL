@@ -48,6 +48,9 @@ formula-parity:
 convergence:
     cargo test --locked -p spreadsheet-domain --test convergence -- --ignored --nocapture
 
+bench-collab:
+    node --test tests/performance/collaboration.test.mjs
+
 sqlx-check:
     cargo sqlx prepare --check --workspace -- --all-targets --all-features
 
