@@ -9,12 +9,12 @@ import { api, connect, getDocument, login, setCommand } from '../helpers/client.
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
 const executable = resolve(`target/debug/pxel-server${process.platform === 'win32' ? '.exe' : ''}`);
 
-function importFixture(path, identity) {
+function importFixture(path, identity, extraArguments = []) {
   const databaseUrl =
     process.env.DATABASE_URL ?? readFileSync('.local/database-url', 'utf8').trim();
   return spawnSync(
     executable,
-    ['xlsx-import', resolve(path), identity.workspace_id, identity.actor_id],
+    ['xlsx-import', resolve(path), identity.workspace_id, identity.actor_id, ...extraArguments],
     {
       encoding: 'utf8',
       timeout: 30_000,
@@ -55,6 +55,26 @@ test('unsupported multi-sheet XLSX is rejected without publishing a document', a
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /supported import profile/);
   assert.doesNotMatch(result.stderr, /hello|world/);
+});
+
+test('merge metadata is reported and cannot be silently dropped during import', async () => {
+  const owner = await login(base);
+  const identity = await (await api(base, owner, '/api/dev/identity')).json();
+  const result = importFixture('fixtures/xlsx/single_sheet_merge.xlsx', identity);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /WorksheetMetadata/);
+  assert.match(result.stderr, /would lose unsupported features/);
+  assert.doesNotMatch(result.stderr, /hello|world/);
+  const accepted = importFixture('fixtures/xlsx/single_sheet_merge.xlsx', identity, [
+    '--allow-loss',
+  ]);
+  assert.equal(accepted.status, 0, accepted.stderr);
+  assert.match(accepted.stderr, /WorksheetMetadata/);
+  const documentId = /Imported document ([0-9a-f-]+)/i.exec(accepted.stdout)?.[1];
+  assert.ok(documentId);
+  const document = await getDocument(base, owner, documentId);
+  assert.equal(document.sheets[0].cells.length, 4);
 });
 
 test('supported XLSX survives import, edit, export and reimport', async () => {

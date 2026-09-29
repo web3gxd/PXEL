@@ -14,6 +14,9 @@ const WORKSHEET_TYPE: &str =
 /// Serialize the supported scalar IR profile. No domain IDs or calculated caches are exported.
 pub fn export_scalar_xlsx(workbook: &NormalizedWorkbook) -> Result<Vec<u8>, XlsxError> {
     workbook.validate()?;
+    if !workbook.issues.is_empty() {
+        return Err(XlsxError::UnsupportedFeature);
+    }
     let mut parts = Vec::with_capacity(workbook.sheets.len() + 4);
     parts.push((
         "[Content_Types].xml".to_owned(),
@@ -193,6 +196,7 @@ mod tests {
     #[test]
     fn escaped_text_and_xfd_coordinate_roundtrip() -> Result<(), XlsxError> {
         let source = NormalizedWorkbook {
+            issues: vec![],
             sheets: vec![NormalizedSheet {
                 name: "R&D 'Plan' Q".to_owned(),
                 cells: vec![
@@ -220,6 +224,7 @@ mod tests {
     #[test]
     fn oversized_entry_fails_before_zip_publication() {
         let source = NormalizedWorkbook {
+            issues: vec![],
             sheets: vec![NormalizedSheet {
                 name: "Big".to_owned(),
                 cells: (1..=9)
@@ -237,6 +242,7 @@ mod tests {
     #[test]
     fn invalid_xml_and_excel_names_are_rejected_before_encoding() {
         let mut source = NormalizedWorkbook {
+            issues: vec![],
             sheets: vec![NormalizedSheet {
                 name: "Bad/Name".to_owned(),
                 cells: vec![],

@@ -5,7 +5,10 @@ mod export;
 mod normalized;
 
 pub use export::export_scalar_xlsx;
-pub use normalized::{NormalizedCell, NormalizedCellValue, NormalizedSheet, NormalizedWorkbook};
+pub use normalized::{
+    CompatibilityIssue, CompatibilityIssueCode, NormalizedCell, NormalizedCellValue,
+    NormalizedSheet, NormalizedWorkbook,
+};
 
 use quick_xml::{Reader, XmlVersion, events::Event};
 use std::{
@@ -588,7 +591,10 @@ fn add_sheet(
 
 #[cfg(test)]
 mod tests {
-    use super::{NormalizedCellValue, XlsxError, inspect_reader, normalize_reader};
+    use super::{
+        CompatibilityIssue, CompatibilityIssueCode, NormalizedCellValue, XlsxError, inspect_reader,
+        normalize_reader,
+    };
     use std::io::{Cursor, Write};
     use zip::{ZipWriter, write::SimpleFileOptions};
 
@@ -639,6 +645,7 @@ mod tests {
         let bytes = include_bytes!("../../../fixtures/xlsx/minimal_scalars.xlsx");
         let workbook = normalize(bytes.to_vec())?;
         assert_eq!(workbook.sheets.len(), 2);
+        assert!(workbook.issues.is_empty());
         assert_eq!(
             workbook
                 .sheets
@@ -778,6 +785,53 @@ mod tests {
             ("xl/worksheets/sheet1.xml", &sheet),
         ])?);
         assert_eq!(result, Err(XlsxError::LimitExceeded));
+        Ok(())
+    }
+
+    #[test]
+    fn reports_metadata_and_formatting_that_scalar_import_would_drop()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let workbook = WORKBOOK.replace("</workbook>", "<definedNames/></workbook>");
+        let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1" ht="30"><c r="A1" s="1"><v>3</v></c></row></sheetData><mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells></worksheet>"#;
+        let result = normalize(package(&[
+            ("xl/workbook.xml", &workbook),
+            ("xl/worksheets/sheet1.xml", sheet),
+            ("docProps/core.xml", "<properties/>"),
+        ])?)?;
+        assert_eq!(
+            result.sheets[0].cells[0].value,
+            NormalizedCellValue::Number(3.0)
+        );
+        assert_eq!(
+            result.issues,
+            vec![
+                CompatibilityIssue {
+                    code: CompatibilityIssueCode::UnsupportedPackagePart,
+                    sheet_index: None
+                },
+                CompatibilityIssue {
+                    code: CompatibilityIssueCode::WorkbookMetadata,
+                    sheet_index: None
+                },
+                CompatibilityIssue {
+                    code: CompatibilityIssueCode::WorksheetMetadata,
+                    sheet_index: Some(0)
+                },
+                CompatibilityIssue {
+                    code: CompatibilityIssueCode::RowFormatting,
+                    sheet_index: Some(0)
+                },
+                CompatibilityIssue {
+                    code: CompatibilityIssueCode::CellFormatting,
+                    sheet_index: Some(0)
+                },
+            ]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+        );
+        assert!(result.validate().is_ok());
         Ok(())
     }
 }

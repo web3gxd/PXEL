@@ -4,7 +4,27 @@ use super::{
 };
 use quick_xml::{Reader, XmlVersion, events::Event};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
+
+const MAX_COMPATIBILITY_ISSUES: usize = 128;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+pub enum CompatibilityIssueCode {
+    UnsupportedPackagePart,
+    WorkbookMetadata,
+    WorksheetMetadata,
+    RowFormatting,
+    CellFormatting,
+}
+
+/// Bounded report without imported names or cell contents.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompatibilityIssue {
+    pub code: CompatibilityIssueCode,
+    /// Zero-based sheet index; None identifies a workbook/package issue.
+    pub sheet_index: Option<u16>,
+}
 
 const MAX_CELLS: usize = 100_000;
 const MAX_SHARED_STRINGS: usize = 100_000;
@@ -19,6 +39,7 @@ const MAX_COLUMN: u32 = 16_384;
 #[serde(deny_unknown_fields)]
 pub struct NormalizedWorkbook {
     pub sheets: Vec<NormalizedSheet>,
+    pub issues: Vec<CompatibilityIssue>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -52,6 +73,22 @@ impl NormalizedWorkbook {
     pub fn validate(&self) -> Result<(), XlsxError> {
         if self.sheets.is_empty() || self.sheets.len() > 64 {
             return Err(XlsxError::LimitExceeded);
+        }
+        if self.issues.len() > MAX_COMPATIBILITY_ISSUES
+            || self.issues.iter().any(|issue| {
+                let global = matches!(
+                    issue.code,
+                    CompatibilityIssueCode::UnsupportedPackagePart
+                        | CompatibilityIssueCode::WorkbookMetadata
+                );
+                global != issue.sheet_index.is_none()
+                    || issue
+                        .sheet_index
+                        .is_some_and(|index| usize::from(index) >= self.sheets.len())
+            })
+            || !self.issues.windows(2).all(|pair| pair[0] < pair[1])
+        {
+            return Err(XlsxError::InvalidPackage);
         }
         let mut names = HashSet::new();
         let mut total_cells = 0_usize;
@@ -172,7 +209,122 @@ pub(super) fn extract(package: &LoadedPackage) -> Result<NormalizedWorkbook, Xls
             cells,
         });
     }
-    Ok(NormalizedWorkbook { sheets })
+    let issues = scan_compatibility(package)?;
+    let workbook = NormalizedWorkbook { sheets, issues };
+    workbook.validate()?;
+    Ok(workbook)
+}
+
+fn scan_compatibility(package: &LoadedPackage) -> Result<Vec<CompatibilityIssue>, XlsxError> {
+    let mut issues = BTreeSet::new();
+    let mut supported_parts = HashSet::from([
+        "[Content_Types].xml".to_owned(),
+        "_rels/.rels".to_owned(),
+        package.workbook_part.clone(),
+        super::relationship_part(&package.workbook_part)?,
+    ]);
+    for sheet in &package.inspection.sheets {
+        supported_parts.insert(sheet.part.clone());
+    }
+    let base = package
+        .workbook_part
+        .rsplit_once('/')
+        .map_or("", |(base, _)| base);
+    for relationship in package.workbook_rels.values() {
+        if relationship.kind == SHARED_STRING_REL {
+            supported_parts.insert(resolve_target(base, &relationship.target)?);
+        }
+    }
+    if package
+        .parts
+        .keys()
+        .any(|part| !supported_parts.contains(part))
+    {
+        issues.insert(CompatibilityIssue {
+            code: CompatibilityIssueCode::UnsupportedPackagePart,
+            sheet_index: None,
+        });
+    }
+    let workbook = package
+        .parts
+        .get(&package.workbook_part)
+        .ok_or(XlsxError::InvalidPackage)?;
+    scan_xml_features(workbook, None, &mut issues)?;
+    for (index, sheet) in package.inspection.sheets.iter().enumerate() {
+        let sheet_index = u16::try_from(index).map_err(|_| XlsxError::LimitExceeded)?;
+        let body = package
+            .parts
+            .get(&sheet.part)
+            .ok_or(XlsxError::InvalidPackage)?;
+        scan_xml_features(body, Some(sheet_index), &mut issues)?;
+    }
+    if issues.len() > MAX_COMPATIBILITY_ISSUES {
+        return Err(XlsxError::LimitExceeded);
+    }
+    Ok(issues.into_iter().collect())
+}
+
+fn scan_xml_features(
+    body: &[u8],
+    sheet_index: Option<u16>,
+    issues: &mut BTreeSet<CompatibilityIssue>,
+) -> Result<(), XlsxError> {
+    let text = std::str::from_utf8(body).map_err(|_| XlsxError::InvalidPackage)?;
+    let mut reader = Reader::from_str(text);
+    let mut depth = 0_usize;
+    loop {
+        let event = reader.read_event().map_err(|_| XlsxError::InvalidPackage)?;
+        let (element, element_depth) = match &event {
+            Event::Start(start) => {
+                depth = depth.checked_add(1).ok_or(XlsxError::LimitExceeded)?;
+                (Some(start), depth)
+            }
+            Event::Empty(start) => (Some(start), depth + 1),
+            Event::End(_) => {
+                depth = depth.checked_sub(1).ok_or(XlsxError::InvalidPackage)?;
+                (None, depth)
+            }
+            Event::Eof => break,
+            _ => (None, depth),
+        };
+        let Some(element) = element else { continue };
+        let name = element.name();
+        let tag = name.as_ref();
+        let code = match sheet_index {
+            None if element_depth == 2 && tag != "sheets" => {
+                Some(CompatibilityIssueCode::WorkbookMetadata)
+            }
+            None if element_depth == 3 && tag == "sheet" => {
+                let attrs = attributes(element)?;
+                attrs
+                    .keys()
+                    .any(|key| !matches!(key.as_str(), "name" | "sheetId" | "r:id"))
+                    .then_some(CompatibilityIssueCode::WorkbookMetadata)
+            }
+            Some(_) if element_depth == 2 && !matches!(tag, "sheetData" | "dimension") => {
+                Some(CompatibilityIssueCode::WorksheetMetadata)
+            }
+            Some(_) if element_depth == 3 && tag == "row" => {
+                let attrs = attributes(element)?;
+                attrs
+                    .keys()
+                    .any(|key| key != "r")
+                    .then_some(CompatibilityIssueCode::RowFormatting)
+            }
+            Some(_) if element_depth == 4 && tag == "c" => {
+                let attrs = attributes(element)?;
+                attrs
+                    .keys()
+                    .any(|key| !matches!(key.as_str(), "r" | "t"))
+                    .then_some(CompatibilityIssueCode::CellFormatting)
+            }
+            _ => None,
+        };
+        if let Some(code) = code {
+            issues.insert(CompatibilityIssue { code, sheet_index });
+        }
+    }
+    Ok(())
 }
 
 fn shared_strings(package: &LoadedPackage) -> Result<Vec<String>, XlsxError> {

@@ -374,8 +374,15 @@ async fn main() -> anyhow::Result<()> {
         let actor = arguments
             .next()
             .ok_or_else(|| anyhow::anyhow!("XLSX import requires an actor ID"))?;
+        let loss_policy = match arguments.next() {
+            None => xlsx_import::LossPolicy::Reject,
+            Some(flag) if flag == std::ffi::OsStr::new("--allow-loss") => {
+                xlsx_import::LossPolicy::AcceptReported
+            }
+            Some(_) => anyhow::bail!("XLSX import accepts only --allow-loss as an optional flag"),
+        };
         if arguments.next().is_some() {
-            anyhow::bail!("XLSX import accepts exactly three arguments");
+            anyhow::bail!("XLSX import accepts at most four arguments");
         }
         let config = config::Config::load()?;
         if !config.dev_auth {
@@ -394,8 +401,19 @@ async fn main() -> anyhow::Result<()> {
             actor_id: spreadsheet_domain::workbook::ActorId::from_bytes(parse_id(actor)?)?,
         };
         let normalized = xlsx_worker::load(std::path::Path::new(&path)).await?;
+        if !normalized.issues.is_empty() {
+            for issue in &normalized.issues {
+                eprintln!(
+                    "XLSX compatibility issue: {:?} (sheet index {:?})",
+                    issue.code, issue.sheet_index
+                );
+            }
+            if loss_policy == xlsx_import::LossPolicy::Reject {
+                anyhow::bail!("XLSX import would lose unsupported features");
+            }
+        }
         let document = DocumentId::from_bytes(*Uuid::now_v7().as_bytes())?;
-        let events = xlsx_import::prepare(&normalized, document, identity.actor_id)?;
+        let events = xlsx_import::prepare(&normalized, document, identity.actor_id, loss_policy)?;
         let database = PgDatabase::connect(&config.database_url, 2).await?;
         database.readiness().await?;
         let receipt = database.create_imported(identity, &events).await?;

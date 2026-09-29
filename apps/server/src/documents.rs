@@ -489,7 +489,10 @@ fn export_projection(workbook: &Workbook) -> Result<NormalizedWorkbook, ApiError
             cells,
         });
     }
-    let normalized = NormalizedWorkbook { sheets };
+    let normalized = NormalizedWorkbook {
+        sheets,
+        issues: vec![],
+    };
     normalized.validate().map_err(|_| {
         ApiError(
             StatusCode::UNPROCESSABLE_ENTITY,

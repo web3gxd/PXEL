@@ -38,3 +38,16 @@ with ZipFile(ROOT / "single_sheet_scalars.xlsx", "w") as archive:
         info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
         info.compress_type = ZIP_DEFLATED
         archive.writestr(info, content.encode("utf-8"))
+
+merged_parts = dict(single_sheet_parts)
+merged_parts["xl/worksheets/sheet1.xml"] = merged_parts[
+    "xl/worksheets/sheet1.xml"
+].replace(
+    "</worksheet>",
+    '<mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells></worksheet>',
+)
+with ZipFile(ROOT / "single_sheet_merge.xlsx", "w") as archive:
+    for name, content in sorted(merged_parts.items()):
+        info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, content.encode("utf-8"))

@@ -13,7 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const REQUEST_MAGIC: &[u8; 4] = b"PXIW";
 const RESPONSE_MAGIC: &[u8; 4] = b"PXOW";
-const PROTOCOL_VERSION: u16 = 2;
+const PROTOCOL_VERSION: u16 = 3;
 const MAX_PATH_BYTES: usize = 4096;
 const RESPONSE_HEADER_BYTES: usize = 11;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
@@ -244,7 +244,7 @@ mod tests {
         let frame = encode_header(0, 5).unwrap_or([0; 11]);
         assert_eq!(decode_header(&frame), Ok(5));
         let mut unknown = frame;
-        unknown[5] = 3;
+        unknown[5] = 4;
         assert_eq!(decode_header(&unknown), Err(WorkerError::Protocol));
         let rejected = encode_header(1, 0).unwrap_or([0; 11]);
         assert_eq!(decode_header(&rejected), Err(WorkerError::Rejected));
@@ -257,16 +257,24 @@ mod tests {
 
     #[test]
     fn parent_rejects_invalid_worker_ir() {
-        let valid = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"hello"}}]}]}"#;
+        let valid = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"hello"}}]}],"issues":[]}"#;
         assert!(decode_payload(valid).is_ok());
-        let duplicate = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"a"}},{"row":1,"column":1,"value":{"Text":"b"}}]}]}"#;
+        let duplicate = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"a"}},{"row":1,"column":1,"value":{"Text":"b"}}]}],"issues":[]}"#;
         assert_eq!(decode_payload(duplicate), Err(WorkerError::Protocol));
-        let invalid_number = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Number":-0.0}}]}]}"#;
+        let invalid_number = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Number":-0.0}}]}],"issues":[]}"#;
         assert_eq!(decode_payload(invalid_number), Err(WorkerError::Protocol));
-        let unknown = br#"{"sheets":[{"name":"Data","cells":[],"hidden":true}]}"#;
+        let unknown = br#"{"sheets":[{"name":"Data","cells":[],"hidden":true}],"issues":[]}"#;
         assert_eq!(decode_payload(unknown), Err(WorkerError::Protocol));
         let duplicate_names =
-            br#"{"sheets":[{"name":"Data","cells":[]},{"name":"data","cells":[]}]}"#;
+            br#"{"sheets":[{"name":"Data","cells":[]},{"name":"data","cells":[]}],"issues":[]}"#;
         assert_eq!(decode_payload(duplicate_names), Err(WorkerError::Protocol));
+        let invented_code = br#"{"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"Unknown","sheet_index":0}]}"#;
+        assert_eq!(decode_payload(invented_code), Err(WorkerError::Protocol));
+        let invalid_sheet = br#"{"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"CellFormatting","sheet_index":1}]}"#;
+        assert_eq!(decode_payload(invalid_sheet), Err(WorkerError::Protocol));
+        let duplicated_issue = br#"{"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"CellFormatting","sheet_index":0},{"code":"CellFormatting","sheet_index":0}]}"#;
+        assert_eq!(decode_payload(duplicated_issue), Err(WorkerError::Protocol));
+        let mislabeled_issue = br#"{"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"WorkbookMetadata","sheet_index":0}]}"#;
+        assert_eq!(decode_payload(mislabeled_issue), Err(WorkerError::Protocol));
     }
 }

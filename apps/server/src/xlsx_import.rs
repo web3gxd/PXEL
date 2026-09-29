@@ -16,6 +16,12 @@ use uuid::Uuid;
 
 const MAX_IMPORT_CELLS: usize = 1_000;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LossPolicy {
+    Reject,
+    AcceptReported,
+}
+
 #[derive(Debug, Error)]
 pub enum ImportError {
     #[error("invalid XLSX intermediate representation")]
@@ -59,8 +65,12 @@ pub fn prepare(
     imported: &NormalizedWorkbook,
     document: DocumentId,
     actor: ActorId,
+    loss_policy: LossPolicy,
 ) -> Result<Vec<CommittedEvent>, ImportError> {
     imported.validate().map_err(|_| ImportError::InvalidIr)?;
+    if !imported.issues.is_empty() && loss_policy == LossPolicy::Reject {
+        return Err(ImportError::UnsupportedProfile);
+    }
     let sheet = imported.sheets.first().ok_or(ImportError::InvalidIr)?;
     if imported.sheets.len() != 1 || sheet.cells.len() > MAX_IMPORT_CELLS {
         return Err(ImportError::UnsupportedProfile);
@@ -176,6 +186,7 @@ mod tests {
     fn normalized_values_and_formula_become_replayable_events()
     -> Result<(), Box<dyn std::error::Error>> {
         let input = NormalizedWorkbook {
+            issues: vec![],
             sheets: vec![NormalizedSheet {
                 name: "Data".into(),
                 cells: vec![
@@ -194,7 +205,7 @@ mod tests {
         };
         let document = DocumentId::from_bytes([1; 16])?;
         let actor = ActorId::from_bytes([2; 16])?;
-        let events = prepare(&input, document, actor)?;
+        let events = prepare(&input, document, actor, LossPolicy::Reject)?;
         assert_eq!(events.len(), 3);
         let mut replay = Workbook::empty(document);
         for event in &events {
@@ -229,6 +240,7 @@ mod tests {
         let document = DocumentId::from_bytes([1; 16])?;
         let actor = ActorId::from_bytes([2; 16])?;
         let input = NormalizedWorkbook {
+            issues: vec![],
             sheets: vec![NormalizedSheet {
                 name: "Data".into(),
                 cells: vec![NormalizedCell {
@@ -239,7 +251,7 @@ mod tests {
             }],
         };
         assert!(matches!(
-            prepare(&input, document, actor),
+            prepare(&input, document, actor, LossPolicy::Reject),
             Err(ImportError::InvalidFormula)
         ));
         Ok(())
