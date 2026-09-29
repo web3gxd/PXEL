@@ -237,6 +237,10 @@ worker IR, сервер связывает формулы, а PostgreSQL одн�
 integration test проверяет импорт, HTTP replay и owner export; двухлистовой
 fixture отвергается целиком. Публичная загрузка, OS sandbox, malware scan,
 стили, compatibility report и полный import/edit/export/reimport gate открыты.
+Дополнительный живой scalar round-trip: импорт → WebSocket-правка → owner
+export → повторный импорт сохранил координаты, типы и значения четырёх ячеек.
+Renderer добавляет скобки к формуле `=A1+B1`, получая `=(A1+B1)`; это
+эквивалентный синтаксис, но исходный текст не сохраняется побайтно.
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU

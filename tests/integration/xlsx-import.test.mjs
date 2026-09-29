@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { api, getDocument, login } from '../helpers/client.mjs';
+import { api, connect, getDocument, login, setCommand } from '../helpers/client.mjs';
 
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
 const executable = resolve(`target/debug/pxel-server${process.platform === 'win32' ? '.exe' : ''}`);
@@ -54,4 +55,55 @@ test('unsupported multi-sheet XLSX is rejected without publishing a document', a
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /supported import profile/);
   assert.doesNotMatch(result.stderr, /hello|world/);
+});
+
+test('supported XLSX survives import, edit, export and reimport', async () => {
+  const owner = await login(base);
+  const identity = await (await api(base, owner, '/api/dev/identity')).json();
+  const first = importFixture('fixtures/xlsx/single_sheet_scalars.xlsx', identity);
+  assert.equal(first.status, 0, first.stderr);
+  const firstId = /Imported document ([0-9a-f-]+)/i.exec(first.stdout)?.[1];
+  assert.ok(firstId);
+  const initial = await getDocument(base, owner, firstId);
+  const client = await connect(base, owner);
+  try {
+    assert.equal((await client.send(setCommand(client, initial, 41))).case, 'committed');
+  } finally {
+    client.socket.terminate();
+  }
+  const edited = await getDocument(base, owner, firstId);
+  assert.equal(edited.version, '4');
+  const exported = await api(base, owner, `/api/documents/${firstId}/export.xlsx`);
+  assert.equal(exported.status, 200);
+  const directory = mkdtempSync(join(tmpdir(), 'pxel-xlsx-roundtrip-'));
+  try {
+    const path = join(directory, 'roundtrip.xlsx');
+    writeFileSync(path, Buffer.from(await exported.arrayBuffer()));
+    const second = importFixture(path, identity);
+    assert.equal(second.status, 0, second.stderr);
+    const secondId = /Imported document ([0-9a-f-]+)/i.exec(second.stdout)?.[1];
+    assert.ok(secondId);
+    const restored = await getDocument(base, owner, secondId);
+    const authored = (document) => {
+      const sheet = document.sheets[0];
+      return sheet.cells
+        .map((cell) => ({
+          row: sheet.rows.indexOf(cell.row_id),
+          column: sheet.columns.indexOf(cell.column_id),
+          type: cell.value.type,
+          value: cell.value.type === 'formula' ? cell.value.value.source : cell.value.value,
+        }))
+        .sort((a, b) => a.row - b.row || a.column - b.column);
+    };
+    const before = authored(edited);
+    const after = authored(restored);
+    assert.equal(before.find((cell) => cell.type === 'formula')?.value, '=A1+B1');
+    assert.equal(after.find((cell) => cell.type === 'formula')?.value, '=(A1+B1)');
+    assert.deepEqual(
+      after.map((cell) => (cell.type === 'formula' ? { ...cell, value: 'formula' } : cell)),
+      before.map((cell) => (cell.type === 'formula' ? { ...cell, value: 'formula' } : cell)),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
