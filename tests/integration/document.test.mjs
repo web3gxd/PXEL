@@ -233,6 +233,91 @@ test('appending rows preserves an existing formula target and calculated value',
   }
 });
 
+test('seeded mixed-client writes, retry, extension and reconnect converge through ordered replay', async () => {
+  let random = 0x50e1c0de;
+  const next = () => {
+    random ^= random << 13;
+    random ^= random >>> 17;
+    random ^= random << 5;
+    return random >>> 0;
+  };
+  const cookie = await login(base);
+  for (let scenario = 0; scenario < 5; scenario++) {
+    const { snapshot } = await createDocument(base, cookie);
+    let left = await connect(base, cookie);
+    const right = await connect(base, cookie);
+    try {
+      const [a, b] = await Promise.all([
+        left.send(setCommand(left, snapshot, next() % 1000, { row: 0, sequence: 1 })),
+        right.send(setCommand(right, snapshot, next() % 1000, { row: 1, sequence: 1 })),
+      ]);
+      assert.deepEqual(
+        [a.value.committedVersion, b.value.committedVersion].sort((x, y) => Number(x - y)),
+        [2n, 3n],
+      );
+      let version = 3n;
+      for (let index = 0; index < 12; index++) {
+        if (index === 4) {
+          const rowIds = [uuid7(), uuid7()];
+          const extension = await right.send(
+            extendRowsCommand(right, { ...snapshot, version: String(version) }, rowIds, {
+              sequence: index + 2,
+            }),
+          );
+          assert.equal(extension.case, 'committed');
+          assert.equal(extension.value.committedVersion, ++version);
+        } else {
+          const writer = next() % 2 === 0 ? left : right;
+          const command = setCommand(writer, snapshot, next() % 1000, {
+            row: next() % 3,
+            column: next() % 3,
+            sequence: index + 2,
+          });
+          const committed = await writer.send(command);
+          assert.equal(committed.case, 'committed');
+          assert.equal(committed.value.committedVersion, ++version);
+          if (index === 2) {
+            const retry = await writer.send(command);
+            assert.equal(retry.case, 'receipt');
+            assert.equal(retry.value.committedVersion, version);
+          }
+        }
+        if (index === 6) {
+          left.socket.terminate();
+          left = await connect(base, cookie);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      const canonical = await getDocument(base, cookie, snapshot.document_id);
+      assert.equal(canonical.version, String(version));
+      assert.equal(canonical.sheets[0].rows.length, snapshot.sheets[0].rows.length + 2);
+      const returning = await connect(base, cookie);
+      try {
+        const frames = await receiveFrames(returning, Number(version), () =>
+          subscribeDocument(returning, snapshot.document_id, 1),
+        );
+        const events = frames.slice(0, -1);
+        assert.deepEqual(
+          events.map((frame) => frame.value.headVersion),
+          Array.from({ length: Number(version - 1n) }, (_, index) => BigInt(index + 2)),
+        );
+        assert.equal(frames.at(-1).case, 'replayComplete');
+        assert.equal(frames.at(-1).value.barrierVersion, version);
+        assert.equal(frames.at(-1).value.resyncRequired, false);
+        assert.equal(
+          Buffer.from(events.at(-1).value.latestOperation.confirmedStateHash).toString('hex'),
+          canonical.state_hash,
+        );
+      } finally {
+        returning.socket.close();
+      }
+    } finally {
+      left.socket.terminate();
+      right.socket.terminate();
+    }
+  }
+});
+
 test('late subscriber receives every missed version in order before the replay barrier', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);

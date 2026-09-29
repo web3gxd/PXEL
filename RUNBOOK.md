@@ -1,5 +1,25 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — сетевой convergence сценарий со структурной операцией
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-019 и текущий WebSocket test
+harness. Цель — проверить одну смешанную последовательность через живые
+WebSocket/PostgreSQL, а не только domain projection. Инварианты: монотонные
+версии, идемпотентный retry, устойчивость stable IDs при `ExtendRows`,
+reconnect и совпадение hash последнего canonical event с HTTP projection.
+
+В `tests/integration/document.test.mjs` добавлены пять сценариев с фиксированным
+xorshift seed: по два конкурентных начальных писателя, 12 дальнейших команд,
+один retry, append двух строк, разрыв одного соединения, поздняя подписка и
+проверка полного ordered replay. Задержка 30 ms между командами удерживает
+тест ниже локального dev rate limit; это параметр теста, не production latency.
+Focused run прошёл 1/1 за 3.93 s, полный `pnpm test:integration` прошёл 30/30
+за 9.78 s. Это не 100×1000 сетевых сценариев, не permission-revocation race,
+не restart между командами и не cross-host stress; phase 3 gate остаётся открыт.
+Презентация и roadmap обновлены без объявления фазы завершённой.
+
+---
+
 ## 2026-09-29 — первый структурный срез: автоматическое расширение строк
 
 Дополнительный regression test на существующую формулу `=A1` подтвердил, что

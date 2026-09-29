@@ -25,6 +25,11 @@ durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалё
 закрылся, писатель не остановился. Третий прогон обнаружил send timeout;
 queue overflow в сети и cross-host case ещё не подтверждены;
 [условия](benchmarks/2026-09-29-slow-reader-local.md).
+Дополнительный сетевой convergence test прошёл 5 фиксированных сценариев через
+настоящий WebSocket/PostgreSQL: конкурентные писатели, retry, `ExtendRows`,
+disconnect/reconnect и поздний replay. Версии пришли без пропусков, финальный
+event state hash совпал с HTTP canonical projection. Это меньше целевых
+100×1000 сетевых сценариев и не закрывает phase 3 gate.
 Живой integration test одновременной записи в одну ячейку подтвердил версии
 2/3, серверный порядок и значение победителя после replay. Это не заменяет
 случайные multi-user сценарии с разными задержками и отказами.
