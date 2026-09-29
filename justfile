@@ -72,6 +72,10 @@ sqlx-check:
 s3-contract:
     cargo test --locked -p spreadsheet-storage --features s3 --test s3_contract -- --ignored --nocapture
 
+crash-recovery-postgres:
+    cargo build --locked -p pxel-server --features dev-auth
+    node --test tests/recovery/postgres-immediate-stop.test.mjs
+
 audit:
     cargo deny check
     cargo audit

@@ -359,7 +359,10 @@
           </div>
           <div class="doing">
             <b>05</b><span>Snapshots</span
-            ><small>Образ, история, уборка; S3/Moto 8 тестов. Garage и power-loss впереди</small>
+            ><small
+              >Образ, история, уборка; S3/Moto 8 тестов и crash PostgreSQL. Garage и power-loss
+              впереди</small
+            >
           </div>
           <div><b>06</b><span>XLSX</span><small>импорт и экспорт</small></div>
         </div>
@@ -380,7 +383,7 @@
           Сейчас главное: завершить сетевые convergence tests и измерить backpressure по этапам.
           Ограниченный replay, отзыв прав, reconnect, локальный slow-reader stress и первый срез
           структуры проверены. Вставка и удаление строк с формулами переживают перезапуск; дальше —
-          cut/move, расширенный undo, crash matrix snapshots, S3 и XLSX. Release benchmark с
+          cut/move, расширенный undo, оставшаяся crash matrix, Garage/S3 и XLSX. Release benchmark с
           реальными PostgreSQL и файловым snapshot восстановил 10 000 событий хвоста с p95 71–88 мс
           в двух локальных прогонах. Для сравнения полный replay дал p95 131–139 мс; это тёплая
           книга с одной ячейкой, без браузера.

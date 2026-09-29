@@ -380,9 +380,18 @@ async fn main() -> anyhow::Result<()> {
                 let database = recovery_database.clone();
                 let blobs = recovery_blobs.clone();
                 async move {
-                    database
-                        .recover_document(&blobs, identity, document)
-                        .await
+                    let started = Instant::now();
+                    let recovered = database.recover_document(&blobs, identity, document).await;
+                    if let Ok(result) = &recovered {
+                        tracing::info!(
+                            event = "document_recovery",
+                            snapshot_version =
+                                result.snapshot_version.map_or(0, |version| version.get()),
+                            replayed_events = result.replayed_events,
+                            recovery_duration_ms = started.elapsed().as_millis(),
+                        );
+                    }
+                    recovered
                         .map(|result| result.workbook)
                         .map_err(|error| match error {
                             SnapshotError::Journal(error) => error,

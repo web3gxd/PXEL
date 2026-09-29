@@ -1,5 +1,42 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — PostgreSQL immediate-stop recovery со snapshot + tail
+
+Перед срезом прочитаны AGENTS.md, roadmap, ADR-004/033/037/039, snapshot
+publisher/reader, server recovery composition и существующие recovery tests.
+Цель — проверить подтвержденный хвост после аварийной остановки отдельной БД.
+Инварианты: ACK следует durable commit, ACTIVE snapshot не заменяет журнал,
+после WAL recovery canonical hash совпадает с ACK; содержимое ячеек не логируется.
+Риск: `pg_ctl -m immediate` имитирует отказ процесса, но не потерю питания.
+
+Добавлены `tests/recovery/postgres-immediate-stop.test.mjs`, рецепт
+`just crash-recovery-postgres`, ADR-040, структурированное событие
+`document_recovery` с версиями/count/duration и обновления README,
+persistence/roadmap/презентации. Harness поднимает отдельный PostgreSQL 18
+со `synchronous_commit=on`, `fsync=on`, `full_page_writes=on`; v3 snapshot
+проверяется в metadata до v4 commit. После immediate stop/restart проверяются
+v4 hash и content, исторический v3 и фактическая загрузка snapshot v3 + одного
+event по runtime recovery событию.
+
+Первый запуск теста завис: захваченные stdout/stderr `pg_ctl` остались открыты
+у дочернего PostgreSQL; `spawnSync` теперь не захватывает их. Второй запуск
+обнаружил, что общий debug binary не собран с dev-auth; рецепт явно собирает
+его. Следующий запуск выявил неверное ожидание scheduler: интервал 2 ставит
+snapshot на v3, поскольку genesis v1 не считается; сценарий исправлен по
+существующему правилу. Затем afterEach helper пытался отозвать test session
+после остановки сервера; harness теперь отзывает ее до shutdown. После этих
+исправлений адресный тест прошёл 1/1 за 7.24 s (время node runner, не latency
+восстановления). Отдельная сборка `cargo build --locked -p pxel-server
+--features dev-auth` прошла. Физическая потеря питания, disk corruption,
+PITR/backup restore, Linux и Garage этим тестом не проверены. Прерванные
+диагностические каталоги старых неуспешных прогонов остаются в игнорируемой
+`.local`; успешный harness удаляет свой приватный кластер после остановки.
+Повторный `just crash-recovery-postgres` прошёл 1/1 за 7.63 s. `just check`
+прошёл Rust fmt/Clippy default + all-features, workspace tests/build, WASM,
+protobuf drift, frontend format/lint/typecheck, Vitest 71/71 и Vite build.
+Presentation check прошёл 10 слайдов при 1440×900 и 390×844. Это не
+подтверждает CI на Linux или официальный latency threshold.
+
 ## 2026-09-29 — optional S3 adapter для snapshot объектов
 
 Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-004/033/037/038,

@@ -112,6 +112,14 @@ S3 consistency и backup/PITR остаются отдельными задача
 
 Crash после object upload, до metadata update оставляет незавершенный record/object: recovery reader его не использует, будущий reconciler/GC решит судьбу. Crash после activation transaction дает читателю ACTIVE record. Corrupt ACTIVE при загрузке сейчас пропускается без изменения metadata и выбирается предыдущий ACTIVE; автоматический аудируемый `REJECTED` переход будет отдельным срезом. Object existence alone никогда не активирует snapshot.
 
+Изолированный тест ADR-040 запускает PostgreSQL 18 с `synchronous_commit=on`,
+`fsync=on`, `full_page_writes=on`, активирует snapshot v3, подтверждает v4,
+останавливает PostgreSQL в режиме `immediate` и запускает его снова. Runtime
+recovery сообщает только opaque версии/длительность: выбранный snapshot v3 и
+одно replayed событие; restored state hash совпадает с ACK v4. Этот тест
+покрывает сбой процесса PostgreSQL с WAL recovery, но не потерю питания,
+носителя, S3 объекта или backup/PITR restore.
+
 ## Replay и hashes
 
 Reader авторизует historical read, выбирает подходящий ACTIVE snapshot <=requested version, проверяет envelope/checksum/hash и последовательно применяет log tail. Versions должны быть непрерывны. Unknown event/schema, gap и checksum mismatch не пропускаются. Replay применяет сохраненные canonical operations, не повторяет сортировку/генерацию IDs или random source.

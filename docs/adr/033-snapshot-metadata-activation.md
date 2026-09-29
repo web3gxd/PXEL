@@ -35,7 +35,8 @@ Reader видит только `ACTIVE`, повторно проверяет о�
 API storage crate подключён к actor startup по ADR-034; scheduler добавлен
 ADR-035. Исторический endpoint добавлен в ADR-036; уборка незавершённых
 объектов — в ADR-037, retention старых ACTIVE поколений — в ADR-038.
-S3 contract ещё не реализован.
+Позднее optional S3 adapter прошёл локальный Moto contract (ADR-039);
+Garage и российский S3 ещё не проверены.
 На одном вызове reader проверяет
 не более 128 поколений: при их исчерпании возможен full replay. Временную
 I/O-ошибку reader возвращает, а повреждённый или отсутствующий объект

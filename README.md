@@ -86,6 +86,7 @@ just sqlx-check  # sqlx-cli 0.9.0; сверка .sqlx с реальной Postgr
 just smoke      # запускает/останавливает приложение; HTTP/WS + Playwright
 just audit      # cargo-deny 0.20.2, cargo-audit 0.22.2, pnpm audit
 pnpm test:recovery # собирает dev-auth binary и проверяет hard restart
+just crash-recovery-postgres # отдельный PostgreSQL 18: immediate stop, WAL recovery, snapshot+tail
 just bench-collab # отдельный локальный замер ACK и доставки второму клиенту
 ```
 
@@ -96,6 +97,10 @@ Linux CI использует `--with-deps`. Порты 8080/5173 перед `ju
 Cargo-nextest закреплен на 0.9.146. `cargo test --workspace --all-features`
 также работает без nextest. SQLx compile-time metadata хранится в `.sqlx/`;
 `SQLX_OFFLINE=true cargo build --locked --workspace` не требует БД при компиляции.
+`crash-recovery-postgres` требует `PXEL_PG_BIN`, создает отдельный кластер под
+`.local`, включает `synchronous_commit`, `fsync` и `full_page_writes`, затем
+удаляет кластер после остановки. Это проверка аварийного завершения процесса БД,
+а не физической потери питания, диска или backup/PITR.
 
 GitHub Actions выполняет те же команды на Ubuntu 24.04. Наличие workflow
 не означает выполненный remote CI: фактический статус записывается в RUNBOOK.

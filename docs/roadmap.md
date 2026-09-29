@@ -163,6 +163,10 @@ read версии без снимка проверен через replay; пос
 прошёл локальный HTTP contract на Moto 5.2.3 (8/8); server hard-restart test
 с порогом snapshot 1 создал девять новых ACTIVE S3 снимков. Garage 2.4.0,
 российский S3, inventory orphan objects и power-loss остаются открытыми.
+Отдельный crash recovery test ([ADR-040](adr/040-postgres-immediate-stop-recovery.md))
+прошёл на изолированном PostgreSQL 18: после `immediate` stop и WAL recovery
+actor поднял ACTIVE snapshot v3 и одно committed событие хвоста v4; hash
+совпал с ACK. Это не имитация потери питания или диска.
 Read-only historical endpoint восстанавливает точную версию из подходящего
 snapshot и хвоста журнала ([ADR-036](adr/036-historical-version-read.md));
 PostgreSQL и HTTP tests проверили v1/v2, fallback, ACL и неизменность head.
