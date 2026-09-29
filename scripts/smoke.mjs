@@ -32,8 +32,19 @@ try {
   await waitFor('http://127.0.0.1:8080/readyz');
   await waitFor('http://127.0.0.1:5173');
   for (const args of [
-    ['--test', 'tests/integration/server.test.mjs', 'tests/integration/document.test.mjs'],
-    ['--test', 'tests/recovery/server-restart.test.mjs'],
+    [
+      '--test',
+      '--test-concurrency=1',
+      'tests/integration/server.test.mjs',
+      'tests/integration/document.test.mjs',
+      'tests/integration/network-convergence.test.mjs',
+    ],
+    [
+      '--test',
+      '--test-concurrency=1',
+      'tests/recovery/server-restart.test.mjs',
+      'tests/recovery/convergence-restart.test.mjs',
+    ],
     [playwright, 'test', '--config', 'apps/web/playwright.config.ts'],
   ]) {
     const result = spawnSync(process.execPath, args, { stdio: 'inherit', windowsHide: true });

@@ -18,8 +18,12 @@ Criterion: 41.822–42.905 ms (optimized, Windows/Ultra 9 185H, 10 samples).
 durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалённым
 выделением (ADR-017) локально проверены. Domain-only seeded convergence
 100×1000×3 прошёл; harness дополнен вставкой/удалением стабильных строк и
-столбцов и frozen CopyRange значений. Полный gate фазы 3 ещё не закрыт:
-нужны сетевые/ACL/формульные convergence сценарии и измерения latency. Outbound queue с
+столбцов и frozen CopyRange значений. Локальный сетевой scalar/LWW harness
+100×1000 прошёл за 1 310 127 ms с двумя
+авторами, live/replay подписчиком, повторами и reconnect. Отдельный hard-restart
+сценарий с двумя авторами прошёл; общий `just smoke` проверил integration
+42/42, recovery 2/2 и Chromium 48/48. Полный gate фазы 3 ещё открыт: нужны совмещённые ACL/формульные
+convergence сценарии, cross-host stress и измерения latency. Outbound queue с
 лимитом кадров/байтов реализована в ADR-018; cross-host slow-reader stress и
 очередные метрики ещё открыты. Локальный paused-socket stress выполнен:
 три прогона по 512×30,005-byte commits завершились head 513, медленный socket
@@ -30,12 +34,13 @@ queue overflow в сети и cross-host case ещё не подтвержден
 настоящий WebSocket/PostgreSQL: конкурентные писатели, retry, `ExtendRows`,
 disconnect/reconnect и поздний replay. Версии пришли без пропусков, финальный
 event state hash совпал с HTTP canonical projection. Это меньше целевых
-100×1000 сетевых сценариев и не закрывает phase 3 gate.
+100×1000 сетевых сценариев; позднее они проверены отдельным scalar harness.
 Ещё 5 сетевых сценариев смешали конкурентные записи, вставку/удаление строк и
 столбцов, frozen CopyRange, idempotent retry и reconnect: поздний replay после
 CopyRange был непрерывным, а replay через CopyRange честно потребовал projection
-resync на barrier. Полный PostgreSQL/WebSocket integration suite прошёл 40/40.
-Эти пять сценариев также не заменяют масштабный случайный сетевой прогон.
+resync на barrier. Тогда полный PostgreSQL/WebSocket integration suite прошёл 40/40;
+после добавления сетевого scalar harness общий smoke прошёл 42/42.
+Эти пять структурных сценариев не входят в масштабный scalar сетевой прогон.
 Живой integration test одновременной записи в одну ячейку подтвердил версии
 2/3, серверный порядок и значение победителя после replay. Это не заменяет
 случайные multi-user сценарии с разными задержками и отказами.

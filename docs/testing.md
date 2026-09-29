@@ -42,6 +42,29 @@ SetCellValue/ClearCell, вставку и удаление stable-ID строк/
 непрерывные структурные events и финальный hash. Это функциональное покрытие,
 не 100×1000 случайных сетевых сценариев и не latency benchmark.
 
+`pnpm test:network-convergence` запускает отдельный seeded сетевой harness на
+реальном сервере/PostgreSQL: по умолчанию 3 документа × 100 команд. Два
+WebSocket автора отправляют пары операций с воспроизводимой задержкой 0–2 мс;
+часть пар пишет одно свойство одной ячейки. Harness проверяет серверный порядок,
+идемпотентные receipts, live последовательность всех версий, переподключение
+автора, 20 пропущенных подписчиком версий, replay без дыр и финальный hash
+против авторизованной HTTP projection. Масштаб задают `PXEL_NETWORK_SEEDS`
+(1–100) и `PXEL_NETWORK_COMMANDS` (чётное 2–1000); полный профиль — 100×1000.
+Этот сценарий пока не перезапускает сервер между командами, не меняет ACL и
+не включает формулы. Отдельный `tests/recovery/convergence-restart.test.mjs`
+жёстко останавливает сервер после 50 конкурирующих записей двух клиентов,
+проверяет полный replay и hash, идемпотентный retry, затем делает ещё две
+конкурентные записи. Он входит в `pnpm test:recovery`, но не моделирует
+случайные задержки и ACL revoke в том же restart-сценарии. Wall-clock тестов
+не является p95 commit/delivery.
+
+Локальный полный профиль 100×1000 прошёл 2026-09-29 за 1 310 127 ms на
+Windows 11 Pro 10.0.26100 / Intel Core Ultra 9 185H / 15.61 GiB RAM,
+PostgreSQL 18.6 на 127.0.0.1:55432. `synchronous_commit`, `fsync` и
+`full_page_writes` были `on`; backend работал в debug build, клиент и БД
+на одной машине. Это длительность всего correctness run, не распределение
+latency отдельной операции и не cross-host production показатель.
+
 Recovery matrix: до transaction; после CAS/INSERT до второго statement; после COMMIT до publish/ACK; candidate failure; two writers CAS; unknown commit outcome; snapshot UPLOADING/STORED/VERIFIED/ACTIVE boundaries; object upload до metadata; replay interruption/gap/corrupt event. Невалидный candidate не сохраняется, committed event не теряется.
 
 Публикация snapshot имеет тест шести управляемых остановок на настоящих

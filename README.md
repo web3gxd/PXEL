@@ -42,6 +42,13 @@ cargo run --locked -q -p pxel-server -- xlsx-preview fixtures/xlsx/minimal_scala
 Нужны wasm32 target, wasm-bindgen-cli **0.2.129** и установленный Playwright Chromium.
 Команда собирает WASM из исходников; generated binaries не хранятся в Git.
 
+После запуска локального backend/PostgreSQL сетевую сходимость двух клиентов
+проверяет `pnpm test:network-convergence` (3×100); полный профиль задаётся
+`PXEL_NETWORK_SEEDS=100` и `PXEL_NETWORK_COMMANDS=1000` для той же команды.
+Проверка использует настоящие WebSocket и PostgreSQL. `pnpm test:recovery`
+дополнительно проверяет сходимость двух авторов после жёсткого рестарта;
+случайная нагрузка вместе с отзывом прав остаётся отдельным gate.
+
 ## Локальный запуск
 
 Нужны Rust из `rust-toolchain.toml`, Node 24.18+, pnpm 12.6.0, just 1.58.0

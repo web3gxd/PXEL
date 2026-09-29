@@ -15,4 +15,9 @@ function run(command, args) {
 }
 
 run('cargo', ['build', '--locked', '-p', 'pxel-server', '--features', 'dev-auth']);
-run(process.execPath, ['--test', 'tests/recovery/server-restart.test.mjs']);
+run(process.execPath, [
+  '--test',
+  '--test-concurrency=1',
+  'tests/recovery/server-restart.test.mjs',
+  'tests/recovery/convergence-restart.test.mjs',
+]);
