@@ -70,6 +70,11 @@ export function App() {
                 {document.pending.length ? 'Сохраняем…' : 'Сохранено'}
               </span>
             )}
+            {document.remotePresence.length > 0 && (
+              <span className="preview-badge" data-testid="remote-presence">
+                Вместе в таблице: {document.remotePresence.length + 1}
+              </span>
+            )}
             {document.previewVisible && (
               <span className="preview-badge" data-testid="calculation-preview">
                 Предпросмотр • не подтверждено

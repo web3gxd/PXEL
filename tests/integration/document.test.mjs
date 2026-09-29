@@ -15,10 +15,51 @@ import {
   nextFrame,
   receiveFrames,
   setCommand,
+  sendPresence,
   subscribeDocument,
   uuid7,
 } from '../helpers/client.mjs';
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
+
+test('presence reaches subscribers and disappears without advancing document version', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const first = await connect(base, cookie);
+  const second = await connect(base, cookie);
+  try {
+    assert.equal(
+      (await receiveFrames(first, 1, () => subscribeDocument(first, snapshot.document_id, 1)))[0]
+        .case,
+      'replayComplete',
+    );
+    assert.equal(
+      (await receiveFrames(second, 1, () => subscribeDocument(second, snapshot.document_id, 1)))[0]
+        .case,
+      'replayComplete',
+    );
+    const seenByFirst = nextFrame(first);
+    const seenBySecond = nextFrame(second);
+    sendPresence(first, snapshot);
+    const [a, b] = await Promise.all([seenByFirst, seenBySecond]);
+    assert.equal(a.case, 'presenceSnapshot');
+    assert.equal(b.case, 'presenceSnapshot');
+    assert.equal(a.value.peers.length, 2);
+    assert.equal(b.value.peers.length, 2);
+    assert.equal(
+      Buffer.from(b.value.peers.find((peer) => peer.anchor)?.anchor.rowId).toString('hex'),
+      snapshot.sheets[0].rows[0].replaceAll('-', ''),
+    );
+    const leave = nextFrame(second);
+    first.socket.close();
+    const after = await leave;
+    assert.equal(after.case, 'presenceSnapshot');
+    assert.equal(after.value.peers.length, 1);
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).version, '1');
+  } finally {
+    first.socket.terminate();
+    second.socket.terminate();
+  }
+});
 
 test('another socket receives a canonical live event and late subscriber replays it', async () => {
   const cookie = await login(base);

@@ -14,6 +14,11 @@ Criterion: 41.822–42.905 ms (optimized, Windows/Ultra 9 185H, 10 samples).
 Это не p95 UI и не Excel golden parity. AND/OR/NOT, volatile-функции, широкий
 совместимый профиль и Linux gate остаются отдельными работами.
 
+Фаза 3 идёт отдельными срезами: bounded PostgreSQL replay/barrier (ADR-015),
+durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалённым
+выделением (ADR-017) локально проверены. Полный gate фазы 3 ещё не закрыт:
+нужны seeded convergence stress, outbound byte queue и измерения latency.
+
 | Фаза | Минимальный рабочий срез                                                                                                                            | Gate                                                                                                                                                             |
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0    | Workspace, quality tooling, PostgreSQL migrations, Axum health/readiness, dev-auth boundary, protobuf handshake, пустой Canvas, local BlobStore, CI | Команды старта и quality checks работают; браузер получает Welcome и рисует сетку; BlobStore contract проходит; действительные ограничения окружения перечислены |

@@ -1375,6 +1375,7 @@ dependencies = [
  "spreadsheet-formula",
  "spreadsheet-storage",
  "spreadsheet-wire-protocol",
+ "thiserror",
  "tokio",
  "tower-http",
  "tracing",

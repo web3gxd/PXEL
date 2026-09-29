@@ -82,6 +82,28 @@ export function drawGrid(
       GRID.columnWidth - 2,
       GRID.rowHeight - 2,
     );
+    for (const peer of document.remotePresence) {
+      const firstRow = Math.min(peer.anchor.row, peer.focus.row);
+      const lastRow = Math.max(peer.anchor.row, peer.focus.row);
+      const firstColumn = Math.min(peer.anchor.column, peer.focus.column);
+      const lastColumn = Math.max(peer.anchor.column, peer.focus.column);
+      if (
+        lastRow < rows.start ||
+        firstRow >= rows.end ||
+        lastColumn < columns.start ||
+        firstColumn >= columns.end
+      )
+        continue;
+      const color = ['#bb4b69', '#7062b0', '#267da0', '#aa672c'][peer.actorId.charCodeAt(0) % 4];
+      context.strokeStyle = color ?? '#7062b0';
+      context.lineWidth = 2;
+      context.strokeRect(
+        x(firstColumn) + 2,
+        y(firstRow) + 2,
+        (lastColumn - firstColumn + 1) * GRID.columnWidth - 4,
+        (lastRow - firstRow + 1) * GRID.rowHeight - 4,
+      );
+    }
     context.restore();
   }
 

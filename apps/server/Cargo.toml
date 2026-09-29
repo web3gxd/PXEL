@@ -16,6 +16,7 @@ spreadsheet-formula.workspace = true
 spreadsheet-storage.workspace = true
 spreadsheet-wire-protocol.workspace = true
 anyhow.workspace = true
+thiserror.workspace = true
 axum.workspace = true
 prost.workspace = true
 serde.workspace = true

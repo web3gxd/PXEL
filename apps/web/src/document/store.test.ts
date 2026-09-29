@@ -23,6 +23,44 @@ const projection = (): Projection => ({
   state_hash: '0'.repeat(64),
   sheets: [{ id: sheetId, name: 'Лист 1', rows: [rowId], columns: [columnId], cells: [] }],
 });
+it('renders only valid remote presence without changing confirmed document state', async () => {
+  const store = new DocumentStore();
+  store.projection = projection();
+  const before = store.projection.state_hash;
+  const envelope = create(ServerEnvelopeSchema, {
+    protocolVersion: 1,
+    payload: {
+      case: 'presenceSnapshot',
+      value: {
+        documentId: uuidBytes(documentId),
+        peers: [
+          {
+            sessionId: uuidBytes(uuidV7()),
+            actorId: uuidBytes(uuidV7()),
+            anchor: {
+              sheetId: uuidBytes(sheetId),
+              rowId: uuidBytes(rowId),
+              columnId: uuidBytes(columnId),
+            },
+            focus: {
+              sheetId: uuidBytes(sheetId),
+              rowId: uuidBytes(rowId),
+              columnId: uuidBytes(columnId),
+            },
+          },
+        ],
+      },
+    },
+  });
+  await store.receive(envelope);
+  expect(store.remotePresence).toHaveLength(1);
+  expect(store.remotePresence[0]?.focus).toEqual({ row: 0, column: 0 });
+  expect(store.projection.state_hash).toBe(before);
+  expect(store.projection.version).toBe('1');
+  store.disconnected();
+  expect(store.remotePresence).toHaveLength(0);
+  store.dispose();
+});
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -474,8 +512,11 @@ describe('document projection and pending intents', () => {
     store.set({ row: 0, column: 0 }, { type: 'text', value: 'second' });
     expect(sent).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(2000);
-    expect(sent).toHaveLength(2);
-    expect(sent[1]).toEqual(sent[0]);
+    const commands = sent.filter(
+      (bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload.case === 'command',
+    );
+    expect(commands).toHaveLength(2);
+    expect(commands[1]).toEqual(commands[0]);
     expect(displayValue(store.value({ row: 0, column: 0 }))).toBe('second');
     expect(store.confirmed.size).toBe(0);
     store.disconnected();
@@ -714,12 +755,20 @@ describe('formula intents and versioned server calculation', () => {
     expect(store.calculated.size).toBe(0);
     await vi.advanceTimersByTimeAsync(35000);
     expect(store.calculationStatus).toBe('failed');
-    expect(sent).toHaveLength(1);
+    expect(
+      sent.filter(
+        (bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload.case === 'requestCalculation',
+      ),
+    ).toHaveLength(1);
     store.disconnected();
     await store.receive(calculation('2', 3, { sequence: 1, cells: false }));
     expect(store.calculatedVersion).toBeUndefined();
     await vi.advanceTimersByTimeAsync(60000);
-    expect(sent).toHaveLength(1);
+    expect(
+      sent.filter(
+        (bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload.case === 'requestCalculation',
+      ),
+    ).toHaveLength(1);
   });
   it('publishes a complete chunk stream atomically and ignores late duplicates', async () => {
     const { store } = await connectedStore();

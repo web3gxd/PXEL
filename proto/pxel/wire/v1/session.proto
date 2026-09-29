@@ -10,6 +10,7 @@ message ClientEnvelope {
     DocumentCommand command = 3;
     RequestCalculation request_calculation = 4;
     SubscribeDocument subscribe_document = 5;
+    SetPresence set_presence = 6;
   }
 }
 
@@ -29,6 +30,7 @@ message ServerEnvelope {
     CalculationCommitted calculation_committed = 7;
     DocumentHeadChanged document_head_changed = 8;
     ReplayComplete replay_complete = 9;
+    PresenceSnapshot presence_snapshot = 10;
   }
 }
 
@@ -50,6 +52,25 @@ enum ErrorCode {
 message ProtocolError {
   ErrorCode code = 1;
   uint32 supported_protocol_version = 2;
+}
+
+// Ephemeral session state. Never persisted in the authored operation log.
+message SetPresence {
+  bytes document_id = 1;
+  CellAddress anchor = 2;
+  CellAddress focus = 3;
+}
+
+message PresencePeer {
+  bytes session_id = 1;
+  bytes actor_id = 2;
+  CellAddress anchor = 3;
+  CellAddress focus = 4;
+}
+
+message PresenceSnapshot {
+  bytes document_id = 1;
+  repeated PresencePeer peers = 2;
 }
 
 message CellAddress {

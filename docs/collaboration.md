@@ -8,8 +8,10 @@ PostgreSQL до `ReplayComplete`, а затем догоняет live head из 
 (ADR-015). Системное событие или больший gap требует HTTP projection resync.
 Документный grant/revoke теперь использует durable `access_epoch` и
 process-local payload send gate (ADR-016). Два разных dev-пользователя,
-закрытие подписки и restart recovery проверены. Presence, membership revoke,
-distributed fencing и полный семантический gate фазы 3 остаются открытыми.
+закрытие подписки и restart recovery проверены. Ephemeral presence и удалённое
+выделение реализованы отдельно от журнала (ADR-017); два пользователя и
+браузерный disconnect проверены. Membership revoke, distributed fencing,
+dedicated outbound byte queue и полный семантический gate фазы 3 остаются открытыми.
 Подробные результаты находятся в RUNBOOK.
 
 ## Command, validation, event, projection

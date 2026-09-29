@@ -48,6 +48,7 @@ pub fn decode_command(bytes: &[u8]) -> Result<v1::DocumentCommand, DecodeError> 
         ClientRequest::Command(command) => Ok(*command),
         ClientRequest::Calculation(_) => Err(DecodeError::InvalidMessage),
         ClientRequest::Subscribe(_) => Err(DecodeError::InvalidMessage),
+        ClientRequest::Presence(_) => Err(DecodeError::InvalidMessage),
     }
 }
 
@@ -56,6 +57,7 @@ pub enum ClientRequest {
     Command(Box<v1::DocumentCommand>),
     Calculation(v1::RequestCalculation),
     Subscribe(v1::SubscribeDocument),
+    Presence(v1::SetPresence),
 }
 
 pub fn decode_request(bytes: &[u8]) -> Result<ClientRequest, DecodeError> {
@@ -87,6 +89,36 @@ pub fn decode_request(bytes: &[u8]) -> Result<ClientRequest, DecodeError> {
             }
             Ok(ClientRequest::Subscribe(request))
         }
+        Some(v1::client_envelope::Payload::SetPresence(request)) => {
+            let valid_address = |address: &v1::CellAddress| {
+                address.sheet_id.len() == 16
+                    && address.row_id.len() == 16
+                    && address.column_id.len() == 16
+                    && !address.sheet_id.iter().all(|byte| *byte == 0)
+                    && !address.row_id.iter().all(|byte| *byte == 0)
+                    && !address.column_id.iter().all(|byte| *byte == 0)
+            };
+            if request.document_id.len() != 16
+                || request.document_id.iter().all(|byte| *byte == 0)
+                || request
+                    .anchor
+                    .as_ref()
+                    .is_some_and(|address| !valid_address(address))
+                || request
+                    .focus
+                    .as_ref()
+                    .is_some_and(|address| !valid_address(address))
+                || request.anchor.is_some() != request.focus.is_some()
+                || request
+                    .anchor
+                    .as_ref()
+                    .zip(request.focus.as_ref())
+                    .is_some_and(|(anchor, focus)| anchor.sheet_id != focus.sheet_id)
+            {
+                return Err(DecodeError::InvalidMessage);
+            }
+            Ok(ClientRequest::Presence(request))
+        }
         _ => Err(DecodeError::InvalidMessage),
     }
 }
@@ -109,6 +141,44 @@ pub fn error_message(error: DecodeError) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presence_requires_complete_same_sheet_addresses() {
+        let address = v1::CellAddress {
+            sheet_id: vec![1; 16],
+            row_id: vec![2; 16],
+            column_id: vec![3; 16],
+        };
+        let make = |anchor: Option<v1::CellAddress>, focus: Option<v1::CellAddress>| {
+            v1::ClientEnvelope {
+                protocol_version: PROTOCOL_VERSION,
+                payload: Some(v1::client_envelope::Payload::SetPresence(v1::SetPresence {
+                    document_id: vec![4; 16],
+                    anchor,
+                    focus,
+                })),
+            }
+            .encode_to_vec()
+        };
+        assert!(matches!(
+            decode_request(&make(Some(address.clone()), Some(address.clone()))),
+            Ok(ClientRequest::Presence(_))
+        ));
+        assert!(matches!(
+            decode_request(&make(None, None)),
+            Ok(ClientRequest::Presence(_))
+        ));
+        assert_eq!(
+            decode_request(&make(Some(address.clone()), None)).err(),
+            Some(DecodeError::InvalidMessage)
+        );
+        let mut other = address.clone();
+        other.sheet_id = vec![5; 16];
+        assert_eq!(
+            decode_request(&make(Some(address), Some(other))).err(),
+            Some(DecodeError::InvalidMessage)
+        );
+    }
 
     fn hello(version: u32) -> Vec<u8> {
         v1::ClientEnvelope {

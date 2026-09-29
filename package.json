@@ -17,7 +17,7 @@
     "proto:generate": "node scripts/proto.mjs",
     "proto:check": "node scripts/proto.mjs --check",
     "test:integration": "node --test tests/integration/server.test.mjs tests/integration/document.test.mjs",
-    "test:recovery": "node --test tests/recovery/server-restart.test.mjs"
+    "test:recovery": "node scripts/recovery.mjs"
   },
   "devDependencies": {
     "@bufbuild/buf": "1.73.0",

@@ -3,6 +3,7 @@ mod calculation_stream;
 mod config;
 mod delivery;
 mod documents;
+mod presence;
 
 use axum::{
     Json, Router,
@@ -40,6 +41,7 @@ struct AppState {
     rate: Mutex<(Instant, u32)>,
     sessions: spreadsheet_collab::InProcessSessionDirectory<PgDatabase>,
     delivery: delivery::DeliveryGates,
+    presence: presence::PresenceDirectory,
 }
 
 #[derive(Serialize)]
@@ -54,6 +56,7 @@ struct HeadSubscription {
     ticket: DocumentAccess,
     access_changes: watch::Receiver<u64>,
     updates: watch::Receiver<HeadUpdate>,
+    peers: watch::Receiver<Vec<v1::PresencePeer>>,
     last_sent: DocumentVersion,
 }
 
@@ -66,6 +69,7 @@ struct DocumentDelivery<'a> {
 
 enum SubscriptionEvent {
     Head(HeadUpdate),
+    Presence(Vec<v1::PresencePeer>),
     AccessChanged,
     Closed,
 }
@@ -84,10 +88,13 @@ async fn next_subscription_event(
             if changed.is_ok() { SubscriptionEvent::Head(active.updates.borrow_and_update().clone()) }
             else { SubscriptionEvent::Closed }
         }
+        changed = active.peers.changed() => {
+            if changed.is_ok() { SubscriptionEvent::Presence(active.peers.borrow_and_update().clone()) }
+            else { SubscriptionEvent::Closed }
+        }
     };
     if matches!(event, SubscriptionEvent::Closed) {
-        *subscription = None;
-        return None;
+        return Some(SubscriptionEvent::Closed);
     }
     Some(event)
 }
@@ -287,6 +294,7 @@ async fn main() -> anyhow::Result<()> {
         auth: auth::Auth::new(config.dev_auth, database.clone()),
         sessions: spreadsheet_collab::InProcessSessionDirectory::new(database.clone()),
         delivery: delivery::DeliveryGates::default(),
+        presence: presence::PresenceDirectory::default(),
         database,
         blobs,
         origins: config.allowed_origins,
@@ -507,14 +515,33 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
     let mut last_pong = Instant::now();
     let mut calculation = None;
     let mut head_subscription: Option<HeadSubscription> = None;
+    let mut last_presence = Instant::now() - Duration::from_millis(50);
     loop {
         tokio::select! {
             event = next_subscription_event(&mut head_subscription) => {
                 let Some(event) = event else { continue; };
                 let update = match event {
                     SubscriptionEvent::Head(update) => update,
+                    SubscriptionEvent::Presence(peers) => {
+                        let Some(active) = head_subscription.as_ref() else { continue; };
+                        let payload = v1::ServerEnvelope {
+                            protocol_version: wire::PROTOCOL_VERSION,
+                            payload: Some(v1::server_envelope::Payload::PresenceSnapshot(
+                                v1::PresenceSnapshot {
+                                    document_id: active.document.as_bytes().to_vec(),
+                                    peers,
+                                },
+                            )),
+                        }.encode_to_vec();
+                        if !send_document_payload(
+                            &mut socket, &state, &principal,
+                            DocumentDelivery { document: active.document, gate: &active.gate, ticket: active.ticket },
+                            payload,
+                        ).await { break; }
+                        continue;
+                    }
                     SubscriptionEvent::AccessChanged => break,
-                    SubscriptionEvent::Closed => continue,
+                    SubscriptionEvent::Closed => break,
                 };
                 let Some(active) = head_subscription.as_mut() else { continue; };
                 if update.version <= active.last_sent { continue; }
@@ -594,6 +621,19 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 }
                             }
                         }
+                        Ok(wire::ClientRequest::Presence(request)) => {
+                            let Some(active) = head_subscription.as_ref() else { break; };
+                            if request.document_id.as_slice() != active.document.as_bytes()
+                                || !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
+                            if last_presence.elapsed() < Duration::from_millis(50) { continue; }
+                            let _read = active.gate.lock.read().await;
+                            let authorized = matches!(state.database.access(principal.identity, active.document).await,
+                                Ok(current) if current.document_access_epoch == active.ticket.document_access_epoch
+                                && current.membership_access_epoch == active.ticket.membership_access_epoch);
+                            if !authorized { break; }
+                            if state.presence.update(active.document, session_id, request.anchor, request.focus).await.is_err() { break; }
+                            last_presence = Instant::now();
+                        }
                         Ok(wire::ClientRequest::Subscribe(request)) => {
                             if !rate_allowed(&state).await { break; }
                             let document = match request.document_id.as_slice().try_into()
@@ -637,6 +677,13 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 DocumentDelivery { document, gate: &gate, ticket },
                                 current, resync_required,
                             ).await { break; }
+                            if let Some(previous) = head_subscription.take() {
+                                state.presence.leave(previous.document, session_id).await;
+                            }
+                            let peers = match state.presence.join(document, session_id, principal.identity.actor_id).await {
+                                Ok(peers) => peers,
+                                Err(_) => break,
+                            };
                             head_subscription = Some(HeadSubscription {
                                 document,
                                 session,
@@ -644,6 +691,7 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 ticket,
                                 access_changes,
                                 updates,
+                                peers,
                                 last_sent: current,
                             });
                         }
@@ -659,6 +707,9 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 }
             }
         }
+    }
+    if let Some(active) = head_subscription.take() {
+        state.presence.leave(active.document, session_id).await;
     }
     let _ = send(&mut socket, Message::Close(None)).await;
     tracing::info!(event = "session_disconnected", %session_id);

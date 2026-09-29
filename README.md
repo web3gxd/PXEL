@@ -12,8 +12,10 @@ reload/restart. Формулы сохраняются как source и серв�
 Две открытые вкладки получают подтвержденные события по WebSocket. При
 переподключении сервер воспроизводит из PostgreSQL до 128 операций по порядку,
 фиксирует `ReplayComplete` и затем доставляет новые версии. Больший разрыв или
-системное событие вызывает авторизованный resync. Presence, атомарный отзыв
-ACL-подписок, snapshots и XLSX еще отсутствуют.
+системное событие вызывает авторизованный resync. Временное presence показывает
+удалённое выделение, не меняя версию документа. Отзыв документного ACL закрывает
+старую подписку через durable access epoch и локальный send gate. Полный gate
+фазы 3, snapshots и XLSX ещё впереди.
 
 Архитектура принята только для фазы 0. Все решения, проверки и ограничения:
 [RUNBOOK.md](RUNBOOK.md), [roadmap](docs/roadmap.md), [architecture](docs/architecture.md).
@@ -79,6 +81,7 @@ just test        # nextest + Vitest; PostgreSQL должна работать
 just sqlx-check  # sqlx-cli 0.9.0; сверка .sqlx с реальной PostgreSQL
 just smoke      # запускает/останавливает приложение; HTTP/WS + Playwright
 just audit      # cargo-deny 0.20.2, cargo-audit 0.22.2, pnpm audit
+pnpm test:recovery # собирает dev-auth binary и проверяет hard restart
 ```
 
 До `check/test/sqlx-check` задайте `DATABASE_URL` из `.local/database-url` без вывода

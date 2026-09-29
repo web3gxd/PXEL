@@ -1,5 +1,54 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — ephemeral presence и удалённое выделение (фаза 3, срез)
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-014/015/016, collaboration,
+wire/session, server subscription и web store/Canvas. Цель — показать
+удалённое выделение двум пользователям, не превращая движение курсора в
+каноническую операцию. Инварианты: document version и state hash не меняются;
+отправка требует текущего ACL/epoch под send gate; сообщения ограничены;
+disconnect удаляет presence; данные документа не попадают в логи.
+
+Wire v1 расширен `SetPresence` и `PresenceSnapshot` с полными stable ID
+anchor/focus. Сервер проверяет форму, sheet consistency, подписку, session и
+ACL epoch; process-local directory держит максимум 64 peers на документ,
+coalescing watch, лимит 20 обновлений/с на сокет и не более 10 рассылок/с
+на документ с отложенной доставкой финального положения. Snapshot уходит через
+тот же ACL delivery gate. Клиент проверяет ID относительно текущих осей,
+рисует видимые удалённые выделения на Canvas и показывает число участников.
+При disconnect, revoke и смене документа присутствие очищается. Созданы
+ADR-017, wire/client/server tests, браузерный сценарий двух разных аккаунтов,
+обновлены README, collaboration, roadmap и презентация. Скрипт recovery теперь
+сам собирает бинарник с `dev-auth` и читает локальный DB URL без его вывода.
+
+Проверено: Rust wire/server unit tests, `pnpm test` 53/53, живой targeted
+presence integration, полный `pnpm test:integration` 26/26, полный `just check`
+с exit 0 (fmt, Clippy, workspace tests/build, wasm32, protobuf drift,
+Prettier, ESLint, TS, Vitest, Vite build). После добавления браузерного
+сценария `pnpm test:e2e` прошёл 16/16 при DPR 1/2; презентация прошла 10
+слайдов на 1440×900 и 390×844. `pnpm test:recovery` прошёл 1/1 после
+исправления harness. Его первые два запуска завершились до readiness:
+исполняемый файл после `just check` был собран без `dev-auth`; причина
+подтверждена ручным запуском, теперь recovery script сам собирает feature.
+После последней правки README/документации и client disconnect полный
+`just check` повторно завершился с exit 0. Security review дополнительно
+обнаружил возможное умножение частоты рассылок на число участников; добавлен
+aggregate doc throttle и тест coalesced trailing update. После этой правки
+повторно прошли `just check` и живой `pnpm test:integration` 26/26; новый
+браузерный сценарий при DPR 1/2 прошёл 2/2. Полный браузерный suite 16/16
+был запущен до aggregate throttle; остальных UI-изменений после него не было.
+Latency p95 и визуальный pixel diff
+удалённой рамки не измерялись.
+
+Ограничения: presence действует только в одном процессе; сервер проверяет
+форму stable IDs, а не их актуальность в workbook на каждое движение;
+неизвестные IDs отбрасывает клиент. Выделение сейчас передаёт anchor и focus,
+но UI использует одну активную ячейку. Dedicated outbound byte queue,
+membership revoke, seeded convergence stress и latency gate фазы 3 открыты.
+Linux/Compose/remote CI и фазы 4–6 в этом срезе не проверялись.
+
+---
+
 ## 2026-09-29 — document ACL epoch и WebSocket payload send gate
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-014/015, collaboration,

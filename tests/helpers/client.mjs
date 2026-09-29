@@ -136,6 +136,26 @@ export function subscribeDocument(client, documentId, lastSeenVersion) {
     ),
   );
 }
+export function sendPresence(client, snapshot, row = 0, column = 0) {
+  const sheet = snapshot.sheets[0];
+  const address = {
+    sheetId: bytes(sheet.id),
+    rowId: bytes(sheet.rows[row]),
+    columnId: bytes(sheet.columns[column]),
+  };
+  client.socket.send(
+    toBinary(
+      clientSchema,
+      create(clientSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'setPresence',
+          value: { documentId: bytes(snapshot.document_id), anchor: address, focus: address },
+        },
+      }),
+    ),
+  );
+}
 export async function connect(base, cookie) {
   const socket = new WebSocket(base.replace(/^http/, 'ws') + '/api/ws', {
     headers: { Origin: origin, Cookie: cookie },

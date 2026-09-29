@@ -43,6 +43,12 @@ export type Projection = {
   sheets: Sheet[];
 };
 export type Position = { row: number; column: number };
+export type RemotePresence = {
+  sessionId: string;
+  actorId: string;
+  anchor: Position;
+  focus: Position;
+};
 type Pending = {
   id: string;
   row: string;
@@ -242,6 +248,7 @@ export class DocumentStore {
   confirmed = new Map<string, Value>();
   pending: Pending[] = [];
   selected: Position = { row: 0, column: 0 };
+  remotePresence: RemotePresence[] = [];
   editing: { position: Position; text: string; source: 'cell' | 'bar' } | undefined;
   error = '';
   loading = false;
@@ -258,6 +265,7 @@ export class DocumentStore {
   private actor: Uint8Array | undefined;
   private sender: ((bytes: Uint8Array) => boolean) | undefined;
   private subscribedDocument: string | undefined;
+  private presenceTimer: ReturnType<typeof setTimeout> | undefined;
   private headRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   private headRefreshVersion = 0n;
   private headRefreshAttempts = 0;
@@ -544,6 +552,7 @@ export class DocumentStore {
       clearTimeout(this.headRefreshTimer);
       this.headRefreshVersion = 0n;
       this.headRefreshAttempts = 0;
+      this.remotePresence = [];
     }
     this.projection = projection;
     this.confirmed = new Map(
@@ -571,6 +580,34 @@ export class DocumentStore {
       }),
     );
     if (this.sender(bytes)) this.subscribedDocument = projection.document_id;
+    this.schedulePresence();
+  }
+  private schedulePresence() {
+    clearTimeout(this.presenceTimer);
+    if (!this.sender || !this.subscribedDocument || !this.sheet) return;
+    this.presenceTimer = setTimeout(() => {
+      const sheet = this.sheet;
+      const documentId = this.projection?.document_id;
+      const row = sheet?.rows[this.selected.row];
+      const column = sheet?.columns[this.selected.column];
+      if (!sheet || !documentId || !row || !column || !this.sender) return;
+      const address = {
+        sheetId: uuidBytes(sheet.id),
+        rowId: uuidBytes(row),
+        columnId: uuidBytes(column),
+      };
+      const bytes = toBinary(
+        ClientEnvelopeSchema,
+        create(ClientEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'setPresence',
+            value: { documentId: uuidBytes(documentId), anchor: address, focus: address },
+          },
+        }),
+      );
+      this.sender(bytes);
+    }, 60);
   }
   private async refreshHead() {
     clearTimeout(this.headRefreshTimer);
@@ -670,6 +707,7 @@ export class DocumentStore {
     return true;
   }
   disconnected() {
+    const hadPresence = this.remotePresence.length > 0;
     this.calculationRequestedVersion = undefined;
     this.calculationAssembly = undefined;
     clearTimeout(this.calculationTimer);
@@ -678,11 +716,14 @@ export class DocumentStore {
     this.syncing = false;
     this.sender = undefined;
     this.subscribedDocument = undefined;
+    clearTimeout(this.presenceTimer);
+    this.remotePresence = [];
     clearTimeout(this.headRefreshTimer);
     this.headRefreshAttempts = 0;
     this.headRefreshVersion = 0n;
     this.inflight = undefined;
     clearTimeout(this.timer);
+    if (hadPresence) this.notify();
   }
   dispose() {
     this.disconnected();
@@ -693,6 +734,7 @@ export class DocumentStore {
   }
   select(position: Position) {
     this.selected = position;
+    this.schedulePresence();
     this.notify();
   }
   begin(text = displayValue(this.value(this.selected)), source: 'cell' | 'bar' = 'cell') {
@@ -881,6 +923,62 @@ export class DocumentStore {
   }
   async receive(envelope: ServerEnvelope) {
     const payload = envelope.payload;
+    if (payload.case === 'presenceSnapshot') {
+      const snapshot = payload.value;
+      if (snapshot.documentId.length !== 16 || snapshot.peers.length > 64)
+        throw new Error('Invalid presence snapshot');
+      if (bytesUuid(snapshot.documentId) !== this.projection?.document_id) return;
+      const sheet = this.sheet;
+      if (!sheet) return;
+      const rows = new Map(sheet.rows.map((id, index) => [id, index]));
+      const columns = new Map(sheet.columns.map((id, index) => [id, index]));
+      const peers: RemotePresence[] = [];
+      const seen = new Set<string>();
+      for (const peer of snapshot.peers) {
+        if (peer.sessionId.length !== 16 || peer.actorId.length !== 16)
+          throw new Error('Invalid presence peer');
+        const sessionId = bytesUuid(peer.sessionId);
+        if (seen.has(sessionId)) throw new Error('Duplicate presence peer');
+        seen.add(sessionId);
+        if (!peer.anchor || !peer.focus) continue;
+        if (
+          peer.anchor.sheetId.length !== 16 ||
+          peer.focus.sheetId.length !== 16 ||
+          peer.anchor.rowId.length !== 16 ||
+          peer.focus.rowId.length !== 16 ||
+          peer.anchor.columnId.length !== 16 ||
+          peer.focus.columnId.length !== 16
+        )
+          throw new Error('Invalid presence address');
+        if (
+          bytesUuid(peer.anchor.sheetId) !== sheet.id ||
+          bytesUuid(peer.focus.sheetId) !== sheet.id
+        )
+          continue;
+        const anchorRow = rows.get(bytesUuid(peer.anchor.rowId));
+        const focusRow = rows.get(bytesUuid(peer.focus.rowId));
+        const anchorColumn = columns.get(bytesUuid(peer.anchor.columnId));
+        const focusColumn = columns.get(bytesUuid(peer.focus.columnId));
+        if (
+          anchorRow === undefined ||
+          focusRow === undefined ||
+          anchorColumn === undefined ||
+          focusColumn === undefined
+        )
+          continue;
+        const actorId = bytesUuid(peer.actorId);
+        if (actorId === (this.actor && bytesUuid(this.actor))) continue;
+        peers.push({
+          sessionId,
+          actorId,
+          anchor: { row: anchorRow, column: anchorColumn },
+          focus: { row: focusRow, column: focusColumn },
+        });
+      }
+      this.remotePresence = peers;
+      this.notify();
+      return;
+    }
     if (payload.case === 'replayComplete') {
       const marker = payload.value;
       if (marker.documentId.length !== 16 || marker.barrierVersion > 9223372036854775807n)

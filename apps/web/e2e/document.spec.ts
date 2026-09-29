@@ -186,3 +186,78 @@ test('two browser tabs see each other’s committed cell after a head hint', asy
     await second.close();
   }
 });
+
+test('two different users see ephemeral presence without changing the saved version', async ({
+  page,
+  browser,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const documentId = new URL(page.url()).searchParams.get('document');
+  if (!documentId) throw new Error('Document ID missing');
+  const origin = new URL(page.url()).origin;
+  const ownerResponse = await page.request.get('/api/dev/identity', {
+    headers: { Origin: origin },
+  });
+  expect(ownerResponse.status()).toBe(200);
+  const owner = await ownerResponse.json();
+  const viewer = await browser.newContext();
+  const account = `presence_${crypto.randomUUID().replaceAll('-', '').slice(0, 20)}`;
+  try {
+    const home = await viewer.request.post(origin + '/api/dev/session', {
+      headers: { Origin: origin, 'X-PXEL-DEV-ACCOUNT': account },
+    });
+    expect(home.status()).toBe(204);
+    const viewerIdentity = await (
+      await viewer.request.get(origin + '/api/dev/identity', { headers: { Origin: origin } })
+    ).json();
+    await viewer.request.delete(origin + '/api/dev/session', { headers: { Origin: origin } });
+    const id = crypto.getRandomValues(new Uint8Array(16));
+    let time = BigInt(Date.now());
+    for (let index = 5; index >= 0; index--) {
+      id[index] = Number(time & 255n);
+      time >>= 8n;
+    }
+    id[6] = 0x70 | ((id[6] ?? 0) & 15);
+    id[8] = 0x80 | ((id[8] ?? 0) & 63);
+    const raw = [...id].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    const changeId = `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20)}`;
+    const grant = await page.request.post(`/api/documents/${documentId}/permissions`, {
+      headers: { Origin: origin },
+      data: {
+        action: 'grant',
+        change_id: changeId,
+        target_user_id: viewerIdentity.actor_id,
+        role: 'viewer',
+      },
+    });
+    expect(grant.status()).toBe(200);
+    const shared = await viewer.request.post(origin + '/api/dev/session', {
+      headers: {
+        Origin: origin,
+        'X-PXEL-DEV-ACCOUNT': account,
+        'X-PXEL-DEV-WORKSPACE': owner.workspace_id,
+      },
+    });
+    expect(shared.status()).toBe(204);
+    const second = await viewer.newPage();
+    await second.goto(page.url());
+    await expect(second.getByTestId('connection-status')).toHaveText('Подключено');
+    const savedBefore = await (await page.request.get(`/api/documents/${documentId}`)).json();
+    const grid = page.getByRole('region', { name: 'Область таблицы' });
+    await grid.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(second.getByTestId('remote-presence')).toHaveText('Вместе в таблице: 2');
+    const savedAfter = await (await page.request.get(`/api/documents/${documentId}`)).json();
+    expect(savedAfter.version).toBe(savedBefore.version);
+    await page.close();
+    await expect(second.getByTestId('remote-presence')).toHaveCount(0);
+  } finally {
+    await viewer.request
+      .delete(origin + '/api/dev/session', { headers: { Origin: origin } })
+      .catch(() => undefined);
+    await viewer.close();
+  }
+});

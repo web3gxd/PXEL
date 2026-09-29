@@ -103,6 +103,7 @@ export function useSession(document?: DocumentStore) {
                 'calculationCommitted',
                 'documentHeadChanged',
                 'replayComplete',
+                'presenceSnapshot',
               ].includes(envelope.payload.case ?? '')
             )
               throw new SessionProtocolError('invalid_message');
