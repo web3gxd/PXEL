@@ -342,17 +342,17 @@
           </div>
           <div class="doing">
             <b>04</b><span>Структура</span
-            ><small>ExtendRows проверен; insert/delete, undo впереди</small>
+            ><small>ExtendRows + вставка без формул; transform/delete/undo впереди</small>
           </div>
           <div><b>05</b><span>Snapshots</span><small>S3 + recovery</small></div>
           <div><b>06</b><span>XLSX</span><small>импорт и экспорт</small></div>
         </div>
         <p class="roadmap-note">
-          Презентация обновляется после проверенных срезов. `ExtendRows` уже сохраняет stable IDs,
-          проходит replay и автоматически расширяет Canvas в двух вкладках. Очередь отправки
-          ограничена 160 кадрами / 2 MiB. Локальные latency и paused-socket stress измерены:
-          медленный клиент закрыт после send timeout. Cross-host поведение и сетевой queue overflow
-          ещё открыты. Linux/Compose/remote CI — отдельные gates.
+          Презентация обновляется после проверенных срезов. `ExtendRows` автоматически расширяет
+          Canvas; вставка по stable ID сохраняет значения, но при формулах пока отклоняется. Очередь
+          отправки ограничена 160 кадрами / 2 MiB. Локальные latency и paused-socket stress
+          измерены: медленный клиент закрыт после send timeout. Cross-host поведение и сетевой queue
+          overflow ещё открыты. Linux/Compose/remote CI — отдельные gates.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>

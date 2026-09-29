@@ -91,6 +91,40 @@ fn benches(c: &mut Criterion) {
         });
     }
     axes.finish();
+    let insertion_book = match book_with_axes(99_999) {
+        Ok(book) => book,
+        Err(error) => {
+            eprintln!("insertion benchmark fixture invalid: {error}");
+            std::process::exit(1);
+        }
+    };
+    let insertion_sheet = &insertion_book.sheets()[0];
+    let Some(first_row) = insertion_sheet.rows().first().copied() else {
+        eprintln!("insertion benchmark fixture has no rows");
+        std::process::exit(1);
+    };
+    let insertion_row = match RowId::from_bytes((100_000u128).to_be_bytes()) {
+        Ok(row) => row,
+        Err(error) => {
+            eprintln!("insertion benchmark row invalid: {error}");
+            std::process::exit(1);
+        }
+    };
+    let insertion = Operation::InsertRows {
+        sheet: insertion_sheet.id(),
+        before: first_row,
+        rows: vec![insertion_row],
+    };
+    let insertion_version = match DocumentVersion::new(2) {
+        Ok(version) => version,
+        Err(error) => {
+            eprintln!("insertion benchmark version invalid: {error}");
+            std::process::exit(1);
+        }
+    };
+    c.bench_function("insert_front_99999_rows", |b| {
+        b.iter(|| black_box(insertion_book.candidate(black_box(&insertion), insertion_version)))
+    });
     for count in [1_000, 100_000] {
         let book = match fixture(count) {
             Ok(book) => book,

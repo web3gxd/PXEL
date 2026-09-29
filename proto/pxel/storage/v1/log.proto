@@ -23,6 +23,7 @@ message Operation {
   SetCellFormula set_cell_formula = 4;
   AdvanceCalculationEpoch advance_calculation_epoch = 5;
   ExtendRows extend_rows = 6;
+  InsertRows insert_rows = 7;
  }
 }
 message AdvanceCalculationEpoch {
@@ -46,6 +47,7 @@ enum CalculationReason {
 }
 message CreateWorkbook { bytes sheet_id = 1; string name = 2; repeated bytes rows = 3; repeated bytes columns = 4; }
 message ExtendRows { bytes sheet_id = 1; repeated bytes rows = 2; }
+message InsertRows { bytes sheet_id = 1; bytes before_row_id = 2; repeated bytes rows = 3; }
 message CellAddress { bytes sheet_id = 1; bytes row_id = 2; bytes column_id = 3; }
 message SetCellValue { CellAddress address = 1; CellValue value = 2; }
 message CellValue { oneof kind { bool blank = 1; double number = 2; string text = 3; bool boolean = 4; } }

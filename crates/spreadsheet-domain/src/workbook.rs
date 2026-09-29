@@ -27,6 +27,8 @@ pub enum DomainError {
     InvalidValue,
     #[error("invalid bound formula")]
     InvalidFormula,
+    #[error("structural operation would require unsupported formula transformation")]
+    UnsupportedStructuralDependency,
     #[error("invalid or duplicate axis identity")]
     InvalidAxis,
     #[error("document version conflict")]
@@ -302,6 +304,11 @@ pub enum Operation {
         sheet: SheetId,
         rows: Vec<RowId>,
     },
+    InsertRows {
+        sheet: SheetId,
+        before: RowId,
+        rows: Vec<RowId>,
+    },
     SetCellValue {
         address: CellAddress,
         value: CellValue,
@@ -324,6 +331,11 @@ pub enum CommandPayload {
     },
     ExtendRows {
         sheet: SheetId,
+        rows: Vec<RowId>,
+    },
+    InsertRows {
+        sheet: SheetId,
+        before: RowId,
         rows: Vec<RowId>,
     },
     SetCellValue {
@@ -601,7 +613,9 @@ impl Workbook {
         next.version = next_version;
         if matches!(
             operation,
-            Operation::CreateWorkbook { .. } | Operation::ExtendRows { .. }
+            Operation::CreateWorkbook { .. }
+                | Operation::ExtendRows { .. }
+                | Operation::InsertRows { .. }
         ) {
             next.last_axis_change_version = next_version;
         }
@@ -628,6 +642,7 @@ impl Workbook {
             let address = match operation {
                 Operation::CreateWorkbook { .. } => return Err(DomainError::VersionConflict),
                 Operation::ExtendRows { .. } => return Err(DomainError::VersionConflict),
+                Operation::InsertRows { .. } => return Err(DomainError::VersionConflict),
                 Operation::AdvanceCalculationEpoch { .. } => {
                     return Err(DomainError::VersionConflict);
                 }
@@ -658,6 +673,30 @@ impl Workbook {
                     .find(|current| current.id == *sheet)
                     .ok_or(DomainError::MissingSheet)?
                     .validate_row_extension(rows)?;
+                (self.text_bytes, self.ast_memory_bytes)
+            }
+            Operation::InsertRows {
+                sheet,
+                before,
+                rows,
+            } => {
+                let target = self
+                    .sheets
+                    .iter()
+                    .find(|current| current.id == *sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                target
+                    .row_position(*before)
+                    .ok_or(DomainError::MissingRow)?;
+                target.validate_row_extension(rows)?;
+                if self.sheets.iter().any(|sheet| {
+                    sheet
+                        .cells
+                        .values()
+                        .any(|cell| matches!(cell, CellContent::Formula(_)))
+                }) {
+                    return Err(DomainError::UnsupportedStructuralDependency);
+                }
                 (self.text_bytes, self.ast_memory_bytes)
             }
             Operation::AdvanceCalculationEpoch { context } => {
@@ -713,6 +752,29 @@ impl Workbook {
                     target.row_positions.insert(*row, target.rows.len() as u32);
                     target.rows.push(*row);
                 }
+            }
+            Operation::InsertRows {
+                sheet,
+                before,
+                rows,
+            } => {
+                let target = self
+                    .sheets
+                    .iter_mut()
+                    .find(|current| current.id == *sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                target.validate_row_extension(rows)?;
+                let position = target
+                    .row_position(*before)
+                    .ok_or(DomainError::MissingRow)? as usize;
+                target.rows.splice(position..position, rows.iter().copied());
+                target.row_positions = target
+                    .rows
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(index, id)| (id, index as u32))
+                    .collect();
             }
             Operation::SetCellValue { address, value } => {
                 let normalized = value.normalized()?;

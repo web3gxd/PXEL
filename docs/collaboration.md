@@ -25,6 +25,13 @@ projection после структурного события. `last_axis_change
 Это консервативное ограничение снимается только вместе с проверенным binding
 и transformation для insert/delete.
 
+`InsertRows` (ADR-020) уже использует stable row anchor, а не позицию клиента.
+Два append-before одного anchor сохраняются в server commit order. Пока
+отсутствует трансформация текста формул и relative deltas, весь command
+отклоняется typed `UnsupportedStructuralDependency` при любой формуле в книге;
+обычные stable-ID правки значений проходят через вставку. Это временный
+функциональный предел, а не заявленная Excel-совместимость вставки.
+
 ## Command, validation, event, projection
 
 Command — намерение клиента: protocol_version, operation_id (UUIDv7), document_id, actor_id, base_version, client_sequence, client_instance_id, typed payload. Server AuthContext является authority; actor_id проверяется на совпадение, не дает права. ValidatedOperation — проверенное и нормализованное действие. CommittedEvent — неизменяемый durable факт с document version и schema version. Projection — восстанавливаемое состояние, не транспортный DTO.

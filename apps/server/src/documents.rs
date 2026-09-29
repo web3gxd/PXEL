@@ -671,6 +671,31 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
                 }
                 CommandPayload::ExtendRows { sheet, rows }
             }
+            v1::canonical_operation::Kind::InsertRows(insertion) => {
+                if insertion.rows.is_empty() || insertion.rows.len() > 1_000 {
+                    return Err(SessionError::InvalidCommand);
+                }
+                let sheet = SheetId::from_bytes(bytes_id(&insertion.sheet_id)?)?;
+                let before = RowId::from_bytes(bytes_id(&insertion.before_row_id)?)?;
+                let mut rows = Vec::with_capacity(insertion.rows.len());
+                let mut seen = std::collections::BTreeSet::new();
+                for raw in insertion.rows {
+                    let bytes = bytes_id(&raw)?;
+                    if Uuid::from_bytes(bytes).get_version_num() != 7 {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    let row = RowId::from_bytes(bytes)?;
+                    if !seen.insert(row) {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    rows.push(row);
+                }
+                CommandPayload::InsertRows {
+                    sheet,
+                    before,
+                    rows,
+                }
+            }
             v1::canonical_operation::Kind::SetCellFormula(_) => {
                 return Err(SessionError::InvalidCommand);
             }
@@ -726,6 +751,15 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
                 rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
             })
         }
+        Operation::InsertRows {
+            sheet,
+            before,
+            rows,
+        } => v1::canonical_operation::Kind::InsertRows(v1::InsertRows {
+            sheet_id: sheet.as_bytes().to_vec(),
+            before_row_id: before.as_bytes().to_vec(),
+            rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
+        }),
         Operation::CreateWorkbook { .. } | Operation::AdvanceCalculationEpoch { .. } => {
             return None;
         }
@@ -809,6 +843,9 @@ pub async fn handle_command(
                     | DomainError::MissingRow
                     | DomainError::MissingColumn,
                 ) => v1::RejectionCode::DeletedTarget,
+                SessionError::Domain(DomainError::UnsupportedStructuralDependency) => {
+                    v1::RejectionCode::UnsupportedStructuralDependency
+                }
                 SessionError::InvalidCommand | SessionError::Domain(_) => {
                     v1::RejectionCode::InvalidCommand
                 }

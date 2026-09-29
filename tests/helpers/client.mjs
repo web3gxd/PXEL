@@ -252,6 +252,32 @@ export function extendRowsCommand(
   };
 }
 
+export function insertRowsCommand(
+  client,
+  snapshot,
+  beforeRowId,
+  rowIds,
+  { sequence = 1, operationId = uuid7() } = {},
+) {
+  return {
+    operationId: bytes(operationId),
+    documentId: bytes(snapshot.document_id),
+    actorId: client.actorId,
+    baseVersion: BigInt(snapshot.version),
+    clientSequence: BigInt(sequence),
+    operation: {
+      kind: {
+        case: 'insertRows',
+        value: {
+          sheetId: bytes(snapshot.sheets[0].id),
+          beforeRowId: bytes(beforeRowId),
+          rows: rowIds.map(bytes),
+        },
+      },
+    },
+  };
+}
+
 export function formulaCommand(client, snapshot, source, options = {}) {
   const command = setCommand(client, snapshot, 0, options);
   const address = command.operation.kind.value.address;

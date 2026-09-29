@@ -8,6 +8,7 @@ import {
   connect,
   createDocument,
   extendRowsCommand,
+  insertRowsCommand,
   formulaCommand,
   calculation,
   requestCalculation,
@@ -230,6 +231,67 @@ test('appending rows preserves an existing formula target and calculated value',
     );
   } finally {
     client.socket.close();
+  }
+});
+
+test('row insertion uses stable anchors, server order and rejects unsupported formula transforms', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const left = await connect(base, cookie);
+  const right = await connect(base, cookie);
+  try {
+    const anchor = snapshot.sheets[0].rows[1];
+    assert.equal((await left.send(setCommand(left, snapshot, 99, { row: 1 }))).case, 'committed');
+    const leftRow = uuid7();
+    const rightRow = uuid7();
+    const leftCommand = insertRowsCommand(left, snapshot, anchor, [leftRow], { sequence: 2 });
+    const rightCommand = insertRowsCommand(right, snapshot, anchor, [rightRow], { sequence: 1 });
+    const [first, second] = await Promise.all([left.send(leftCommand), right.send(rightCommand)]);
+    assert.equal(first.case, 'committed');
+    assert.equal(second.case, 'committed');
+    assert.deepEqual(
+      [first.value.committedVersion, second.value.committedVersion].sort((a, b) => Number(a - b)),
+      [3n, 4n],
+    );
+    const mostRecent = first.value.committedVersion === 4n ? leftRow : rightRow;
+    const earlier = first.value.committedVersion === 3n ? leftRow : rightRow;
+    const afterInsert = await getDocument(base, cookie, snapshot.document_id);
+    assert.deepEqual(afterInsert.sheets[0].rows.slice(0, 4), [
+      snapshot.sheets[0].rows[0],
+      earlier,
+      mostRecent,
+      anchor,
+    ]);
+    assert.equal(
+      afterInsert.sheets[0].cells.find((cell) => cell.row_id === anchor)?.value.value,
+      99,
+    );
+    const retry = await left.send(leftCommand);
+    assert.equal(retry.case, 'receipt');
+    assert.equal(retry.value.committedVersion, first.value.committedVersion);
+    const staleCell = await left.send(setCommand(left, snapshot, 100, { row: 1, sequence: 3 }));
+    assert.equal(staleCell.case, 'committed');
+    assert.equal(staleCell.value.committedVersion, 5n);
+    const formula = await left.send(
+      formulaCommand(left, { ...snapshot, version: '5' }, '=A1', {
+        row: 0,
+        column: 1,
+        sequence: 4,
+      }),
+    );
+    assert.equal(formula.case, 'committed');
+    assert.equal(formula.value.committedVersion, 6n);
+    const denied = await left.send(
+      insertRowsCommand(left, { ...snapshot, version: '6' }, anchor, [uuid7()], { sequence: 5 }),
+    );
+    assert.equal(denied.case, 'rejected');
+    assert.equal(denied.value.code, 12);
+    const current = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(current.version, '6');
+    assert.equal(current.sheets[0].cells.find((cell) => cell.row_id === anchor)?.value.value, 100);
+  } finally {
+    left.socket.close();
+    right.socket.close();
   }
 });
 

@@ -148,6 +148,42 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('queues a stable-anchor insertion and waits for canonical axes', async () => {
+    const { store, sent } = await connectedStore();
+    expect(store.insertRowBeforeSelection()).toBe(true);
+    expect(store.insertRowBeforeSelection()).toBe(false);
+    expect(store.sheet?.rows).toEqual([rowId]);
+    expect(store.pending).toHaveLength(1);
+    const payload = fromBinary(ClientEnvelopeSchema, sent[0] ?? new Uint8Array()).payload;
+    if (payload.case !== 'command' || payload.value.operation?.kind.case !== 'insertRows')
+      throw new Error('Missing row insertion command');
+    expect(bytesUuid(payload.value.operation.kind.value.beforeRowId)).toBe(rowId);
+    const inserted = bytesUuid(payload.value.operation.kind.value.rows[0]!);
+    const next = projection();
+    next.version = '2';
+    next.sheets[0]!.rows.unshift(inserted);
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => next }));
+    vi.stubGlobal('fetch', fetchMock);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: payload.value.operationId,
+            committedVersion: 2n,
+            canonicalOperation: payload.value.operation,
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(store.sheet?.rows).toEqual([inserted, rowId]);
+    expect(store.pending).toHaveLength(0);
+    store.disconnected();
+  });
   it('queues one bounded row extension and refreshes axes after commit', async () => {
     const { store, sent } = await connectedStore();
     expect(store.extendRows()).toBe(true);

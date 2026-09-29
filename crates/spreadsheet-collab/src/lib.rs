@@ -530,6 +530,15 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
             sheet: *sheet,
             rows: rows.clone(),
         }),
+        CommandPayload::InsertRows {
+            sheet,
+            before,
+            rows,
+        } => Ok(Operation::InsertRows {
+            sheet: *sheet,
+            before: *before,
+            rows: rows.clone(),
+        }),
         CommandPayload::SetCellValue { address, value } => Ok(Operation::SetCellValue {
             address: *address,
             value: value.normalized()?,

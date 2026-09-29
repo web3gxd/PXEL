@@ -89,6 +89,7 @@ impl CalculationHandle {
             }
             Operation::CreateWorkbook { .. } => pending.rebuild = true,
             Operation::ExtendRows { .. } => pending.rebuild = true,
+            Operation::InsertRows { .. } => pending.rebuild = true,
             Operation::AdvanceCalculationEpoch { .. } => pending.rebuild = true,
         }
         if pending.changed.len() > 100_000 {

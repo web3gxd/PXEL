@@ -42,8 +42,12 @@ operation replay. Он прошел в двух полных suites 18/18 пос
 добавляет до 1,000 stable row IDs за одну durable operation, автоматически
 срабатывает у нижней границы Canvas и восстанавливается после restart.
 Два клиента, idempotent retry, replay и stale-formula rejection проверены.
-Это не закрывает фазу 4: insert/delete, reference transformation, copy/paste
-и компенсирующий undo ещё не реализованы.
+Второй срез фазы 4 (ADR-020) добавляет `InsertRows` перед stable row anchor:
+значение остаётся на прежнем ID, параллельные вставки следуют server order,
+retry и replay идемпотентны. Пока в книге есть хотя бы одна формула, вставка
+получает typed `UnsupportedStructuralDependency`: преобразование ссылок ещё
+не реализовано, поэтому данные не меняются молча. Это не закрывает фазу 4:
+formula transforms, delete/columns, copy/paste и компенсирующий undo впереди.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).
@@ -61,6 +65,9 @@ path этим не проверен; [отчёт](benchmarks/2026-09-29-render-s
 два локальных runs дали интервалы 6.77–7.90 ms; память и snapshots этим не
 измерялись. Criterion показал разницу со старым baseline, но причина без
 контролируемого A/B неизвестна; [условия](benchmarks/2026-09-29-axis-allocation-local.md).
+Вставка одной строки перед первой из 99,999 stable row IDs измерена отдельным
+Criterion harness: 6.6972–7.2624 ms на локальном optimized domain candidate,
+без БД, расчета и UI; [условия](benchmarks/2026-09-29-row-insertion-local.md).
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU

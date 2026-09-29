@@ -79,6 +79,14 @@ h1 {
   color: var(--secondary);
   font-size: 12px;
 }
+.document-menu .insert-row-action:not(:disabled) {
+  color: #275b3c;
+  font-weight: 600;
+  cursor: pointer;
+}
+.document-menu .insert-row-action:not(:disabled):hover {
+  text-decoration: underline;
+}
 .connection-area {
   margin-left: auto;
   display: flex;

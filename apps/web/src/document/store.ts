@@ -64,7 +64,13 @@ type PendingExtension = {
   bytes: Uint8Array;
   attempts: number;
 };
-type Pending = PendingCell | PendingExtension;
+type PendingInsertion = {
+  kind: 'insertRows';
+  id: string;
+  bytes: Uint8Array;
+  attempts: number;
+};
+type Pending = PendingCell | PendingExtension | PendingInsertion;
 export function uuidBytes(id: string) {
   return Uint8Array.from(id.replaceAll('-', '').match(/../g) ?? [], (pair) => parseInt(pair, 16));
 }
@@ -113,6 +119,7 @@ const rejectionText: Record<number, string> = {
   7: 'Сервер занят. Повторите ввод чуть позже.',
   8: 'Хранилище временно недоступно.',
   9: 'Строка или столбец уже удалены.',
+  12: 'Для вставки строк в таблицу с формулами пока нужен перенос ссылок.',
 };
 const isUuid = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -901,6 +908,52 @@ export class DocumentStore {
     this.flush();
     return true;
   }
+  insertRowBeforeSelection() {
+    const sheet = this.sheet,
+      projection = this.projection,
+      actor = this.actor;
+    const before = sheet?.rows[this.selected.row];
+    if (
+      !sheet ||
+      !projection ||
+      !actor ||
+      !before ||
+      sheet.rows.length >= 100_000 ||
+      this.pending.some((pending) => pending.kind === 'insertRows') ||
+      this.pending.length >= 128
+    )
+      return false;
+    const id = uuidV7();
+    const message = create(ClientEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'command',
+        value: {
+          operationId: uuidBytes(id),
+          documentId: uuidBytes(projection.document_id),
+          actorId: actor,
+          baseVersion: BigInt(projection.version),
+          clientSequence: ++this.sequence,
+          operation: {
+            kind: {
+              case: 'insertRows',
+              value: {
+                sheetId: uuidBytes(sheet.id),
+                beforeRowId: uuidBytes(before),
+                rows: [uuidBytes(uuidV7())],
+              },
+            },
+          },
+        },
+      },
+    });
+    const bytes = toBinary(ClientEnvelopeSchema, message);
+    if (bytes.byteLength > 1_048_576) return false;
+    this.pending.push({ kind: 'insertRows', id, bytes, attempts: 0 });
+    this.notify();
+    this.flush();
+    return true;
+  }
   private flush() {
     if (this.inflight || !this.sender || this.syncing) return;
     const op = this.pending[0];
@@ -923,7 +976,7 @@ export class DocumentStore {
     }
   }
   private apply(operation: CanonicalOperation) {
-    if (operation.kind.case === 'extendRows')
+    if (operation.kind.case === 'extendRows' || operation.kind.case === 'insertRows')
       throw new Error('Structural operation requires a canonical projection refresh');
     const entry = operation.kind.value;
     const address = entry?.address;
@@ -1063,7 +1116,8 @@ export class DocumentStore {
         if (
           event &&
           hint.headVersion === BigInt(this.projection.version) + 1n &&
-          event.canonicalOperation?.kind.case !== 'extendRows'
+          event.canonicalOperation?.kind.case !== 'extendRows' &&
+          event.canonicalOperation?.kind.case !== 'insertRows'
         ) {
           if (
             event.documentId.length !== 16 ||
@@ -1126,7 +1180,8 @@ export class DocumentStore {
         payload.case === 'committed' &&
         payload.value.committedVersion === BigInt(this.projection.version) + 1n &&
         payload.value.canonicalOperation &&
-        payload.value.canonicalOperation.kind.case !== 'extendRows'
+        payload.value.canonicalOperation.kind.case !== 'extendRows' &&
+        payload.value.canonicalOperation.kind.case !== 'insertRows'
       ) {
         if (payload.value.confirmedStateHash.length !== 32) throw new Error('Invalid state hash');
         this.apply(payload.value.canonicalOperation);

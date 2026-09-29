@@ -1,4 +1,5 @@
 use proptest::prelude::*;
+use spreadsheet_domain::formula::{AST_SCHEMA_VERSION, BoundAst, Formula, Node, NodeId};
 use spreadsheet_domain::workbook::*;
 
 fn seed() -> Result<(Workbook, CellAddress), DomainError> {
@@ -63,6 +64,85 @@ fn row_extension_preserves_stable_cells_and_replays_atomically() -> Result<(), D
         state_hash: extended.hash(),
     })?;
     assert_eq!(replay.hash(), extended.hash());
+    Ok(())
+}
+
+#[test]
+fn insert_rows_uses_stable_anchor_and_preserves_existing_cell_identity() -> Result<(), DomainError>
+{
+    let (book, address) = seed()?;
+    let second = RowId::from_bytes([7; 16])?;
+    let third = RowId::from_bytes([8; 16])?;
+    let expanded = book.candidate(
+        &Operation::ExtendRows {
+            sheet: address.sheet,
+            rows: vec![second, third],
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let filled = expanded.candidate(
+        &Operation::SetCellValue {
+            address: CellAddress {
+                row: second,
+                ..address
+            },
+            value: CellValue::Number(42.0),
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let inserted = RowId::from_bytes([9; 16])?;
+    let operation = Operation::InsertRows {
+        sheet: address.sheet,
+        before: second,
+        rows: vec![inserted],
+    };
+    let next = filled.candidate(&operation, DocumentVersion::new(4)?)?;
+    assert_eq!(
+        next.sheets()[0].rows(),
+        &[address.row, inserted, second, third]
+    );
+    assert_eq!(next.sheets()[0].row_position(second), Some(2));
+    assert_eq!(next.sheets()[0].cells(), filled.sheets()[0].cells());
+    assert_eq!(next.last_axis_change_version().get(), 4);
+    let mut replay = filled.clone();
+    replay.apply_event(&CommittedEvent {
+        document_id: filled.document_id(),
+        operation_id: OperationId::from_bytes([11; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([12; 16])?),
+        version: DocumentVersion::new(4)?,
+        operation,
+        state_hash: next.hash(),
+    })?;
+    assert_eq!(replay.hash(), next.hash());
+    Ok(())
+}
+
+#[test]
+fn insert_rows_rejects_formulas_until_reference_transformation_exists() -> Result<(), DomainError> {
+    let (book, address) = seed()?;
+    let ast = BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Number(1.0)])
+        .map_err(|_| DomainError::InvalidFormula)?;
+    let formula = Formula::new("=1".into(), "=1".into(), ast, address, book.version())
+        .map_err(|_| DomainError::InvalidFormula)?;
+    let with_formula = book.candidate(
+        &Operation::SetCellFormula { address, formula },
+        DocumentVersion::new(2)?,
+    )?;
+    let original_hash = with_formula.hash();
+    assert_eq!(
+        with_formula
+            .candidate(
+                &Operation::InsertRows {
+                    sheet: address.sheet,
+                    before: address.row,
+                    rows: vec![RowId::from_bytes([13; 16])?],
+                },
+                DocumentVersion::new(3)?,
+            )
+            .map(|_| ()),
+        Err(DomainError::UnsupportedStructuralDependency)
+    );
+    assert_eq!(with_formula.hash(), original_hash);
     Ok(())
 }
 
@@ -314,6 +394,46 @@ fn duplicate_and_oversized_axes_are_rejected() -> Result<(), DomainError> {
 }
 
 proptest! {
+    #[test]
+    fn inserting_before_any_anchor_preserves_existing_id_positions(
+        row_count in 1usize..64,
+        raw_anchor in any::<u16>(),
+        value in any::<i32>(),
+    ) {
+        let sheet = SheetId::from_bytes([2;16])?;
+        let column = ColumnId::from_bytes([3;16])?;
+        let rows = (1..=row_count)
+            .map(|index| RowId::from_bytes((index as u128).to_be_bytes()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let anchor_index = usize::from(raw_anchor) % row_count;
+        let anchor = rows[anchor_index];
+        let address = CellAddress { sheet, row: anchor, column };
+        let book = Workbook::empty(DocumentId::from_bytes([1;16])?).candidate(
+            &Operation::CreateWorkbook { sheet: SheetSeed {
+                id: sheet, name: "Sheet".into(), rows: rows.clone(), columns: vec![column],
+            } },
+            DocumentVersion::new(1)?,
+        )?.candidate(
+            &Operation::SetCellValue { address, value: CellValue::Number(f64::from(value)) },
+            DocumentVersion::new(2)?,
+        )?;
+        let inserted = RowId::from_bytes(((row_count + 1) as u128).to_be_bytes())?;
+        let next = book.candidate(
+            &Operation::InsertRows { sheet, before: anchor, rows: vec![inserted] },
+            DocumentVersion::new(3)?,
+        )?;
+        let mut expected = rows;
+        expected.insert(anchor_index, inserted);
+        prop_assert_eq!(next.sheets()[0].rows(), expected.as_slice());
+        for (position, id) in expected.iter().copied().enumerate() {
+            prop_assert_eq!(next.sheets()[0].row_position(id), Some(position as u32));
+        }
+        prop_assert_eq!(
+            next.sheets()[0].cells().get(&address),
+            Some(&CellContent::Value(CellValue::Number(f64::from(value)))),
+        );
+    }
+
     #[test]
     fn independent_writes_converge_in_canonical_hash(a in any::<i32>(), b in any::<bool>()) {
         let document = DocumentId::from_bytes([1;16])?;

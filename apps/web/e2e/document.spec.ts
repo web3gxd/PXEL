@@ -224,6 +224,68 @@ test('scrolling near the end extends stable rows and updates both browsers', asy
   }
 });
 
+test('insert row before selection keeps the authored value on its stable row after reload', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const id = new URL(page.url()).searchParams.get('document');
+  if (!id) throw new Error('Document ID missing');
+  const beforeResponse = await page.request.get(`/api/documents/${id}`);
+  expect(beforeResponse.ok()).toBe(true);
+  const before = await beforeResponse.json();
+  const oldFirstRow = before.sheets[0].rows[0];
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('42');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await page.getByRole('button', { name: 'Строка ↑' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/documents/${id}`);
+      if (!response.ok()) return 0;
+      return (await response.json()).sheets[0].rows.length;
+    })
+    .toBe(1001);
+  const after = await (await page.request.get(`/api/documents/${id}`)).json();
+  expect(after.sheets[0].rows[0]).not.toBe(oldFirstRow);
+  expect(after.sheets[0].rows[1]).toBe(oldFirstRow);
+  expect(
+    after.sheets[0].cells.find((cell: { row_id: string }) => cell.row_id === oldFirstRow)?.value,
+  ).toEqual({ type: 'number', value: 42 });
+  await page.reload();
+  await expect(bar).toHaveValue('');
+  await page.getByRole('region', { name: 'Область таблицы' }).focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(bar).toHaveValue('42');
+});
+
+test('insertion with formulas reports a typed limitation without changing the document', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const id = new URL(page.url()).searchParams.get('document');
+  if (!id) throw new Error('Document ID missing');
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('=1');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await page.getByRole('button', { name: 'Строка ↑' }).click();
+  await expect(page.getByRole('alert')).toContainText('нужен перенос ссылок');
+  const response = await page.request.get(`/api/documents/${id}`);
+  expect(response.ok()).toBe(true);
+  const projection = await response.json();
+  expect(projection.version).toBe('2');
+  expect(projection.sheets[0].rows).toHaveLength(1000);
+  expect(projection.sheets[0].cells[0].value.value.source).toBe('=1');
+});
+
 test('two tabs converge after one tab disconnects during a remote edit', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');

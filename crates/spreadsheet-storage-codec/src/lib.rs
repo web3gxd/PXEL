@@ -49,6 +49,15 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                 sheet_id: sheet.as_bytes().to_vec(),
                 rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
             }),
+            Operation::InsertRows {
+                sheet,
+                before,
+                rows,
+            } => Kind::InsertRows(v1::InsertRows {
+                sheet_id: sheet.as_bytes().to_vec(),
+                before_row_id: before.as_bytes().to_vec(),
+                rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
+            }),
             Operation::SetCellFormula { address, formula } => {
                 Kind::SetCellFormula(v1::SetCellFormula {
                     address: Some(addr(address)),
@@ -154,6 +163,32 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                 rows,
             }
         }
+        Kind::InsertRows(insertion) => {
+            if insertion.rows.is_empty() || insertion.rows.len() > 1_000 {
+                return Err(CodecError::Invalid);
+            }
+            let rows: Vec<RowId> = insertion
+                .rows
+                .iter()
+                .map(|value| RowId::from_bytes(id(value)?).map_err(|_| CodecError::Invalid))
+                .collect::<Result<_, _>>()?;
+            if rows
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != rows.len()
+            {
+                return Err(CodecError::Invalid);
+            }
+            Operation::InsertRows {
+                sheet: SheetId::from_bytes(id(&insertion.sheet_id)?)
+                    .map_err(|_| CodecError::Invalid)?,
+                before: RowId::from_bytes(id(&insertion.before_row_id)?)
+                    .map_err(|_| CodecError::Invalid)?,
+                rows,
+            }
+        }
         Kind::SetCellFormula(v) => {
             let address = decode_addr(v.address.ok_or(CodecError::Invalid)?)?;
             let formula = formula_codec::decode(v.formula.ok_or(CodecError::Invalid)?)?;
@@ -182,6 +217,7 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
         Operation::ExtendRows { .. } => 4,
+        Operation::InsertRows { .. } => 5,
         Operation::AdvanceCalculationEpoch { .. } => 3,
         Operation::SetCellFormula { .. } => 2,
         _ => 1,
@@ -214,7 +250,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=4) {
+    if !matches!(e.schema_version, 1..=5) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -230,11 +266,11 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         e.actor_id.as_slice(),
         &operation,
     ) {
-        (1 | 2 | 4, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
+        (1 | 2 | 4 | 5, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4, 0, actor, _) => {
+        (1 | 2 | 4 | 5, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -292,6 +328,19 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
         Operation::ExtendRows { sheet, rows } => {
             h.update([5]);
             h.update(sheet.as_bytes());
+            h.update((rows.len() as u64).to_le_bytes());
+            for row in rows {
+                h.update(row.as_bytes());
+            }
+        }
+        Operation::InsertRows {
+            sheet,
+            before,
+            rows,
+        } => {
+            h.update([6]);
+            h.update(sheet.as_bytes());
+            h.update(before.as_bytes());
             h.update((rows.len() as u64).to_le_bytes());
             for row in rows {
                 h.update(row.as_bytes());
@@ -357,6 +406,18 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
                 rows: rows.clone(),
             },
         )?,
+        CommandPayload::InsertRows {
+            sheet,
+            before,
+            rows,
+        } => semantic_operation(
+            &mut h,
+            &Operation::InsertRows {
+                sheet: *sheet,
+                before: *before,
+                rows: rows.clone(),
+            },
+        )?,
         CommandPayload::SetCellValue { address, value } => semantic_operation(
             &mut h,
             &Operation::SetCellValue {
@@ -409,6 +470,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::SetCellValue { .. })
         | (EventPrincipal::System, Operation::SetCellFormula { .. })
         | (EventPrincipal::System, Operation::ExtendRows { .. })
+        | (EventPrincipal::System, Operation::InsertRows { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
         (EventPrincipal::System, _) => h.update(b"PXEL-EVENT-SYSTEM-1"),
@@ -808,6 +870,47 @@ mod formula_tests {
             *source = FormulaSource::new("=1+2".into())?
         }
         assert_ne!(command_fingerprint(&c)?, hash);
+        Ok(())
+    }
+    #[test]
+    fn insert_rows_schema_round_trips_and_fingerprint_binds_anchor()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let sheet = SheetId::from_bytes([4; 16])?;
+        let before = RowId::from_bytes([5; 16])?;
+        let rows = vec![RowId::from_bytes([6; 16])?, RowId::from_bytes([7; 16])?];
+        let event = CommittedEvent {
+            document_id: DocumentId::from_bytes([1; 16])?,
+            operation_id: OperationId::from_bytes([2; 16])?,
+            principal: EventPrincipal::User(ActorId::from_bytes([3; 16])?),
+            version: DocumentVersion::new(2)?,
+            operation: Operation::InsertRows {
+                sheet,
+                before,
+                rows: rows.clone(),
+            },
+            state_hash: [8; 32],
+        };
+        let encoded = encode(&event)?;
+        let envelope = v1::EventEnvelope::decode(encoded.as_slice())?;
+        assert_eq!(envelope.schema_version, 5);
+        assert_eq!(decode(&encoded)?, event);
+        let mut command = Command {
+            document_id: event.document_id,
+            operation_id: event.operation_id,
+            actor_id: ActorId::from_bytes([3; 16])?,
+            base_version: DocumentVersion::new(1)?,
+            client_sequence: 1,
+            operation: CommandPayload::InsertRows {
+                sheet,
+                before,
+                rows,
+            },
+        };
+        let fingerprint = command_fingerprint(&command)?;
+        if let CommandPayload::InsertRows { before, .. } = &mut command.operation {
+            *before = RowId::from_bytes([9; 16])?;
+        }
+        assert_ne!(command_fingerprint(&command)?, fingerprint);
         Ok(())
     }
     #[test]

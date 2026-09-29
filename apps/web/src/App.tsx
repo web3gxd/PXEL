@@ -97,6 +97,15 @@ export function App() {
                 {label}
               </button>
             ))}
+            <button
+              type="button"
+              className="insert-row-action"
+              disabled={!document.sheet || state.kind !== 'online'}
+              title="Вставить одну строку перед выделенной"
+              onClick={() => document.insertRowBeforeSelection()}
+            >
+              Строка ↑
+            </button>
           </nav>
         </div>
         <div className="connection-area">
@@ -271,7 +280,9 @@ export function App() {
         </div>
         <span className="sheet-summary">
           {document.sheet ? 'Лист 1' : 'Пустой лист'}
-          <span className="summary-separator">·</span>1 000 строк × 26 столбцов
+          <span className="summary-separator">·</span>
+          {document.sheet?.rows.length ?? 1_000} строк × {document.sheet?.columns.length ?? 26}{' '}
+          столбцов
         </span>
         <span className="footer-wordmark" aria-hidden="true">
           PXEL

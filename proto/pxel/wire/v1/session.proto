@@ -103,6 +103,7 @@ message CanonicalOperation {
     ClearCell clear_cell = 2;
     SetCellFormula set_cell_formula = 3;
     ExtendRows extend_rows = 4;
+    InsertRows insert_rows = 5;
   }
 }
 
@@ -111,6 +112,14 @@ message CanonicalOperation {
 message ExtendRows {
   bytes sheet_id = 1;
   repeated bytes rows = 2;
+}
+
+// Inserts immediately before an existing stable row ID. In this first slice,
+// books containing formulas receive a typed rejection until transforms exist.
+message InsertRows {
+  bytes sheet_id = 1;
+  bytes before_row_id = 2;
+  repeated bytes rows = 3;
 }
 
 message DocumentCommand {
@@ -161,6 +170,7 @@ enum RejectionCode {
   REJECTION_CODE_DELETED_TARGET = 9;
   REJECTION_CODE_REBASE_WINDOW_EXCEEDED = 10;
   REJECTION_CODE_INVALID_FORMULA = 11;
+  REJECTION_CODE_UNSUPPORTED_STRUCTURAL_DEPENDENCY = 12;
 }
 
 message OperationRejected {

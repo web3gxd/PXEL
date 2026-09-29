@@ -1,5 +1,76 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — baseline вставки перед 99,999 строками
+
+В `crates/spreadsheet-domain/benches/workbook.rs` добавлен timed case
+`insert_front_99999_rows`. Формулы отсутствуют, candidate создаётся из
+предварительно подготовленной книги. Запущен optimized Criterion с 3 s warm-up,
+10 samples и 935 timed iterations. Интервал 95% estimate — 6.6972–7.2624 ms,
+point estimate 6.9241 ms на текущем Windows/Ultra 9 185H. Это не p95 commit
+или UI, не измерение памяти. Полные условия записаны в
+[отчёте](docs/benchmarks/2026-09-29-row-insertion-local.md). Production-код
+после предыдущего `just check` не менялся; benchmark и property test прошли
+отдельно.
+После добавления harness `cargo clippy --locked -p spreadsheet-domain
+--all-targets --all-features -- -D warnings`, `pnpm format:check` и
+`git diff --check` завершились успешно.
+
+---
+
+## 2026-09-29 — вставка строки перед стабильным ID
+
+Перед этапом прочитаны AGENTS, roadmap, ADR-002/019, collaboration contract,
+domain/formula/codec/actor/frontend и RUNBOOK. Цель — вставить строку внутри
+листа с сохранением identity заполненных ячеек. Инварианты: server order,
+candidate перед CAS, typed отказ вместо молчаливой порчи формул, versioned
+persisted event, idempotent retry, confirmed axes отдельно от pending. Риск:
+формулы хранят authored source и relative deltas; без трансформации текущий A1
+текст после вставки может быть неверен. ADR-020 вводит временный workbook-wide
+запрет вставки при любой формуле до проверенного transformation slice.
+
+Добавлены `InsertRows` с stable `before` anchor и batch 1–1,000 UUIDv7 IDs,
+persisted schema 5, additive wire v1 field, миграция principal constraint,
+типизированный rejection 12. Domain обновляет axis order/index, хранит клетки
+на прежних ID, event codec считает отдельный semantic hash. Calculation worker
+перестраивает projection после structural change. В web появились команда и
+кнопка «Строка ↑», canonical refresh после ACK/hint и фактический размер осей
+в footer. Изменены domain, formula, collab, storage-codec, storage, server,
+wire/storage protobuf, generated TS, web store/UI и tests; документация и
+презентация обновлены.
+
+Первый integration test неверно ожидал обратный порядок двух insert-before:
+фактический server order — ранняя вставка перед поздней, обе перед anchor.
+Ожидание исправлено; production-код не менялся. PostgreSQL migration выполнена
+локально (`migrations_complete`), `/readyz` вернул 200. Targeted domain 2/2,
+codec 1/1, frontend Vitest 56/56, integration 31/31, Chromium E2E 24/24
+при DPR 1/2 прошли. `pnpm test:recovery` прошёл 1/1 с hard restart после
+`InsertRows`. Полный `just check` завершился exit 0: Rust fmt/Clippy/tests/build,
+wasm32, protobuf drift, WASM build, Prettier, ESLint, TypeScript, 56 Vitest и
+Vite build. Проверка презентации прошла 10 слайдов на 1440×900 и 390×844;
+`git diff --check` чист. Linux/Compose/remote CI, reference
+transforms, delete/columns, copy/paste и undo не проверены и не объявлены
+готовыми.
+`just sqlx-check` прошёл с текущей PostgreSQL после миграции; query metadata
+не менялись.
+После полного quality gate добавлен и отдельно выполнен property-based test
+вставки перед случайным anchor (1–63 исходные строки): позиции всех stable IDs
+и значение существующей клетки сохранились. Повтор полного `just check` после
+этого дополнительного теста не выполнялся; production-код не менялся.
+
+---
+
+## 2026-09-29 — аудит десяти знаков PXEL
+
+Проверены `design/logos/reference.svg`, десять файлов 01–10 и автономная
+галерея. Все 11 SVG разобраны XML-парсером; у новых вариантов viewBox 64×64,
+у исходного знака 37×37. В HTML проверена 61 ссылка на SVG, отсутствующих
+файлов нет. Осмотрены desktop-галерея и снимок редактора; в верхней панели
+редактора остаётся название таблицы без знака и wordmark. Исправлено только
+неточное описание viewBox в `design/logos/README.md`. Runtime-код не менялся;
+новый браузерный E2E-прогон в рамках этого аудита не запускался.
+
+---
+
 ## 2026-09-29 — замер создания оси на 100,000 стабильных строк
 
 Перед замером проверены ADR-002, существующий `workbook` Criterion harness и
