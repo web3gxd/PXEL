@@ -231,6 +231,44 @@ export function setCommand(
   };
 }
 
+export function batchValuesCommand(
+  client,
+  snapshot,
+  writes,
+  { sequence = 1, operationId = uuid7() } = {},
+) {
+  const sheet = snapshot.sheets[0];
+  return {
+    operationId: bytes(operationId),
+    documentId: bytes(snapshot.document_id),
+    actorId: client.actorId,
+    baseVersion: BigInt(snapshot.version),
+    clientSequence: BigInt(sequence),
+    operation: {
+      kind: {
+        case: 'setCellValues',
+        value: {
+          writes: writes.map(({ row, column, value }) => ({
+            address: {
+              sheetId: bytes(sheet.id),
+              rowId: bytes(sheet.rows[row]),
+              columnId: bytes(sheet.columns[column]),
+            },
+            value: {
+              kind:
+                typeof value === 'number'
+                  ? { case: 'number', value }
+                  : typeof value === 'boolean'
+                    ? { case: 'boolean', value }
+                    : { case: 'text', value },
+            },
+          })),
+        },
+      },
+    },
+  };
+}
+
 export function extendRowsCommand(
   client,
   snapshot,

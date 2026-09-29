@@ -13,6 +13,7 @@ pub const MAX_COLUMNS: usize = 1_000;
 pub const MAX_CELLS: usize = 100_000;
 pub const MAX_RETIRED_ROWS: usize = 1_000_000;
 pub const MAX_RETIRED_COLUMNS: usize = 1_000_000;
+pub const MAX_CELL_VALUE_BATCH_TEXT_BYTES: usize = 512 * 1024;
 pub const MAX_TEXT_BYTES: usize = 32 * 1024;
 pub const MAX_WORKBOOK_TEXT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_WORKBOOK_AST_BYTES: usize = 32 * 1024 * 1024;
@@ -298,6 +299,11 @@ impl fmt::Debug for SheetSeed {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
+pub struct CellWrite {
+    pub address: CellAddress,
+    pub value: CellValue,
+}
+#[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
     CreateWorkbook {
         sheet: SheetSeed,
@@ -334,6 +340,9 @@ pub enum Operation {
     SetCellValue {
         address: CellAddress,
         value: CellValue,
+    },
+    SetCellValues {
+        writes: Vec<CellWrite>,
     },
     SetCellFormula {
         address: CellAddress,
@@ -376,6 +385,9 @@ pub enum CommandPayload {
     SetCellValue {
         address: CellAddress,
         value: CellValue,
+    },
+    SetCellValues {
+        writes: Vec<CellWrite>,
     },
     SetCellFormula {
         address: CellAddress,
@@ -703,6 +715,28 @@ impl Workbook {
         if self.version.get().checked_add(1) != Some(next_version.get()) {
             return Err(DomainError::VersionConflict);
         }
+        if let Operation::SetCellValues { writes } = operation {
+            if writes.is_empty() || writes.len() > 1_000 {
+                return Err(DomainError::LimitExceeded);
+            }
+            let text_bytes = writes
+                .iter()
+                .try_fold(0usize, |total, write| {
+                    total.checked_add(write.value.text_bytes())
+                })
+                .ok_or(DomainError::LimitExceeded)?;
+            if text_bytes > MAX_CELL_VALUE_BATCH_TEXT_BYTES {
+                return Err(DomainError::LimitExceeded);
+            }
+            let operations = writes
+                .iter()
+                .map(|write| Operation::SetCellValue {
+                    address: write.address,
+                    value: write.value.clone(),
+                })
+                .collect::<Vec<_>>();
+            return self.preview_candidate(&operations, next_version);
+        }
         let budgets = self.operation_budgets(operation)?;
         let mut next = self.clone();
         next.apply_operation(operation, budgets, next_version)?;
@@ -770,6 +804,7 @@ impl Workbook {
                 Operation::SetCellValue { address, .. }
                 | Operation::SetCellFormula { address, .. }
                 | Operation::ClearCell { address } => *address,
+                Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
             };
             if !seen.insert(address) {
                 return Err(DomainError::InvalidAxis);
@@ -939,6 +974,7 @@ impl Workbook {
                 value.validate()?;
                 self.updated_budgets(*address, value.text_bytes(), 0)?
             }
+            Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
             Operation::SetCellFormula { address, formula } => {
                 self.validate_formula(*address, formula)?;
                 self.updated_budgets(*address, formula.text_bytes(), formula.ast_memory_bytes())?
@@ -1085,6 +1121,7 @@ impl Workbook {
                     sheet.cells.insert(*address, CellContent::Value(normalized));
                 }
             }
+            Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
             Operation::SetCellFormula { address, formula } => {
                 let sheet = self
                     .sheets

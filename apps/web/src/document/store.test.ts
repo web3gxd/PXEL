@@ -148,6 +148,27 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('pastes a TSV rectangle as one optimistic durable command', async () => {
+    const { store, sent } = await connectedStore();
+    const secondRow = uuidV7(),
+      secondColumn = uuidV7();
+    const expanded = projection();
+    expanded.sheets[0]!.rows.push(secondRow);
+    expanded.sheets[0]!.columns.push(secondColumn);
+    store.load(expanded);
+    expect(store.pasteTsv('1\tTRUE\nhello\t')).toBe(true);
+    expect(store.pending).toHaveLength(1);
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'number', value: 1 });
+    expect(store.value({ row: 1, column: 0 })).toEqual({ type: 'text', value: 'hello' });
+    const payload = fromBinary(ClientEnvelopeSchema, sent[0] ?? new Uint8Array()).payload;
+    if (payload.case !== 'command' || payload.value.operation?.kind.case !== 'setCellValues')
+      throw new Error('Missing batch command');
+    expect(payload.value.operation.kind.value.writes).toHaveLength(4);
+    expect(store.pasteTsv('=A1\t2')).toBe(false);
+    expect(store.pending).toHaveLength(1);
+    expect(store.error).toContain('формул');
+    store.disconnected();
+  });
   it('deletes by stable row ID and cancels a draft when axes change', async () => {
     const { store, sent } = await connectedStore();
     expect(store.deleteSelectedRow()).toBe(false);

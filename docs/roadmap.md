@@ -72,6 +72,13 @@ hard restart и browser DPR 1/2 проверены. Criterion: 11.853–14.140 m
 проверены. Criterion: 12.241–13.377 ms для domain candidate с 10 000
 формулами; [условия](benchmarks/2026-09-29-column-deletion-local.md).
 Copy/paste, undo, multi-sheet compatibility и snapshots ещё открыты.
+Седьмой срез фазы 4 (ADR-025) добавляет атомарную TSV-вставку обычных значений:
+до 1,000 ячеек и 512 KiB текста сохраняются одной schema-10 операцией и одной
+версией. PostgreSQL/WebSocket commit, retry, atomic rejection и пересчёт
+зависимой формулы проверены; браузер DPR 1/2 подтвердил reload. Criterion
+для 1,000 numeric writes в domain candidate: 567.59–631.31 µs
+([условия](benchmarks/2026-09-29-value-batch-local.md)). Копирование формул,
+rich clipboard, cut/move и undo остаются отдельными срезами.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

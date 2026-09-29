@@ -87,6 +87,11 @@ impl CalculationHandle {
             | Operation::ClearCell { address } => {
                 pending.changed.insert(*address);
             }
+            Operation::SetCellValues { writes } => {
+                pending
+                    .changed
+                    .extend(writes.iter().map(|write| write.address));
+            }
             Operation::CreateWorkbook { .. } => pending.rebuild = true,
             Operation::ExtendRows { .. } => pending.rebuild = true,
             Operation::InsertRows { .. }

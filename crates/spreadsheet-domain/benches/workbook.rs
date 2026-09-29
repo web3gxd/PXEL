@@ -263,6 +263,31 @@ fn benches(c: &mut Criterion) {
             )
         })
     });
+    let batch_book = match book_with_axes(1_000) {
+        Ok(book) => book,
+        Err(error) => {
+            eprintln!("batch fixture invalid: {error}");
+            std::process::exit(1);
+        }
+    };
+    let batch_sheet = &batch_book.sheets()[0];
+    let batch = Operation::SetCellValues {
+        writes: batch_sheet
+            .rows()
+            .iter()
+            .map(|&row| CellWrite {
+                address: CellAddress {
+                    sheet: batch_sheet.id(),
+                    row,
+                    column: batch_sheet.columns()[0],
+                },
+                value: CellValue::Number(42.0),
+            })
+            .collect(),
+    };
+    c.bench_function("candidate_1000_value_batch", |b| {
+        b.iter(|| black_box(batch_book.candidate(black_box(&batch), insertion_version)))
+    });
     for count in [1_000, 100_000] {
         let book = match fixture(count) {
             Ok(book) => book,

@@ -1,4 +1,4 @@
-import type { DocumentStore } from '../document/store';
+import { displayValue, type DocumentStore } from '../document/store';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { drawGrid } from './renderer';
 import { GRID, columnLabel } from './viewport';
@@ -118,6 +118,19 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
         role="region"
         aria-label="Область таблицы"
         aria-describedby="grid-description"
+        onPaste={(event) => {
+          if (!document?.sheet) return;
+          event.preventDefault();
+          document.pasteTsv(event.clipboardData.getData('text/plain'));
+        }}
+        onCopy={(event) => {
+          if (!document?.sheet) return;
+          event.preventDefault();
+          event.clipboardData.setData(
+            'text/plain',
+            displayValue(document.value(document.selected)),
+          );
+        }}
         onPointerDown={(event) => {
           if (!document?.sheet) return;
           document.commit();

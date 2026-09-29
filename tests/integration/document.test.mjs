@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import {
   api,
+  batchValuesCommand,
   bytes,
   decodeFrame,
   connect,
@@ -25,6 +26,78 @@ import {
   uuid7,
 } from '../helpers/client.mjs';
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
+
+test('value batch commits atomically in one version, replays and deduplicates', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    const command = batchValuesCommand(client, snapshot, [
+      { row: 0, column: 0, value: 4 },
+      { row: 1, column: 1, value: 'batch' },
+    ]);
+    const result = await client.send(command);
+    assert.equal(result.case, 'committed');
+    assert.equal(result.value.committedVersion, 2n);
+    assert.equal(result.value.canonicalOperation.kind.case, 'setCellValues');
+    const current = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(current.version, '2');
+    assert.equal(current.sheets[0].cells.length, 2);
+    const retry = await client.send(command);
+    assert.equal(retry.case, 'receipt');
+    assert.equal(retry.value.committedVersion, 2n);
+    const invalid = batchValuesCommand(
+      client,
+      current,
+      [
+        { row: 0, column: 0, value: 99 },
+        { row: 0, column: 0, value: 100 },
+      ],
+      { sequence: 2 },
+    );
+    assert.equal((await client.send(invalid)).case, 'rejected');
+    const after = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(after.version, '2');
+    assert.equal(after.sheets[0].cells.length, 2);
+  } finally {
+    client.socket.close();
+  }
+});
+
+test('value batch invalidates dependent formulas at its single committed version', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    const initial = await client.send(
+      batchValuesCommand(client, snapshot, [
+        { row: 0, column: 0, value: 2 },
+        { row: 0, column: 1, value: 3 },
+      ]),
+    );
+    assert.equal(initial.case, 'committed');
+    const formula = await client.send(
+      formulaCommand(client, { ...snapshot, version: '2' }, '=A1+B1', { column: 2, sequence: 2 }),
+    );
+    assert.equal(formula.case, 'committed');
+    const updated = await client.send(
+      batchValuesCommand(
+        client,
+        { ...snapshot, version: '3' },
+        [
+          { row: 0, column: 0, value: 5 },
+          { row: 0, column: 1, value: 8 },
+        ],
+        { sequence: 3 },
+      ),
+    );
+    assert.equal(updated.case, 'committed');
+    const result = await calculation(base, cookie, snapshot.document_id, 4);
+    assert.deepEqual(result.values[0].value, { type: 'number', value: 13 });
+  } finally {
+    client.socket.close();
+  }
+});
 
 test('presence reaches subscribers and disappears without advancing document version', async () => {
   const cookie = await login(base);

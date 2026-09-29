@@ -6,6 +6,7 @@ import { setTimeout } from 'node:timers/promises';
 import { test } from 'node:test';
 import {
   api,
+  batchValuesCommand,
   calculation,
   releaseSessions,
   formulaCommand,
@@ -280,6 +281,27 @@ test(
           columnDeletionRecovery.state_hash,
           Buffer.from(deletedColumn.value.confirmedStateHash).toString('hex'),
         );
+        const { snapshot: batchBase } = await createDocument(base, cookie);
+        const batchWriter = await connect(base, cookie);
+        const batchCommand = batchValuesCommand(batchWriter, batchBase, [
+          { row: 0, column: 0, value: 12 },
+          { row: 1, column: 1, value: 'replayed' },
+        ]);
+        const batchCommit = await batchWriter.send(batchCommand);
+        assert.equal(batchCommit.case, 'committed');
+        batchWriter.socket.terminate();
+        await kill();
+        await start();
+        const batchRecovered = await getDocument(base, cookie, batchBase.document_id);
+        assert.equal(batchRecovered.version, '2');
+        assert.equal(batchRecovered.sheets[0].cells.length, 2);
+        assert.equal(
+          batchRecovered.state_hash,
+          Buffer.from(batchCommit.value.confirmedStateHash).toString('hex'),
+        );
+        const batchRetry = await connect(base, cookie);
+        assert.equal((await batchRetry.send(batchCommand)).case, 'receipt');
+        batchRetry.socket.terminate();
       } finally {
         client.socket.terminate();
       }

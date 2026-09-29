@@ -121,6 +121,50 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                     }),
                 })
             }
+            Operation::SetCellValues { writes } => {
+                if writes.is_empty()
+                    || writes.len() > 1_000
+                    || writes
+                        .iter()
+                        .map(|write| write.address)
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        != writes.len()
+                    || writes
+                        .iter()
+                        .map(|write| match &write.value {
+                            CellValue::Text(value) => value.len(),
+                            _ => 0,
+                        })
+                        .sum::<usize>()
+                        > 512 * 1024
+                {
+                    return Err(CodecError::Invalid);
+                }
+                Kind::SetCellValues(v1::SetCellValues {
+                    writes: writes
+                        .iter()
+                        .map(|write| {
+                            let value = write
+                                .value
+                                .clone()
+                                .normalized()
+                                .map_err(|_| CodecError::Invalid)?;
+                            Ok(v1::SetCellValue {
+                                address: Some(addr(&write.address)),
+                                value: Some(v1::CellValue {
+                                    kind: Some(match value {
+                                        CellValue::Blank => v1::cell_value::Kind::Blank(true),
+                                        CellValue::Number(v) => v1::cell_value::Kind::Number(v),
+                                        CellValue::Text(v) => v1::cell_value::Kind::Text(v),
+                                        CellValue::Boolean(v) => v1::cell_value::Kind::Boolean(v),
+                                    }),
+                                }),
+                            })
+                        })
+                        .collect::<Result<_, CodecError>>()?,
+                })
+            }
         }),
     })
 }
@@ -327,6 +371,42 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
             .normalized()
             .map_err(|_| CodecError::Invalid)?,
         },
+        Kind::SetCellValues(batch) => {
+            if batch.writes.is_empty() || batch.writes.len() > 1_000 {
+                return Err(CodecError::Invalid);
+            }
+            let writes = batch
+                .writes
+                .into_iter()
+                .map(|write| {
+                    let address = decode_addr(write.address.ok_or(CodecError::Invalid)?)?;
+                    let value = match write
+                        .value
+                        .and_then(|v| v.kind)
+                        .ok_or(CodecError::Invalid)?
+                    {
+                        v1::cell_value::Kind::Blank(true) => CellValue::Blank,
+                        v1::cell_value::Kind::Blank(false) => return Err(CodecError::Invalid),
+                        v1::cell_value::Kind::Number(n) => CellValue::Number(n),
+                        v1::cell_value::Kind::Text(s) => CellValue::Text(s),
+                        v1::cell_value::Kind::Boolean(b) => CellValue::Boolean(b),
+                    }
+                    .normalized()
+                    .map_err(|_| CodecError::Invalid)?;
+                    Ok(CellWrite { address, value })
+                })
+                .collect::<Result<Vec<_>, CodecError>>()?;
+            if writes
+                .iter()
+                .map(|write| write.address)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != writes.len()
+            {
+                return Err(CodecError::Invalid);
+            }
+            Operation::SetCellValues { writes }
+        }
     })
 }
 pub fn schema_version(operation: &Operation) -> u32 {
@@ -337,6 +417,7 @@ pub fn schema_version(operation: &Operation) -> u32 {
         Operation::DeleteRows { .. } => 7,
         Operation::InsertColumnsRebased { .. } => 8,
         Operation::DeleteColumns { .. } => 9,
+        Operation::SetCellValues { .. } => 10,
         Operation::AdvanceCalculationEpoch { .. } => 3,
         Operation::SetCellFormula { .. } => 2,
         _ => 1,
@@ -369,7 +450,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=9) {
+    if !matches!(e.schema_version, 1..=10) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -385,11 +466,16 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         e.actor_id.as_slice(),
         &operation,
     ) {
-        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
+        (
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
+            0,
+            actor,
+            Operation::AdvanceCalculationEpoch { .. },
+        ) => {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9, 0, actor, _) => {
+        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -538,6 +624,35 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
                 CellValue::Boolean(b) => h.update([3, u8::from(b)]),
             }
         }
+        Operation::SetCellValues { writes } => {
+            if writes.is_empty() || writes.len() > 1_000 {
+                return Err(CodecError::Invalid);
+            }
+            h.update([11]);
+            h.update((writes.len() as u64).to_le_bytes());
+            for write in writes {
+                h.update(write.address.sheet.as_bytes());
+                h.update(write.address.row.as_bytes());
+                h.update(write.address.column.as_bytes());
+                match write
+                    .value
+                    .clone()
+                    .normalized()
+                    .map_err(|_| CodecError::Invalid)?
+                {
+                    CellValue::Blank => h.update([0]),
+                    CellValue::Number(n) => {
+                        h.update([1]);
+                        h.update(n.to_bits().to_le_bytes());
+                    }
+                    CellValue::Text(s) => {
+                        h.update([2]);
+                        field(h, s.as_bytes());
+                    }
+                    CellValue::Boolean(b) => h.update([3, u8::from(b)]),
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -608,6 +723,12 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
                 value: value.clone(),
             },
         )?,
+        CommandPayload::SetCellValues { writes } => semantic_operation(
+            &mut h,
+            &Operation::SetCellValues {
+                writes: writes.clone(),
+            },
+        )?,
         CommandPayload::ClearCell { address } => {
             semantic_operation(&mut h, &Operation::ClearCell { address: *address })?
         }
@@ -658,6 +779,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::DeleteRows { .. })
         | (EventPrincipal::System, Operation::InsertColumnsRebased { .. })
         | (EventPrincipal::System, Operation::DeleteColumns { .. })
+        | (EventPrincipal::System, Operation::SetCellValues { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
         (EventPrincipal::System, _) => h.update(b"PXEL-EVENT-SYSTEM-1"),
@@ -1226,6 +1348,50 @@ mod formula_tests {
         let fingerprint = command_fingerprint(&command)?;
         if let CommandPayload::DeleteColumns { columns, .. } = &mut command.operation {
             columns[0] = ColumnId::from_bytes([8; 16])?;
+        }
+        assert_ne!(command_fingerprint(&command)?, fingerprint);
+        Ok(())
+    }
+    #[test]
+    fn value_batch_schema_round_trips_and_fingerprint_binds_every_write()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let sheet = SheetId::from_bytes([4; 16])?;
+        let address = CellAddress {
+            sheet,
+            row: RowId::from_bytes([5; 16])?,
+            column: ColumnId::from_bytes([6; 16])?,
+        };
+        let writes = vec![CellWrite {
+            address,
+            value: CellValue::Number(42.0),
+        }];
+        let event = CommittedEvent {
+            document_id: DocumentId::from_bytes([1; 16])?,
+            operation_id: OperationId::from_bytes([2; 16])?,
+            principal: EventPrincipal::User(ActorId::from_bytes([3; 16])?),
+            version: DocumentVersion::new(2)?,
+            operation: Operation::SetCellValues {
+                writes: writes.clone(),
+            },
+            state_hash: [7; 32],
+        };
+        let bytes = encode(&event)?;
+        assert_eq!(
+            v1::EventEnvelope::decode(bytes.as_slice())?.schema_version,
+            10
+        );
+        assert_eq!(decode(&bytes)?, event);
+        let mut command = Command {
+            document_id: event.document_id,
+            operation_id: event.operation_id,
+            actor_id: ActorId::from_bytes([3; 16])?,
+            base_version: DocumentVersion::new(1)?,
+            client_sequence: 1,
+            operation: CommandPayload::SetCellValues { writes },
+        };
+        let fingerprint = command_fingerprint(&command)?;
+        if let CommandPayload::SetCellValues { writes } = &mut command.operation {
+            writes[0].value = CellValue::Number(43.0);
         }
         assert_ne!(command_fingerprint(&command)?, fingerprint);
         Ok(())

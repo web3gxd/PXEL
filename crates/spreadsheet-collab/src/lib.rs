@@ -576,6 +576,17 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
             address: *address,
             value: value.normalized()?,
         }),
+        CommandPayload::SetCellValues { writes } => Ok(Operation::SetCellValues {
+            writes: writes
+                .iter()
+                .map(|write| {
+                    Ok(spreadsheet_domain::workbook::CellWrite {
+                        address: write.address,
+                        value: write.value.clone().normalized()?,
+                    })
+                })
+                .collect::<Result<_, SessionError>>()?,
+        }),
         CommandPayload::ClearCell { address } => Ok(Operation::ClearCell { address: *address }),
         CommandPayload::SetCellFormula { address, source } => {
             if command.base_version == DocumentVersion::ZERO

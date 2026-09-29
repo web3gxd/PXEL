@@ -28,6 +28,7 @@ message Operation {
   DeleteRows delete_rows = 9;
   InsertColumns insert_columns_rebased = 10;
   DeleteColumns delete_columns = 11;
+  SetCellValues set_cell_values = 12;
  }
 }
 message AdvanceCalculationEpoch {
@@ -55,6 +56,7 @@ message InsertRows { bytes sheet_id = 1; bytes before_row_id = 2; repeated bytes
 message DeleteRows { bytes sheet_id = 1; repeated bytes rows = 2; }
 message InsertColumns { bytes sheet_id = 1; bytes before_column_id = 2; repeated bytes columns = 3; }
 message DeleteColumns { bytes sheet_id = 1; repeated bytes columns = 2; }
+message SetCellValues { repeated SetCellValue writes = 1; }
 message CellAddress { bytes sheet_id = 1; bytes row_id = 2; bytes column_id = 3; }
 message SetCellValue { CellAddress address = 1; CellValue value = 2; }
 message CellValue { oneof kind { bool blank = 1; double number = 2; string text = 3; bool boolean = 4; } }

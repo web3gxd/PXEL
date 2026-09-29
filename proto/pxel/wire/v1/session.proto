@@ -107,6 +107,7 @@ message CanonicalOperation {
     DeleteRows delete_rows = 6;
     InsertColumns insert_columns = 7;
     DeleteColumns delete_columns = 8;
+    SetCellValues set_cell_values = 9;
   }
 }
 
@@ -143,6 +144,12 @@ message InsertColumns {
 message DeleteColumns {
   bytes sheet_id = 1;
   repeated bytes columns = 2;
+}
+
+// One atomic version for up to 1,000 distinct value writes. Formula source
+// requires the separate server-side binding command.
+message SetCellValues {
+  repeated SetCellValue writes = 1;
 }
 
 message DocumentCommand {

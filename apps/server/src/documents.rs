@@ -664,6 +664,38 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
                     value,
                 }
             }
+            v1::canonical_operation::Kind::SetCellValues(batch) => {
+                if batch.writes.is_empty() || batch.writes.len() > 1_000 {
+                    return Err(SessionError::InvalidCommand);
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                let mut writes = Vec::with_capacity(batch.writes.len());
+                for write in batch.writes {
+                    let cell = address(write.address)?;
+                    if !seen.insert(cell) {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    let value = match write
+                        .value
+                        .and_then(|value| value.kind)
+                        .ok_or(SessionError::InvalidCommand)?
+                    {
+                        v1::cell_value::Kind::Blank(true) => CellValue::Blank,
+                        v1::cell_value::Kind::Blank(false) => {
+                            return Err(SessionError::InvalidCommand);
+                        }
+                        v1::cell_value::Kind::Number(n) => CellValue::Number(n),
+                        v1::cell_value::Kind::Text(s) => CellValue::Text(s),
+                        v1::cell_value::Kind::Boolean(b) => CellValue::Boolean(b),
+                    }
+                    .normalized()?;
+                    writes.push(CellWrite {
+                        address: cell,
+                        value,
+                    });
+                }
+                CommandPayload::SetCellValues { writes }
+            }
             v1::canonical_operation::Kind::ClearCell(clear) => CommandPayload::ClearCell {
                 address: address(clear.address)?,
             },
@@ -807,6 +839,24 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
                         CellValue::Boolean(b) => v1::cell_value::Kind::Boolean(b),
                     }),
                 }),
+            })
+        }
+        Operation::SetCellValues { writes } => {
+            v1::canonical_operation::Kind::SetCellValues(v1::SetCellValues {
+                writes: writes
+                    .into_iter()
+                    .map(|write| v1::SetCellValue {
+                        address: Some(wire_address(write.address)),
+                        value: Some(v1::CellValue {
+                            kind: Some(match write.value {
+                                CellValue::Blank => v1::cell_value::Kind::Blank(true),
+                                CellValue::Number(n) => v1::cell_value::Kind::Number(n),
+                                CellValue::Text(s) => v1::cell_value::Kind::Text(s),
+                                CellValue::Boolean(b) => v1::cell_value::Kind::Boolean(b),
+                            }),
+                        }),
+                    })
+                    .collect(),
             })
         }
         Operation::ClearCell { address } => {

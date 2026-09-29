@@ -239,6 +239,88 @@ fn row_extension_preserves_stable_cells_and_replays_atomically() -> Result<(), D
 }
 
 #[test]
+fn cell_value_batch_is_atomic_and_replayable() -> Result<(), DomainError> {
+    let (book, first) = seed()?;
+    let second_row = RowId::from_bytes([55; 16])?;
+    let book = book.candidate(
+        &Operation::ExtendRows {
+            sheet: first.sheet,
+            rows: vec![second_row],
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let second = CellAddress {
+        row: second_row,
+        ..first
+    };
+    let operation = Operation::SetCellValues {
+        writes: vec![
+            CellWrite {
+                address: first,
+                value: CellValue::Number(7.0),
+            },
+            CellWrite {
+                address: second,
+                value: CellValue::Text("ok".into()),
+            },
+        ],
+    };
+    let after = book.candidate(&operation, DocumentVersion::new(3)?)?;
+    assert_eq!(after.version().get(), 3);
+    assert_eq!(after.sheets()[0].cells().len(), 2);
+    assert_eq!(book.sheets()[0].cells().len(), 0);
+    let invalid = Operation::SetCellValues {
+        writes: vec![
+            CellWrite {
+                address: first,
+                value: CellValue::Number(9.0),
+            },
+            CellWrite {
+                address: CellAddress {
+                    row: RowId::from_bytes([56; 16])?,
+                    ..first
+                },
+                value: CellValue::Number(1.0),
+            },
+        ],
+    };
+    assert_eq!(
+        book.candidate(&invalid, DocumentVersion::new(3)?)
+            .map(|_| ()),
+        Err(DomainError::MissingRow)
+    );
+    assert_eq!(book.sheets()[0].cells().len(), 0);
+    let duplicate = Operation::SetCellValues {
+        writes: vec![
+            CellWrite {
+                address: first,
+                value: CellValue::Number(1.0),
+            },
+            CellWrite {
+                address: first,
+                value: CellValue::Number(2.0),
+            },
+        ],
+    };
+    assert_eq!(
+        book.candidate(&duplicate, DocumentVersion::new(3)?)
+            .map(|_| ()),
+        Err(DomainError::InvalidAxis)
+    );
+    let mut replay = book;
+    replay.apply_event(&CommittedEvent {
+        document_id: after.document_id(),
+        operation_id: OperationId::from_bytes([57; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([58; 16])?),
+        version: DocumentVersion::new(3)?,
+        operation,
+        state_hash: after.hash(),
+    })?;
+    assert_eq!(replay.hash(), after.hash());
+    Ok(())
+}
+
+#[test]
 fn insert_rows_uses_stable_anchor_and_preserves_existing_cell_identity() -> Result<(), DomainError>
 {
     let (book, address) = seed()?;

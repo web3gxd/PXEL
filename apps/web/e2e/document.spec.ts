@@ -1,5 +1,34 @@
 import { expect, test } from '@playwright/test';
 
+test('TSV paste commits one durable batch and survives reload', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  await grid.focus();
+  await grid.evaluate((element) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', '12\tTRUE\nalpha\t34');
+    element.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }),
+    );
+  });
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const id = new URL(page.url()).searchParams.get('document');
+  const state = await page.evaluate(
+    async (documentId) => (await fetch(`/api/documents/${documentId}`)).json(),
+    id,
+  );
+  expect(state.version).toBe('2');
+  expect(state.sheets[0].cells).toHaveLength(4);
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('12');
+  await grid.focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByTestId('active-cell')).toHaveText('B2: 34');
+});
+
 test('missing WASM visibly disables preview while server calculation remains available', async ({
   page,
 }) => {

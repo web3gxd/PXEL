@@ -5,6 +5,7 @@ import {
   ClientEnvelopeSchema,
   CanonicalOperationSchema,
   CellValueSchema,
+  SetCellValueSchema,
   CalculationCommittedSchema,
 } from '../generated/pxel/wire/v1/session_pb';
 import type {
@@ -60,6 +61,13 @@ type PendingCell = {
   bytes: Uint8Array;
   attempts: number;
 };
+type PendingBatch = {
+  kind: 'batch';
+  id: string;
+  writes: { row: string; column: string; value: Value }[];
+  bytes: Uint8Array;
+  attempts: number;
+};
 type PendingExtension = {
   kind: 'extendRows';
   id: string;
@@ -92,6 +100,7 @@ type PendingColumnDeletion = {
 };
 type Pending =
   | PendingCell
+  | PendingBatch
   | PendingExtension
   | PendingInsertion
   | PendingDeletion
@@ -342,6 +351,10 @@ export class DocumentStore {
     for (let i = this.pending.length - 1; i >= 0; i--) {
       const op = this.pending[i];
       if (op?.kind === 'cell' && op.row === row && op.column === column) return op.value;
+      if (op?.kind === 'batch') {
+        const write = op.writes.find((item) => item.row === row && item.column === column);
+        if (write) return write.value;
+      }
     }
     return this.confirmed.get(key(row, column));
   }
@@ -365,7 +378,10 @@ export class DocumentStore {
       !row ||
       !column ||
       this.pending.some(
-        (pending) => pending.kind === 'cell' && pending.row === row && pending.column === column,
+        (pending) =>
+          (pending.kind === 'cell' && pending.row === row && pending.column === column) ||
+          (pending.kind === 'batch' &&
+            pending.writes.some((item) => item.row === row && item.column === column)),
       )
     )
       return displayValue(value);
@@ -397,6 +413,10 @@ export class DocumentStore {
       const pending = this.pending[i];
       if (pending?.kind === 'cell' && pending.row === row && pending.column === column)
         return pending.value;
+      if (pending?.kind === 'batch') {
+        const write = pending.writes.find((item) => item.row === row && item.column === column);
+        if (write) return write.value;
+      }
     }
     return this.confirmed.get(key(row, column)) ?? { type: 'blank' };
   }
@@ -404,11 +424,12 @@ export class DocumentStore {
     const sheet = this.sheet,
       projection = this.projection;
     if (!sheet || !projection) return;
-    const overlay = new Set(
-      this.pending
-        .filter((pending): pending is PendingCell => pending.kind === 'cell')
-        .map((pending) => key(pending.row, pending.column)),
-    );
+    const overlay = new Set<string>();
+    for (const pending of this.pending) {
+      if (pending.kind === 'cell') overlay.add(key(pending.row, pending.column));
+      if (pending.kind === 'batch')
+        for (const write of pending.writes) overlay.add(key(write.row, write.column));
+    }
     if (this.editing) {
       const row = sheet.rows[this.editing.position.row],
         column = sheet.columns[this.editing.position.column];
@@ -920,6 +941,110 @@ export class DocumentStore {
     this.flush();
     return true;
   }
+  pasteTsv(text: string, position: Position = this.selected) {
+    const sheet = this.sheet,
+      projection = this.projection,
+      actor = this.actor;
+    if (!sheet || !projection || !actor) return false;
+    const rows = text
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\n$/, '')
+      .split('\n')
+      .map((line) => line.split('\t'));
+    const count = rows.reduce((total, row) => total + row.length, 0);
+    if (
+      count < 1 ||
+      count > 1000 ||
+      this.pending.length >= 128 ||
+      rows.some(
+        (row, rowIndex) =>
+          position.row + rowIndex >= sheet.rows.length ||
+          position.column + row.length > sheet.columns.length,
+      )
+    ) {
+      this.error = 'Диапазон вставки превышает границы листа или лимит 1000 ячеек.';
+      this.notify();
+      return false;
+    }
+    const writes: PendingBatch['writes'] = [];
+    const wireWrites = [];
+    let textBytes = 0;
+    for (let r = 0; r < rows.length; r++) {
+      const fields = rows[r] ?? [];
+      for (let c = 0; c < fields.length; c++) {
+        const value = parseInput(fields[c] ?? '');
+        if (value.type === 'formula') {
+          this.error = 'Массовая вставка формул пока не поддерживается. Введите формулу в ячейку.';
+          this.notify();
+          return false;
+        }
+        if (value.type === 'text') textBytes += byteLength(value.value);
+        if (
+          textBytes > 512 * 1024 ||
+          (value.type === 'text' && byteLength(value.value) > 32 * 1024)
+        ) {
+          this.error = 'Текст вставки превышает лимит 512 КБ или 32 КБ на ячейку.';
+          this.notify();
+          return false;
+        }
+        const row = sheet.rows[position.row + r]!,
+          column = sheet.columns[position.column + c]!;
+        writes.push({ row, column, value });
+        wireWrites.push(
+          create(SetCellValueSchema, {
+            address: {
+              sheetId: uuidBytes(sheet.id),
+              rowId: uuidBytes(row),
+              columnId: uuidBytes(column),
+            },
+            value: create(CellValueSchema, {
+              kind:
+                value.type === 'blank'
+                  ? { case: 'blank', value: true }
+                  : value.type === 'number'
+                    ? { case: 'number', value: value.value }
+                    : value.type === 'boolean'
+                      ? { case: 'boolean', value: value.value }
+                      : { case: 'text', value: value.value },
+            }),
+          }),
+        );
+      }
+    }
+    const id = uuidV7();
+    const message = create(ClientEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'command',
+        value: {
+          operationId: uuidBytes(id),
+          documentId: uuidBytes(projection.document_id),
+          actorId: actor,
+          baseVersion: BigInt(projection.version),
+          clientSequence: ++this.sequence,
+          operation: create(CanonicalOperationSchema, {
+            kind: {
+              case: 'setCellValues',
+              value: { writes: wireWrites },
+            },
+          }),
+        },
+      },
+    });
+    const bytes = toBinary(ClientEnvelopeSchema, message);
+    if (bytes.byteLength > 1_048_576) {
+      this.error = 'Команда вставки превышает лимит 1 МБ.';
+      this.notify();
+      return false;
+    }
+    this.pending.push({ kind: 'batch', id, writes, bytes, attempts: 0 });
+    this.syncPreview();
+    this.error = '';
+    this.notify();
+    this.flush();
+    return true;
+  }
   extendRows() {
     const sheet = this.sheet,
       projection = this.projection,
@@ -1164,7 +1289,8 @@ export class DocumentStore {
       operation.kind.case === 'insertRows' ||
       operation.kind.case === 'deleteRows' ||
       operation.kind.case === 'insertColumns' ||
-      operation.kind.case === 'deleteColumns'
+      operation.kind.case === 'deleteColumns' ||
+      operation.kind.case === 'setCellValues'
     )
       throw new Error('Structural operation requires a canonical projection refresh');
     const entry = operation.kind.value;
@@ -1309,7 +1435,8 @@ export class DocumentStore {
           event.canonicalOperation?.kind.case !== 'insertRows' &&
           event.canonicalOperation?.kind.case !== 'deleteRows' &&
           event.canonicalOperation?.kind.case !== 'insertColumns' &&
-          event.canonicalOperation?.kind.case !== 'deleteColumns'
+          event.canonicalOperation?.kind.case !== 'deleteColumns' &&
+          event.canonicalOperation?.kind.case !== 'setCellValues'
         ) {
           if (
             event.documentId.length !== 16 ||
@@ -1376,7 +1503,8 @@ export class DocumentStore {
         payload.value.canonicalOperation.kind.case !== 'insertRows' &&
         payload.value.canonicalOperation.kind.case !== 'deleteRows' &&
         payload.value.canonicalOperation.kind.case !== 'insertColumns' &&
-        payload.value.canonicalOperation.kind.case !== 'deleteColumns'
+        payload.value.canonicalOperation.kind.case !== 'deleteColumns' &&
+        payload.value.canonicalOperation.kind.case !== 'setCellValues'
       ) {
         if (payload.value.confirmedStateHash.length !== 32) throw new Error('Invalid state hash');
         this.apply(payload.value.canonicalOperation);
