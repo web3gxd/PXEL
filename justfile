@@ -57,6 +57,9 @@ bench-render:
 bench-optimistic:
     node tests/performance/optimistic.mjs
 
+stress-slow-reader:
+    node --test tests/performance/slow-reader.test.mjs
+
 sqlx-check:
     cargo sqlx prepare --check --workspace -- --all-targets --all-features
 

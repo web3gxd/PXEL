@@ -1,5 +1,28 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — медленный подписчик не блокирует документ
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-018, текущие WebSocket outbound
+queue, heartbeat и integration helpers. Цель — проверить реальным TCP pause,
+что медленный получатель не останавливает durable writer. Инварианты: каждое
+ACK writer имеет следующую версию, PostgreSQL head достигает ожидаемого
+значения, медленный socket не удерживает document actor.
+
+Добавлены `tests/performance/slow-reader.test.mjs`, `just stress-slow-reader`
+и [отчёт](docs/benchmarks/2026-09-29-slow-reader-local.md). Два запуска против
+release сервера и реальной PostgreSQL прошли: 512/512 последовательных
+коммитов по 30,005 bytes, head 513, paused socket закрыт после resume,
+19.57/19.17 s на Windows/Ultra 9 185H. Команды разделены 22 ms, чтобы не
+сработал глобальный dev limiter 64/s. Логи не различают queue overflow и
+send timeout; заявляется лишь подтверждённое поведение. Cross-host,
+queue-depth telemetry и multiple-slow-client stress не проверены.
+После форматирования `presentation:check` прошёл 10 слайдов на desktop/mobile,
+`pnpm format:check` и `git diff --check` прошли. Полный `just check` в этом
+документационно-тестовом срезе повторно не запускался; последний полный
+прогон в предыдущем срезе был успешным.
+
+---
+
 ## 2026-09-29 — браузерное восстановление после разрыва связи
 
 Перед срезом прочитаны AGENTS, roadmap, collaboration contract, `useSession`

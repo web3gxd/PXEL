@@ -19,8 +19,12 @@ durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалё
 выделением (ADR-017) локально проверены. Domain-only seeded convergence
 100×1000×3 прошёл. Полный gate фазы 3 ещё не закрыт: нужны сетевые/ACL и
 структурные convergence сценарии и измерения latency. Outbound queue с
-лимитом кадров/байтов реализована в ADR-018; slow-reader network stress и
-очередные метрики ещё открыты.
+лимитом кадров/байтов реализована в ADR-018; cross-host slow-reader stress и
+очередные метрики ещё открыты. Локальный paused-socket stress выполнен:
+два прогона по 512×30,005-byte commits завершились head 513, медленный socket
+закрылся, писатель не остановился. Путь закрытия (queue overflow или send
+timeout) и cross-host case ещё требуют instrumentation;
+[условия](benchmarks/2026-09-29-slow-reader-local.md).
 Живой integration test одновременной записи в одну ячейку подтвердил версии
 2/3, серверный порядок и значение победителя после replay. Это не заменяет
 случайные multi-user сценарии с разными задержками и отказами.
