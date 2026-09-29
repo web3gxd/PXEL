@@ -3,6 +3,7 @@ use spreadsheet_domain::{
     workbook::*,
 };
 use spreadsheet_formula::binder::bind;
+use spreadsheet_formula::{bound::render_current, canonical, parse};
 
 fn workbook(reverse: bool) -> Result<(Workbook, CellAddress), Box<dyn std::error::Error>> {
     let document = DocumentId::from_bytes([1; 16])?;
@@ -109,5 +110,60 @@ fn unallocated_or_unknown_references_are_explicit_and_origin_must_be_live()
         )
         .is_err()
     );
+    Ok(())
+}
+
+#[test]
+fn current_a1_text_follows_stable_targets_and_expands_range()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (book, origin) = workbook(false)?;
+    let formula = bind("=A1+$A$1+SUM(A1:A2)", &book, origin)?;
+    assert_eq!(render_current(&formula, &book)?, formula.canonical());
+    let sheet = book.sheets().first().ok_or("missing sheet")?;
+    let inserted = RowId::from_bytes([9; 16])?;
+    let shifted = Workbook::hydrate(
+        book.document_id(),
+        DocumentVersion::new(2)?,
+        SheetSeed {
+            id: sheet.id(),
+            name: sheet.name().to_owned(),
+            rows: vec![sheet.rows()[0], inserted, sheet.rows()[1], sheet.rows()[2]],
+            columns: sheet.columns().to_vec(),
+        },
+        [(origin, CellContent::Formula(formula.clone()))],
+    )?;
+    let current = render_current(&formula, &shifted)?;
+    assert_eq!(current, canonical(&parse("=A1+$A$1+SUM(A1:A3)")?.ast)?);
+    let rebound = bind(&current, &shifted, origin)?;
+    let old_targets: Vec<_> = formula
+        .ast()
+        .nodes()
+        .iter()
+        .filter_map(|node| match node {
+            Node::Cell(reference) => Some((reference.target_row, reference.target_column)),
+            _ => None,
+        })
+        .collect();
+    let new_targets: Vec<_> = rebound
+        .ast()
+        .nodes()
+        .iter()
+        .filter_map(|node| match node {
+            Node::Cell(reference) => Some((reference.target_row, reference.target_column)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(new_targets, old_targets);
+    let old_range = formula.ast().nodes().iter().find_map(|node| match node {
+        Node::Range(reference) => Some((reference.start.target_row, reference.end.target_row)),
+        _ => None,
+    });
+    let new_range = rebound.ast().nodes().iter().find_map(|node| match node {
+        Node::Range(reference) => Some((reference.start.target_row, reference.end.target_row)),
+        _ => None,
+    });
+    assert_eq!(new_range, old_range);
+    assert!(matches!(&rebound.ast().nodes()[0], Node::Cell(reference)
+        if reference.row_mode == AxisReferenceMode::Relative { original_delta: -3 }));
     Ok(())
 }

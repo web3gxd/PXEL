@@ -1,5 +1,25 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — read-only A1 rendering from stable formula references
+
+Для следующего среза фазы 4 прочитаны AGENTS, roadmap, ADR-020 и код
+domain/formula binder, formatter и projection. `spreadsheet-formula::bound` теперь
+умеет получать текущий A1-текст из bound AST и актуальных осей, не разбирая
+старый пользовательский source. Тест строит новую проекцию осей со строкой
+внутри диапазона: видимый
+`A1:A2` становится `A1:A3`, повторный bind сохраняет stable targets, а
+относительный row delta меняется с -2 на -3. Это только чистый read-only
+компонент: `InsertRows` при формулах по-прежнему отклоняется; серверный DTO и
+UI ещё не используют новый текст. Прежде чем снять защиту, нужен versioned
+persisted transform deltas с replay и browser tests.
+
+Выполнены `cargo fmt --all`, `cargo test --locked -p spreadsheet-formula
+--test binder` (3/3), `cargo clippy --locked -p spreadsheet-formula
+--all-targets -- -D warnings` (pass). Полный `just check` для этого среза
+не запускался; другие тесты не заявляются.
+
+---
+
 ## 2026-09-29 — статус промежуточной презентации
 
 По замечанию пользователя обложка и последний слайд `presentation/index.html`

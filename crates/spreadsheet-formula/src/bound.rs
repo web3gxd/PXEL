@@ -1,7 +1,7 @@
 //! Bridge from durable stable-ID AST to the pure evaluator. Source text is never parsed.
 use crate::{
-    EvaluationBudget, EvaluationError, ReferenceResolver, Value, ast as syntax, evaluate,
-    range_index::RangeDependency,
+    EvaluationBudget, EvaluationError, ReferenceResolver, Value, ast as syntax, canonical,
+    evaluate, range_index::RangeDependency,
 };
 use spreadsheet_domain::{
     formula as bound,
@@ -180,6 +180,55 @@ fn project(formula: &bound::Formula, workbook: &Workbook) -> Result<syntax::Ast,
         schema_version: syntax::AST_SCHEMA_VERSION,
         root: syntax::NodeId(formula.ast().root().0 as usize),
         nodes,
+    })
+}
+
+/// Renders the formula's current A1 addresses from stable targets. The stored
+/// source remains the text authored at bind time; this is a read-only view.
+/// Structural writers must still rebase relative deltas before committing.
+pub fn render_current(
+    formula: &bound::Formula,
+    workbook: &Workbook,
+) -> Result<String, EvaluationError> {
+    if !origin_exists(formula, workbook) {
+        return Err(EvaluationError::InvalidAst);
+    }
+    let mut ast = project(formula, workbook)?;
+    for (source, rendered) in formula.ast().nodes().iter().zip(&mut ast.nodes) {
+        let target_sheet = match source {
+            bound::Node::Cell(reference) => Some(reference.target_sheet),
+            bound::Node::Range(reference) => Some(reference.start.target_sheet),
+            _ => None,
+        };
+        let Some(target_sheet) = target_sheet else {
+            continue;
+        };
+        let name = if target_sheet == formula.origin().sheet {
+            None
+        } else {
+            Some(
+                sheet(workbook, target_sheet)
+                    .ok_or(EvaluationError::InvalidAst)?
+                    .name()
+                    .to_owned(),
+            )
+        };
+        match rendered {
+            syntax::Node::Cell(reference) => reference.sheet = name,
+            syntax::Node::Range(reference) => {
+                reference.start.sheet = name.clone();
+                reference.end.sheet = name;
+            }
+            syntax::Node::InvalidReference => {}
+            _ => return Err(EvaluationError::InvalidAst),
+        }
+    }
+    canonical(&ast).map_err(|error| {
+        if error.code == syntax::ParseErrorCode::LimitExceeded {
+            EvaluationError::CalculationLimitExceeded
+        } else {
+            EvaluationError::InvalidAst
+        }
     })
 }
 fn valid_result(value: &Value) -> bool {
