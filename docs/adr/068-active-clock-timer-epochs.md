@@ -39,7 +39,9 @@ NOW test waits for the production heartbeat/cadence without changing user input;
 the resulting server epoch/value arrives by subscription. This is functional evidence,
 not a timer-load benchmark or a hard realtime guarantee.
 
-Compatible open-renewal including RAND, classification/admission load profiling,
+Initial classification-only [measurement](../benchmarks/2026-09-30-timer-classification-local.md)
+covers warm scalar-heavy books through100k cells; whole-admission/subscriber load
+is not measured. Compatible open-renewal including RAND, admission load profiling,
 timezone settings, manual Excel corpus and full production gates remain open.
 Normal cadence can be delayed by bounded queue/backpressure and actual DB commit;
 missed periods are not replayed as a burst of artificial epochs.

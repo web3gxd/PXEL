@@ -390,6 +390,84 @@ mod tests {
         )
     }
     #[test]
+    #[ignore = "release timer classification harness; excludes queues, database and calculation"]
+    fn timer_classification_benchmark() -> Result<(), Box<dyn std::error::Error>> {
+        use spreadsheet_domain::workbook::CellValue;
+        use std::{hint::black_box, time::Instant};
+        for cell_count in [1_000usize, 10_000, 100_000] {
+            let seed = SheetSeed {
+                id: SheetId::from_bytes([1; 16])?,
+                name: "Sheet1".into(),
+                rows: (1..=cell_count)
+                    .map(|n| RowId::from_bytes((n as u128).to_be_bytes()))
+                    .collect::<Result<Vec<_>, _>>()?,
+                columns: vec![ColumnId::from_bytes([3; 16])?],
+            };
+            let address = CellAddress {
+                sheet: seed.id,
+                row: seed.rows[0],
+                column: seed.columns[0],
+            };
+            let cells = seed
+                .rows
+                .iter()
+                .map(|row| {
+                    (
+                        CellAddress {
+                            row: *row,
+                            ..address
+                        },
+                        CellContent::Value(CellValue::Number(1.0)),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let static_book = Workbook::hydrate(
+                DocumentId::from_bytes([4; 16])?,
+                DocumentVersion::new(1)?,
+                seed,
+                cells,
+            )?;
+            let clock_book = static_book
+                .candidate(
+                    &Operation::SetCellFormula {
+                        address,
+                        formula: spreadsheet_formula::binder::bind(
+                            "=NOW()",
+                            &static_book,
+                            address,
+                        )?,
+                    },
+                    DocumentVersion::new(2)?,
+                )?
+                .candidate(
+                    &Operation::AdvanceCalculationEpoch {
+                        context: context(CalculationReason::Explicit, calculation::ENGINE_VERSION)?,
+                    },
+                    DocumentVersion::new(3)?,
+                )?;
+            for (name, book, expected) in [
+                ("static", &static_book, (false, false)),
+                ("one_now", &clock_book, (true, false)),
+            ] {
+                assert_eq!(clock_consumers(book), expected);
+                let mut samples = Vec::with_capacity(1_100);
+                for _ in 0..1_100 {
+                    let start = Instant::now();
+                    black_box(clock_consumers(black_box(book)));
+                    samples.push(start.elapsed().as_secs_f64() * 1_000_000.0);
+                }
+                samples.drain(..100);
+                samples.sort_by(f64::total_cmp);
+                println!(
+                    "timer_classification cells={cell_count} profile={name} samples=1000 p50_us={:.3} p95_us={:.3} max_us={:.3}",
+                    samples[499], samples[949], samples[999]
+                );
+            }
+            assert!(timer_due_at(&clock_book, 60_000, 0, 0));
+        }
+        Ok(())
+    }
+    #[test]
     fn timer_policy_only_advances_clock_consumers_at_due_boundaries()
     -> Result<(), Box<dyn std::error::Error>> {
         for (source, minute, midnight) in [
