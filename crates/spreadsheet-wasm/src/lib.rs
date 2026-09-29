@@ -47,9 +47,14 @@ struct FixtureCell {
 #[serde(deny_unknown_fields)]
 struct FixtureInput {
     schema_version: u32,
+    #[serde(default = "default_date_system")]
+    date_system: u16,
     current_sheet: String,
     sheets: Vec<String>,
     cells: Vec<FixtureCell>,
+}
+fn default_date_system() -> u16 {
+    1900
 }
 
 #[derive(Deserialize)]
@@ -99,12 +104,16 @@ impl TryFrom<FixtureValue> for Value {
 }
 
 struct FixtureResolver {
+    date_system: DateSystem,
     cells: BTreeMap<(String, u32, u32), Value>,
     sheets: BTreeSet<String>,
     current_sheet: String,
 }
 
 impl ReferenceResolver for FixtureResolver {
+    fn date_system(&self) -> DateSystem {
+        self.date_system
+    }
     fn resolve_cell(&self, reference: &CellReference) -> Value {
         let sheet = reference.sheet.as_deref().unwrap_or(&self.current_sheet);
         if !self.sheets.contains(sheet) {
@@ -224,12 +233,13 @@ pub fn evaluate_fixture(source: &str, cells_json: &str) -> Result<String, Adapte
     }
     let payload: FixturePayload =
         serde_json::from_str(cells_json).map_err(|_| AdapterError::InvalidJson)?;
-    let (input, current_sheet, mut sheets, explicit_catalog) = match payload {
+    let (input, current_sheet, mut sheets, explicit_catalog, date_system) = match payload {
         FixturePayload::Cells(cells) => (
             cells,
             "Sheet1".to_owned(),
             BTreeSet::from(["Sheet1".to_owned()]),
             false,
+            DateSystem::Excel1900,
         ),
         FixturePayload::Workbook(input) => {
             if input.schema_version != 1
@@ -242,7 +252,12 @@ pub fn evaluate_fixture(source: &str, cells_json: &str) -> Result<String, Adapte
             if sheets.len() != input.sheets.len() || !sheets.contains(&input.current_sheet) {
                 return Err(AdapterError::InvalidJson);
             }
-            (input.cells, input.current_sheet, sheets, true)
+            let system = match input.date_system {
+                1900 => DateSystem::Excel1900,
+                1904 => DateSystem::Excel1904,
+                _ => return Err(AdapterError::InvalidJson),
+            };
+            (input.cells, input.current_sheet, sheets, true, system)
         }
     };
     if input.len() > MAX_CELLS {
@@ -280,6 +295,7 @@ pub fn evaluate_fixture(source: &str, cells_json: &str) -> Result<String, Adapte
     let result = match evaluate(
         &parsed.ast,
         &FixtureResolver {
+            date_system,
             cells,
             sheets,
             current_sheet,
@@ -336,6 +352,18 @@ pub fn copy_formula_text_wasm(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fixture_calendar_profile_is_explicit_and_fail_closed()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let input = r#"{"schema_version":1,"date_system":1904,"current_sheet":"Sheet1","sheets":["Sheet1"],"cells":[]}"#;
+        let result: Json = serde_json::from_str(&evaluate_fixture("=DATE(1904,1,1)", input)?)?;
+        assert_eq!(result["result"], json!({"type":"number","value":0.0}));
+        assert!(matches!(
+            evaluate_fixture("=DATE(1904,1,1)", &input.replace("1904", "1905")),
+            Err(AdapterError::InvalidJson)
+        ));
+        Ok(())
+    }
     #[test]
     fn explicit_sheet_catalog_distinguishes_blank_and_ref_error()
     -> Result<(), Box<dyn std::error::Error>> {

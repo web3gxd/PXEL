@@ -12,12 +12,18 @@ Google Sheets задает пользовательскую модель мгн�
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Supported после phase 2 gate | Literals, basic operators, A1/mixed references, bounded ranges, SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/IF/IFS/IFERROR/AND/OR/NOT/ABS/MOD                                                                                                                                 |
 | Partially supported          | CONCAT/LEFT/RIGHT/MID/LEN/TRIM/LOWER/UPPER: bounded Unicode-scalar profile (ADR-062); modern surrogate counting, locale-independent case and numeric formatting, legacy UTF-16/Excel locale verification open                                                      |
-| Partially supported          | POWER / fractional exponent: portable binary64 profile (ADR-061), manual Excel precision verification open; ROUND/ROUNDUP/ROUNDDOWN: shortest-decimal profile (ADR-060); static dependency treatment IF; range caps; date system semantics до ввода date functions |
+| Partially supported          | POWER / fractional exponent: portable binary64 profile (ADR-061), manual Excel precision verification open; ROUND/ROUNDUP/ROUNDDOWN: shortest-decimal profile (ADR-060); static dependency treatment IF; range caps; date system metadata и formatting ещё открыты |
 | Preserved but not editable   | Unknown function при распознаваемом normalized AST: source/AST сохраняются, canonical result NAME; UI показывает unsupported feature                                                                                                                               |
 | Dropped with warning         | Импортированные calculated caches не считаются canonical values; могут показываться только как untrusted preview                                                                                                                                                   |
 | Rejected                     | Неподдержанная грамматика без lossless normalized representation; external/UDF refs; превышение limits                                                                                                                                                             |
 
 Формула сохраняется только с server-validated normalized AST. Сохранить неизвестный произвольный текст вместо AST и молча считать cache корректным нельзя. Native/WASM version mismatch приводит к отключению соответствующего preview/reload, а не к доверию клиентскому AST.
+
+DATE/YEAR/MONTH/DAY — partially supported по ADR-063: numeric serials,
+Gregorian1900/1904 и fake1900-02-29, bounded normalization. Shared corpus337
+проверен native/browser с обоими профилями, но текущая durable workbook model
+использует1900. Workbook date-system metadata/import, locale date text/number
+formatting и manual Excel goldens ещё открыты; NOW/TODAY пока не включены.
 
 ## XLSX profile: phase 6
 

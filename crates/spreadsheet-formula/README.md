@@ -69,7 +69,7 @@ Source provenance and documentation conflicts are retained in the corpus.
   conditions, preserving later errors even after a decisive boolean; range
   traversal is budgeted and checked. NOT takes one scalar and inverts the same
   scalar coercion as IF. Arrays/implicit intersection remain unsupported.
-  Engine identity is `pxel-formula-0.6.0`; old persisted contexts require a new
+  Engine identity is `pxel-formula-0.7.0`; old persisted contexts require a new
   authorized calculation epoch. See ADR-055 and the common fixture corpus.
 
 - ABS takes one scalar; MOD takes two and follows the divisor sign. Blank is
@@ -86,6 +86,12 @@ Source provenance and documentation conflicts are retained in the corpus.
   collapses ASCII spaces; LOWER/UPPER use pinned locale-independent Unicode
   mapping. Numeric text indices and string scans share the work/byte budget.
   See ADR-062 for limits and Excel compatibility boundaries.
+
+- DATE/YEAR/MONTH/DAY use a trusted explicit calendar profile. DATE returns a
+  numeric serial; fake 1900-02-29 and both 1900/1904 systems are covered by the
+  common native/browser corpus. Workbooks currently use 1900; persisted system
+  selection, date-text parsing/formatting and NOW/TODAY remain separate work.
+  See ADR-063 for normalization, bounds and serial-zero behavior.
 
 Bounds: 32 KiB source, 4,096 AST nodes, AST depth 128 (parser call depth 256 to
 admit canonical parentheses), 255 call arguments, 100,000

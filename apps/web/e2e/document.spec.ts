@@ -4,6 +4,14 @@ import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
 
 for (const scenario of [
   {
+    name: 'calendar date functions',
+    source: '=YEAR(DATE(A1,2,29))*10000+MONTH(DATE(A1,2,29))*100+DAY(DATE(A1,2,29))',
+    input: '2000',
+    edit: '2100',
+    before: '20000229',
+    after: '21000301',
+  },
+  {
     name: 'Unicode text functions',
     source: '=CONCAT(UPPER(LEFT(TRIM(A1),2)),LOWER(RIGHT("Я",1)),MID("😀abc",2,2),LEN(A1))',
     input: 'абв',

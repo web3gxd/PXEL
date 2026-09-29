@@ -372,3 +372,10 @@ browser corpus284, stateful1001/2002, четыре text unit/property/resource t
 прошли; live dependent-edit/reload DPR1/2 подтверждён. Numeric text index
 coercion budget regression исправлена после adversarial review. Locale/legacy
 Unicode/manual Excel остаются gates; остальные функции и full MVP ещё открыты.
+
+ADR-063 добавляет DATE/YEAR/MONTH/DAY, engine0.7.0: numeric serial calendar
+profile1900/1904, checked normalization/fake day, five Rust calendar tests,
+337 expected/native/browser cases и stateful1001/2002. Live PostgreSQL43/43
+и новый dependent-edit/reload DPR1/2 прошли; календарный benchmark записан.
+Durable workbook1904 metadata, injected NOW/TODAY/RAND, manual Excel goldens,
+lookup/conditional aggregates и оставшиеся общие MVP gates ещё открыты.

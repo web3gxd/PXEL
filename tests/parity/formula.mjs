@@ -28,7 +28,13 @@ const requests = corpus.cases.map((test) => {
   });
   return {
     source: test.formula,
-    input: { schema_version: 1, current_sheet: origin, sheets: [...sheets], cells },
+    input: {
+      schema_version: 1,
+      current_sheet: origin,
+      sheets: [...sheets],
+      cells,
+      ...(test.date_system === undefined ? {} : { date_system: test.date_system }),
+    },
   };
 });
 const native = spawnSync(

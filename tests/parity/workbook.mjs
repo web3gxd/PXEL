@@ -56,6 +56,10 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=TRIM(CONCAT("  ",A1,"  "))',
     '=LOWER(CONCAT("ПРИВЕТ",A1))',
     '=UPPER(CONCAT("straße",A1))',
+    '=DATE(2000,MOD(ABS(A1),12)+1,1)',
+    '=YEAR(DATE(2000+ABS(A1),2,29))',
+    '=MONTH(DATE(2000+ABS(A1),2,29))',
+    '=DAY(DATE(2000+ABS(A1),2,29))',
   ];
   const source = sources[next() % sources.length];
   const primitive = (value) => ({ type: 'number', value });

@@ -150,6 +150,16 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/upper-function",
       "title": "UPPER function",
       "retrieved_at": "2026-09-30"
+    },
+    "date": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/date-function",
+      "title": "DATE function",
+      "retrieved_at": "2026-09-30"
+    },
+    "date_systems": {
+      "url": "https://support.microsoft.com/en-us/excel/change-the-date-system-format-or-two-digit-year-interpretation",
+      "title": "Excel date systems",
+      "retrieved_at": "2026-09-30"
     }
   },
   "cases": [
@@ -4693,6 +4703,812 @@
       },
       "provenance": {
         "sources": ["concat"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_jan1",
+      "formula": "=DATE(1900,1,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_feb28",
+      "formula": "=DATE(1900,2,28)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 59
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_fake",
+      "formula": "=DATE(1900,2,29)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 60
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_march1",
+      "formula": "=DATE(1900,3,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 61
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_march0",
+      "formula": "=DATE(1900,3,0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 60
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_overflow_fake",
+      "formula": "=DATE(1900,1,61)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 61
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_epoch2000",
+      "formula": "=DATE(2000,1,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 36526
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_leap2000",
+      "formula": "=DATE(2000,2,29)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 36585
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_year2000",
+      "formula": "=YEAR(DATE(2000,2,29))",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2000
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_month2100",
+      "formula": "=MONTH(DATE(2100,2,29))",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_day2100",
+      "formula": "=DAY(DATE(2100,2,29))",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_shortyear",
+      "formula": "=DATE(108,1,2)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 39449
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_year0",
+      "formula": "=DATE(0,1,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_month0",
+      "formula": "=DATE(2000,0,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 36495
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_day0",
+      "formula": "=DATE(2000,1,0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 36525
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_max",
+      "formula": "=DATE(9999,12,31)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2958465
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_max_normalize",
+      "formula": "=DATE(9999,13,0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2958465
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_min",
+      "formula": "=DATE(1900,1,0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_fraction_max",
+      "formula": "=YEAR(2958465.9)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 9999
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_max_month",
+      "formula": "=MONTH(2958465)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 12
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_max_day",
+      "formula": "=DAY(2958465)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 31
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_text",
+      "formula": "=DATE(\"2000\",\"2\",\"29\")",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 36585
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_fraction",
+      "formula": "=DATE(2000.9,2.9,29.9)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 36585
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_boolean",
+      "formula": "=DATE(2000,TRUE,TRUE)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 36526
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_zero_year",
+      "formula": "=YEAR(0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1900
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_zero_month",
+      "formula": "=MONTH(0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_zero_day",
+      "formula": "=DAY(0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_fake_year",
+      "formula": "=YEAR(60.9)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1900
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_fake_month",
+      "formula": "=MONTH(60)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_fake_day",
+      "formula": "=DAY(60)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 29
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_largeyear",
+      "formula": "=DATE(10000,1,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_negativeyear",
+      "formula": "=DATE(-1,1,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_negative_serial",
+      "formula": "=YEAR(-0.1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_max_overflow",
+      "formula": "=DAY(2958466)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_huge_month",
+      "formula": "=DATE(2000,1e308,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_huge_day",
+      "formula": "=DATE(2000,1,1e308)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_arity_date",
+      "formula": "=DATE(2000,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_arity_year",
+      "formula": "=YEAR(1,2)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_text_date",
+      "formula": "=DAY(\"2000-01-01\")",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_propagate",
+      "formula": "=DATE(1/0,1,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_blank",
+      "formula": "=YEAR(A1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1900
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_recover",
+      "formula": "=IFERROR(DAY(-1),99)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_zero",
+      "formula": "=DATE(1904,1,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_2000",
+      "formula": "=DATE(2000,1,1)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "number",
+        "value": 35064
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_max",
+      "formula": "=DATE(9999,12,31)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "number",
+        "value": 2957003
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_year",
+      "formula": "=YEAR(0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "number",
+        "value": 1904
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_month",
+      "formula": "=MONTH(0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_day",
+      "formula": "=DAY(0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_sixty_month",
+      "formula": "=MONTH(60)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_sixty_day",
+      "formula": "=DAY(60)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_leap",
+      "formula": "=DAY(59)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "number",
+        "value": 29
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_underflow",
+      "formula": "=DATE(1904,1,0)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "calendar_1904_overflow",
+      "formula": "=YEAR(2957004)",
+      "origin": "Sheet1!B1",
+      "cells": {},
+      "date_system": 1904,
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["date", "date_systems"],
         "basis": "derived",
         "verified_in_excel": false
       }

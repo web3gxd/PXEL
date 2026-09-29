@@ -20,6 +20,12 @@ impl ReferenceResolver for Range {
 fn benchmarks(c: &mut Criterion) {
     for (name, source, expected) in [
         ("ABS_scalar", "=ABS(-123.5)", Value::Number(123.5)),
+        ("DATE_scalar", "=DATE(2000,1,1)", Value::Number(36526.0)),
+        (
+            "DATE_parts",
+            "=YEAR(36585)*10000+MONTH(36585)*100+DAY(36585)",
+            Value::Number(20000229.0),
+        ),
         (
             "TEXT_scalar",
             "=CONCAT(UPPER(LEFT(TRIM(\"  абв  \"),2)),LOWER(RIGHT(\"Я\",1)),MID(\"😀abc\",2,2),LEN(\"😀\"))",

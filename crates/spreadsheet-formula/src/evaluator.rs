@@ -51,6 +51,10 @@ impl EvaluationBudget {
 /// Trusted adapter must visit all addressed cells in row-major order, including
 /// Blank cells, and immediately propagate visitor errors without more work.
 pub trait ReferenceResolver {
+    /// Calendar profile supplied by the trusted adapter, never the host locale.
+    fn date_system(&self) -> DateSystem {
+        DateSystem::Excel1900
+    }
     fn resolve_cell(&self, reference: &CellReference) -> Value;
     fn visit_range(
         &self,
@@ -192,6 +196,8 @@ pub(crate) fn eval(
                 "CONCAT" | "LEFT" | "RIGHT" | "MID" | "LEN" | "TRIM" | "LOWER" | "UPPER"
             ) {
                 crate::text::call(ast, name, arguments, resolver, budget, depth + 1)?
+            } else if matches!(name.as_str(), "DATE" | "YEAR" | "MONTH" | "DAY") {
+                crate::calendar::call(ast, name, arguments, resolver, budget, depth + 1)?
             } else if name == "IF" {
                 conditional(ast, arguments, resolver, budget, depth + 1)?
             } else if name == "IFS" {

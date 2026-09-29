@@ -2,6 +2,7 @@ use serde_json::{Value as Json, json};
 use spreadsheet_formula::*;
 
 struct Cells {
+    system: DateSystem,
     cells: Json,
     sheet: String,
 }
@@ -36,6 +37,9 @@ fn decode(value: &Json) -> Value {
     }
 }
 impl ReferenceResolver for Cells {
+    fn date_system(&self) -> DateSystem {
+        self.system
+    }
     fn resolve_cell(&self, reference: &CellReference) -> Value {
         let mut number = reference.column + 1;
         let mut letters = Vec::new();
@@ -87,6 +91,11 @@ fn all_shared_profile_fixtures_match_without_excel_verification_claim()
             .map(|(s, _)| s.to_owned())
             .ok_or("origin missing")?;
         let resolver = Cells {
+            system: match case["date_system"].as_u64() {
+                None | Some(1900) => DateSystem::Excel1900,
+                Some(1904) => DateSystem::Excel1904,
+                _ => return Err("invalid fixture date system".into()),
+            },
             cells: case["cells"].clone(),
             sheet,
         };

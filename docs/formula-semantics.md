@@ -78,7 +78,7 @@ COUNT/COUNTA посещают диапазон в row-major порядке с т
 MOD возвращает remainder со знаком divisor, zero divisor даёт DIV/0; fixed
 binary64 n-d*floor(n/d), nonfinite или потеря sign/bounds из-за крайних чисел
 даёт NUM. Native/WASM корпус проверяет 27 новых cases; ручная Excel verification
-и extreme precision corrections остаются открыты. Engine identity 0.6.0 требует
+и extreme precision corrections остаются открыты. Engine identity 0.7.0 требует
 явного epoch advance для старых persisted contexts.
 
 ROUND/ROUNDUP/ROUNDDOWN используют bounded shortest-decimal quantization по
@@ -95,8 +95,19 @@ case mapping locale-independent. CONCAT range traversal row-major, blank empty;
 arity1–253, logical32767-character cap VALUE, byte32KiB/work caps — evaluator
 errors. Numeric text indices также проверяются и расходуют бюджет до coercion.
 Вариант legacy UTF-16 counting, locale-specific case/number formatting и ручная
-Excel verification ещё открыты. Engine0.6.0 требует новый calculation epoch
+Excel verification ещё открыты. Engine0.7.0 требует новый calculation epoch
 для старого context; AST/event/snapshot schemas не меняются.
+
+DATE/YEAR/MONTH/DAY реализованы по [ADR-063](adr/063-calendar-serial-profile.md):
+DATE возвращает numeric serial, не меняет формат ячейки. Чистая Gregorian
+арифметика поддерживает1900/1904, фиктивное1900-02-29 (serial60) и legacy
+serial0 YEAR1900/MONTH1/DAY0. Fractional arguments усекаются; month/day overflow
+нормализуется, невалидный диапазон даёт NUM. Calendar parts принимают дробь
+последнего дня9999-12-31. Text coercion проходит bounded scan/work budget;
+resource failures не скрываются IFERROR. Общие337 fixtures включают53 calendar
+cases с обоими системами; manual Excel verification не заявлена. Текущие книги
+редактора используют1900. Durable выбор1904, locale date parsing/formatting и
+NOW/TODAY с persisted injected context остаются следующими срезами.
 
 Forward/reverse direct edges, range nodes и reverse range index: сначала row intervals per sheet с column filtering, без полного scan всех ranges при каждом edit. Maximum 100 000 addressed cells/range, 256 range dependencies/formula и 1 000 000 deterministic work units/job. Подтверждение разумности caps — benchmark фазы 2.
 

@@ -63,7 +63,10 @@ PXEL_DEV_AUTH=1 cargo run --locked -q -p pxel-server --features dev-auth -- xlsx
 
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Поддержаны AND/OR/NOT с диапазонами и typed resource limits. Текущий engine
-identity — `pxel-formula-0.6.0`; доступны CONCAT/LEFT/RIGHT/MID/LEN/TRIM/LOWER/UPPER
+identity — `pxel-formula-0.7.0`; доступны DATE/YEAR/MONTH/DAY в календарном
+профиле ADR-063 (книги редактора используют 1900; чистый evaluator проверен также
+для 1904; NOW/TODAY и выбор системы книги ещё впереди).
+Доступны CONCAT/LEFT/RIGHT/MID/LEN/TRIM/LOWER/UPPER
 в Unicode profile по ADR-062; POWER и `^` принимают дробные степени по ADR-061;
 доступны ROUND/ROUNDUP/ROUNDDOWN в ограниченном
 decimal profile по ADR-060; старый явно сохранённый CalculationContext
