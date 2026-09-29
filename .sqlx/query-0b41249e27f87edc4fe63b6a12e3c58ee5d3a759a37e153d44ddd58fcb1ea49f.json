@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO documents(document_id,workspace_id,head_version) VALUES($1,$2,$3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0b41249e27f87edc4fe63b6a12e3c58ee5d3a759a37e153d44ddd58fcb1ea49f"
+}

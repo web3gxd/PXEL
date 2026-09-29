@@ -366,14 +366,16 @@
           </div>
           <div class="doing">
             <b>06</b><span>XLSX</span
-            ><small>ZIP/OOXML, bounded IR и кнопка owner-only scalar export; import впереди</small>
+            ><small
+              >ZIP/OOXML, bounded IR, owner export и атомарный локальный import одного листа</small
+            >
           </div>
         </div>
         <p class="roadmap-note">
           Это живой отчёт: выполненные срезы и замеры добавляются после проверки. Подробные
           ограничения, тесты и решения — в <a href="../RUNBOOK.md">RUNBOOK</a> и
-          <a href="../docs/roadmap.md">roadmap</a>. Фазы 3–5 ещё не закрыты; XLSX извлекается в
-          отдельную промежуточную модель без публикации документа.
+          <a href="../docs/roadmap.md">roadmap</a>. Фазы 3–5 ещё не закрыты; локальный XLSX import
+          публикует один scalar-лист, веб-загрузка и Excel golden gate впереди.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>
@@ -387,11 +389,12 @@
           Сетевой scalar stress 100×1000 прошёл за 21 мин 50 с на локальном debug-стенде; два автора
           и подписчик сошлись после reconnect/replay. Следующие проверки — совместный stress формул,
           ACL и рестартов, а также backpressure по этапам. Вставка и удаление строк с формулами уже
-          переживают перезапуск; остаются cut/move, расширенный undo, crash matrix, Garage/S3 и XLSX
-          import/reimport. Owner-only scalar XLSX уже выдаётся через HTTP после записи аудита.
-          Release benchmark с реальными PostgreSQL и файловым snapshot восстановил 10 000 событий
-          хвоста с p95 71–88 мс в двух локальных прогонах. Для сравнения полный replay дал p95
-          131–139 мс; это тёплая книга с одной ячейкой, без браузера.
+          переживают перезапуск; остаются cut/move, расширенный undo, crash matrix, Garage/S3 и
+          полный XLSX import/reimport. Локальная dev-команда уже атомарно создаёт один scalar-лист;
+          owner-only XLSX выдаётся через HTTP после записи аудита. Release benchmark с реальными
+          PostgreSQL и файловым snapshot восстановил 10 000 событий хвоста с p95 71–88 мс в двух
+          локальных прогонах. Для сравнения полный replay дал p95 131–139 мс; это тёплая книга с
+          одной ячейкой, без браузера.
           <a href="../docs/benchmarks/2026-09-29-snapshot-replay-persisted-local.md">Условия</a>.
         </p>
         <div class="closing-links">

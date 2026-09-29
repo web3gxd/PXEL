@@ -5,6 +5,8 @@ mod delivery;
 mod documents;
 mod outbound;
 mod presence;
+#[cfg(feature = "dev-auth")]
+mod xlsx_import;
 mod xlsx_worker;
 
 use axum::{
@@ -354,6 +356,55 @@ async fn main() -> anyhow::Result<()> {
         println!(
             "XLSX preview: {} sheets, {} cells",
             counts.sheets, counts.cells
+        );
+        return Ok(());
+    }
+    #[cfg(not(feature = "dev-auth"))]
+    if command.as_deref() == Some(std::ffi::OsStr::new("xlsx-import")) {
+        anyhow::bail!("XLSX import is unavailable without the development authentication feature");
+    }
+    #[cfg(feature = "dev-auth")]
+    if command.as_deref() == Some(std::ffi::OsStr::new("xlsx-import")) {
+        let path = arguments
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("XLSX import requires a file path"))?;
+        let workspace = arguments
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("XLSX import requires a workspace ID"))?;
+        let actor = arguments
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("XLSX import requires an actor ID"))?;
+        if arguments.next().is_some() {
+            anyhow::bail!("XLSX import accepts exactly three arguments");
+        }
+        let config = config::Config::load()?;
+        if !config.dev_auth {
+            anyhow::bail!("XLSX import requires local development authentication");
+        }
+        let parse_id = |raw: std::ffi::OsString| -> anyhow::Result<[u8; 16]> {
+            let text = raw
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("import ID is not Unicode"))?;
+            Ok(*Uuid::parse_str(text)?.as_bytes())
+        };
+        let identity = spreadsheet_application::journal::AuthenticatedActor {
+            workspace_id: spreadsheet_domain::workbook::WorkspaceId::from_bytes(parse_id(
+                workspace,
+            )?)?,
+            actor_id: spreadsheet_domain::workbook::ActorId::from_bytes(parse_id(actor)?)?,
+        };
+        let normalized = xlsx_worker::load(std::path::Path::new(&path)).await?;
+        let document = DocumentId::from_bytes(*Uuid::now_v7().as_bytes())?;
+        let events = xlsx_import::prepare(&normalized, document, identity.actor_id)?;
+        let database = PgDatabase::connect(&config.database_url, 2).await?;
+        database.readiness().await?;
+        let receipt = database.create_imported(identity, &events).await?;
+        database.close().await;
+        println!(
+            "Imported document {} at version {} ({} committed events)",
+            Uuid::from_bytes(*document.as_bytes()),
+            receipt.committed_version.get(),
+            events.len()
         );
         return Ok(());
     }

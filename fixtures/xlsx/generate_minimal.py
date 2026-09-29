@@ -21,3 +21,20 @@ with ZipFile(ROOT / "minimal_scalars.xlsx", "w") as archive:
         info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
         info.compress_type = ZIP_DEFLATED
         archive.writestr(info, content.encode("utf-8"))
+
+single_sheet_parts = dict(PARTS)
+single_sheet_parts["xl/workbook.xml"] = single_sheet_parts["xl/workbook.xml"].replace(
+    '<sheet name="Plan" sheetId="2" r:id="r2"/>', ""
+)
+single_sheet_parts["xl/_rels/workbook.xml.rels"] = single_sheet_parts[
+    "xl/_rels/workbook.xml.rels"
+].replace(
+    '<Relationship Id="r2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>',
+    "",
+)
+single_sheet_parts.pop("xl/worksheets/sheet2.xml")
+with ZipFile(ROOT / "single_sheet_scalars.xlsx", "w") as archive:
+    for name, content in sorted(single_sheet_parts.items()):
+        info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, content.encode("utf-8"))

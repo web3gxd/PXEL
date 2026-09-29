@@ -37,6 +37,7 @@ try {
       '--test-concurrency=1',
       'tests/integration/server.test.mjs',
       'tests/integration/document.test.mjs',
+      'tests/integration/xlsx-import.test.mjs',
       'tests/integration/network-convergence.test.mjs',
     ],
     [

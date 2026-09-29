@@ -32,6 +32,8 @@ fn number(n: u64) -> Result<i64, JournalError> {
     i64::try_from(n).map_err(|_| JournalError::Corrupt)
 }
 const UNDO_WINDOW: u64 = 10_000;
+const MAX_IMPORT_CELLS: usize = 1_000;
+const MAX_IMPORT_ENCODED_BYTES: usize = 32 * 1024 * 1024;
 struct StoredEventRow<'a> {
     document: DocumentId,
     committed_version: i64,
@@ -715,10 +717,237 @@ impl OperationJournal for PgDatabase {
     }
 }
 
+impl PgDatabase {
+    /// Publish a new imported document only after every prepared event has been
+    /// validated against its predecessor. No partial workbook is visible.
+    pub async fn create_imported(
+        &self,
+        identity: AuthenticatedActor,
+        events: &[CommittedEvent],
+    ) -> Result<CommitReceipt, JournalError> {
+        if events.is_empty() || events.len() > MAX_IMPORT_CELLS + 1 {
+            return Err(JournalError::Corrupt);
+        }
+        let genesis = events.first().ok_or(JournalError::Corrupt)?;
+        let last = events.last().ok_or(JournalError::Corrupt)?;
+        let principal = EventPrincipal::User(identity.actor_id);
+        let document_id = genesis.document_id;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut candidate = Workbook::empty(document_id);
+        let mut hashes = Vec::with_capacity(events.len());
+        let mut written_cells = 0_usize;
+        let mut encoded_bytes = 0_usize;
+        for (index, event) in events.iter().enumerate() {
+            let permitted = if index == 0 {
+                matches!(event.operation, Operation::CreateWorkbook { .. })
+            } else {
+                matches!(
+                    event.operation,
+                    Operation::SetCellValues { .. } | Operation::SetCellFormula { .. }
+                )
+            };
+            if !permitted
+                || event.document_id != document_id
+                || event.principal != principal
+                || event.version.get()
+                    != u64::try_from(index + 1).map_err(|_| JournalError::Corrupt)?
+                || !seen.insert(event.operation_id)
+            {
+                return Err(JournalError::Corrupt);
+            }
+            written_cells = written_cells
+                .checked_add(match &event.operation {
+                    Operation::SetCellValues { writes } => writes.len(),
+                    Operation::SetCellFormula { .. } => 1,
+                    _ => 0,
+                })
+                .ok_or(JournalError::PayloadTooLarge)?;
+            if written_cells > MAX_IMPORT_CELLS {
+                return Err(JournalError::PayloadTooLarge);
+            }
+            let encoded = codec::encode(event).map_err(|error| match error {
+                codec::CodecError::EventTooLarge => JournalError::PayloadTooLarge,
+                _ => JournalError::Corrupt,
+            })?;
+            encoded_bytes = encoded_bytes
+                .checked_add(encoded.len())
+                .ok_or(JournalError::PayloadTooLarge)?;
+            if encoded_bytes > MAX_IMPORT_ENCODED_BYTES {
+                return Err(JournalError::PayloadTooLarge);
+            }
+            candidate
+                .apply_event(event)
+                .map_err(|_| JournalError::Corrupt)?;
+            hashes.push(codec::event_hash(event).map_err(invalid)?);
+        }
+        let mut tx = self.pool.begin().await.map_err(error)?;
+        let member = sqlx::query!(
+            "SELECT role FROM memberships WHERE workspace_id=$1 AND user_id=$2 FOR UPDATE",
+            uuid(identity.workspace_id.as_bytes()),
+            uuid(identity.actor_id.as_bytes())
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(error)?
+        .ok_or(JournalError::Unauthorized)?;
+        if member.role != "owner" && member.role != "member" {
+            return Err(JournalError::Unauthorized);
+        }
+        let already = sqlx::query!(
+            "SELECT workspace_id FROM documents WHERE document_id=$1",
+            uuid(document_id.as_bytes())
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(error)?;
+        if already.is_some() {
+            let access = access_locked(&mut tx, identity, document_id).await?;
+            let rows = sqlx::query!(
+                "SELECT committed_version,operation_id,canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version<=$2 ORDER BY committed_version",
+                uuid(document_id.as_bytes()),
+                number(last.version.get())?
+            )
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(error)?;
+            if rows.len() != events.len()
+                || rows
+                    .iter()
+                    .zip(events.iter().zip(&hashes))
+                    .any(|(row, (event, hash))| {
+                        row.committed_version != event.version.get() as i64
+                            || row.operation_id != uuid(event.operation_id.as_bytes())
+                            || row.canonical_event_hash.as_slice() != hash
+                    })
+            {
+                return Err(JournalError::IdempotencyConflict);
+            }
+            tx.commit().await.map_err(error)?;
+            return Ok(CommitReceipt {
+                operation_id: last.operation_id,
+                committed_version: last.version,
+                canonical_event_hash: *hashes.last().ok_or(JournalError::Corrupt)?,
+                current_head_version: access.head,
+            });
+        }
+        sqlx::query!(
+            "INSERT INTO documents(document_id,workspace_id,head_version) VALUES($1,$2,$3)",
+            uuid(document_id.as_bytes()),
+            uuid(identity.workspace_id.as_bytes()),
+            number(last.version.get())?
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(error)?;
+        sqlx::query!("INSERT INTO document_permissions(workspace_id,document_id,user_id,role) VALUES($1,$2,$3,'owner')",uuid(identity.workspace_id.as_bytes()),uuid(document_id.as_bytes()),uuid(identity.actor_id.as_bytes())).execute(&mut *tx).await.map_err(error)?;
+        sqlx::query!("SET LOCAL synchronous_commit = on")
+            .execute(&mut *tx)
+            .await
+            .map_err(error)?;
+        let mut receipt = None;
+        for (index, event) in events.iter().enumerate() {
+            let fingerprint = if index == 0 {
+                codec::genesis_fingerprint(event)
+            } else {
+                *hashes.get(index).ok_or(JournalError::Corrupt)?
+            };
+            receipt = Some(insert(&mut tx, event, fingerprint).await?);
+        }
+        tx.commit().await.map_err(error)?;
+        receipt.ok_or(JournalError::Corrupt)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+    #[sqlx::test(migrations = false)]
+    async fn imported_events_publish_atomically_and_retry_exactly(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        let (db, identity, _) = fixture(pool).await?;
+        let document = DocumentId::from_bytes([21; 16])?;
+        let sheet = SheetId::from_bytes([22; 16])?;
+        let row = RowId::from_bytes([23; 16])?;
+        let column = ColumnId::from_bytes([24; 16])?;
+        let genesis_operation = Operation::CreateWorkbook {
+            sheet: SheetSeed {
+                id: sheet,
+                name: "Imported".into(),
+                rows: vec![row],
+                columns: vec![column],
+            },
+        };
+        let first =
+            Workbook::empty(document).candidate(&genesis_operation, DocumentVersion::new(1)?)?;
+        let genesis = CommittedEvent {
+            document_id: document,
+            operation_id: OperationId::from_bytes([25; 16])?,
+            principal: EventPrincipal::User(identity.actor_id),
+            version: first.version(),
+            operation: genesis_operation,
+            state_hash: first.hash(),
+        };
+        let address = CellAddress { sheet, row, column };
+        let write = |value| Operation::SetCellValues {
+            writes: vec![CellWrite {
+                address,
+                value: CellValue::Number(value),
+            }],
+        };
+        let content_operation = write(7.0);
+        let second = first.candidate(&content_operation, DocumentVersion::new(2)?)?;
+        let content = CommittedEvent {
+            document_id: document,
+            operation_id: OperationId::from_bytes([26; 16])?,
+            principal: EventPrincipal::User(identity.actor_id),
+            version: second.version(),
+            operation: content_operation,
+            state_hash: second.hash(),
+        };
+        let events = [genesis.clone(), content.clone()];
+        let receipt = db.create_imported(identity, &events).await?;
+        assert_eq!(receipt.committed_version, DocumentVersion::new(2)?);
+        assert_eq!(
+            db.load_events(identity, document, DocumentVersion::ZERO, 10)
+                .await?,
+            events
+        );
+        let retry = db.create_imported(identity, &events).await?;
+        assert_eq!(retry.canonical_event_hash, receipt.canonical_event_hash);
+        let changed_operation = write(8.0);
+        let changed = first.candidate(&changed_operation, DocumentVersion::new(2)?)?;
+        let changed_content = CommittedEvent {
+            operation: changed_operation,
+            state_hash: changed.hash(),
+            ..content
+        };
+        assert!(matches!(
+            db.create_imported(identity, &[genesis.clone(), changed_content])
+                .await,
+            Err(JournalError::IdempotencyConflict)
+        ));
+        sqlx::query("CREATE FUNCTION fail_import_second_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.committed_version=2 THEN RAISE EXCEPTION 'injected'; END IF; RETURN NEW; END $$")
+            .execute(&db.pool).await?;
+        sqlx::query("CREATE TRIGGER fail_import_second_event BEFORE INSERT ON document_operations FOR EACH ROW EXECUTE FUNCTION fail_import_second_event()")
+            .execute(&db.pool).await?;
+        let other = DocumentId::from_bytes([27; 16])?;
+        let mut failed_events = events;
+        let mut candidate = Workbook::empty(other);
+        for event in &mut failed_events {
+            event.document_id = other;
+            candidate = candidate.candidate(&event.operation, event.version)?;
+            event.state_hash = candidate.hash();
+        }
+        assert!(db.create_imported(identity, &failed_events).await.is_err());
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM documents WHERE document_id=$1")
+            .bind(uuid(other.as_bytes()))
+            .fetch_one(&db.pool)
+            .await?;
+        assert_eq!(count, 0);
+        Ok(())
+    }
     async fn fixture(
         pool: sqlx::PgPool,
     ) -> Result<(PgDatabase, AuthenticatedActor, Workbook), Box<dyn std::error::Error>> {

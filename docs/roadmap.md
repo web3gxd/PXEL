@@ -230,6 +230,13 @@ test и живой HTTP/WebSocket integration. Это ещё не import/edit/ex
 интерфейсе. Она недоступна, пока есть неподтверждённые операции, и сообщает
 viewer об отсутствии права на экспорт. Браузерный download проверяется при
 DPR 1/2; импорт и полный phase-6 gate остаются открытыми.
+Восьмой срез ([ADR-049](adr/049-atomic-local-xlsx-document-import.md))
+публикует один scalar-лист через локальную dev-auth CLI. Parent валидирует
+worker IR, сервер связывает формулы, а PostgreSQL одной транзакцией сохраняет
+создание документа, owner permission, версии 1..N и все события. Живой
+integration test проверяет импорт, HTTP replay и owner export; двухлистовой
+fixture отвергается целиком. Публичная загрузка, OS sandbox, malware scan,
+стили, compatibility report и полный import/edit/export/reimport gate открыты.
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU

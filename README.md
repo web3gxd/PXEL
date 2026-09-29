@@ -41,6 +41,18 @@ cargo run --locked -q -p pxel-server -- xlsx-preview fixtures/xlsx/minimal_scala
 `GET /api/documents/{id}/export.xlsx`; подготовка файла аудируется до ответа.
 Стили, даты, merges и проверенная Excel-совместимость пока не входят в этот срез.
 
+Для локального dev-стенда одно-листовой scalar XLSX можно атомарно превратить
+в новый документ после `just infra-up`/`just infra-native`. Возьмите opaque
+`workspace_id` и `actor_id` из `GET /api/dev/identity` своей dev-сессии:
+
+```sh
+PXEL_DEV_AUTH=1 cargo run --locked -q -p pxel-server --features dev-auth -- xlsx-import fixtures/xlsx/single_sheet_scalars.xlsx <workspace_id> <actor_id>
+```
+
+Команда проверяет членство в workspace в PostgreSQL, печатает только ID нового
+документа, версию и число событий. Два листа и неподдержанные свойства пока
+отклоняются; веб-загрузка будет добавлена после OS sandbox и import report.
+
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Нужны wasm32 target, wasm-bindgen-cli **0.2.129** и установленный Playwright Chromium.
 Команда собирает WASM из исходников; generated binaries не хранятся в Git.
