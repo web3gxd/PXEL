@@ -57,6 +57,10 @@ bundle: 20 reloads дали p95 64.4 ms от navigation и 18.8 ms после do
 14.58 MB JSON) измерена отдельно: два runs по 20 reloads, худший p95
 442.8 ms после document GET, максимум 107 DOM nodes. Persisted large-book
 path этим не проверен; [отчёт](benchmarks/2026-09-29-render-sparse-local.md).
+Создание domain-книги с 100,000 стабильных row IDs отдельно измерено Criterion:
+два локальных runs дали интервалы 6.77–7.90 ms; память и snapshots этим не
+измерялись. Criterion показал разницу со старым baseline, но причина без
+контролируемого A/B неизвестна; [условия](benchmarks/2026-09-29-axis-allocation-local.md).
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU

@@ -1,5 +1,22 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — замер создания оси на 100,000 стабильных строк
+
+Перед замером проверены ADR-002, существующий `workbook` Criterion harness и
+другие benchmark reports. Без изменения production-кода выполнены два runs
+`cargo bench --locked -p spreadsheet-domain --features test-support --bench
+workbook axis_allocation -- --sample-size 10`. Первый проход с idle dev server
+дал 7.1798–7.9022 ms для 100,000 строк и 30.625–33.905 µs для 1,000 строк;
+после остановки сервера второй дал 6.7701–7.5430 ms и 32.594–34.945 µs.
+Это 95% Criterion estimates, не UI p95. Criterion отметил отличие от более
+старого локального baseline, но два текущих runs статистически не различались
+для 100,000 строк (`p=0.10`). Причина старой разницы не установлена; код оси
+не оптимизировался. Условия и границы записаны в
+[отчёте](docs/benchmarks/2026-09-29-axis-allocation-local.md). Memory footprint,
+persisted snapshot и controlled A/B не измерялись.
+
+---
+
 ## 2026-09-29 — сетевой convergence сценарий со структурной операцией
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-019 и текущий WebSocket test
