@@ -58,6 +58,15 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                 before_row_id: before.as_bytes().to_vec(),
                 rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
             }),
+            Operation::InsertRowsRebased {
+                sheet,
+                before,
+                rows,
+            } => Kind::InsertRowsRebased(v1::InsertRows {
+                sheet_id: sheet.as_bytes().to_vec(),
+                before_row_id: before.as_bytes().to_vec(),
+                rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
+            }),
             Operation::SetCellFormula { address, formula } => {
                 Kind::SetCellFormula(v1::SetCellFormula {
                     address: Some(addr(address)),
@@ -163,7 +172,12 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                 rows,
             }
         }
-        Kind::InsertRows(insertion) => {
+        kind @ (Kind::InsertRows(_) | Kind::InsertRowsRebased(_)) => {
+            let rebased = matches!(kind, Kind::InsertRowsRebased(_));
+            let insertion = match kind {
+                Kind::InsertRows(insertion) | Kind::InsertRowsRebased(insertion) => insertion,
+                _ => return Err(CodecError::Invalid),
+            };
             if insertion.rows.is_empty() || insertion.rows.len() > 1_000 {
                 return Err(CodecError::Invalid);
             }
@@ -181,12 +195,22 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
             {
                 return Err(CodecError::Invalid);
             }
-            Operation::InsertRows {
-                sheet: SheetId::from_bytes(id(&insertion.sheet_id)?)
-                    .map_err(|_| CodecError::Invalid)?,
-                before: RowId::from_bytes(id(&insertion.before_row_id)?)
-                    .map_err(|_| CodecError::Invalid)?,
-                rows,
+            let sheet =
+                SheetId::from_bytes(id(&insertion.sheet_id)?).map_err(|_| CodecError::Invalid)?;
+            let before = RowId::from_bytes(id(&insertion.before_row_id)?)
+                .map_err(|_| CodecError::Invalid)?;
+            if rebased {
+                Operation::InsertRowsRebased {
+                    sheet,
+                    before,
+                    rows,
+                }
+            } else {
+                Operation::InsertRows {
+                    sheet,
+                    before,
+                    rows,
+                }
             }
         }
         Kind::SetCellFormula(v) => {
@@ -218,6 +242,7 @@ pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
         Operation::ExtendRows { .. } => 4,
         Operation::InsertRows { .. } => 5,
+        Operation::InsertRowsRebased { .. } => 6,
         Operation::AdvanceCalculationEpoch { .. } => 3,
         Operation::SetCellFormula { .. } => 2,
         _ => 1,
@@ -250,7 +275,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=5) {
+    if !matches!(e.schema_version, 1..=6) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -266,11 +291,11 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         e.actor_id.as_slice(),
         &operation,
     ) {
-        (1 | 2 | 4 | 5, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
+        (1 | 2 | 4 | 5 | 6, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5, 0, actor, _) => {
+        (1 | 2 | 4 | 5 | 6, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -337,8 +362,17 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
             sheet,
             before,
             rows,
+        }
+        | Operation::InsertRowsRebased {
+            sheet,
+            before,
+            rows,
         } => {
-            h.update([6]);
+            h.update([if matches!(o, Operation::InsertRowsRebased { .. }) {
+                7
+            } else {
+                6
+            }]);
             h.update(sheet.as_bytes());
             h.update(before.as_bytes());
             h.update((rows.len() as u64).to_le_bytes());
@@ -471,6 +505,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::SetCellFormula { .. })
         | (EventPrincipal::System, Operation::ExtendRows { .. })
         | (EventPrincipal::System, Operation::InsertRows { .. })
+        | (EventPrincipal::System, Operation::InsertRowsRebased { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
         (EventPrincipal::System, _) => h.update(b"PXEL-EVENT-SYSTEM-1"),
@@ -894,6 +929,19 @@ mod formula_tests {
         let envelope = v1::EventEnvelope::decode(encoded.as_slice())?;
         assert_eq!(envelope.schema_version, 5);
         assert_eq!(decode(&encoded)?, event);
+        let rebased = CommittedEvent {
+            operation: Operation::InsertRowsRebased {
+                sheet,
+                before,
+                rows: rows.clone(),
+            },
+            ..event.clone()
+        };
+        let rebased_bytes = encode(&rebased)?;
+        let rebased_envelope = v1::EventEnvelope::decode(rebased_bytes.as_slice())?;
+        assert_eq!(rebased_envelope.schema_version, 6);
+        assert_eq!(decode(&rebased_bytes)?, rebased);
+        assert_ne!(event_hash(&event)?, event_hash(&rebased)?);
         let mut command = Command {
             document_id: event.document_id,
             operation_id: event.operation_id,

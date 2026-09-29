@@ -309,6 +309,13 @@ pub enum Operation {
         before: RowId,
         rows: Vec<RowId>,
     },
+    /// Persisted schema 6: same axis action plus deterministic rebasing of
+    /// every bound formula's relative row offset at the new document version.
+    InsertRowsRebased {
+        sheet: SheetId,
+        before: RowId,
+        rows: Vec<RowId>,
+    },
     SetCellValue {
         address: CellAddress,
         value: CellValue,
@@ -609,15 +616,25 @@ impl Workbook {
         }
         let budgets = self.operation_budgets(operation)?;
         let mut next = self.clone();
-        next.apply_operation(operation, budgets)?;
+        next.apply_operation(operation, budgets, next_version)?;
         next.version = next_version;
         if matches!(
             operation,
             Operation::CreateWorkbook { .. }
                 | Operation::ExtendRows { .. }
                 | Operation::InsertRows { .. }
+                | Operation::InsertRowsRebased { .. }
         ) {
             next.last_axis_change_version = next_version;
+        }
+        if matches!(operation, Operation::InsertRowsRebased { .. }) {
+            for sheet in &next.sheets {
+                for (address, content) in &sheet.cells {
+                    if let CellContent::Formula(formula) = content {
+                        next.validate_formula(*address, formula)?;
+                    }
+                }
+            }
         }
         Ok(next)
     }
@@ -643,6 +660,7 @@ impl Workbook {
                 Operation::CreateWorkbook { .. } => return Err(DomainError::VersionConflict),
                 Operation::ExtendRows { .. } => return Err(DomainError::VersionConflict),
                 Operation::InsertRows { .. } => return Err(DomainError::VersionConflict),
+                Operation::InsertRowsRebased { .. } => return Err(DomainError::VersionConflict),
                 Operation::AdvanceCalculationEpoch { .. } => {
                     return Err(DomainError::VersionConflict);
                 }
@@ -658,7 +676,7 @@ impl Workbook {
         next.version = target_version;
         for operation in operations {
             let budgets = next.operation_budgets(operation)?;
-            next.apply_operation(operation, budgets)?;
+            next.apply_operation(operation, budgets, target_version)?;
         }
         Ok(next)
     }
@@ -699,6 +717,22 @@ impl Workbook {
                 }
                 (self.text_bytes, self.ast_memory_bytes)
             }
+            Operation::InsertRowsRebased {
+                sheet,
+                before,
+                rows,
+            } => {
+                let target = self
+                    .sheets
+                    .iter()
+                    .find(|current| current.id == *sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                target
+                    .row_position(*before)
+                    .ok_or(DomainError::MissingRow)?;
+                target.validate_row_extension(rows)?;
+                (self.text_bytes, self.ast_memory_bytes)
+            }
             Operation::AdvanceCalculationEpoch { context } => {
                 let expected_epoch = self
                     .calculation_context
@@ -730,6 +764,7 @@ impl Workbook {
         &mut self,
         operation: &Operation,
         (text_bytes, ast_memory_bytes): (usize, usize),
+        next_version: DocumentVersion,
     ) -> Result<(), DomainError> {
         match operation {
             Operation::AdvanceCalculationEpoch { context } => {
@@ -757,6 +792,11 @@ impl Workbook {
                 sheet,
                 before,
                 rows,
+            }
+            | Operation::InsertRowsRebased {
+                sheet,
+                before,
+                rows,
             } => {
                 let target = self
                     .sheets
@@ -775,6 +815,35 @@ impl Workbook {
                     .enumerate()
                     .map(|(index, id)| (id, index as u32))
                     .collect();
+                if matches!(operation, Operation::InsertRowsRebased { .. }) {
+                    let mut replacements = Vec::new();
+                    for (index, sheet) in self.sheets.iter().enumerate() {
+                        for (address, content) in &sheet.cells {
+                            let CellContent::Formula(formula) = content else {
+                                continue;
+                            };
+                            let origin_position = sheet
+                                .row_position(address.row)
+                                .ok_or(DomainError::MissingRow)?;
+                            let rebased = formula
+                                .rebase_row_offsets(next_version, origin_position, |id, row| {
+                                    self.sheets
+                                        .iter()
+                                        .find(|sheet| sheet.id == id)
+                                        .and_then(|sheet| sheet.row_position(row))
+                                })
+                                .map_err(|_| DomainError::InvalidFormula)?;
+                            replacements.push((index, *address, rebased));
+                        }
+                    }
+                    for (index, address, formula) in replacements {
+                        let sheet = self
+                            .sheets
+                            .get_mut(index)
+                            .ok_or(DomainError::MissingSheet)?;
+                        sheet.cells.insert(address, CellContent::Formula(formula));
+                    }
+                }
             }
             Operation::SetCellValue { address, value } => {
                 let normalized = value.normalized()?;

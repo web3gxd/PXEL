@@ -1,5 +1,7 @@
 use proptest::prelude::*;
-use spreadsheet_domain::formula::{AST_SCHEMA_VERSION, BoundAst, Formula, Node, NodeId};
+use spreadsheet_domain::formula::{
+    AST_SCHEMA_VERSION, AxisReferenceMode, BoundAst, BoundCellReference, Formula, Node, NodeId,
+};
 use spreadsheet_domain::workbook::*;
 
 fn seed() -> Result<(Workbook, CellAddress), DomainError> {
@@ -143,6 +145,104 @@ fn insert_rows_rejects_formulas_until_reference_transformation_exists() -> Resul
         Err(DomainError::UnsupportedStructuralDependency)
     );
     assert_eq!(with_formula.hash(), original_hash);
+    Ok(())
+}
+
+#[test]
+fn rebased_insertion_preserves_target_and_replays_relative_delta() -> Result<(), DomainError> {
+    let (book, first) = seed()?;
+    let middle = RowId::from_bytes([21; 16])?;
+    let last = RowId::from_bytes([22; 16])?;
+    let book = book.candidate(
+        &Operation::ExtendRows {
+            sheet: first.sheet,
+            rows: vec![middle, last],
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let origin = CellAddress { row: last, ..first };
+    let reference = BoundCellReference {
+        target_sheet: first.sheet,
+        target_row: first.row,
+        target_column: first.column,
+        row_mode: AxisReferenceMode::Relative { original_delta: -2 },
+        column_mode: AxisReferenceMode::Relative { original_delta: 0 },
+    };
+    let ast = BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Cell(reference)])
+        .map_err(|_| DomainError::InvalidFormula)?;
+    let formula = Formula::new("=A1".into(), "=A1".into(), ast, origin, book.version())
+        .map_err(|_| DomainError::InvalidFormula)?;
+    let with_formula = book.candidate(
+        &Operation::SetCellFormula {
+            address: origin,
+            formula,
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let operation = Operation::InsertRowsRebased {
+        sheet: first.sheet,
+        before: middle,
+        rows: vec![RowId::from_bytes([23; 16])?],
+    };
+    let next = with_formula.candidate(&operation, DocumentVersion::new(4)?)?;
+    let CellContent::Formula(rebased) = next.sheets()[0]
+        .cells()
+        .get(&origin)
+        .ok_or(DomainError::InvalidFormula)?
+    else {
+        return Err(DomainError::InvalidFormula);
+    };
+    assert_eq!(rebased.source(), "=A1");
+    assert_eq!(rebased.bound_at_version().get(), 4);
+    assert!(matches!(&rebased.ast().nodes()[0], Node::Cell(reference)
+        if reference.target_row == first.row
+        && reference.row_mode == AxisReferenceMode::Relative { original_delta: -3 }));
+    let mut replay = with_formula;
+    replay.apply_event(&CommittedEvent {
+        document_id: next.document_id(),
+        operation_id: OperationId::from_bytes([24; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([25; 16])?),
+        version: DocumentVersion::new(4)?,
+        operation,
+        state_hash: next.hash(),
+    })?;
+    assert_eq!(replay.hash(), next.hash());
+    Ok(())
+}
+
+#[test]
+fn rebase_uses_target_sheet_axis_for_cross_sheet_reference() -> Result<(), DomainError> {
+    let (_, origin) = seed()?;
+    let target_sheet = SheetId::from_bytes([31; 16])?;
+    let target_row = RowId::from_bytes([32; 16])?;
+    let target_column = ColumnId::from_bytes([33; 16])?;
+    let reference = BoundCellReference {
+        target_sheet,
+        target_row,
+        target_column,
+        row_mode: AxisReferenceMode::Relative { original_delta: 1 },
+        column_mode: AxisReferenceMode::Absolute,
+    };
+    let ast = BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Cell(reference)])
+        .map_err(|_| DomainError::InvalidFormula)?;
+    let formula = Formula::new(
+        "='Other'!$A2".into(),
+        "='Other'!$A2".into(),
+        ast,
+        origin,
+        DocumentVersion::new(1)?,
+    )
+    .map_err(|_| DomainError::InvalidFormula)?;
+    let rebased = formula
+        .rebase_row_offsets(DocumentVersion::new(2)?, 2, |sheet, row| {
+            (sheet == target_sheet && row == target_row).then_some(4)
+        })
+        .map_err(|_| DomainError::InvalidFormula)?;
+    assert!(matches!(&rebased.ast().nodes()[0], Node::Cell(reference)
+        if reference.target_sheet == target_sheet
+        && reference.target_row == target_row
+        && reference.row_mode == AxisReferenceMode::Relative { original_delta: 2 }
+        && reference.column_mode == AxisReferenceMode::Absolute));
     Ok(())
 }
 

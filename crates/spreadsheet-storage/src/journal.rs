@@ -263,6 +263,11 @@ impl OperationJournal for PgDatabase {
                 sheet,
                 before,
                 rows,
+            }
+            | Operation::InsertRowsRebased {
+                sheet,
+                before,
+                rows,
             } => CommandPayload::InsertRows {
                 sheet: *sheet,
                 before: *before,
@@ -407,7 +412,7 @@ impl OperationJournal for PgDatabase {
         let mut events = Vec::with_capacity(rows.len());
         let mut expected = after.get();
         for r in rows {
-            if !matches!(r.schema_version, 1..=5) {
+            if !matches!(r.schema_version, 1..=6) {
                 return Err(JournalError::UnsupportedSchema);
             }
             if codec::checksum(&r.payload).as_slice() != r.payload_checksum {

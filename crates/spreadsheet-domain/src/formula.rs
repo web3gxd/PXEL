@@ -376,6 +376,45 @@ pub struct Formula {
     profile: CompatibilityProfile,
 }
 impl Formula {
+    /// Rebase only relative row copy offsets after a stable-ID-preserving axis
+    /// change. Authored text stays immutable; the current A1 view is rendered
+    /// from targets and axes by the formula adapter.
+    pub fn rebase_row_offsets(
+        &self,
+        next_version: DocumentVersion,
+        origin_row_position: u32,
+        row_position: impl Fn(SheetId, RowId) -> Option<u32>,
+    ) -> Result<Self, FormulaValidationError> {
+        let mut nodes = self.ast.nodes().to_vec();
+        let rebase = |reference: &mut BoundCellReference| -> Result<(), FormulaValidationError> {
+            if let AxisReferenceMode::Relative { .. } = reference.row_mode {
+                let target = row_position(reference.target_sheet, reference.target_row)
+                    .ok_or(FormulaValidationError::InvalidReference)?;
+                reference.row_mode = AxisReferenceMode::Relative {
+                    original_delta: i64::from(target) - i64::from(origin_row_position),
+                };
+            }
+            Ok(())
+        };
+        for node in &mut nodes {
+            match node {
+                Node::Cell(reference) => rebase(reference)?,
+                Node::Range(reference) => {
+                    rebase(&mut reference.start)?;
+                    rebase(&mut reference.end)?;
+                }
+                _ => {}
+            }
+        }
+        let ast = BoundAst::new(self.ast.schema_version(), self.ast.root(), nodes)?;
+        Self::new(
+            self.source.clone(),
+            self.canonical.clone(),
+            ast,
+            self.origin,
+            next_version,
+        )
+    }
     /// Architecture-independent conservative charge, not allocator instrumentation.
     /// Nodes cost 256 bytes each, argument handles 4 bytes, plus AST-owned text.
     pub fn ast_memory_bytes(&self) -> usize {

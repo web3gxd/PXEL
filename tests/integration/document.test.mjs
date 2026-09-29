@@ -234,7 +234,7 @@ test('appending rows preserves an existing formula target and calculated value',
   }
 });
 
-test('row insertion uses stable anchors, server order and rejects unsupported formula transforms', async () => {
+test('row insertion uses stable anchors, server order and rebases formulas', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);
   const left = await connect(base, cookie);
@@ -273,7 +273,7 @@ test('row insertion uses stable anchors, server order and rejects unsupported fo
     assert.equal(staleCell.case, 'committed');
     assert.equal(staleCell.value.committedVersion, 5n);
     const formula = await left.send(
-      formulaCommand(left, { ...snapshot, version: '5' }, '=A1', {
+      formulaCommand(left, { ...snapshot, version: '5' }, '=A4', {
         row: 0,
         column: 1,
         sequence: 4,
@@ -281,14 +281,21 @@ test('row insertion uses stable anchors, server order and rejects unsupported fo
     );
     assert.equal(formula.case, 'committed');
     assert.equal(formula.value.committedVersion, 6n);
-    const denied = await left.send(
+    const transformed = await left.send(
       insertRowsCommand(left, { ...snapshot, version: '6' }, anchor, [uuid7()], { sequence: 5 }),
     );
-    assert.equal(denied.case, 'rejected');
-    assert.equal(denied.value.code, 12);
+    assert.equal(transformed.case, 'committed');
+    assert.equal(transformed.value.committedVersion, 7n);
     const current = await getDocument(base, cookie, snapshot.document_id);
-    assert.equal(current.version, '6');
+    assert.equal(current.version, '7');
     assert.equal(current.sheets[0].cells.find((cell) => cell.row_id === anchor)?.value.value, 100);
+    const rendered = current.sheets[0].cells.find(
+      (cell) =>
+        cell.row_id === snapshot.sheets[0].rows[0] &&
+        cell.column_id === snapshot.sheets[0].columns[1],
+    )?.value.value;
+    assert.equal(rendered.source, '=A4');
+    assert.equal(rendered.current_text, '=A5');
   } finally {
     left.socket.close();
     right.socket.close();

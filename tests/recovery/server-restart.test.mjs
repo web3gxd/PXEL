@@ -149,20 +149,33 @@ test(
         );
         const { snapshot: insertionBase } = await createDocument(base, cookie);
         const insertionWriter = await connect(base, cookie);
+        const referenceFormula = await insertionWriter.send(
+          formulaCommand(insertionWriter, insertionBase, '=A2', { column: 1, sequence: 1 }),
+        );
+        assert.equal(referenceFormula.case, 'committed');
         const newRow = uuid7();
         const insertion = await insertionWriter.send(
-          insertRowsCommand(insertionWriter, insertionBase, insertionBase.sheets[0].rows[1], [
-            newRow,
-          ]),
+          insertRowsCommand(
+            insertionWriter,
+            { ...insertionBase, version: '2' },
+            insertionBase.sheets[0].rows[1],
+            [newRow],
+            { sequence: 2 },
+          ),
         );
         assert.equal(insertion.case, 'committed');
         insertionWriter.socket.terminate();
         await kill();
         await start();
         const insertedRecovery = await getDocument(base, cookie, insertionBase.document_id);
-        assert.equal(insertedRecovery.version, '2');
+        assert.equal(insertedRecovery.version, '3');
         assert.equal(insertedRecovery.sheets[0].rows[1], newRow);
         assert.equal(insertedRecovery.sheets[0].rows[2], insertionBase.sheets[0].rows[1]);
+        const recoveredFormula = insertedRecovery.sheets[0].cells.find(
+          (cell) => cell.value.type === 'formula',
+        )?.value.value;
+        assert.equal(recoveredFormula?.source, '=A2');
+        assert.equal(recoveredFormula?.current_text, '=A3');
         assert.equal(
           insertedRecovery.state_hash,
           Buffer.from(insertion.value.confirmedStateHash).toString('hex'),

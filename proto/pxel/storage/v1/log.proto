@@ -24,6 +24,7 @@ message Operation {
   AdvanceCalculationEpoch advance_calculation_epoch = 5;
   ExtendRows extend_rows = 6;
   InsertRows insert_rows = 7;
+  InsertRows insert_rows_rebased = 8;
  }
 }
 message AdvanceCalculationEpoch {

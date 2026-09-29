@@ -1,5 +1,64 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — schema-6 row insertion with formula rebase
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-002/020, formula semantics,
+collaboration contract и текущий путь domain → codec → journal → actor → HTTP/UI.
+Цель: разрешить вставку строки в книге с формулами без потери stable targets,
+copy offsets или восстановления после сбоя. Инварианты: candidate до CAS,
+неизменность старых schema-5 событий, server-authoritative адреса и hash,
+отказ до COMMIT при превышении формульных лимитов. Риск: все формулы пока
+перебираются при структурной операции; многолистовые fixtures отсутствуют.
+
+Новые команды `InsertRows` нормализуются в отдельную durable операцию
+`InsertRowsRebased` schema 6. Domain сначала вставляет row ID, затем для каждой
+формулы пересчитывает relative row delta по stable target и новому origin,
+проверяет диапазоны и выводимый A1-текст. Абсолютные row modes и целевые IDs
+не меняются. Старые schema-5 события сохраняют прежний formula-free guard;
+их protobuf bytes и semantic hash не переписываются. SQL migration 006
+разрешает schema 6 для user events. Calculation graph после commit строится
+заново. HTTP projection теперь содержит `current_text`, полученный из bound
+AST и актуальных осей; UI использует его для редактора и WASM preview только
+если он отличается от сохранённого canonical text, иначе сохраняет исходный
+авторский ввод. Решение и миграция описаны в ADR-021; обновлены ADR-020,
+collaboration/roadmap и слайды 6, 9, 10.
+
+Реально выполнено: `pnpm proto:generate`; `cargo run --locked -p pxel-server
+--features dev-auth -- migrate` (migration 006 применена к локальной БД);
+domain test с replay hash/relative delta; codec test schema 5/6 round-trip;
+`pnpm test:integration` 31/31 на настоящем PostgreSQL/WebSocket;
+`pnpm test:e2e` 24/24 на built Axum assets при DPR 1/2;
+`pnpm test:recovery` 1/1 с hard restart после formula + insertion;
+`just check` pass после форматирования; `just sqlx-check` pass.
+Дополнительный browser test изменённого A1 в formula bar после вставки и
+reload прошёл 2/2 при DPR 1/2; полный browser suite после его добавления не
+повторялся. Pure domain test проверил lookup cross-sheet target ID; реальной
+многолистовой книги в MVP пока нет. Последний `just check` включал 57/57
+Vitest tests; `pnpm format:check`, `git diff --check` и presentation check
+после документационных правок прошли.
+Первый `just check` остановился только на Prettier для двух изменённых JS/TS
+файлов; после `prettier --write` прошёл. Первый полный browser suite выявил,
+что редактор показывал canonical text вместо исходной формулы после reload;
+выбор `current_text` ограничен случаями изменённого A1-представления, повторный
+suite прошёл. Тесты не удалялись, assertion не ослаблялись.
+
+Criterion harness `insert_middle_10000_formulas`: 3 s warm-up, 10 s target,
+10 samples/825 timed iterations; 95% estimate 12.078–13.443 ms, point
+12.681 ms для domain candidate на Windows/Ultra 9 185H. Без БД, сети и UI;
+[полные условия](docs/benchmarks/2026-09-29-formula-insertion-local.md).
+`pnpm --filter @pxel/web presentation:check` прошёл 10/10 слайдов на
+1440×900 и 390×844 после изменения текста.
+Ограничения: multi-sheet structural fixture, удаление/колонки, copy/move,
+undo, snapshots и XLSX не реализованы; phase-4 gate остаётся открытым.
+Следующий минимальный срез — typed DeleteRows с `#REF!` для удалённых targets
+и тестами convergence/recovery, затем copy/paste/undo.
+Перед коммитом просмотрены тесты и diff по пяти осям: корректность (versioned
+replay и preserved stable target), читаемость, crate boundaries, авторизация/
+данные логов и стоимость scan. Блокирующих замечаний после исправления
+регрессии authored source не осталось; известные границы указаны выше.
+
+---
+
 ## 2026-09-29 — read-only A1 rendering from stable formula references
 
 Для следующего среза фазы 4 прочитаны AGENTS, roadmap, ADR-020 и код

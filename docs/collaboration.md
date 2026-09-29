@@ -25,12 +25,13 @@ projection после структурного события. `last_axis_change
 Это консервативное ограничение снимается только вместе с проверенным binding
 и transformation для insert/delete.
 
-`InsertRows` (ADR-020) уже использует stable row anchor, а не позицию клиента.
-Два append-before одного anchor сохраняются в server commit order. Пока
-отсутствует трансформация текста формул и relative deltas, весь command
-отклоняется typed `UnsupportedStructuralDependency` при любой формуле в книге;
-обычные stable-ID правки значений проходят через вставку. Это временный
-функциональный предел, а не заявленная Excel-совместимость вставки.
+`InsertRows` (ADR-020/021) использует stable row anchor, а не позицию клиента.
+Два append-before одного anchor сохраняются в server commit order. Новое
+schema-6 событие до CAS пересчитывает относительные row deltas всех формул,
+а текущий A1-текст выводится из stable targets. Историческое schema-5 событие
+сохраняет formula-free guard. Новый formula command со старой base axis version
+по-прежнему требует resync: историческая axis projection для binding пока
+не реализована. Это не заявленная полная Excel-совместимость структуры.
 
 ## Command, validation, event, projection
 

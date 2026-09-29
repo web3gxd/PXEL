@@ -263,9 +263,7 @@ test('insert row before selection keeps the authored value on its stable row aft
   await expect(bar).toHaveValue('42');
 });
 
-test('insertion with formulas reports a typed limitation without changing the document', async ({
-  page,
-}) => {
+test('insertion with formulas retains the formula on its stable row', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
   await page.getByRole('button', { name: 'Создать таблицу' }).click();
@@ -277,13 +275,44 @@ test('insertion with formulas reports a typed limitation without changing the do
   await bar.press('Enter');
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await page.getByRole('button', { name: 'Строка ↑' }).click();
-  await expect(page.getByRole('alert')).toContainText('нужен перенос ссылок');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const response = await page.request.get(`/api/documents/${id}`);
   expect(response.ok()).toBe(true);
   const projection = await response.json();
-  expect(projection.version).toBe('2');
-  expect(projection.sheets[0].rows).toHaveLength(1000);
-  expect(projection.sheets[0].cells[0].value.value.source).toBe('=1');
+  expect(projection.version).toBe('3');
+  expect(projection.sheets[0].rows).toHaveLength(1001);
+  expect(projection.sheets[0].cells[0].row_id).toBe(projection.sheets[0].rows[1]);
+  expect(projection.sheets[0].cells[0].value.value.current_text).toBe('=1');
+  await page.reload();
+  await page.getByRole('region', { name: 'Область таблицы' }).focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(bar).toHaveValue('=1');
+});
+
+test('formula bar follows a shifted stable target after row insertion', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await grid.focus();
+  await page.keyboard.press('ArrowRight');
+  await bar.fill('=A2');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.getByRole('button', { name: 'Строка ↑' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(bar).toHaveValue('=A3');
+  await page.reload();
+  await grid.focus();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await expect(bar).toHaveValue('=A3');
 });
 
 test('two tabs converge after one tab disconnects during a remote edit', async ({ page }) => {

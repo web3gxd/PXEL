@@ -246,7 +246,9 @@
           <a href="../docs/benchmarks/2026-09-29-render-sparse-local.md">Замер</a>. Optimistic
           Canvas draw: худший p95 14,9 мс в пяти сериях по 100 правок при удержанной отправке
           WebSocket; серверная версия не менялась.
-          <a href="../docs/benchmarks/2026-09-29-optimistic-local.md">Замер</a>.
+          <a href="../docs/benchmarks/2026-09-29-optimistic-local.md">Замер</a>. Вставка среди 10
+          000 формул: 12,08–13,44 мс для domain candidate, без БД и сети.
+          <a href="../docs/benchmarks/2026-09-29-formula-insertion-local.md">Условия</a>.
         </p>
         <p class="metric-footnote">
           Замеры относятся к указанным локальным стендам, не являются SLA. Условия:
@@ -342,15 +344,15 @@
           </div>
           <div class="doing">
             <b>04</b><span>Структура</span
-            ><small>ExtendRows + вставка без формул; transform/delete/undo впереди</small>
+            ><small>Вставка с формулами и replay; delete/copy/undo впереди</small>
           </div>
           <div><b>05</b><span>Snapshots</span><small>S3 + recovery</small></div>
           <div><b>06</b><span>XLSX</span><small>импорт и экспорт</small></div>
         </div>
         <p class="roadmap-note">
           Презентация обновляется после проверенных срезов. `ExtendRows` автоматически расширяет
-          Canvas; вставка по stable ID сохраняет значения, но при формулах пока отклоняется. Очередь
-          отправки ограничена 160 кадрами / 2 MiB. Локальные latency и paused-socket stress
+          Canvas; вставка по stable ID теперь пересчитывает относительные ссылки формул до COMMIT.
+          Очередь отправки ограничена 160 кадрами / 2 MiB. Локальные latency и paused-socket stress
           измерены: медленный клиент закрыт после send timeout. Cross-host поведение и сетевой queue
           overflow ещё открыты. Linux/Compose/remote CI — отдельные gates.
         </p>
@@ -365,7 +367,8 @@
         <p class="lead">
           Сейчас главное: завершить сетевые convergence tests и измерить backpressure по этапам.
           Ограниченный replay, отзыв прав, reconnect, локальный slow-reader stress и первый срез
-          структуры проверены. Дальше — insert/delete с трансформацией ссылок, snapshots и XLSX.
+          структуры проверены. Вставка строк с формулами и восстановление после сбоя проверены;
+          дальше — удаление/копирование, snapshots и XLSX.
         </p>
         <div class="closing-links">
           <a href="../README.md"><span>Начать локально</span><b>README ↗</b></a>

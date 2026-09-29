@@ -972,4 +972,22 @@ describe('formula intents and versioned server calculation', () => {
     cell.value.value.ast_schema = 99;
     expect(() => decodeProjection(p)).toThrow();
   });
+  it('uses shifted A1 text for editing but preserves authored input otherwise', () => {
+    const unchanged = formulaProjection();
+    const first = unchanged.sheets[0]?.cells[0];
+    if (first?.value.type !== 'formula') throw new Error('Missing fixture');
+    first.value.value.current_text = '=(1+2)';
+    const original = decodeProjection(unchanged).sheets[0]?.cells[0]?.value;
+    expect(original?.type === 'formula' && original.value.source).toBe('=1+2');
+
+    const shifted = formulaProjection();
+    const second = shifted.sheets[0]?.cells[0];
+    if (second?.value.type !== 'formula') throw new Error('Missing fixture');
+    second.value.value.source = '=A2';
+    second.value.value.canonical = '=A2';
+    second.value.value.current_text = '=A3';
+    const resolved = decodeProjection(shifted).sheets[0]?.cells[0]?.value;
+    expect(resolved?.type === 'formula' && resolved.value.source).toBe('=A3');
+    expect(resolved?.type === 'formula' && resolved.value.authored_source).toBe('=A2');
+  });
 });

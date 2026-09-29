@@ -1,4 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
+use spreadsheet_domain::formula::{
+    AST_SCHEMA_VERSION, AxisReferenceMode, BoundAst, BoundCellReference, Formula, Node, NodeId,
+};
 use spreadsheet_domain::workbook::*;
 use std::hint::black_box;
 
@@ -83,6 +86,46 @@ fn text_budget_fixture() -> Result<(Workbook, Operation, DocumentVersion), Domai
     ))
 }
 
+fn formula_insertion_fixture(count: usize) -> Result<(Workbook, Operation), DomainError> {
+    let seed = sheet_seed(count + 1)?;
+    let version = DocumentVersion::new(1)?;
+    let cells = seed
+        .rows
+        .iter()
+        .enumerate()
+        .take(count)
+        .map(|(index, &row)| {
+            let address = CellAddress {
+                sheet: seed.id,
+                row,
+                column: seed.columns[0],
+            };
+            let reference = BoundCellReference {
+                target_sheet: seed.id,
+                target_row: seed.rows[0],
+                target_column: seed.columns[0],
+                row_mode: AxisReferenceMode::Relative {
+                    original_delta: -(index as i64),
+                },
+                column_mode: AxisReferenceMode::Relative { original_delta: 0 },
+            };
+            let ast = BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Cell(reference)])
+                .map_err(|_| DomainError::InvalidFormula)?;
+            let formula = Formula::new("=A1".into(), "=A1".into(), ast, address, version)
+                .map_err(|_| DomainError::InvalidFormula)?;
+            Ok((address, CellContent::Formula(formula)))
+        })
+        .collect::<Result<Vec<_>, DomainError>>()?;
+    let operation = Operation::InsertRowsRebased {
+        sheet: seed.id,
+        before: seed.rows[count / 2],
+        rows: vec![RowId::from_bytes(((count + 2) as u128).to_be_bytes())?],
+    };
+    let book =
+        Workbook::from_content_fixture(DocumentId::from_bytes([1; 16])?, version, seed, cells)?;
+    Ok((book, operation))
+}
+
 fn benches(c: &mut Criterion) {
     let mut axes = c.benchmark_group("axis_allocation");
     for count in [1_000, 100_000] {
@@ -124,6 +167,18 @@ fn benches(c: &mut Criterion) {
     };
     c.bench_function("insert_front_99999_rows", |b| {
         b.iter(|| black_box(insertion_book.candidate(black_box(&insertion), insertion_version)))
+    });
+    let (formula_book, formula_insertion) = match formula_insertion_fixture(10_000) {
+        Ok(fixture) => fixture,
+        Err(error) => {
+            eprintln!("formula insertion benchmark fixture invalid: {error}");
+            std::process::exit(1);
+        }
+    };
+    c.bench_function("insert_middle_10000_formulas", |b| {
+        b.iter(|| {
+            black_box(formula_book.candidate(black_box(&formula_insertion), insertion_version))
+        })
     });
     for count in [1_000, 100_000] {
         let book = match fixture(count) {

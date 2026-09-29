@@ -2,6 +2,8 @@
 
 Date: 2026-09-29. Status: ACCEPTED FOR PHASE 4 FIRST INSERTION SLICE. Full structural formula compatibility remains open.
 
+Update 2026-09-29: ADR-021 supersedes the formula-free restriction for **new** single-sheet insertion commands using persisted schema 6. This ADR continues to define replay semantics for historical schema-5 events. Delete/copy/move and multi-sheet compatibility remain open.
+
 ## Context
 
 `ExtendRows` proved the durable structural path but could not insert inside a sheet. Existing formulas persist authored source text and stable-ID-bound references. Moving rows without updating visible A1 text and relative deltas would create misleading editing and copying behavior. There is no verified transformation or formatter yet.

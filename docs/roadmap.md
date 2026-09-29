@@ -44,10 +44,17 @@ operation replay. Он прошел в двух полных suites 18/18 пос
 Два клиента, idempotent retry, replay и stale-formula rejection проверены.
 Второй срез фазы 4 (ADR-020) добавляет `InsertRows` перед stable row anchor:
 значение остаётся на прежнем ID, параллельные вставки следуют server order,
-retry и replay идемпотентны. Пока в книге есть хотя бы одна формула, вставка
-получает typed `UnsupportedStructuralDependency`: преобразование ссылок ещё
-не реализовано, поэтому данные не меняются молча. Это не закрывает фазу 4:
-formula transforms, delete/columns, copy/paste и компенсирующий undo впереди.
+retry и replay идемпотентны. В историческом schema-5 срезе книга с формулами
+получала typed `UnsupportedStructuralDependency`; этот отказ сохранён для
+старых событий и заменён в новых командах следующим срезом.
+Третий срез фазы 4 (ADR-021) вводит отдельное persisted schema 6 для вставки
+строк с формулами: stable targets сохраняются, relative row offsets
+пересчитываются до CAS, текущий A1-текст строится из bound AST, а старые
+schema-5 события сохраняют прежнюю семантику. Локальные PostgreSQL/WebSocket,
+browser DPR 1/2 и hard restart recovery прошли. Criterion для candidate с
+10 000 формулами: 12.078–13.443 ms, без БД/сети; [условия](benchmarks/2026-09-29-formula-insertion-local.md).
+Фаза 4 всё ещё открыта: delete/columns, copy/paste, undo и multi-sheet
+compatibility не завершены.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

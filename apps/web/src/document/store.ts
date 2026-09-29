@@ -15,6 +15,8 @@ import type {
 
 export type FormulaDescriptor = {
   source: string;
+  current_text?: string;
+  authored_source?: string;
   canonical?: string;
   ast_schema?: number;
   compatibility_profile?: string;
@@ -134,6 +136,10 @@ function decodeFormula(input: unknown): FormulaDescriptor {
     !value.source.startsWith('=') ||
     value.source.length < 2 ||
     byteLength(value.source) > 32768 ||
+    (value.current_text !== undefined &&
+      (typeof value.current_text !== 'string' ||
+        !value.current_text.startsWith('=') ||
+        byteLength(value.current_text) > 32768)) ||
     typeof value.canonical !== 'string' ||
     !value.canonical.startsWith('=') ||
     byteLength(value.canonical) > 65536 ||
@@ -143,7 +149,9 @@ function decodeFormula(input: unknown): FormulaDescriptor {
     !/^\d+$/.test(value.bound_at_version)
   )
     throw new Error('Неподдерживаемое представление формулы');
-  return value as FormulaDescriptor;
+  return value.current_text && value.current_text !== value.canonical
+    ? { ...value, authored_source: value.source, source: value.current_text }
+    : (value as FormulaDescriptor);
 }
 function decodeCalculatedValue(input: unknown): CalculatedValue {
   if (!input || typeof input !== 'object') throw new Error('Некорректный результат расчета');
@@ -228,7 +236,7 @@ export function decodeProjection(input: unknown): Projection {
       cells.add(key(cell.row_id, cell.column_id));
       const v = cell.value;
       if (v?.type === 'formula') {
-        decodeFormula(v.value);
+        v.value = decodeFormula(v.value);
         continue;
       }
       if (

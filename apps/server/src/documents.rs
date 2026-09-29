@@ -334,6 +334,7 @@ enum JsonValue {
 struct JsonFormula {
     source: String,
     canonical: String,
+    current_text: String,
     ast_schema: u32,
     compatibility_profile: &'static str,
     bound_at_version: String,
@@ -361,42 +362,57 @@ pub async fn get_document(
     let sheets = workbook
         .sheets()
         .iter()
-        .map(|sheet| SheetView {
-            id: id_string(sheet.id().as_bytes()),
-            name: sheet.name().to_owned(),
-            rows: sheet
-                .rows()
-                .iter()
-                .map(|id| id_string(id.as_bytes()))
-                .collect(),
-            columns: sheet
-                .columns()
-                .iter()
-                .map(|id| id_string(id.as_bytes()))
-                .collect(),
-            cells: sheet
-                .cells()
-                .iter()
-                .map(|(address, value)| CellView {
-                    row_id: id_string(address.row.as_bytes()),
-                    column_id: id_string(address.column.as_bytes()),
-                    value: match value {
-                        CellContent::Value(CellValue::Blank) => JsonValue::Blank,
-                        CellContent::Value(CellValue::Number(n)) => JsonValue::Number(*n),
-                        CellContent::Value(CellValue::Text(s)) => JsonValue::Text(s.clone()),
-                        CellContent::Value(CellValue::Boolean(b)) => JsonValue::Boolean(*b),
-                        CellContent::Formula(formula) => JsonValue::Formula(JsonFormula {
-                            source: formula.source().to_owned(),
-                            canonical: formula.canonical().to_owned(),
-                            ast_schema: formula.ast().schema_version(),
-                            compatibility_profile: formula.profile().identifier(),
-                            bound_at_version: formula.bound_at_version().get().to_string(),
-                        }),
-                    },
-                })
-                .collect(),
+        .map(|sheet| -> Result<SheetView, ApiError> {
+            Ok(SheetView {
+                id: id_string(sheet.id().as_bytes()),
+                name: sheet.name().to_owned(),
+                rows: sheet
+                    .rows()
+                    .iter()
+                    .map(|id| id_string(id.as_bytes()))
+                    .collect(),
+                columns: sheet
+                    .columns()
+                    .iter()
+                    .map(|id| id_string(id.as_bytes()))
+                    .collect(),
+                cells: sheet
+                    .cells()
+                    .iter()
+                    .map(|(address, value)| -> Result<CellView, ApiError> {
+                        Ok(CellView {
+                            row_id: id_string(address.row.as_bytes()),
+                            column_id: id_string(address.column.as_bytes()),
+                            value: match value {
+                                CellContent::Value(CellValue::Blank) => JsonValue::Blank,
+                                CellContent::Value(CellValue::Number(n)) => JsonValue::Number(*n),
+                                CellContent::Value(CellValue::Text(s)) => {
+                                    JsonValue::Text(s.clone())
+                                }
+                                CellContent::Value(CellValue::Boolean(b)) => JsonValue::Boolean(*b),
+                                CellContent::Formula(formula) => JsonValue::Formula(JsonFormula {
+                                    source: formula.source().to_owned(),
+                                    canonical: formula.canonical().to_owned(),
+                                    current_text: spreadsheet_formula::bound::render_current(
+                                        formula, &workbook,
+                                    )
+                                    .map_err(|_| {
+                                        ApiError(
+                                            StatusCode::INTERNAL_SERVER_ERROR,
+                                            "formula_projection",
+                                        )
+                                    })?,
+                                    ast_schema: formula.ast().schema_version(),
+                                    compatibility_profile: formula.profile().identifier(),
+                                    bound_at_version: formula.bound_at_version().get().to_string(),
+                                }),
+                            },
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ApiError>>()?,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, ApiError>>()?;
     Ok(Json(DocumentView {
         document_id: id_string(id.as_bytes()),
         version: workbook.version().get().to_string(),
@@ -752,6 +768,11 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
             })
         }
         Operation::InsertRows {
+            sheet,
+            before,
+            rows,
+        }
+        | Operation::InsertRowsRebased {
             sheet,
             before,
             rows,

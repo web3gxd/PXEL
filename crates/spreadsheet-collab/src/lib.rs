@@ -425,6 +425,16 @@ async fn submit<J: OperationJournal>(
         )?;
         let operation = normalize(&command, workbook)?;
         let candidate = Arc::new(workbook.candidate(&operation, next)?);
+        if matches!(operation, Operation::InsertRowsRebased { .. }) {
+            for sheet in candidate.sheets() {
+                for content in sheet.cells().values() {
+                    if let spreadsheet_domain::workbook::CellContent::Formula(formula) = content {
+                        spreadsheet_formula::bound::render_current(formula, &candidate)
+                            .map_err(|_| SessionError::InvalidFormula)?;
+                    }
+                }
+            }
+        }
         let event = CommittedEvent {
             document_id: command.document_id,
             operation_id: command.operation_id,
@@ -521,9 +531,9 @@ async fn advance_context<J: OperationJournal>(
     Err(JournalError::Conflict.into())
 }
 
-/// Phase 2 has immutable axes after genesis. Therefore every base >= 1 in the
-/// advertised window has exactly the current axis projection. Structural commands
-/// must replace this proof with the checkpoint/structural-tail history before use.
+/// Stable-ID value commands may cross an axis change. Formula text is bound only
+/// when the client's base is at least the latest axis-change version; historical
+/// axis projections are not yet available for an older formula command.
 fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, SessionError> {
     match &command.operation {
         CommandPayload::ExtendRows { sheet, rows } => Ok(Operation::ExtendRows {
@@ -534,7 +544,7 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
             sheet,
             before,
             rows,
-        } => Ok(Operation::InsertRows {
+        } => Ok(Operation::InsertRowsRebased {
             sheet: *sheet,
             before: *before,
             rows: rows.clone(),
