@@ -2,8 +2,9 @@
 
 Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
 operations реализованы локально; первый доменный срез фазы 5 создаёт
-`SnapshotImage` и проверяет tail replay. Бинарный формат, metadata и
-activation ещё не подключены. Ниже
+`SnapshotImage` и проверяет tail replay. ADR-032 добавил versioned binary
+codec с лимитом 32 MiB и проверкой ожидаемых metadata. PostgreSQL snapshot
+records, BlobStore activation и startup recovery ещё не подключены. Ниже
 смешаны действующие контракты журнала и отдельно названные будущие требования.
 
 ## PostgreSQL authority
@@ -53,9 +54,10 @@ S3 MVP subset: PutObject/GetObject/HeadObject/DeleteObject, позднее multi
 
 ## Snapshot activation (фаза 5)
 
-ADR-031 реализует только внутренний образ и восстановление в domain crate.
+ADR-031 реализует внутренний образ и восстановление в domain crate.
 Он сохраняет tombstones, bound formulas, calculation context и последнюю
-версию изменения осей. Reader пока не выбирает его при запуске; перечисленные
+версию изменения осей. ADR-032 добавляет отдельный бинарный codec, но reader
+пока не выбирает снимок при запуске; перечисленные
 ниже переходы состояния остаются контрактом следующего storage среза.
 
 Snapshot имеет immutable document version, schema version, engine/profile/context, domain encoding version, length, byte checksum и content hash. Scheduler берет согласованный immutable candidate на V, не читает изменяемую книгу во время записи.

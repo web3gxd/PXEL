@@ -1,0 +1,25 @@
+syntax = "proto3";
+package pxel.storage.v1;
+
+import "pxel/storage/v1/log.proto";
+
+// Independent persisted format; do not interpret the event schema version here.
+message SnapshotEnvelope {
+  uint32 snapshot_schema_version = 1;
+  bytes document_id = 2;
+  uint64 document_version = 3;
+  uint64 last_axis_change_version = 4;
+  CreateWorkbook sheet = 5;
+  repeated SnapshotCell cells = 6;
+  repeated bytes retired_rows = 7;
+  repeated bytes retired_columns = 8;
+  AdvanceCalculationEpoch calculation_context = 9;
+  bytes state_hash = 10;
+  string writer_engine_version = 11;
+  string writer_compatibility_profile = 12;
+}
+
+message SnapshotCell {
+  CellAddress address = 1;
+  CellContent content = 2;
+}

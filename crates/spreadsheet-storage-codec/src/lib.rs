@@ -1,7 +1,9 @@
 //! Versioned durable envelope. Hashes use explicit semantic encoding, never protobuf bytes.
 mod formula_codec;
+mod snapshot_codec;
 use prost::Message;
 use sha2::{Digest, Sha256};
+pub use snapshot_codec::{MAX_SNAPSHOT_BYTES, decode_snapshot, encode_snapshot};
 use spreadsheet_domain::workbook::*;
 use thiserror::Error;
 pub mod v1 {
@@ -13,6 +15,8 @@ pub enum CodecError {
     UnsupportedSchema,
     #[error("durable event exceeds the maximum encoded size")]
     EventTooLarge,
+    #[error("snapshot exceeds the maximum encoded size")]
+    SnapshotTooLarge,
     #[error("invalid durable event")]
     Invalid,
 }
