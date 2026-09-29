@@ -11,6 +11,12 @@ pub(crate) enum Admission {
         context_id: CalculationContextId,
         watermark: DocumentVersion,
     },
+    Timer {
+        context_id: CalculationContextId,
+        timestamp_ms: i64,
+        day: i32,
+        offset: i16,
+    },
 }
 impl Admission {
     pub fn permits(self, book: &Workbook) -> bool {
@@ -21,6 +27,16 @@ impl Admission {
                 book.calculation_context()
                     .is_some_and(|context| context.context_id() == context_id)
                     && has_volatile(book)
+            }
+            Self::Timer {
+                context_id,
+                timestamp_ms,
+                day,
+                offset,
+            } => {
+                book.calculation_context()
+                    .is_some_and(|context| context.context_id() == context_id)
+                    && timer_due_at(book, timestamp_ms, day, offset)
             }
         }
     }
@@ -41,6 +57,7 @@ pub(crate) struct Bootstrap {
     pending: Option<(OperationId, CalculationContext, Admission)>,
     inspected: Option<DocumentVersion>,
     required_edit: Option<DocumentVersion>,
+    pending_timer: Option<(OperationId, CalculationContext, Admission)>,
 }
 impl Bootstrap {
     pub fn new(sampler: Option<Sampler>) -> Self {
@@ -49,12 +66,78 @@ impl Bootstrap {
             pending: None,
             inspected: None,
             required_edit: None,
+            pending_timer: None,
         }
     }
     pub fn edited(&mut self, book: &Workbook, operation: &Operation) {
         if affects_calculation(operation) && (self.pending.is_some() || has_volatile(book)) {
             self.required_edit = Some(book.version());
         }
+    }
+    pub async fn timer<J: OperationJournal>(
+        &mut self,
+        journal: &J,
+        identity: AuthenticatedActor,
+        workbook: &mut Arc<Workbook>,
+        calculation: &CalculationHandle,
+        axes: &mut axis_history::AxisHistory,
+    ) -> Result<(), SessionError> {
+        if self.pending_timer.is_none() {
+            let (now, today) = clock_consumers(workbook);
+            if !now && !today {
+                return Ok(());
+            }
+            let Some(sampler) = &self.sampler else {
+                return Ok(());
+            };
+            let Some(previous) = workbook.calculation_context() else {
+                return Err(SessionError::InvalidCommand);
+            };
+            let (id, context) = sampler(CalculationReason::Timer)?;
+            if context.reason() != CalculationReason::Timer
+                || context.engine_version() != calculation::ENGINE_VERSION
+                || context.compatibility_profile() != calculation::COMPATIBILITY_PROFILE
+                || context.utc_offset_minutes() != previous.utc_offset_minutes()
+            {
+                return Err(SessionError::InvalidCommand);
+            }
+            if !timer_due_at(
+                workbook,
+                context.effective_timestamp_utc_ms(),
+                context.civil_day_since_unix_epoch(),
+                context.utc_offset_minutes(),
+            ) {
+                return Ok(());
+            }
+            let admission = Admission::Timer {
+                context_id: previous.context_id(),
+                timestamp_ms: context.effective_timestamp_utc_ms(),
+                day: context.civil_day_since_unix_epoch(),
+                offset: context.utc_offset_minutes(),
+            };
+            self.pending_timer = Some((id, context, admission));
+        }
+        let Some((id, context, admission)) = &self.pending_timer else {
+            return Err(SessionError::InvalidCommand);
+        };
+        advance_context(
+            journal,
+            identity,
+            workbook,
+            ContextAdvance {
+                operation_id: *id,
+                context,
+                admission: *admission,
+            },
+            calculation,
+            axes,
+        )
+        .await?;
+        self.pending_timer = None;
+        // A refreshed external epoch may be followed by a newer content edit.
+        // Resolve its durable ordering before declaring this head inspected.
+        self.ensure(journal, identity, workbook, calculation, axes)
+            .await
     }
     pub async fn ensure<J: OperationJournal>(
         &mut self,
@@ -229,6 +312,37 @@ fn affects_calculation(operation: &Operation) -> bool {
             | Operation::ExtendRows { .. }
     )
 }
+fn clock_consumers(book: &Workbook) -> (bool, bool) {
+    let mut now = false;
+    let mut today = false;
+    for sheet in book.sheets() {
+        for content in sheet.cells().values() {
+            if let CellContent::Formula(formula) = content {
+                for node in formula.ast().nodes() {
+                    if let Node::Call { name, .. } = node {
+                        now |= name.as_str() == "NOW";
+                        today |= name.as_str() == "TODAY";
+                    }
+                }
+            }
+        }
+    }
+    (now, today)
+}
+fn timer_due_at(book: &Workbook, timestamp_ms: i64, day: i32, offset: i16) -> bool {
+    let Some(context) = book.calculation_context() else {
+        return false;
+    };
+    if offset != context.utc_offset_minutes() || timestamp_ms < context.effective_timestamp_utc_ms()
+    {
+        return false;
+    }
+    let (now, today) = clock_consumers(book);
+    (now && timestamp_ms
+        .checked_sub(context.effective_timestamp_utc_ms())
+        .is_some_and(|elapsed| elapsed >= 60_000))
+        || (today && day != context.civil_day_since_unix_epoch())
+}
 
 #[cfg(test)]
 mod tests {
@@ -274,6 +388,46 @@ mod tests {
             calculation::COMPATIBILITY_PROFILE.into(),
             reason,
         )
+    }
+    #[test]
+    fn timer_policy_only_advances_clock_consumers_at_due_boundaries()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (source, minute, midnight) in [
+            ("=NOW()", true, true),
+            ("=TODAY()", false, true),
+            ("=RAND()", false, false),
+            ("=\"NOW()\"", false, false),
+        ] {
+            let book = fixture(source)?.candidate(
+                &Operation::AdvanceCalculationEpoch {
+                    context: context(CalculationReason::Explicit, calculation::ENGINE_VERSION)?,
+                },
+                DocumentVersion::new(3)?,
+            )?;
+            assert!(!timer_due_at(&book, 59_999, 0, 0));
+            assert_eq!(timer_due_at(&book, 60_000, 0, 0), minute);
+            assert_eq!(timer_due_at(&book, 86_400_000, 1, 0), midnight);
+            assert!(!timer_due_at(&book, 86_400_000, 1, 60));
+        }
+        let previous = CalculationContext::new(
+            CalculationContextId::from_bytes([10; 16])?,
+            1,
+            60_000,
+            0,
+            0,
+            [11; 32],
+            calculation::ENGINE_VERSION.into(),
+            calculation::COMPATIBILITY_PROFILE.into(),
+            CalculationReason::Explicit,
+        )?;
+        let book = fixture("=NOW()")?.candidate(
+            &Operation::AdvanceCalculationEpoch { context: previous },
+            DocumentVersion::new(3)?,
+        )?;
+        assert!(!timer_due_at(&book, 59_999, 0, 0));
+        assert!(!timer_due_at(&book, 119_999, 0, 0));
+        assert!(timer_due_at(&book, 120_000, 0, 0));
+        Ok(())
     }
     #[test]
     fn classification_uses_calls_and_retains_compatible_context()

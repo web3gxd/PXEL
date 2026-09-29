@@ -32,6 +32,43 @@ test('first volatile formula calculates without manual recalc and keeps context 
   expect(restored.calculation_context).toEqual(state.calculation_context);
 });
 
+test('active NOW updates from a durable heartbeat timer without user edits', async ({ page }) => {
+  test.setTimeout(95_000);
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('=NOW()');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  const active = page.getByTestId('active-cell');
+  await expect(active).toHaveText(/^A1: \d/);
+  const initial = await active.textContent();
+  const id = new URL(page.url()).searchParams.get('document');
+  const state = async () => (await page.request.get(`/api/documents/${id}`)).json();
+  const before = await state();
+  expect(before.version).toBe('3');
+  await expect
+    .poll(async () => (await state()).calculation_context?.epoch, {
+      timeout: 80_000,
+      intervals: [1000],
+    })
+    .toBe('2');
+  const after = await state();
+  expect(after.version).toBe('4');
+  expect(after.calculation_context.reason).toBe('timer');
+  expect(
+    BigInt(after.calculation_context.effective_timestamp_utc_ms) -
+      BigInt(before.calculation_context.effective_timestamp_utc_ms),
+  ).toBeGreaterThanOrEqual(60_000n);
+  await expect(active).not.toHaveText(initial!);
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+  expect(await bar.inputValue()).toBe('=NOW()');
+});
+
 test('editing another cell advances RAND epoch automatically and survives reload', async ({
   page,
 }) => {

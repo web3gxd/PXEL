@@ -2410,6 +2410,349 @@ mod tests {
     async fn volatile_edit_restart_recovers_missing_epoch(pool: sqlx::PgPool) -> TestResult {
         volatile_edit_recovery_case(pool, 0).await
     }
+    #[derive(Clone)]
+    struct TimerAckLossJournal {
+        database: PgDatabase,
+        lose: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl OperationJournal for TimerAckLossJournal {
+        delegate_journal!(calculation_epoch_version(identity:AuthenticatedActor,document:DocumentId,through:DocumentVersion) -> Option<DocumentVersion>);
+        delegate_journal!(quarantine(document:DocumentId) -> ());
+        delegate_journal!(access(identity:AuthenticatedActor,document:DocumentId) -> DocumentAccess);
+        delegate_journal!(create(identity:AuthenticatedActor,event:CommittedEvent) -> CommitReceipt);
+        delegate_journal!(load_events(identity:AuthenticatedActor,document:DocumentId,after:DocumentVersion,limit:u32) -> Vec<CommittedEvent>);
+        delegate_journal!(load_undo_target(identity:AuthenticatedActor,document:DocumentId,target:OperationId) -> CommittedEvent);
+        delegate_journal!(commit(request:&CommitRequest) -> CommitOutcome);
+        delegate_journal!(receipt(identity:AuthenticatedActor,command:&Command) -> Option<CommitReceipt>);
+        delegate_journal!(system_receipt(identity:AuthenticatedActor,document:DocumentId,operation:OperationId,context:&CalculationContext) -> Option<CommitReceipt>);
+        async fn commit_system(
+            &self,
+            request: &SystemCommitRequest,
+        ) -> Result<CommitOutcome, JournalError> {
+            let outcome = self.database.commit_system(request).await?;
+            if matches!(&request.event.operation, Operation::AdvanceCalculationEpoch { context } if context.reason() == CalculationReason::Timer)
+                && self.lose.swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(JournalError::Unavailable);
+            }
+            Ok(outcome)
+        }
+    }
+    async fn timer_epoch_case(pool: sqlx::PgPool, source: &str, mode: u8) -> TestResult {
+        use spreadsheet_collab::SessionDirectory;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering},
+        };
+        let (db, identity, book) = fixture(pool).await?;
+        let lose_ack = mode != 0;
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        let mut formula = request(&db, identity, &book, 180).await?;
+        formula.command.operation = CommandPayload::SetCellFormula {
+            address,
+            source: spreadsheet_domain::formula::FormulaSource::new(source.into())?,
+        };
+        formula.event.operation = Operation::SetCellFormula {
+            address,
+            formula: spreadsheet_formula::binder::bind(source, &book, address)?,
+        };
+        formula.event.state_hash = book
+            .candidate(&formula.event.operation, formula.event.version)?
+            .hash();
+        db.commit(&formula).await?;
+        let clock = Arc::new(AtomicI64::new(0));
+        let sampled_clock = clock.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let journal = TimerAckLossJournal {
+            database: db.clone(),
+            lose: Arc::new(AtomicBool::new(lose_ack)),
+        };
+        let directory = spreadsheet_collab::InProcessSessionDirectory::new(journal)
+            .with_context_sampler(move |reason| {
+                let count = counter.fetch_add(1, Ordering::SeqCst) as u8;
+                let timestamp = sampled_clock.load(Ordering::SeqCst);
+                Ok((
+                    OperationId::from_bytes([190 + count; 16])?,
+                    CalculationContext::new(
+                        CalculationContextId::from_bytes([200 + count; 16])?,
+                        1,
+                        timestamp,
+                        0,
+                        (timestamp / 86_400_000) as i32,
+                        [210 + count; 32],
+                        spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                        spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                        reason,
+                    )?,
+                ))
+            });
+        let session = directory.session(identity, book.document_id()).await?;
+        assert_eq!(session.read(identity).await?.version().get(), 3);
+        clock.store(59_999, Ordering::SeqCst);
+        session.request_timer(identity)?;
+        assert_eq!(session.head(identity).await?.get(), 3);
+        clock.store(60_000, Ordering::SeqCst);
+        session.request_timer(identity)?;
+        let first_head = session.head(identity).await?;
+        assert_eq!(first_head.get(), if source == "=NOW()" { 4 } else { 3 });
+        if mode == 2 {
+            let command = Command {
+                operation_id: OperationId::from_bytes([230; 16])?,
+                document_id: book.document_id(),
+                actor_id: identity.actor_id,
+                base_version: first_head,
+                client_sequence: 1,
+                operation: CommandPayload::ClearCell { address },
+            };
+            assert!(matches!(
+                session.submit(identity, command).await?,
+                spreadsheet_collab::Submission::Committed { .. }
+            ));
+            assert_eq!(session.head(identity).await?.get(), 5);
+            let before = calls.load(Ordering::SeqCst);
+            clock.store(120_000, Ordering::SeqCst);
+            session.request_timer(identity)?;
+            assert_eq!(session.head(identity).await?.get(), 5);
+            assert_eq!(calls.load(Ordering::SeqCst), before);
+            assert_eq!(
+                session
+                    .read(identity)
+                    .await?
+                    .calculation_context()
+                    .ok_or("context missing")?
+                    .epoch(),
+                2
+            );
+            return Ok(());
+        }
+        // Another subscription requests the same interval: persisted time coalesces it.
+        let before_retry_samples = calls.load(Ordering::SeqCst);
+        if lose_ack {
+            clock.store(120_000, Ordering::SeqCst);
+        }
+        session.request_timer(identity)?;
+        assert_eq!(session.head(identity).await?, first_head);
+        if lose_ack {
+            assert_eq!(calls.load(Ordering::SeqCst), before_retry_samples);
+            // The first retry resolved the retained ID without resampling.
+            assert_eq!(
+                session
+                    .read(identity)
+                    .await?
+                    .calculation_context()
+                    .ok_or("context missing")?
+                    .epoch(),
+                2
+            );
+            assert!(
+                !db.load_events(identity, book.document_id(), DocumentVersion::new(3)?, 128)
+                    .await?
+                    .iter()
+                    .any(|event| event.version.get() > 4)
+            );
+        }
+        clock.store(86_400_000, Ordering::SeqCst);
+        session.request_timer(identity)?;
+        let restored = session.read(identity).await?;
+        assert_eq!(
+            restored.version().get(),
+            match source {
+                "=NOW()" => 5,
+                "=TODAY()" => 4,
+                _ => 3,
+            }
+        );
+        if source != "=RAND()" {
+            assert_eq!(
+                restored
+                    .calculation_context()
+                    .ok_or("context missing")?
+                    .reason(),
+                CalculationReason::Timer
+            );
+            let calculated = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                loop {
+                    if let Some(state) = session.calculated(identity).await? {
+                        break Ok::<_, spreadsheet_collab::SessionError>(state);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await??;
+            match &calculated.outcome {
+                spreadsheet_collab::calculation::CalculationOutcome::Complete {
+                    results, ..
+                } => assert_eq!(
+                    results.get(&address),
+                    Some(&spreadsheet_formula::Value::Number(25570.0))
+                ),
+                _ => return Err("timer calculation failed".into()),
+            }
+        } else {
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        }
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
+    async fn timer_now_threshold_and_subscriber_coalescing(pool: sqlx::PgPool) -> TestResult {
+        timer_epoch_case(pool, "=NOW()", 0).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn timer_today_only_advances_at_civil_midnight(pool: sqlx::PgPool) -> TestResult {
+        timer_epoch_case(pool, "=TODAY()", 0).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn timer_rand_only_never_samples_clock(pool: sqlx::PgPool) -> TestResult {
+        timer_epoch_case(pool, "=RAND()", 0).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn timer_lost_commit_ack_resolves_same_id(pool: sqlx::PgPool) -> TestResult {
+        timer_epoch_case(pool, "=NOW()", 1).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn timer_pending_receipt_resolves_after_clock_formula_deleted(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        timer_epoch_case(pool, "=NOW()", 2).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn timer_cas_race_preserves_edit_after_external_epoch(pool: sqlx::PgPool) -> TestResult {
+        use spreadsheet_collab::SessionDirectory;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        let (db, identity, book) = fixture(pool).await?;
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        let mut formula = request(&db, identity, &book, 232).await?;
+        formula.command.operation = CommandPayload::SetCellFormula {
+            address,
+            source: spreadsheet_domain::formula::FormulaSource::new("=NOW()".into())?,
+        };
+        formula.event.operation = Operation::SetCellFormula {
+            address,
+            formula: spreadsheet_formula::binder::bind("=NOW()", &book, address)?,
+        };
+        formula.event.state_hash = book
+            .candidate(&formula.event.operation, formula.event.version)?
+            .hash();
+        db.commit(&formula).await?;
+        let directory = spreadsheet_collab::InProcessSessionDirectory::new(db.clone())
+            .with_context_sampler(|reason| {
+                Ok((
+                    OperationId::from_bytes([233; 16])?,
+                    CalculationContext::new(
+                        CalculationContextId::from_bytes([234; 16])?,
+                        1,
+                        0,
+                        0,
+                        0,
+                        [235; 32],
+                        spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                        spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                        reason,
+                    )?,
+                ))
+            });
+        let initialized = directory
+            .session(identity, book.document_id())
+            .await?
+            .read(identity)
+            .await?;
+        let operation = Operation::AdvanceCalculationEpoch {
+            context: CalculationContext::new(
+                CalculationContextId::from_bytes([236; 16])?,
+                2,
+                60_000,
+                0,
+                0,
+                [237; 32],
+                spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                CalculationReason::Explicit,
+            )?,
+        };
+        let external = initialized.candidate(&operation, DocumentVersion::new(4)?)?;
+        let mut edit = request(&db, identity, &external, 238).await?;
+        edit.command.operation = CommandPayload::SetCellFormula {
+            address,
+            source: spreadsheet_domain::formula::FormulaSource::new("=NOW()+1".into())?,
+        };
+        edit.event.operation = Operation::SetCellFormula {
+            address,
+            formula: spreadsheet_formula::binder::bind("=NOW()+1", &external, address)?,
+        };
+        edit.event.state_hash = external
+            .candidate(&edit.event.operation, edit.event.version)?
+            .hash();
+        let journal = ReceiptRaceJournal {
+            database: db.clone(),
+            pending: Arc::new(AtomicBool::new(true)),
+            followup: Some(Arc::new(edit)),
+            event: Arc::new(SystemCommitRequest {
+                identity,
+                expected_head: initialized.version(),
+                expected_access: db.access(identity, book.document_id()).await?,
+                event: CommittedEvent {
+                    document_id: book.document_id(),
+                    operation_id: OperationId::from_bytes([239; 16])?,
+                    principal: EventPrincipal::System,
+                    version: external.version(),
+                    operation,
+                    state_hash: external.hash(),
+                },
+            }),
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let directory = spreadsheet_collab::InProcessSessionDirectory::new(journal)
+            .with_context_sampler(move |reason| {
+                let count = counter.fetch_add(1, Ordering::SeqCst) as u8;
+                Ok((
+                    OperationId::from_bytes([240 + count; 16])?,
+                    CalculationContext::new(
+                        CalculationContextId::from_bytes([245 + count; 16])?,
+                        1,
+                        60_000,
+                        0,
+                        0,
+                        [250 + count; 32],
+                        spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                        spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                        reason,
+                    )?,
+                ))
+            });
+        let session = directory.session(identity, book.document_id()).await?;
+        session.request_timer(identity)?;
+        assert_eq!(session.head(identity).await?.get(), 6);
+        let restored = session.read(identity).await?;
+        assert_eq!(
+            restored
+                .calculation_context()
+                .ok_or("context missing")?
+                .epoch(),
+            3
+        );
+        assert_eq!(
+            restored
+                .calculation_context()
+                .ok_or("context missing")?
+                .reason(),
+            CalculationReason::VolatileDependency
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        Ok(())
+    }
     #[sqlx::test(migrations = false)]
     async fn volatile_edit_newer_external_edit_outlives_old_pending_context(
         pool: sqlx::PgPool,

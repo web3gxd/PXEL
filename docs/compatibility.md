@@ -69,3 +69,5 @@ ADR-065: NOW/TODAY/RAND — Partially supported: persisted epoch, native/WASM co
 ADR-066 снимает ручной bootstrap prerequisite для NOW/TODAY/RAND: первый durable контекст создаётся сервером автоматически. Статус всё ещё Partially supported до automatic dependency/timer epochs и Excel verification; compatible context/value сохраняется после reload.
 
 ADR-067 добавляет automatic edit epochs, в том числе после независимой content правки, и recovery отсутствующего epoch из журнала. Volatile functions остаются Partially supported: timer, open-renewal, date formatting и Excel goldens не закрыты.
+
+ADR-068 добавляет active NOW/TODAY timer через durable context, проверенный на реальном heartbeat. Partially supported остаётся до open-renewal, timezone/date formatting и manual Excel verification; fixed interval не обещает realtime deadline при backpressure.

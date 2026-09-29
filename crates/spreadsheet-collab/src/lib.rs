@@ -64,6 +64,9 @@ pub struct HeadUpdate {
 }
 
 enum Request {
+    Timer {
+        identity: AuthenticatedActor,
+    },
     ReadHead {
         identity: AuthenticatedActor,
         reply: oneshot::Sender<Result<DocumentVersion, SessionError>>,
@@ -93,6 +96,13 @@ pub struct DocumentSession {
 }
 
 impl DocumentSession {
+    /// Internal heartbeat admission for an authenticated active subscription.
+    /// Enqueueing is neither a commit nor a permission lease.
+    pub fn request_timer(&self, identity: AuthenticatedActor) -> Result<(), SessionError> {
+        self.sender
+            .try_send(Request::Timer { identity })
+            .map_err(queue_error)
+    }
     /// Registers before the actor authorization barrier. Notifications are
     /// coalescing hints only; callers must recheck access before every send.
     pub async fn watch_head(
@@ -436,6 +446,25 @@ async fn run<J: OperationJournal>(
         tokio::time::timeout(Duration::from_secs(60), receiver.recv()).await
     {
         match request {
+            Request::Timer { identity } => {
+                let before = workbook.version();
+                let result = async {
+                    refresh(&journal, identity, &mut workbook, &calculation, &mut axes).await?;
+                    bootstrap
+                        .ensure(&journal, identity, &mut workbook, &calculation, &mut axes)
+                        .await?;
+                    bootstrap
+                        .timer(&journal, identity, &mut workbook, &calculation, &mut axes)
+                        .await
+                }
+                .await;
+                if result.is_err() {
+                    tracing::warn!(event = "calculation_timer_pending");
+                }
+                if workbook.version() > before {
+                    maybe_snapshot(snapshots.as_ref(), &workbook);
+                }
+            }
             Request::ReadHead { identity, reply } => {
                 let result = refresh(&journal, identity, &mut workbook, &calculation, &mut axes)
                     .await

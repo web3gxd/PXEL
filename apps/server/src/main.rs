@@ -832,6 +832,10 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 if last_pong.elapsed() >= Duration::from_secs(45)
                     || !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
                 if !outbound.enqueue(Message::Ping(Vec::new().into()), None) { break; }
+                if let Some(active) = &head_subscription
+                    && active.session.request_timer(principal.identity).is_err() {
+                    tracing::debug!(event = "calculation_timer_admission_skipped");
+                }
             }
             message = source.next() => match message {
                 Some(Ok(Message::Pong(_))) => last_pong = Instant::now(),
