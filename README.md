@@ -15,7 +15,9 @@ reload/restart. Формулы сохраняются как source и серв�
 системное событие вызывает авторизованный resync. Временное presence показывает
 удалённое выделение, не меняя версию документа. Отзыв документного ACL закрывает
 старую подписку через durable access epoch и локальный send gate. Полный gate
-фазы 3, snapshots и XLSX ещё впереди. У каждого WebSocket есть очередь
+фазы 3, crash/recovery matrix snapshots, S3 и XLSX ещё впереди. Локальные
+snapshots уже проходят проверенную активацию и используются при запуске actor;
+после каждых 1000 операций запускается фоновая запись. У каждого WebSocket есть очередь
 отправки с лимитами 160 кадров / 2 MiB; медленный клиент отключается,
 а фактическая отправка снова проверяет ACL.
 
@@ -100,15 +102,16 @@ GitHub Actions выполняет те же команды на Ubuntu 24.04. Н
 
 ## Конфигурация и границы
 
-| Переменная                                | Назначение                                                          |
-| ----------------------------------------- | ------------------------------------------------------------------- |
-| `DATABASE_URL` / `PXEL_DATABASE_URL_FILE` | DB URL из environment или файла; default file `.local/database-url` |
-| `PXEL_BIND`                               | Backend bind; default `127.0.0.1:8080`                              |
-| `PXEL_ALLOWED_ORIGINS`                    | Список точных Origin через запятую, без wildcard                    |
-| `PXEL_DEV_AUTH`                           | `1` работает только с compile feature `dev-auth` и loopback bind    |
-| `PXEL_BLOB_ROOT`                          | Private writable directory; default `.local/blobs`                  |
-| `PXEL_DB_PORT`                            | Порт только локального bootstrap; default `55432`                   |
-| `PXEL_PG_BIN`                             | Каталог binaries для native bootstrap                               |
+| Переменная                                | Назначение                                                                  |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| `DATABASE_URL` / `PXEL_DATABASE_URL_FILE` | DB URL из environment или файла; default file `.local/database-url`         |
+| `PXEL_BIND`                               | Backend bind; default `127.0.0.1:8080`                                      |
+| `PXEL_ALLOWED_ORIGINS`                    | Список точных Origin через запятую, без wildcard                            |
+| `PXEL_DEV_AUTH`                           | `1` работает только с compile feature `dev-auth` и loopback bind            |
+| `PXEL_BLOB_ROOT`                          | Private writable directory; default `.local/blobs`                          |
+| `PXEL_SNAPSHOT_INTERVAL`                  | Число committed событий между snapshots; default `1000`, предел `1..100000` |
+| `PXEL_DB_PORT`                            | Порт только локального bootstrap; default `55432`                           |
+| `PXEL_PG_BIN`                             | Каталог binaries для native bootstrap                                       |
 
 `GET /healthz` проверяет процесс, `GET /readyz` — подключение, точную версию/checksum
 миграций и writable blob root. Dev login требует проверенный Origin, создает
@@ -121,7 +124,7 @@ timeout 45 s. Development session можно адресно отозвать ч�
 
 Без `dev-auth` login не доступен и WebSocket не авторизуется. Это безопасный skeleton,
 а не готовая production auth. В проекте нет обязательной внешней телеметрии.
-MinIO/Garage не запускаются; snapshots и S3 adapter относятся к фазе 5.
+MinIO/Garage не запускаются; локальные snapshots относятся к фазе 5, S3 adapter ещё впереди.
 Ограничения локального blob adapter: [storage README](crates/spreadsheet-storage/README.md).
 
 ## Репозиторий

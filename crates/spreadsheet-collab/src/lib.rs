@@ -11,7 +11,9 @@ use spreadsheet_domain::workbook::{
     CalculationContext, CellContent, CellWriteKind, Command, CommandPayload, CommittedEvent,
     DocumentId, DocumentVersion, DomainError, EventPrincipal, Operation, OperationId, Workbook,
 };
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap, future::Future, num::NonZeroU64, pin::Pin, sync::Arc, time::Duration,
+};
 use thiserror::Error;
 use tokio::sync::{Mutex, Semaphore, mpsc, oneshot, watch};
 
@@ -214,6 +216,7 @@ pub trait SessionDirectory: Send + Sync {
 pub struct InProcessSessionDirectory<J> {
     journal: J,
     recovery: Option<RecoveryFn>,
+    snapshots: Option<SnapshotSchedule>,
     sessions: Arc<Mutex<HashMap<DocumentId, DocumentSession>>>,
     calculation_slots: Arc<Semaphore>,
     recovery_slots: Arc<Semaphore>,
@@ -221,12 +224,28 @@ pub struct InProcessSessionDirectory<J> {
 
 type RecoveryFuture = Pin<Box<dyn Future<Output = Result<Workbook, JournalError>> + Send>>;
 type RecoveryFn = Arc<dyn Fn(AuthenticatedActor, DocumentId) -> RecoveryFuture + Send + Sync>;
+type SnapshotEnqueue = Arc<dyn Fn(Arc<Workbook>) + Send + Sync>;
+#[derive(Clone)]
+struct SnapshotSchedule {
+    interval: NonZeroU64,
+    enqueue: SnapshotEnqueue,
+}
+
+fn maybe_snapshot(schedule: Option<&SnapshotSchedule>, workbook: &Arc<Workbook>) {
+    if let Some(schedule) = schedule {
+        let version = workbook.version().get();
+        if version > 1 && (version - 1).is_multiple_of(schedule.interval.get()) {
+            (schedule.enqueue)(workbook.clone());
+        }
+    }
+}
 
 impl<J: Clone> Clone for InProcessSessionDirectory<J> {
     fn clone(&self) -> Self {
         Self {
             journal: self.journal.clone(),
             recovery: self.recovery.clone(),
+            snapshots: self.snapshots.clone(),
             sessions: self.sessions.clone(),
             calculation_slots: self.calculation_slots.clone(),
             recovery_slots: self.recovery_slots.clone(),
@@ -239,6 +258,7 @@ impl<J> InProcessSessionDirectory<J> {
         Self {
             journal,
             recovery: None,
+            snapshots: None,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             calculation_slots: Arc::new(Semaphore::new(2)),
             recovery_slots: Arc::new(Semaphore::new(4)),
@@ -258,6 +278,19 @@ impl<J> InProcessSessionDirectory<J> {
             Box::pin(recovery(identity, document))
         }));
         directory
+    }
+
+    /// Snapshot scheduling observes only newly committed actor states. The
+    /// callback must enqueue without blocking or claiming durable publication.
+    pub fn with_snapshot_enqueue<F>(mut self, interval: NonZeroU64, enqueue: F) -> Self
+    where
+        F: Fn(Arc<Workbook>) + Send + Sync + 'static,
+    {
+        self.snapshots = Some(SnapshotSchedule {
+            interval,
+            enqueue: Arc::new(enqueue),
+        });
+        self
     }
 }
 
@@ -319,6 +352,7 @@ impl<J: OperationJournal + Clone + Send + Sync + 'static> SessionDirectory
             receiver,
             calculation,
             head_sender,
+            self.snapshots.clone(),
         ));
         Ok(session)
     }
@@ -330,6 +364,7 @@ async fn run<J: OperationJournal>(
     mut receiver: mpsc::Receiver<Request>,
     calculation: CalculationHandle,
     head_sender: watch::Sender<HeadUpdate>,
+    snapshots: Option<SnapshotSchedule>,
 ) {
     let mut workbook = Arc::new(initial);
     if workbook.version() != DocumentVersion::ZERO {
@@ -362,6 +397,7 @@ async fn run<J: OperationJournal>(
                         version: event.version,
                         event: Some(Arc::new((**event).clone())),
                     });
+                    maybe_snapshot(snapshots.as_ref(), &workbook);
                 }
                 let _ = reply.send(result);
             }
@@ -371,6 +407,7 @@ async fn run<J: OperationJournal>(
                 sampled_context,
                 reply,
             } => {
+                let before = workbook.version();
                 let result = advance_context(
                     &journal,
                     identity,
@@ -380,6 +417,9 @@ async fn run<J: OperationJournal>(
                     &calculation,
                 )
                 .await;
+                if result.is_ok() && workbook.version() > before {
+                    maybe_snapshot(snapshots.as_ref(), &workbook);
+                }
                 let _ = reply.send(result);
             }
         }

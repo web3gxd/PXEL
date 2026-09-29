@@ -140,7 +140,10 @@ PostgreSQL/BlobStore тест проверяет повреждение ново
 recovery API в этом случае применяет только хвост, а без валидных снимков
 читает весь журнал. Четвёртый срез ([ADR-034](adr/034-actor-bootstrap-from-snapshot.md))
 подключил проверенное восстановление к startup actor; при восстановлении
-запускается полный пересчёт cache. Scheduler, crash matrix, GC, benchmark
+запускается полный пересчёт cache. Пятый срез ([ADR-035](adr/035-bounded-snapshot-scheduler.md))
+добавил bounded неблокирующий scheduler после каждых 1000 committed событий
+по умолчанию; локальный smoke с порогом 1 подтвердил ACTIVE snapshot v2;
+при пропуске milestone следующий шанс через 1000 событий. Crash matrix, GC, benchmark
 snapshot + 10k tail и S3 contract остаются открытыми.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;

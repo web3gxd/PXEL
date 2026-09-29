@@ -1,5 +1,44 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — bounded snapshot scheduler
+
+Перед срезом прочитаны AGENTS.md, roadmap, ADR-033/034 и actor/storage/server
+code. Цель — создавать новые snapshots автоматически из подтверждённой
+projection без ожидания записи объекта в ACK path. Инварианты: enqueue
+только после durable commit и prepared swap; snapshot ускоряет recovery,
+журнал остаётся authority; неограниченных очередей и содержимого документа
+в логах нет. Риски: пропущенный milestone при переполнении очереди,
+неотменяемое blocking encoding и 32 MiB cap.
+
+Добавлен default threshold 1000 committed событий после genesis,
+`PXEL_SNAPSHOT_INTERVAL` ограничен диапазоном 1..100000, bounded channel
+capacity 1 и один server worker. Состояние передаётся `Arc`, codec работает
+в `spawn_blocking`, затем прежний verified publication lifecycle. Retry
+operation_id не ставит duplicate job. Тест с threshold 1 проверил enqueue
+только после committed v3 и отсутствие enqueue при повторе той же команды.
+Документировано в ADR-035, persistence, roadmap и презентации.
+
+Точечный PostgreSQL/actor тест `active_snapshot_round_trip_and_corrupt_newest_falls_back`
+прошёл 1/1; `cargo check -p pxel-server --features dev-auth` и точечный
+clippy прошли. Локальный server smoke с threshold 1: после одной
+WebSocket операции PostgreSQL показал `document_snapshots.state=ACTIVE`,
+`snapshot_version=2`, `documents.head_version=2`; после hard restart HTTP
+прочитал v2 с сохранённым содержимым. Содержимое документа не включено в
+RUNBOOK или production tracing.
+Финальный `just check` прошёл (Rust fmt/clippy/tests/build, WASM,
+protobuf drift, ESLint, TypeScript, Vitest 71/71, Vite build), в том числе
+unit-проверка диапазона `PXEL_SNAPSHOT_INTERVAL`. `just sqlx-check` прошёл;
+browser presentation check: 10 слайдов на 1440×900 и 390×844.
+`pnpm test:recovery` прошёл 1/1 с hard restart; `pnpm test:integration`
+прошёл 40/40 на штатном interval 1000. E2E после этого server-only среза
+не повторялся; предыдущий полный browser gate 48/48 записан ниже.
+
+Первый общий check остановился на Prettier для README, формат исправлен.
+Первый запуск `pnpm test:recovery` не дошёл до теста: Windows linker не мог
+перезаписать исполняемый файл работающего dev-сервера. Dev-сервер остановлен,
+тот же recovery-test прошёл, затем `just dev` поднят снова.
+Crash matrix, GC, S3 contract, 10k-tail benchmark и XLSX остаются открытыми.
+
 ## 2026-09-29 — actor startup из проверенного snapshot
 
 Перед срезом прочитаны AGENTS.md, roadmap, ADR-004/033 и пути collab,

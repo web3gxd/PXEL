@@ -7,7 +7,10 @@ ADR-033 добавил PostgreSQL snapshot metadata и внутренние publ
 предыдущее поколение при повреждении нового. Authenticated recovery API
 дочитывает непрерывный проверенный хвост журнала после снимка и сверяет
 конечную версию. ADR-034 подключил reader к actor startup и запускает полный
-расчёт restored projection. Scheduler, GC и S3 contract ещё не подключены. Ниже отдельно
+расчёт restored projection. ADR-035 добавил неблокирующий scheduler после
+каждой 1000-й committed операции по умолчанию и отдельный sequential worker.
+Локальный smoke с порогом 1 подтвердил ACTIVE v2 и чтение после restart. GC и S3
+contract ещё не подключены. Ниже отдельно
 названы действующие механизмы и будущие требования.
 
 ## PostgreSQL authority

@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, num::NonZeroU64, path::PathBuf};
 
 pub struct Config {
     pub database_url: String,
@@ -6,6 +6,7 @@ pub struct Config {
     pub blob_root: PathBuf,
     pub allowed_origins: Vec<String>,
     pub dev_auth: bool,
+    pub snapshot_interval: NonZeroU64,
 }
 
 impl Config {
@@ -54,14 +55,43 @@ impl Config {
                 "PXEL_ALLOWED_ORIGINS requires exact nonempty origins without trailing slash"
             );
         }
+        let raw_interval = match std::env::var("PXEL_SNAPSHOT_INTERVAL") {
+            Ok(value) => value,
+            Err(std::env::VarError::NotPresent) => "1000".into(),
+            Err(_) => anyhow::bail!("PXEL_SNAPSHOT_INTERVAL must be Unicode"),
+        };
+        let snapshot_interval = parse_snapshot_interval(&raw_interval)?;
         Ok(Self {
             database_url,
             address,
             allowed_origins,
             dev_auth,
+            snapshot_interval,
             blob_root: std::env::var_os("PXEL_BLOB_ROOT")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(".local/blobs")),
         })
+    }
+}
+
+fn parse_snapshot_interval(raw: &str) -> anyhow::Result<NonZeroU64> {
+    let interval = raw.parse::<u64>()?;
+    if !(1..=100_000).contains(&interval) {
+        anyhow::bail!("PXEL_SNAPSHOT_INTERVAL must be between 1 and 100000");
+    }
+    NonZeroU64::new(interval).ok_or_else(|| anyhow::anyhow!("invalid snapshot interval"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_snapshot_interval;
+
+    #[test]
+    fn snapshot_interval_has_a_bounded_nonzero_configuration() {
+        assert!(matches!(parse_snapshot_interval("1"), Ok(value) if value.get() == 1));
+        assert!(matches!(parse_snapshot_interval("100000"), Ok(value) if value.get() == 100_000));
+        for value in ["0", "100001", "not-a-number", "-1"] {
+            assert!(parse_snapshot_interval(value).is_err());
+        }
     }
 }

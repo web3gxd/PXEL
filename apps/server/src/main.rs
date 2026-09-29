@@ -21,15 +21,18 @@ use futures_util::StreamExt;
 use prost::Message as ProstMessage;
 use serde::Serialize;
 use spreadsheet_application::journal::{DocumentAccess, JournalError, OperationJournal};
-use spreadsheet_collab::{DocumentSession, HeadUpdate, SessionDirectory};
-use spreadsheet_domain::workbook::{DocumentId, DocumentVersion};
+use spreadsheet_collab::{
+    DocumentSession, HeadUpdate, SessionDirectory,
+    calculation::{COMPATIBILITY_PROFILE, ENGINE_VERSION},
+};
+use spreadsheet_domain::workbook::{DocumentId, DocumentVersion, SnapshotId, Workbook};
 use spreadsheet_storage::{LocalFilesystemBlobStore, PgDatabase, SnapshotError};
 use spreadsheet_wire_protocol::{self as wire, v1};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{Mutex, Semaphore, watch};
+use tokio::sync::{Mutex, Semaphore, mpsc, watch};
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
@@ -49,6 +52,33 @@ struct AppState {
 #[derive(Serialize)]
 struct Status {
     status: &'static str,
+}
+
+async fn snapshot_worker(
+    database: PgDatabase,
+    blobs: LocalFilesystemBlobStore,
+    mut receiver: mpsc::Receiver<Arc<Workbook>>,
+) {
+    while let Some(workbook) = receiver.recv().await {
+        let Ok(snapshot_id) = SnapshotId::from_bytes(*Uuid::now_v7().as_bytes()) else {
+            tracing::error!(event = "snapshot_id_generation_failed");
+            continue;
+        };
+        let version = workbook.version().get();
+        if database
+            .publish_snapshot(
+                &blobs,
+                snapshot_id,
+                workbook,
+                ENGINE_VERSION,
+                COMPATIBILITY_PROFILE,
+            )
+            .await
+            .is_err()
+        {
+            tracing::warn!(event = "snapshot_publication_failed", version);
+        }
+    }
 }
 
 struct HeadSubscription {
@@ -271,6 +301,13 @@ async fn main() -> anyhow::Result<()> {
     let blobs = LocalFilesystemBlobStore::new(&config.blob_root, 64 * 1024 * 1024).await?;
     let recovery_database = database.clone();
     let recovery_blobs = blobs.clone();
+    let (snapshot_sender, snapshot_receiver) = mpsc::channel(1);
+    tokio::spawn(snapshot_worker(
+        database.clone(),
+        blobs.clone(),
+        snapshot_receiver,
+    ));
+    let snapshot_interval = config.snapshot_interval;
     let state = Arc::new(AppState {
         auth: auth::Auth::new(config.dev_auth, database.clone()),
         sessions: spreadsheet_collab::InProcessSessionDirectory::with_recovery(
@@ -292,10 +329,16 @@ async fn main() -> anyhow::Result<()> {
                             SnapshotError::Blob(_) | SnapshotError::Database(_) => {
                                 JournalError::Unavailable
                             }
+                            SnapshotError::WorkerFailed => JournalError::Unavailable,
                         })
                 }
             },
-        ),
+        )
+        .with_snapshot_enqueue(snapshot_interval, move |workbook| {
+            if snapshot_sender.try_send(workbook).is_err() {
+                tracing::warn!(event = "snapshot_queue_full_or_closed");
+            }
+        }),
         delivery: delivery::DeliveryGates::default(),
         presence: presence::PresenceDirectory::default(),
         database,

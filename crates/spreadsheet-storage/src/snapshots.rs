@@ -10,6 +10,7 @@ use spreadsheet_domain::{
     workbook::{DocumentId, DocumentVersion, SnapshotId, Workbook},
 };
 use spreadsheet_storage_codec as codec;
+use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -29,6 +30,8 @@ pub enum SnapshotError {
     Database(#[from] sqlx::Error),
     #[error("journal replay failed")]
     Journal(#[from] JournalError),
+    #[error("snapshot encoding worker failed")]
+    WorkerFailed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,7 +137,7 @@ impl PgDatabase {
         &self,
         blobs: &B,
         snapshot_id: SnapshotId,
-        workbook: &Workbook,
+        workbook: Arc<Workbook>,
         engine_version: &str,
         compatibility_profile: &str,
     ) -> Result<SnapshotReceipt, SnapshotError> {
@@ -160,7 +163,14 @@ impl PgDatabase {
         {
             return Err(SnapshotError::SourceMismatch);
         }
-        let body = codec::encode_snapshot(workbook, engine_version, compatibility_profile)?;
+        let encoding_book = workbook.clone();
+        let encoding_engine = engine_version.to_owned();
+        let encoding_profile = compatibility_profile.to_owned();
+        let body = tokio::task::spawn_blocking(move || {
+            codec::encode_snapshot(&encoding_book, &encoding_engine, &encoding_profile)
+        })
+        .await
+        .map_err(|_| SnapshotError::WorkerFailed)??;
         let body_len = body.len();
         let checksum = codec::checksum(&body);
         let key_uuid = uuid(snapshot_id.as_bytes());
@@ -273,14 +283,17 @@ mod tests {
     use spreadsheet_application::journal::{
         AuthenticatedActor, CommitOutcome, CommitRequest, OperationJournal,
     };
-    use spreadsheet_collab::{InProcessSessionDirectory, SessionDirectory};
+    use spreadsheet_collab::{InProcessSessionDirectory, SessionDirectory, Submission};
     use spreadsheet_domain::workbook::{
         ActorId, CellAddress, CellValue, ColumnId, Command, CommandPayload, CommittedEvent,
         EventPrincipal, Operation, OperationId, RowId, SheetId, SheetSeed, WorkspaceId,
     };
-    use std::sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
+    use std::{
+        num::NonZeroU64,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
     };
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -371,6 +384,69 @@ mod tests {
         Ok(())
     }
 
+    async fn assert_snapshot_queued_only_after_commit(
+        db: &PgDatabase,
+        blobs: &LocalFilesystemBlobStore,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        base: &Workbook,
+    ) -> TestResult {
+        let database = db.clone();
+        let blobs = blobs.clone();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let directory =
+            InProcessSessionDirectory::with_recovery(db.clone(), move |actor, document| {
+                let database = database.clone();
+                let blobs = blobs.clone();
+                async move {
+                    database
+                        .recover_document(&blobs, actor, document)
+                        .await
+                        .map(|result| result.workbook)
+                        .map_err(|_| JournalError::Corrupt)
+                }
+            })
+            .with_snapshot_enqueue(NonZeroU64::MIN, move |book| {
+                let _ = sender.try_send(book);
+            });
+        let session = directory.session(identity, document_id).await?;
+        assert!(receiver.try_recv().is_err());
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        let command = Command {
+            operation_id: OperationId::from_bytes([12; 16])?,
+            document_id,
+            actor_id: identity.actor_id,
+            base_version: base.version(),
+            client_sequence: 2,
+            operation: CommandPayload::SetCellValue {
+                address,
+                value: CellValue::Text("after-checkpoint".into()),
+            },
+        };
+        assert!(matches!(
+            session.submit(identity, command.clone()).await?,
+            Submission::Committed { .. }
+        ));
+        let queued = tokio::time::timeout(std::time::Duration::from_secs(2), receiver.recv())
+            .await?
+            .ok_or("snapshot not queued")?;
+        assert_eq!(queued.version().get(), 3);
+        assert_eq!(
+            queued.version(),
+            db.access(identity, document_id).await?.head
+        );
+        assert!(matches!(
+            session.submit(identity, command).await?,
+            Submission::AlreadyCommitted(_)
+        ));
+        assert!(receiver.try_recv().is_err());
+        Ok(())
+    }
+
     #[sqlx::test(migrations = false)]
     async fn active_snapshot_round_trip_and_corrupt_newest_falls_back(
         pool: sqlx::PgPool,
@@ -418,8 +494,14 @@ mod tests {
         )
         .await?;
         let older_id = SnapshotId::from_bytes([10; 16])?;
-        db.publish_snapshot(&blobs, older_id, &book1, "engine-v1", "pxel-v1")
-            .await?;
+        db.publish_snapshot(
+            &blobs,
+            older_id,
+            Arc::new(book1.clone()),
+            "engine-v1",
+            "pxel-v1",
+        )
+        .await?;
         assert_eq!(
             db.latest_valid_snapshot(&blobs, document_id, book1.version())
                 .await?
@@ -466,8 +548,14 @@ mod tests {
             CommitOutcome::Committed(_)
         ));
         let newer_id = SnapshotId::from_bytes([11; 16])?;
-        db.publish_snapshot(&blobs, newer_id, &book2, "engine-v1", "pxel-v1")
-            .await?;
+        db.publish_snapshot(
+            &blobs,
+            newer_id,
+            Arc::new(book2.clone()),
+            "engine-v1",
+            "pxel-v1",
+        )
+        .await?;
         assert_preferred(&db, document_id, newer_id).await?;
         assert_eq!(
             db.latest_valid_snapshot(&blobs, document_id, book2.version())
@@ -512,6 +600,14 @@ mod tests {
             book2.version(),
             older_id,
         )
+        .await?;
+        Box::pin(assert_snapshot_queued_only_after_commit(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            &book2,
+        ))
         .await?;
         Ok(())
     }
