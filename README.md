@@ -15,7 +15,7 @@ reload/restart. Формулы сохраняются как source и серв�
 системное событие вызывает авторизованный resync. Временное presence показывает
 удалённое выделение, не меняя версию документа. Отзыв документного ACL закрывает
 старую подписку через durable access epoch и локальный send gate. Полный gate
-фазы 3, crash/recovery matrix snapshots, S3 и XLSX ещё впереди. Локальные
+фазы 3, crash/recovery matrix snapshots, production S3 и XLSX import/export ещё впереди. Локальные
 snapshots уже проходят проверенную активацию и используются при запуске actor;
 после каждых 1000 операций запускается фоновая запись. У каждого WebSocket есть очередь
 отправки с лимитами 160 кадров / 2 MiB; медленный клиент отключается,
@@ -27,6 +27,15 @@ snapshots уже проходят проверенную активацию и �
 Листаемая презентация о продукте, архитектуре и фактических замерах:
 [presentation/index.html](presentation/index.html). Она открывается локально
 без сервера; стрелки и PageUp/PageDown переключают слайды.
+
+Синтетический XLSX fixture проверяется без публикации документа:
+
+```sh
+cargo run --locked -q -p pxel-server -- xlsx-preview fixtures/xlsx/minimal_scalars.xlsx
+```
+
+Команда печатает только количество листов и ячеек. Загрузка XLSX в редактор
+и экспорт ещё не реализованы.
 
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Нужны wasm32 target, wasm-bindgen-cli **0.2.129** и установленный Playwright Chromium.

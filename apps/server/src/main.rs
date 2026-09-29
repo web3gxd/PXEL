@@ -333,20 +333,36 @@ fn head_hint(document: DocumentId, update: &HeadUpdate) -> Vec<u8> {
 async fn main() -> anyhow::Result<()> {
     let mut arguments = std::env::args_os();
     let _program = arguments.next();
-    if arguments.next().as_deref() == Some(std::ffi::OsStr::new("xlsx-inspect")) {
+    let command = arguments.next();
+    if matches!(command.as_deref(), Some(value) if value == std::ffi::OsStr::new("xlsx-inspect") || value == std::ffi::OsStr::new("xlsx-preview"))
+    {
         let path = arguments
             .next()
-            .ok_or_else(|| anyhow::anyhow!("xlsx-inspect requires a file path"))?;
+            .ok_or_else(|| anyhow::anyhow!("XLSX command requires a file path"))?;
         if arguments.next().is_some() {
-            anyhow::bail!("xlsx-inspect accepts one file path");
+            anyhow::bail!("XLSX command accepts one file path");
         }
-        let inspected = spreadsheet_xlsx::inspect_file(std::path::Path::new(&path))?;
-        println!(
-            "XLSX package: {} sheets, {} entries, {} uncompressed bytes",
-            inspected.sheets.len(),
-            inspected.entry_count,
-            inspected.uncompressed_bytes
-        );
+        if command.as_deref() == Some(std::ffi::OsStr::new("xlsx-preview")) {
+            let normalized = spreadsheet_xlsx::normalize_file(std::path::Path::new(&path))?;
+            let cells: usize = normalized
+                .sheets
+                .iter()
+                .map(|sheet| sheet.cells.len())
+                .sum();
+            println!(
+                "XLSX preview: {} sheets, {} cells",
+                normalized.sheets.len(),
+                cells
+            );
+        } else {
+            let inspected = spreadsheet_xlsx::inspect_file(std::path::Path::new(&path))?;
+            println!(
+                "XLSX package: {} sheets, {} entries, {} uncompressed bytes",
+                inspected.sheets.len(),
+                inspected.entry_count,
+                inspected.uncompressed_bytes
+            );
+        }
         return Ok(());
     }
     tracing_subscriber::fmt()

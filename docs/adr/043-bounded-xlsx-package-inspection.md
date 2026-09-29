@@ -10,7 +10,7 @@ document, parse cell values, or expose file contents in logs.
 Inspection reads at most 32 MiB of ZIP input, 256 entries, 8 MiB per entry,
 32 MiB decompressed total, 100:1 expansion per entry and 5 seconds of wall
 time. It rejects traversal, ambiguous duplicate names, symlinks, encryption,
-unsupported compression, DTDs, general entities, external relationships and
+unsupported compression, DTDs, unknown entities, external relationships and
 recognized active-content parts. XML depth, attributes, text and relationship
 counts are bounded. It resolves the package's officeDocument relationship,
 workbook and worksheet relationships into sheet headers only. Package DTOs do

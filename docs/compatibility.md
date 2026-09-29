@@ -1,6 +1,6 @@
 # Совместимость
 
-Статус: матрица целевого профиля с фактически реализованным первым набором формул. Работающий редактор и движок есть; phase 2 gate еще не закрыт. Фаза 6 начата с bounded package inspection; значения XLSX еще не импортируются, экспорт отсутствует.
+Статус: матрица целевого профиля с фактически реализованным первым набором формул. Работающий редактор и движок есть; phase 2 gate еще не закрыт. Фаза 6 читает ограниченный XLSX в отдельную scalar IR; документ из него еще не создаётся, экспорт отсутствует.
 
 Google Sheets задает пользовательскую модель мгновенного редактирования и collaboration. Excel — целевая совместимость формул/файлов в явно ограниченном профиле, не источник runtime architecture. Excel/LibreOffice headless, готовые spreadsheet/formula/collaboration engines не входят в runtime.
 
@@ -20,7 +20,7 @@ Google Sheets задает пользовательскую модель мгн�
 
 ## XLSX profile: phase 6
 
-Фактически реализован только первый шаг: `xlsx-inspect <path>` проверяет ограниченный ZIP/OOXML пакет и возвращает имена/ID/пути листов. Он не читает ячейки и не создает документ. Подробные лимиты и незакрытые границы — [ADR-043](adr/043-bounded-xlsx-package-inspection.md). Таблица ниже описывает целевой профиль, не текущую полноту реализации.
+Фактически реализованы два локальных шага: `xlsx-inspect <path>` проверяет ограниченный ZIP/OOXML пакет, `xlsx-preview <path>` извлекает числа, boolean, простые shared/inline strings и исходный текст формулы в XLSX-specific IR, выводя только счетчики. Формульный cache отбрасывается. Ни одна команда не создаёт документ. Подробные лимиты и незакрытые границы — [ADR-043](adr/043-bounded-xlsx-package-inspection.md) и [ADR-044](adr/044-normalized-xlsx-scalar-ir.md). Таблица ниже описывает целевой профиль, не текущую полноту реализации.
 
 ZIP → OOXML package relationships → streaming XML → NormalizedImportWorkbook → parent schema validation → server formula binding → canonical document publication. Export идет из согласованной document version через отдельную Export IR. XLSX DTO не становится внутренней workbook model.
 

@@ -1,6 +1,9 @@
-//! Bounded inspection of an untrusted OOXML package. This first phase-6 slice
-//! resolves workbook/sheet relationships into metadata only; no cells are
-//! published into the domain projection.
+//! Bounded inspection and normalized scalar extraction from an OOXML package.
+//! Parsed data is never published directly into the domain projection.
+
+mod normalized;
+
+pub use normalized::{NormalizedCell, NormalizedCellValue, NormalizedSheet, NormalizedWorkbook};
 
 use quick_xml::{Reader, XmlVersion, events::Event};
 use std::{
@@ -27,6 +30,8 @@ const OFFICE_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
 const SHEET_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+const SHARED_STRING_REL: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 const WORKBOOK_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const OFFICE_REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
@@ -64,16 +69,43 @@ struct Relationship {
     target: String,
 }
 
+struct LoadedPackage {
+    inspection: PackageInspection,
+    parts: HashMap<String, Vec<u8>>,
+    started: Instant,
+    workbook_part: String,
+    workbook_rels: HashMap<String, Relationship>,
+}
+
 pub fn inspect_file(path: &Path) -> Result<PackageInspection, XlsxError> {
     let file = File::open(path).map_err(|_| XlsxError::Io)?;
     let len = file.metadata().map_err(|_| XlsxError::Io)?.len();
     inspect_reader(file, len)
 }
 
+pub fn normalize_file(path: &Path) -> Result<NormalizedWorkbook, XlsxError> {
+    let file = File::open(path).map_err(|_| XlsxError::Io)?;
+    let len = file.metadata().map_err(|_| XlsxError::Io)?.len();
+    normalize_reader(file, len)
+}
+
 pub fn inspect_reader<R: Read + Seek>(
     input: R,
     source_len: u64,
 ) -> Result<PackageInspection, XlsxError> {
+    Ok(load_package(input, source_len)?.inspection)
+}
+
+/// Extracts a bounded, non-domain workbook. It does not publish an import.
+pub fn normalize_reader<R: Read + Seek>(
+    input: R,
+    source_len: u64,
+) -> Result<NormalizedWorkbook, XlsxError> {
+    let package = load_package(input, source_len)?;
+    normalized::extract(&package)
+}
+
+fn load_package<R: Read + Seek>(input: R, source_len: u64) -> Result<LoadedPackage, XlsxError> {
     let mut input = input;
     let actual_len = input.seek(SeekFrom::End(0)).map_err(|_| XlsxError::Io)?;
     if actual_len != source_len || actual_len == 0 || actual_len > MAX_ARCHIVE_BYTES {
@@ -200,10 +232,16 @@ pub fn inspect_reader<R: Read + Seek>(
             .ok_or(XlsxError::InvalidPackage)?,
     )?;
     let sheets = parse_sheets(workbook, &workbook_part, &workbook_rels, &parts)?;
-    Ok(PackageInspection {
-        sheets,
-        entry_count,
-        uncompressed_bytes: total,
+    Ok(LoadedPackage {
+        inspection: PackageInspection {
+            sheets,
+            entry_count,
+            uncompressed_bytes: total,
+        },
+        parts,
+        started,
+        workbook_part,
+        workbook_rels,
     })
 }
 
@@ -238,29 +276,65 @@ fn validate_xml(bytes: &[u8]) -> Result<(), XlsxError> {
     let mut reader = Reader::from_str(text);
     reader.config_mut().check_end_names = true;
     let mut depth = 0_usize;
+    let mut roots = 0_usize;
     loop {
         match reader.read_event().map_err(|_| XlsxError::InvalidPackage)? {
             Event::Start(start) => {
+                if depth == 0 {
+                    roots += 1;
+                    if roots > 1 {
+                        return Err(XlsxError::InvalidPackage);
+                    }
+                }
                 depth += 1;
                 if depth > MAX_XML_DEPTH {
                     return Err(XlsxError::LimitExceeded);
                 }
                 validate_attributes(&start)?;
             }
-            Event::Empty(start) => validate_attributes(&start)?,
+            Event::Empty(start) => {
+                if depth == 0 {
+                    roots += 1;
+                    if roots > 1 {
+                        return Err(XlsxError::InvalidPackage);
+                    }
+                }
+                validate_attributes(&start)?;
+            }
             Event::End(_) => depth = depth.checked_sub(1).ok_or(XlsxError::InvalidPackage)?,
-            Event::DocType(_) | Event::GeneralRef(_) => {
+            Event::DocType(_) => {
                 return Err(XlsxError::UnsupportedActiveContent);
             }
+            Event::GeneralRef(reference) => {
+                resolve_xml_reference(&reference)?;
+            }
             Event::Text(text) if text.len() > 1024 * 1024 => return Err(XlsxError::LimitExceeded),
+            Event::Text(text) if depth == 0 && !text.as_ref().trim().is_empty() => {
+                return Err(XlsxError::InvalidPackage);
+            }
             Event::Eof => break,
             _ => {}
         }
     }
-    if depth != 0 {
+    if depth != 0 || roots != 1 {
         return Err(XlsxError::InvalidPackage);
     }
     Ok(())
+}
+
+fn resolve_xml_reference(reference: &quick_xml::events::BytesRef<'_>) -> Result<String, XlsxError> {
+    if let Some(character) = reference
+        .resolve_char_ref()
+        .map_err(|_| XlsxError::InvalidPackage)?
+    {
+        if character.is_control() && !matches!(character, '\t' | '\n' | '\r') {
+            return Err(XlsxError::InvalidPackage);
+        }
+        return Ok(character.to_string());
+    }
+    quick_xml::escape::resolve_predefined_entity(reference.as_ref())
+        .map(str::to_owned)
+        .ok_or(XlsxError::UnsupportedActiveContent)
 }
 
 fn validate_attributes(start: &quick_xml::events::BytesStart<'_>) -> Result<(), XlsxError> {
@@ -512,7 +586,7 @@ fn add_sheet(
 
 #[cfg(test)]
 mod tests {
-    use super::{XlsxError, inspect_reader};
+    use super::{NormalizedCellValue, XlsxError, inspect_reader, normalize_reader};
     use std::io::{Cursor, Write};
     use zip::{ZipWriter, write::SimpleFileOptions};
 
@@ -553,6 +627,31 @@ mod tests {
         inspect_reader(Cursor::new(bytes), len)
     }
 
+    fn normalize(bytes: Vec<u8>) -> Result<super::NormalizedWorkbook, XlsxError> {
+        let len = bytes.len() as u64;
+        normalize_reader(Cursor::new(bytes), len)
+    }
+
+    #[test]
+    fn committed_xlsx_fixture_has_five_scalar_cells() -> Result<(), Box<dyn std::error::Error>> {
+        let bytes = include_bytes!("../../../fixtures/xlsx/minimal_scalars.xlsx");
+        let workbook = normalize(bytes.to_vec())?;
+        assert_eq!(workbook.sheets.len(), 2);
+        assert_eq!(
+            workbook
+                .sheets
+                .iter()
+                .map(|sheet| sheet.cells.len())
+                .sum::<usize>(),
+            5
+        );
+        assert_eq!(
+            workbook.sheets[0].cells[3].value,
+            NormalizedCellValue::Formula("A1+B1".into())
+        );
+        Ok(())
+    }
+
     #[test]
     fn resolves_two_sheets_without_importing_cells() -> Result<(), Box<dyn std::error::Error>> {
         let result = inspect(package(&[])?)?;
@@ -588,6 +687,95 @@ mod tests {
         let duplicate = WORKBOOK.replace("sheetId=\"2\"", "sheetId=\"1\"");
         let result = inspect(package(&[("xl/workbook.xml", &duplicate)])?);
         assert_eq!(result, Err(XlsxError::InvalidPackage));
+        Ok(())
+    }
+
+    #[test]
+    fn extracts_scalar_cells_and_formula_source_without_cached_result()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let rels = WORKBOOK_RELS.replace("</Relationships>", "<Relationship Id=\"r3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>");
+        let strings = r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>hello &amp; world</t></si></sst>"#;
+        let sheet1 = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>-0</v></c><c r="C1" t="b"><v>1</v></c><c r="D1"><f>A1+B1</f><v>999</v></c></row></sheetData></worksheet>"#;
+        let sheet2 = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="4"><c r="Z4" t="inlineStr"><is><t>world&#33;</t></is></c></row></sheetData></worksheet>"#;
+        let workbook = normalize(package(&[
+            ("xl/_rels/workbook.xml.rels", &rels),
+            ("xl/sharedStrings.xml", strings),
+            ("xl/worksheets/sheet1.xml", sheet1),
+            ("xl/worksheets/sheet2.xml", sheet2),
+        ])?)?;
+        assert_eq!(workbook.sheets.len(), 2);
+        assert_eq!(workbook.sheets[0].cells.len(), 4);
+        assert_eq!(
+            workbook.sheets[0].cells[0].value,
+            NormalizedCellValue::Text("hello & world".into())
+        );
+        assert_eq!(
+            workbook.sheets[0].cells[1].value,
+            NormalizedCellValue::Number(0.0)
+        );
+        assert_eq!(
+            workbook.sheets[0].cells[2].value,
+            NormalizedCellValue::Boolean(true)
+        );
+        assert_eq!(
+            workbook.sheets[0].cells[3].value,
+            NormalizedCellValue::Formula("A1+B1".into())
+        );
+        assert_eq!(workbook.sheets[1].cells[0].column, 26);
+        assert_eq!(workbook.sheets[1].cells[0].row, 4);
+        assert_eq!(
+            workbook.sheets[1].cells[0].value,
+            NormalizedCellValue::Text("world!".into())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_shared_index_duplicate_address_and_unsupported_rich_text_fail_atomically()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let missing_shared = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>"#;
+        assert_eq!(
+            normalize(package(&[("xl/worksheets/sheet1.xml", missing_shared)])?),
+            Err(XlsxError::InvalidPackage)
+        );
+        let duplicate = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="A1"><v>2</v></c></row></sheetData></worksheet>"#;
+        assert_eq!(
+            normalize(package(&[("xl/worksheets/sheet1.xml", duplicate)])?),
+            Err(XlsxError::InvalidPackage)
+        );
+        let rich = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><r><t>styled</t></r></is></c></row></sheetData></worksheet>"#;
+        assert_eq!(
+            normalize(package(&[("xl/worksheets/sheet1.xml", rich)])?),
+            Err(XlsxError::UnsupportedFeature)
+        );
+        let unknown_entity = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>&unknown;</t></is></c></row></sheetData></worksheet>"#;
+        assert_eq!(
+            normalize(package(&[("xl/worksheets/sheet1.xml", unknown_entity)])?),
+            Err(XlsxError::UnsupportedActiveContent)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn repeated_shared_string_cannot_expand_ir_without_limit()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let rels = WORKBOOK_RELS.replace("</Relationships>", "<Relationship Id=\"r3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>");
+        let strings = format!(
+            "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><si><t>{}</t></si></sst>",
+            "x".repeat(1024 * 1024)
+        );
+        let rows = (1..=33)
+            .map(|row| format!("<row r=\"{row}\"><c r=\"A{row}\" t=\"s\"><v>0</v></c></row>"))
+            .collect::<String>();
+        let sheet = format!(
+            "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>{rows}</sheetData></worksheet>"
+        );
+        let result = normalize(package(&[
+            ("xl/_rels/workbook.xml.rels", &rels),
+            ("xl/sharedStrings.xml", &strings),
+            ("xl/worksheets/sheet1.xml", &sheet),
+        ])?);
+        assert_eq!(result, Err(XlsxError::LimitExceeded));
         Ok(())
     }
 }
