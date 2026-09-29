@@ -1,5 +1,31 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — optimistic Canvas latency без серверного подтверждения
+
+Перед срезом прочитаны AGENTS, roadmap, testing, текущие DocumentStore,
+Canvas renderer и E2E сценарии. Цель — проверить локальную задержку именно
+pending overlay до подтверждения сервером. Инварианты: команда не достигает
+сервера во время измерения; подтвержденная версия остаётся неизменной;
+тайминг берется из browser clock между Enter и Canvas draw submission.
+
+Добавлен `tests/performance/optimistic.mjs` и `just bench-optimistic`. Harness
+создаёт документ, дожидается подписки, удерживает WebSocket sends и делает
+20 warm-up + 100 measured edits через formula bar. Первая реализация harness
+ошибочно обрезала UUIDv7 и получила HTTP 400 `invalid_identity`; генератор
+исправлен. После этого один probe run и пять независимых серий прошли. В пяти
+сериях p95: 8.8/9.1/8.8/14.9/8.6 ms; серверная версия 1 проверена после
+каждой серии. Результат и пределы в
+[отчёте](docs/benchmarks/2026-09-29-optimistic-local.md), отражены в testing,
+roadmap и презентации. Это `fillText` submission, не момент презентации кадра
+GPU; большая книга и фиксированный runner ещё открыты.
+`pnpm exec prettier --write` применён к harness/report; presentation check
+прошёл 10 слайдов на desktop/mobile. `just check` завершился exit 0: Rust
+fmt/Clippy/tests/build, wasm32 check, protobuf drift, WASM build, Prettier,
+ESLint, TS, 53 Vitest, Vite build. E2E браузера в этом срезе отдельно не
+запускался; предыдущий срез проверил 16/16 против той же production bundle.
+
+---
+
 ## 2026-09-29 — замер первого Canvas-кадра с загруженной книгой
 
 Перед срезом прочитаны AGENTS, roadmap, testing, текущий Canvas renderer и

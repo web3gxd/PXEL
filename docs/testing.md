@@ -60,6 +60,12 @@ browser Performance API в Chromium на production bundle. Последний �
 GET, 107 DOM nodes для пустой книги 1,000×26. Условия и ограничения:
 [2026-09-29-render-local.md](benchmarks/2026-09-29-render-local.md).
 
+`just bench-optimistic` удерживает отправку WebSocket после подписки и измеряет
+в реальном Chromium время от Enter до Canvas `fillText` для нового значения.
+Пять запусков по 20 warm-up + 100 measured edits дали худший p95 14.9 ms;
+серверная версия оставалась 1. Это submission draw call, не GPU presentation.
+[Методика и ограничения](benchmarks/2026-09-29-optimistic-local.md).
+
 | Цель                                      | Target / measurement                                     |
 | ----------------------------------------- | -------------------------------------------------------- |
 | First usable grid после готовности данных | p95 <1 s                                                 |

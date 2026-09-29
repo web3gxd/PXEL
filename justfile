@@ -54,6 +54,9 @@ bench-collab:
 bench-render:
     node tests/performance/render.mjs
 
+bench-optimistic:
+    node tests/performance/optimistic.mjs
+
 sqlx-check:
     cargo sqlx prepare --check --workspace -- --all-targets --all-features
 
