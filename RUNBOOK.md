@@ -1,5 +1,51 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — schema-9 DeleteColumns with durable tombstones
+
+Перед срезом прочитаны AGENTS.md, roadmap, ADR-023 и текущие domain,
+formula, codec, actor, server и browser paths. Цель: удалять стабильные
+столбцы без перенаправления ссылок на соседнюю A1-координату. Инварианты:
+candidate до CAS, typed `#REF!`, один durable event/version, idempotent
+receipt, hash-equal replay и запрет повторного выделения удалённого ID.
+Риски: полный проход по формулам и рост tombstone set; будущий snapshot
+codec обязан их сохранить.
+
+`DeleteColumns` принимает 1–100 уникальных живых IDs и оставляет хотя бы
+один столбец. Schema-9 event, SQL migration 009, отдельные wire/storage
+protobuf fields, semantic hash tag и command fingerprint добавлены без
+переписывания schema 1–8. Candidate удаляет sparse cells, обновляет
+text/AST budgets, переводит scalar bound refs к удалённой колонке в typed
+`Invalid(DeletedTarget)`, сужает partial ranges и пересчитывает relative
+column offsets; удалённые IDs остаются в capped tombstone set и входят в
+domain hash. Calculation graph перестраивается. Canvas UI отправляет
+удаление выбранного столбца и ждёт каноническую projection. Изменены domain,
+formula, collab, codec/journal, server, web store/UI, protobuf/generated TS,
+migration и unit/integration/recovery/browser tests. Решение — ADR-024;
+обновлены collaboration/formula semantics, roadmap, benchmark и слайды.
+
+Реально выполнено: `pnpm proto:generate`; `cargo run --locked -p pxel-server
+--features dev-auth -- migrate` (migration 009); точечные domain, binder,
+codec, PostgreSQL/WebSocket и browser DPR 1/2 tests; `pnpm test:recovery`
+1/1 с hard restart; `just check` pass (Rust fmt/clippy/tests/build/WASM,
+protobuf drift, Prettier/ESLint/TypeScript, Vitest 60/60, Vite build);
+`just sqlx-check` pass; `pnpm test:integration` 35/35; окончательный
+`pnpm test:e2e` 32/32. Презентация открыта Chromium на ширинах 1280/390 px:
+10 слайдов, горизонтального переполнения нет. Criterion
+`delete_target_column_10000_formulas`: 12.241–13.377 ms, point estimate
+12.712 ms, 10 samples/220 iterations; условия —
+docs/benchmarks/2026-09-29-column-deletion-local.md. Это domain candidate,
+не p95 end-to-end commit.
+
+Первый browser suite 31/32 зафиксировал гонку старого offline-теста: WS
+автоматически переподключился до проверки кратковременного статуса. Тест
+теперь устанавливает offline сразу после закрытия socket и проверяет
+восстановление canonical данных после возврата сети; полный 32/32 прошёл.
+Первый integration suite при параллельных файлах получил HTTP 429 на общем
+dev rate limit; `--test-concurrency=1` в package script даёт стабильный
+функциональный прогон 35/35. Нагрузочные сценарии остаются отдельно.
+Copy/paste, undo, multi-sheet, snapshots, XLSX и Linux/Compose/remote CI не
+закрыты.
+
 ## 2026-09-29 — schema-8 InsertColumns with stable formula targets
 
 Перед срезом прочитаны AGENTS.md, roadmap, ADR-021/022 и текущие domain,

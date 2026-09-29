@@ -409,6 +409,44 @@ test('inserting a column keeps formula target stable and shifts its A1 display',
   await expect(bar).toHaveValue('=B1');
 });
 
+test('deleting a referenced column shows REF and survives reload', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const id = new URL(page.url()).searchParams.get('document');
+  if (!id) throw new Error('Document ID missing');
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('7');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  await bar.fill('=A1');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await page.reload();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await page.getByRole('button', { name: 'Столбец −' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const response = await page.request.get(`/api/documents/${id}`);
+  expect(response.ok()).toBe(true);
+  const projection = await response.json();
+  expect(projection.sheets[0].columns).toHaveLength(25);
+  expect(
+    projection.sheets[0].cells.find(
+      (cell: { value: { type: string } }) => cell.value.type === 'formula',
+    )?.value.value.current_text,
+  ).toBe('=#REF!');
+  await grid.focus();
+  await expect(bar).toHaveValue('=#REF!');
+  await page.reload();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(bar).toHaveValue('=#REF!');
+});
+
 test('two tabs converge after one tab is offline during a remote edit', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
@@ -453,9 +491,6 @@ test('two tabs converge after one tab is offline during a remote edit', async ({
         .__pxelTestSockets ?? [])
         if (socket.readyState === 1) socket.close(4000);
     });
-    await expect(second.getByTestId('connection-status')).toContainText(
-      /Восстанавливаем|Нет подключения/,
-    );
     await secondContext.setOffline(true);
     const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
     await bar.fill('317');

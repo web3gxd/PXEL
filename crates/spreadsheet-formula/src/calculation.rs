@@ -311,6 +311,9 @@ impl CalculationProjection {
             | Operation::InsertColumnsRebased { .. } => {
                 return Err(CalculationError::InvalidProjection);
             }
+            Operation::DeleteColumns { .. } => {
+                return Err(CalculationError::InvalidProjection);
+            }
             Operation::AdvanceCalculationEpoch { .. } => {
                 return self.prepare_reconcile(book, &BTreeSet::new(), limits);
             }

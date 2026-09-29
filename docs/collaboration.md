@@ -46,8 +46,15 @@ inverse/undo для `DeleteRows` в текущем срезе ещё нет.
 schema-8 событие. Конкурентные вставки перед одним anchor следуют server
 commit order; target IDs формул не меняются. Relative column offsets и
 отображаемый A1-текст пересчитываются в candidate до CAS. Stale new formula
-после изменения оси по-прежнему требует resync. Column deletion и inverse
-остаются планом из матрицы, а не реализованной функцией.
+после изменения оси по-прежнему требует resync. Inverse этой операции
+остаётся планом из матрицы.
+
+`DeleteColumns` (ADR-024) является отдельным schema-9 event. Все IDs должны
+быть живыми и уникальными, последняя колонка остаётся; retired IDs не
+используются повторно. Scalar references на удалённую колонку дают `#REF!`,
+partial ranges сужаются до живых границ. Stale write получает typed
+rejection, исходный idempotent retry — receipt. Replay проверяет domain hash.
+Undo и inverse ещё не реализованы.
 
 ## Command, validation, event, projection
 

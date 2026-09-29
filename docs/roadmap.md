@@ -65,7 +65,13 @@ column offsets и текущий A1-текст меняются до CAS. Postgr
 hard restart и browser DPR 1/2 проверены. Criterion: 11.853–14.140 ms
 для domain candidate с 10 000 формулами;
 [условия](benchmarks/2026-09-29-column-insertion-local.md). Фаза 4 всё ещё
-открыта: удаление столбцов, copy/paste, undo и multi-sheet compatibility.
+открыта; следующий срез — удаление столбцов.
+Шестой срез фазы 4 (ADR-024) добавляет `DeleteColumns` schema 9: ссылки
+на удалённый stable target дают `#REF!`, частичные ranges сужаются,
+удалённый ID не выдаётся повторно. PostgreSQL/WebSocket и hard restart
+проверены. Criterion: 12.241–13.377 ms для domain candidate с 10 000
+формулами; [условия](benchmarks/2026-09-29-column-deletion-local.md).
+Copy/paste, undo, multi-sheet compatibility и snapshots ещё открыты.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

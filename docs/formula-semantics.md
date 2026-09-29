@@ -106,3 +106,14 @@ continue to span their stable endpoints and therefore include inserted columns
 between them. The displayed `current_text` is rendered from the new axes;
 authored source/canonical text remain historical. Native replay, browser and
 the domain benchmark cover this slice. See ADR-023.
+
+# Column deletion in the current single-sheet profile
+
+Schema-9 `DeleteColumns` preserves surviving stable targets. A bound scalar
+reference to a removed column becomes typed `Invalid(DeletedTarget)` and
+renders as `#REF!`. A rectangular range with removed endpoints shrinks to
+its first/last surviving columns; a range without survivors becomes `#REF!`.
+Relative column copy offsets are recomputed from the new axes. Authored
+source/canonical text is retained; `current_text` reflects the transformed
+bound AST. Native replay and browser display are verified, while full Excel
+range parity remains outside the current profile. See ADR-024.

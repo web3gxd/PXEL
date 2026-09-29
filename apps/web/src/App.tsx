@@ -126,6 +126,17 @@ export function App() {
             >
               Столбец ↑
             </button>
+            <button
+              type="button"
+              className="insert-row-action"
+              disabled={
+                !document.sheet || document.sheet.columns.length <= 1 || state.kind !== 'online'
+              }
+              title="Удалить выделенный столбец"
+              onClick={() => document.deleteSelectedColumn()}
+            >
+              Столбец −
+            </button>
           </nav>
         </div>
         <div className="connection-area">

@@ -749,6 +749,22 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
                     columns,
                 }
             }
+            v1::canonical_operation::Kind::DeleteColumns(deletion) => {
+                if deletion.columns.is_empty() || deletion.columns.len() > 100 {
+                    return Err(SessionError::InvalidCommand);
+                }
+                let sheet = SheetId::from_bytes(bytes_id(&deletion.sheet_id)?)?;
+                let mut columns = Vec::with_capacity(deletion.columns.len());
+                let mut seen = std::collections::BTreeSet::new();
+                for raw in deletion.columns {
+                    let column = ColumnId::from_bytes(bytes_id(&raw)?)?;
+                    if !seen.insert(column) {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    columns.push(column);
+                }
+                CommandPayload::DeleteColumns { sheet, columns }
+            }
             v1::canonical_operation::Kind::SetCellFormula(_) => {
                 return Err(SessionError::InvalidCommand);
             }
@@ -833,6 +849,12 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
             before_column_id: before.as_bytes().to_vec(),
             columns: columns.iter().map(|id| id.as_bytes().to_vec()).collect(),
         }),
+        Operation::DeleteColumns { sheet, columns } => {
+            v1::canonical_operation::Kind::DeleteColumns(v1::DeleteColumns {
+                sheet_id: sheet.as_bytes().to_vec(),
+                columns: columns.iter().map(|id| id.as_bytes().to_vec()).collect(),
+            })
+        }
         Operation::CreateWorkbook { .. } | Operation::AdvanceCalculationEpoch { .. } => {
             return None;
         }

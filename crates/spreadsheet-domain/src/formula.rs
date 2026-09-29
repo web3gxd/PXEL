@@ -377,6 +377,66 @@ pub struct Formula {
     profile: CompatibilityProfile,
 }
 impl Formula {
+    /// Rebase a surviving formula after column deletion. Scalar targets in
+    /// removed columns become REF; ranges retain only their surviving span.
+    pub fn rebase_deleted_columns(
+        &self,
+        next_version: DocumentVersion,
+        origin_column_position: u32,
+        deleted_sheet: SheetId,
+        deleted_columns: &BTreeSet<ColumnId>,
+        column_position: impl Fn(SheetId, ColumnId) -> Option<u32>,
+        range_survivors: impl Fn(ColumnId, ColumnId) -> Option<(ColumnId, ColumnId)>,
+    ) -> Result<Self, FormulaValidationError> {
+        let mut nodes = self.ast.nodes().to_vec();
+        let rebase = |reference: &mut BoundCellReference| -> Result<(), FormulaValidationError> {
+            if let AxisReferenceMode::Relative { .. } = reference.column_mode {
+                let target = column_position(reference.target_sheet, reference.target_column)
+                    .ok_or(FormulaValidationError::InvalidReference)?;
+                reference.column_mode = AxisReferenceMode::Relative {
+                    original_delta: i64::from(target) - i64::from(origin_column_position),
+                };
+            }
+            Ok(())
+        };
+        for node in &mut nodes {
+            match node {
+                Node::Cell(reference) => {
+                    if reference.target_sheet == deleted_sheet
+                        && deleted_columns.contains(&reference.target_column)
+                    {
+                        *node = Node::InvalidReference(ReferenceError::DeletedTarget);
+                    } else {
+                        rebase(reference)?;
+                    }
+                }
+                Node::Range(range) => {
+                    if range.start.target_sheet == deleted_sheet {
+                        if let Some((start, end)) =
+                            range_survivors(range.start.target_column, range.end.target_column)
+                        {
+                            range.start.target_column = start;
+                            range.end.target_column = end;
+                        } else {
+                            *node = Node::InvalidReference(ReferenceError::DeletedTarget);
+                            continue;
+                        }
+                    }
+                    rebase(&mut range.start)?;
+                    rebase(&mut range.end)?;
+                }
+                _ => {}
+            }
+        }
+        let ast = BoundAst::new(self.ast.schema_version(), self.ast.root(), nodes)?;
+        Self::new(
+            self.source.clone(),
+            self.canonical.clone(),
+            ast,
+            self.origin,
+            next_version,
+        )
+    }
     /// Preserve bound column targets while updating relative copy offsets.
     pub fn rebase_column_offsets(
         &self,

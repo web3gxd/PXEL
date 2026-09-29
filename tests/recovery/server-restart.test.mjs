@@ -11,6 +11,7 @@ import {
   formulaCommand,
   connect,
   createDocument,
+  deleteColumnsCommand,
   deleteRowsCommand,
   extendRowsCommand,
   insertColumnsCommand,
@@ -241,6 +242,43 @@ test(
         assert.equal(
           columnRecovery.state_hash,
           Buffer.from(columnInsertion.value.confirmedStateHash).toString('hex'),
+        );
+        const { snapshot: columnDeletionBase } = await createDocument(base, cookie);
+        const columnDeletionWriter = await connect(base, cookie);
+        const formulaBeforeColumnDelete = await columnDeletionWriter.send(
+          formulaCommand(columnDeletionWriter, columnDeletionBase, '=A1', {
+            column: 1,
+            sequence: 1,
+          }),
+        );
+        assert.equal(formulaBeforeColumnDelete.case, 'committed');
+        const deletedColumn = await columnDeletionWriter.send(
+          deleteColumnsCommand(
+            columnDeletionWriter,
+            { ...columnDeletionBase, version: '2' },
+            [columnDeletionBase.sheets[0].columns[0]],
+            { sequence: 2 },
+          ),
+        );
+        assert.equal(deletedColumn.case, 'committed');
+        columnDeletionWriter.socket.terminate();
+        await kill();
+        await start();
+        const columnDeletionRecovery = await getDocument(
+          base,
+          cookie,
+          columnDeletionBase.document_id,
+        );
+        assert.equal(columnDeletionRecovery.version, '3');
+        assert.equal(columnDeletionRecovery.sheets[0].columns.length, 25);
+        assert.equal(
+          columnDeletionRecovery.sheets[0].cells.find((cell) => cell.value.type === 'formula')
+            ?.value.value.current_text,
+          '=#REF!',
+        );
+        assert.equal(
+          columnDeletionRecovery.state_hash,
+          Buffer.from(deletedColumn.value.confirmedStateHash).toString('hex'),
         );
       } finally {
         client.socket.terminate();

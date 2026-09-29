@@ -252,7 +252,9 @@
           target строки при 10 000 формулах: 14,97–17,81 мс для domain candidate.
           <a href="../docs/benchmarks/2026-09-29-row-deletion-local.md">Условия</a>. Вставка столбца
           при 10 000 формулах: 11,85–14,14 мс для domain candidate.
-          <a href="../docs/benchmarks/2026-09-29-column-insertion-local.md">Условия</a>.
+          <a href="../docs/benchmarks/2026-09-29-column-insertion-local.md">Условия</a>. Удаление
+          target-столбца при 10 000 формулах: 12,24–13,38 мс для domain candidate.
+          <a href="../docs/benchmarks/2026-09-29-column-deletion-local.md">Условия</a>.
         </p>
         <p class="metric-footnote">
           Замеры относятся к указанным локальным стендам, не являются SLA. Условия:
@@ -348,9 +350,7 @@
           </div>
           <div class="doing">
             <b>04</b><span>Структура</span
-            ><small
-              >Вставка строк и столбцов, удаление строк; delete columns/copy/undo впереди</small
-            >
+            ><small>Вставка и удаление строк и столбцов; copy/undo впереди</small>
           </div>
           <div><b>05</b><span>Snapshots</span><small>S3 + recovery</small></div>
           <div><b>06</b><span>XLSX</span><small>импорт и экспорт</small></div>
@@ -359,10 +359,10 @@
           Презентация обновляется после проверенных срезов. `ExtendRows` автоматически расширяет
           Canvas; вставка по stable ID пересчитывает относительные ссылки формул до COMMIT. Удаление
           строки превращает ссылки на удалённый target в #REF! и переживает restart. Вставка столбца
-          сохраняет формульный target и меняет текущий A1-адрес. Очередь отправки ограничена 160
-          кадрами / 2 MiB. Локальные latency и paused-socket stress измерены: медленный клиент
-          закрыт после send timeout. Cross-host поведение и сетевой queue overflow ещё открыты.
-          Linux/Compose/remote CI — отдельные gates.
+          сохраняет формульный target и меняет текущий A1-адрес. Удаление столбца даёт #REF! для
+          ссылок на него. Очередь отправки ограничена 160 кадрами / 2 MiB. Локальные latency и
+          paused-socket stress измерены: медленный клиент закрыт после send timeout. Cross-host
+          поведение и сетевой queue overflow ещё открыты. Linux/Compose/remote CI — отдельные gates.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>
@@ -376,7 +376,7 @@
           Сейчас главное: завершить сетевые convergence tests и измерить backpressure по этапам.
           Ограниченный replay, отзыв прав, reconnect, локальный slow-reader stress и первый срез
           структуры проверены. Вставка и удаление строк с формулами переживают перезапуск; дальше —
-          удаление столбцов, копирование, snapshots и XLSX.
+          копирование, snapshots и XLSX.
         </p>
         <div class="closing-links">
           <a href="../README.md"><span>Начать локально</span><b>README ↗</b></a>

@@ -126,6 +126,47 @@ fn formula_insertion_fixture(count: usize) -> Result<(Workbook, Operation), Doma
     Ok((book, operation))
 }
 
+fn formula_column_deletion_fixture(count: usize) -> Result<(Workbook, Operation), DomainError> {
+    let mut seed = sheet_seed(count)?;
+    let source_column = seed.columns[0];
+    let formula_column = ColumnId::from_bytes([4; 16])?;
+    seed.columns.push(formula_column);
+    let version = DocumentVersion::new(1)?;
+    let cells = seed
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, &row)| {
+            let address = CellAddress {
+                sheet: seed.id,
+                row,
+                column: formula_column,
+            };
+            let reference = BoundCellReference {
+                target_sheet: seed.id,
+                target_row: seed.rows[0],
+                target_column: source_column,
+                row_mode: AxisReferenceMode::Relative {
+                    original_delta: -(index as i64),
+                },
+                column_mode: AxisReferenceMode::Relative { original_delta: -1 },
+            };
+            let ast = BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Cell(reference)])
+                .map_err(|_| DomainError::InvalidFormula)?;
+            let formula = Formula::new("=A1".into(), "=A1".into(), ast, address, version)
+                .map_err(|_| DomainError::InvalidFormula)?;
+            Ok((address, CellContent::Formula(formula)))
+        })
+        .collect::<Result<Vec<_>, DomainError>>()?;
+    let operation = Operation::DeleteColumns {
+        sheet: seed.id,
+        columns: vec![source_column],
+    };
+    let book =
+        Workbook::from_content_fixture(DocumentId::from_bytes([1; 16])?, version, seed, cells)?;
+    Ok((book, operation))
+}
+
 fn benches(c: &mut Criterion) {
     let mut axes = c.benchmark_group("axis_allocation");
     for count in [1_000, 100_000] {
@@ -205,6 +246,20 @@ fn benches(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 formula_book.candidate(black_box(&formula_column_insertion), insertion_version),
+            )
+        })
+    });
+    let (column_deletion_book, column_deletion) = match formula_column_deletion_fixture(10_000) {
+        Ok(fixture) => fixture,
+        Err(error) => {
+            eprintln!("column deletion benchmark fixture invalid: {error}");
+            std::process::exit(1);
+        }
+    };
+    c.bench_function("delete_target_column_10000_formulas", |b| {
+        b.iter(|| {
+            black_box(
+                column_deletion_book.candidate(black_box(&column_deletion), insertion_version),
             )
         })
     });

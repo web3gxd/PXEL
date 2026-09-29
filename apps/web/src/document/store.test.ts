@@ -242,6 +242,26 @@ describe('document projection and pending intents', () => {
     expect(store.pending).toHaveLength(0);
     store.disconnected();
   });
+  it('deletes the selected stable column and waits for canonical axes', async () => {
+    const { store, sent } = await connectedStore();
+    expect(store.deleteSelectedColumn()).toBe(false);
+    const secondColumn = uuidV7();
+    const twoColumns = projection();
+    twoColumns.sheets[0]!.columns.push(secondColumn);
+    store.load(twoColumns);
+    store.selected = { row: 0, column: 1 };
+    expect(store.deleteSelectedColumn()).toBe(true);
+    expect(store.deleteSelectedColumn()).toBe(false);
+    const payload = fromBinary(ClientEnvelopeSchema, sent[0] ?? new Uint8Array()).payload;
+    if (payload.case !== 'command' || payload.value.operation?.kind.case !== 'deleteColumns')
+      throw new Error('Missing column deletion command');
+    expect(payload.value.operation.kind.value.columns.map(bytesUuid)).toEqual([secondColumn]);
+    const next = projection();
+    next.version = '2';
+    store.load(next);
+    expect(store.selected.column).toBe(0);
+    store.disconnected();
+  });
   it('queues one bounded row extension and refreshes axes after commit', async () => {
     const { store, sent } = await connectedStore();
     expect(store.extendRows()).toBe(true);

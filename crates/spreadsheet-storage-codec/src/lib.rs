@@ -80,6 +80,10 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                 before_column_id: before.as_bytes().to_vec(),
                 columns: columns.iter().map(|id| id.as_bytes().to_vec()).collect(),
             }),
+            Operation::DeleteColumns { sheet, columns } => Kind::DeleteColumns(v1::DeleteColumns {
+                sheet_id: sheet.as_bytes().to_vec(),
+                columns: columns.iter().map(|id| id.as_bytes().to_vec()).collect(),
+            }),
             Operation::SetCellFormula { address, formula } => {
                 Kind::SetCellFormula(v1::SetCellFormula {
                     address: Some(addr(address)),
@@ -276,6 +280,30 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                 columns,
             }
         }
+        Kind::DeleteColumns(deletion) => {
+            if deletion.columns.is_empty() || deletion.columns.len() > 100 {
+                return Err(CodecError::Invalid);
+            }
+            let columns: Vec<ColumnId> = deletion
+                .columns
+                .iter()
+                .map(|value| ColumnId::from_bytes(id(value)?).map_err(|_| CodecError::Invalid))
+                .collect::<Result<_, _>>()?;
+            if columns
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != columns.len()
+            {
+                return Err(CodecError::Invalid);
+            }
+            Operation::DeleteColumns {
+                sheet: SheetId::from_bytes(id(&deletion.sheet_id)?)
+                    .map_err(|_| CodecError::Invalid)?,
+                columns,
+            }
+        }
         Kind::SetCellFormula(v) => {
             let address = decode_addr(v.address.ok_or(CodecError::Invalid)?)?;
             let formula = formula_codec::decode(v.formula.ok_or(CodecError::Invalid)?)?;
@@ -308,6 +336,7 @@ pub fn schema_version(operation: &Operation) -> u32 {
         Operation::InsertRowsRebased { .. } => 6,
         Operation::DeleteRows { .. } => 7,
         Operation::InsertColumnsRebased { .. } => 8,
+        Operation::DeleteColumns { .. } => 9,
         Operation::AdvanceCalculationEpoch { .. } => 3,
         Operation::SetCellFormula { .. } => 2,
         _ => 1,
@@ -340,7 +369,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=8) {
+    if !matches!(e.schema_version, 1..=9) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -356,11 +385,11 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         e.actor_id.as_slice(),
         &operation,
     ) {
-        (1 | 2 | 4 | 5 | 6 | 7 | 8, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
+        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5 | 6 | 7 | 8, 0, actor, _) => {
+        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -466,6 +495,14 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
                 h.update(column.as_bytes());
             }
         }
+        Operation::DeleteColumns { sheet, columns } => {
+            h.update([10]);
+            h.update(sheet.as_bytes());
+            h.update((columns.len() as u64).to_le_bytes());
+            for column in columns {
+                h.update(column.as_bytes());
+            }
+        }
         Operation::SetCellFormula { address, formula } => {
             h.update([3]);
             h.update(address.sheet.as_bytes());
@@ -557,6 +594,13 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
                 columns: columns.clone(),
             },
         )?,
+        CommandPayload::DeleteColumns { sheet, columns } => semantic_operation(
+            &mut h,
+            &Operation::DeleteColumns {
+                sheet: *sheet,
+                columns: columns.clone(),
+            },
+        )?,
         CommandPayload::SetCellValue { address, value } => semantic_operation(
             &mut h,
             &Operation::SetCellValue {
@@ -613,6 +657,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::InsertRowsRebased { .. })
         | (EventPrincipal::System, Operation::DeleteRows { .. })
         | (EventPrincipal::System, Operation::InsertColumnsRebased { .. })
+        | (EventPrincipal::System, Operation::DeleteColumns { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
         (EventPrincipal::System, _) => h.update(b"PXEL-EVENT-SYSTEM-1"),
@@ -1144,6 +1189,43 @@ mod formula_tests {
         let fingerprint = command_fingerprint(&command)?;
         if let CommandPayload::InsertColumns { before, .. } = &mut command.operation {
             *before = ColumnId::from_bytes([8; 16])?;
+        }
+        assert_ne!(command_fingerprint(&command)?, fingerprint);
+        Ok(())
+    }
+    #[test]
+    fn delete_columns_schema_round_trips_and_fingerprint_binds_ids()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let sheet = SheetId::from_bytes([4; 16])?;
+        let columns = vec![ColumnId::from_bytes([5; 16])?];
+        let event = CommittedEvent {
+            document_id: DocumentId::from_bytes([1; 16])?,
+            operation_id: OperationId::from_bytes([2; 16])?,
+            principal: EventPrincipal::User(ActorId::from_bytes([3; 16])?),
+            version: DocumentVersion::new(2)?,
+            operation: Operation::DeleteColumns {
+                sheet,
+                columns: columns.clone(),
+            },
+            state_hash: [7; 32],
+        };
+        let bytes = encode(&event)?;
+        assert_eq!(
+            v1::EventEnvelope::decode(bytes.as_slice())?.schema_version,
+            9
+        );
+        assert_eq!(decode(&bytes)?, event);
+        let mut command = Command {
+            document_id: event.document_id,
+            operation_id: event.operation_id,
+            actor_id: ActorId::from_bytes([3; 16])?,
+            base_version: DocumentVersion::new(1)?,
+            client_sequence: 1,
+            operation: CommandPayload::DeleteColumns { sheet, columns },
+        };
+        let fingerprint = command_fingerprint(&command)?;
+        if let CommandPayload::DeleteColumns { columns, .. } = &mut command.operation {
+            columns[0] = ColumnId::from_bytes([8; 16])?;
         }
         assert_ne!(command_fingerprint(&command)?, fingerprint);
         Ok(())

@@ -12,6 +12,7 @@ pub const MAX_ROWS: usize = 100_000;
 pub const MAX_COLUMNS: usize = 1_000;
 pub const MAX_CELLS: usize = 100_000;
 pub const MAX_RETIRED_ROWS: usize = 1_000_000;
+pub const MAX_RETIRED_COLUMNS: usize = 1_000_000;
 pub const MAX_TEXT_BYTES: usize = 32 * 1024;
 pub const MAX_WORKBOOK_TEXT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_WORKBOOK_AST_BYTES: usize = 32 * 1024 * 1024;
@@ -326,6 +327,10 @@ pub enum Operation {
         before: ColumnId,
         columns: Vec<ColumnId>,
     },
+    DeleteColumns {
+        sheet: SheetId,
+        columns: Vec<ColumnId>,
+    },
     SetCellValue {
         address: CellAddress,
         value: CellValue,
@@ -362,6 +367,10 @@ pub enum CommandPayload {
     InsertColumns {
         sheet: SheetId,
         before: ColumnId,
+        columns: Vec<ColumnId>,
+    },
+    DeleteColumns {
+        sheet: SheetId,
         columns: Vec<ColumnId>,
     },
     SetCellValue {
@@ -515,6 +524,27 @@ impl Sheet {
         }
         Ok(())
     }
+    fn validate_column_deletion(
+        &self,
+        columns: &[ColumnId],
+    ) -> Result<BTreeSet<ColumnId>, DomainError> {
+        if columns.is_empty() || columns.len() > 100 {
+            return Err(DomainError::LimitExceeded);
+        }
+        let mut deleted = BTreeSet::new();
+        for column in columns {
+            if !self.column_positions.contains_key(column) {
+                return Err(DomainError::MissingColumn);
+            }
+            if !deleted.insert(*column) {
+                return Err(DomainError::InvalidAxis);
+            }
+        }
+        if deleted.len() >= self.columns.len() {
+            return Err(DomainError::InvalidAxis);
+        }
+        Ok(deleted)
+    }
     fn validate_row_deletion(&self, rows: &[RowId]) -> Result<BTreeSet<RowId>, DomainError> {
         if rows.is_empty() || rows.len() > 1_000 {
             return Err(DomainError::LimitExceeded);
@@ -543,6 +573,7 @@ pub struct Workbook {
     last_axis_change_version: DocumentVersion,
     sheets: Vec<Sheet>,
     retired_row_ids: BTreeSet<RowId>,
+    retired_column_ids: BTreeSet<ColumnId>,
     calculation_context: Option<CalculationContext>,
     // Derived from cell contents; never persisted or included in canonical hashes.
     text_bytes: usize,
@@ -556,6 +587,7 @@ impl Workbook {
             last_axis_change_version: DocumentVersion::ZERO,
             sheets: Vec::new(),
             retired_row_ids: BTreeSet::new(),
+            retired_column_ids: BTreeSet::new(),
             calculation_context: None,
             text_bytes: 0,
             ast_memory_bytes: 0,
@@ -627,6 +659,7 @@ impl Workbook {
             last_axis_change_version: version,
             sheets: vec![Sheet::from_seed(&seed)?],
             retired_row_ids: BTreeSet::new(),
+            retired_column_ids: BTreeSet::new(),
             calculation_context: None,
             text_bytes: 0,
             ast_memory_bytes: 0,
@@ -682,6 +715,7 @@ impl Workbook {
                 | Operation::InsertRowsRebased { .. }
                 | Operation::DeleteRows { .. }
                 | Operation::InsertColumnsRebased { .. }
+                | Operation::DeleteColumns { .. }
         ) {
             next.last_axis_change_version = next_version;
         }
@@ -690,6 +724,7 @@ impl Workbook {
             Operation::InsertRowsRebased { .. }
                 | Operation::DeleteRows { .. }
                 | Operation::InsertColumnsRebased { .. }
+                | Operation::DeleteColumns { .. }
         ) {
             for sheet in &next.sheets {
                 for (address, content) in &sheet.cells {
@@ -728,6 +763,7 @@ impl Workbook {
                 Operation::InsertColumnsRebased { .. } => {
                     return Err(DomainError::VersionConflict);
                 }
+                Operation::DeleteColumns { .. } => return Err(DomainError::VersionConflict),
                 Operation::AdvanceCalculationEpoch { .. } => {
                     return Err(DomainError::VersionConflict);
                 }
@@ -851,6 +887,38 @@ impl Workbook {
                     .ok_or(DomainError::MissingColumn)?;
                 (self.text_bytes, self.ast_memory_bytes)
             }
+            Operation::DeleteColumns { sheet, columns } => {
+                let target = self
+                    .sheets
+                    .iter()
+                    .find(|current| current.id == *sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                let deleted = target.validate_column_deletion(columns)?;
+                if self.retired_column_ids.len().saturating_add(deleted.len()) > MAX_RETIRED_COLUMNS
+                {
+                    return Err(DomainError::LimitExceeded);
+                }
+                let removed_text = target
+                    .cells
+                    .iter()
+                    .filter(|(address, _)| deleted.contains(&address.column))
+                    .map(|(_, content)| content.text_bytes())
+                    .sum::<usize>();
+                let removed_ast = target
+                    .cells
+                    .iter()
+                    .filter(|(address, _)| deleted.contains(&address.column))
+                    .map(|(_, content)| content.ast_memory_bytes())
+                    .sum::<usize>();
+                (
+                    self.text_bytes
+                        .checked_sub(removed_text)
+                        .ok_or(DomainError::InvalidFormula)?,
+                    self.ast_memory_bytes
+                        .checked_sub(removed_ast)
+                        .ok_or(DomainError::InvalidFormula)?,
+                )
+            }
             Operation::AdvanceCalculationEpoch { context } => {
                 let expected_epoch = self
                     .calculation_context
@@ -892,9 +960,11 @@ impl Workbook {
     }
     fn validate_new_columns(&self, columns: &[ColumnId]) -> Result<(), DomainError> {
         if columns.iter().any(|id| {
-            self.sheets
-                .iter()
-                .any(|sheet| sheet.column_positions.contains_key(id))
+            self.retired_column_ids.contains(id)
+                || self
+                    .sheets
+                    .iter()
+                    .any(|sheet| sheet.column_positions.contains_key(id))
         }) {
             return Err(DomainError::InvalidAxis);
         }
@@ -995,6 +1065,9 @@ impl Workbook {
             } => {
                 self.apply_column_insertion(*sheet, *before, columns, next_version)?;
             }
+            Operation::DeleteColumns { sheet, columns } => {
+                self.apply_column_deletion(*sheet, columns, next_version)?;
+            }
             Operation::SetCellValue { address, value } => {
                 let normalized = value.normalized()?;
                 let sheet = self
@@ -1092,6 +1165,107 @@ impl Workbook {
                 .ok_or(DomainError::MissingSheet)?;
             sheet.cells.insert(address, CellContent::Formula(formula));
         }
+        Ok(())
+    }
+    fn apply_column_deletion(
+        &mut self,
+        sheet_id: SheetId,
+        columns: &[ColumnId],
+        next_version: DocumentVersion,
+    ) -> Result<(), DomainError> {
+        let index = self
+            .sheets
+            .iter()
+            .position(|sheet| sheet.id == sheet_id)
+            .ok_or(DomainError::MissingSheet)?;
+        let sheet = self.sheets.get(index).ok_or(DomainError::MissingSheet)?;
+        let deleted = sheet.validate_column_deletion(columns)?;
+        let old_columns = sheet.columns.clone();
+        let old_positions = sheet.column_positions.clone();
+        let mut next_alive = vec![None; old_columns.len()];
+        let mut survivor = None;
+        for position in (0..old_columns.len()).rev() {
+            if !deleted.contains(&old_columns[position]) {
+                survivor = Some(old_columns[position]);
+            }
+            next_alive[position] = survivor;
+        }
+        let mut previous_alive = vec![None; old_columns.len()];
+        survivor = None;
+        for (position, column) in old_columns.iter().copied().enumerate() {
+            if !deleted.contains(&column) {
+                survivor = Some(column);
+            }
+            previous_alive[position] = survivor;
+        }
+        let target = self
+            .sheets
+            .get_mut(index)
+            .ok_or(DomainError::MissingSheet)?;
+        target.columns.retain(|column| !deleted.contains(column));
+        target.column_positions = target
+            .columns
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(position, column)| (column, position as u32))
+            .collect();
+        target
+            .cells
+            .retain(|address, _| !deleted.contains(&address.column));
+
+        let mut replacements = Vec::new();
+        for (sheet_index, sheet) in self.sheets.iter().enumerate() {
+            for (address, content) in &sheet.cells {
+                let CellContent::Formula(formula) = content else {
+                    continue;
+                };
+                let origin_position = sheet
+                    .column_position(address.column)
+                    .ok_or(DomainError::MissingColumn)?;
+                let transformed = formula
+                    .rebase_deleted_columns(
+                        next_version,
+                        origin_position,
+                        sheet_id,
+                        &deleted,
+                        |id, column| {
+                            self.sheets
+                                .iter()
+                                .find(|sheet| sheet.id == id)
+                                .and_then(|sheet| sheet.column_position(column))
+                        },
+                        |start, end| {
+                            let first = *old_positions.get(&start)? as usize;
+                            let last = *old_positions.get(&end)? as usize;
+                            let low = first.min(last);
+                            let high = first.max(last);
+                            let low_survivor = next_alive.get(low).copied().flatten()?;
+                            let high_survivor = previous_alive.get(high).copied().flatten()?;
+                            if (*old_positions.get(&low_survivor)? as usize) > high
+                                || (*old_positions.get(&high_survivor)? as usize) < low
+                            {
+                                return None;
+                            }
+                            Some(if first <= last {
+                                (low_survivor, high_survivor)
+                            } else {
+                                (high_survivor, low_survivor)
+                            })
+                        },
+                    )
+                    .map_err(|_| DomainError::InvalidFormula)?;
+                replacements.push((sheet_index, *address, transformed));
+            }
+        }
+        for (sheet_index, address, formula) in replacements {
+            let sheet = self
+                .sheets
+                .get_mut(sheet_index)
+                .ok_or(DomainError::MissingSheet)?;
+            sheet.cells.insert(address, CellContent::Formula(formula));
+        }
+        self.retired_column_ids.extend(deleted);
         Ok(())
     }
     fn apply_row_deletion(
@@ -1347,6 +1521,13 @@ impl Workbook {
             hash.update(b"PXEL-RETIRED-ROWS-1\0");
             hash.update((self.retired_row_ids.len() as u64).to_be_bytes());
             for id in &self.retired_row_ids {
+                hash.update(id.as_bytes());
+            }
+        }
+        if !self.retired_column_ids.is_empty() {
+            hash.update(b"PXEL-RETIRED-COLUMNS-1\0");
+            hash.update((self.retired_column_ids.len() as u64).to_be_bytes());
+            for id in &self.retired_column_ids {
                 hash.update(id.as_bytes());
             }
         }

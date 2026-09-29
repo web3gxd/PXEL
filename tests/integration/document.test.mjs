@@ -7,6 +7,7 @@ import {
   decodeFrame,
   connect,
   createDocument,
+  deleteColumnsCommand,
   deleteRowsCommand,
   extendRowsCommand,
   insertColumnsCommand,
@@ -386,6 +387,58 @@ test('concurrent column inserts before one stable anchor follow server order', a
   } finally {
     left.socket.close();
     right.socket.close();
+  }
+});
+
+test('column deletion persists REF, rejects stale writes and does not reuse IDs', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const writer = await connect(base, cookie);
+  try {
+    const removed = snapshot.sheets[0].columns[0];
+    assert.equal(
+      (await writer.send(setCommand(writer, snapshot, 17, { sequence: 1 }))).case,
+      'committed',
+    );
+    const formula = await writer.send(
+      formulaCommand(writer, { ...snapshot, version: '2' }, '=A1', {
+        column: 1,
+        sequence: 2,
+      }),
+    );
+    assert.equal(formula.case, 'committed');
+    const command = deleteColumnsCommand(writer, { ...snapshot, version: '3' }, [removed], {
+      sequence: 3,
+    });
+    const deletion = await writer.send(command);
+    assert.equal(deletion.case, 'committed');
+    assert.equal(deletion.value.committedVersion, 4n);
+    const current = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(current.sheets[0].columns.includes(removed), false);
+    assert.equal(
+      current.sheets[0].cells.find((cell) => cell.value.type === 'formula')?.value.value
+        .current_text,
+      '=#REF!',
+    );
+    const calculated = await calculation(base, cookie, snapshot.document_id, 4);
+    assert.deepEqual(calculated.values[0].value, { type: 'error', value: '#REF!' });
+    const retry = await writer.send(command);
+    assert.equal(retry.case, 'receipt');
+    assert.equal(retry.value.committedVersion, 4n);
+    const stale = await writer.send(setCommand(writer, snapshot, 99, { sequence: 4 }));
+    assert.equal(stale.case, 'rejected');
+    const reuse = await writer.send(
+      insertColumnsCommand(
+        writer,
+        { ...snapshot, version: '4' },
+        snapshot.sheets[0].columns[1],
+        [removed],
+        { sequence: 5 },
+      ),
+    );
+    assert.equal(reuse.case, 'rejected');
+  } finally {
+    writer.socket.close();
   }
 });
 

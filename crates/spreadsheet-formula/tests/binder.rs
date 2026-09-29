@@ -207,6 +207,37 @@ fn inserted_column_updates_current_a1_text_without_changing_stable_targets()
 }
 
 #[test]
+fn deleted_column_shrinks_range_and_displays_ref_for_scalar_target()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (book, origin) = workbook(false)?;
+    let formula = bind("=A1+SUM(A1:C1)", &book, origin)?;
+    let before = book.candidate(
+        &Operation::SetCellFormula {
+            address: origin,
+            formula,
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let sheet = before.sheets().first().ok_or("missing sheet")?;
+    let after = before.candidate(
+        &Operation::DeleteColumns {
+            sheet: sheet.id(),
+            columns: vec![sheet.columns()[0]],
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let CellContent::Formula(rebased) = after.sheets()[0]
+        .cells()
+        .get(&origin)
+        .ok_or("missing formula")?
+    else {
+        return Err("missing formula".into());
+    };
+    assert_eq!(render_current(rebased, &after)?, "=(#REF!+SUM(A1:B1))");
+    Ok(())
+}
+
+#[test]
 fn deleted_rows_render_shrunken_ranges_and_typed_ref_errors()
 -> Result<(), Box<dyn std::error::Error>> {
     let (book, origin) = workbook(false)?;

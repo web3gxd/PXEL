@@ -430,6 +430,7 @@ async fn submit<J: OperationJournal>(
             Operation::InsertRowsRebased { .. }
                 | Operation::DeleteRows { .. }
                 | Operation::InsertColumnsRebased { .. }
+                | Operation::DeleteColumns { .. }
         ) {
             for sheet in candidate.sheets() {
                 for content in sheet.cells().values() {
@@ -565,6 +566,10 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
         } => Ok(Operation::InsertColumnsRebased {
             sheet: *sheet,
             before: *before,
+            columns: columns.clone(),
+        }),
+        CommandPayload::DeleteColumns { sheet, columns } => Ok(Operation::DeleteColumns {
+            sheet: *sheet,
             columns: columns.clone(),
         }),
         CommandPayload::SetCellValue { address, value } => Ok(Operation::SetCellValue {

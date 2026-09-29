@@ -106,6 +106,7 @@ message CanonicalOperation {
     InsertRows insert_rows = 5;
     DeleteRows delete_rows = 6;
     InsertColumns insert_columns = 7;
+    DeleteColumns delete_columns = 8;
   }
 }
 
@@ -136,6 +137,12 @@ message InsertColumns {
   bytes sheet_id = 1;
   bytes before_column_id = 2;
   repeated bytes columns = 3;
+}
+
+// Removes stable column IDs. Bound scalar targets in removed columns become #REF!.
+message DeleteColumns {
+  bytes sheet_id = 1;
+  repeated bytes columns = 2;
 }
 
 message DocumentCommand {
