@@ -1,6 +1,7 @@
 use proptest::prelude::*;
 use spreadsheet_domain::formula::{
-    AST_SCHEMA_VERSION, AxisReferenceMode, BoundAst, BoundCellReference, Formula, Node, NodeId,
+    AST_SCHEMA_VERSION, AxisReferenceMode, BoundAst, BoundCellReference, BoundRangeReference,
+    Formula, FunctionName, Node, NodeId, ReferenceError,
 };
 use spreadsheet_domain::workbook::*;
 
@@ -243,6 +244,214 @@ fn rebase_uses_target_sheet_axis_for_cross_sheet_reference() -> Result<(), Domai
         && reference.target_row == target_row
         && reference.row_mode == AxisReferenceMode::Relative { original_delta: 2 }
         && reference.column_mode == AxisReferenceMode::Absolute));
+    Ok(())
+}
+
+#[test]
+fn delete_rows_invalidates_scalar_target_and_prevents_id_reuse() -> Result<(), DomainError> {
+    let (book, first) = seed()?;
+    let middle = RowId::from_bytes([41; 16])?;
+    let last = RowId::from_bytes([42; 16])?;
+    let book = book.candidate(
+        &Operation::ExtendRows {
+            sheet: first.sheet,
+            rows: vec![middle, last],
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let filled = book.candidate(
+        &Operation::SetCellValue {
+            address: CellAddress {
+                row: middle,
+                ..first
+            },
+            value: CellValue::Number(10.0),
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let origin = CellAddress { row: last, ..first };
+    let reference = BoundCellReference {
+        target_sheet: first.sheet,
+        target_row: middle,
+        target_column: first.column,
+        row_mode: AxisReferenceMode::Relative { original_delta: -1 },
+        column_mode: AxisReferenceMode::Relative { original_delta: 0 },
+    };
+    let ast = BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Cell(reference)])
+        .map_err(|_| DomainError::InvalidFormula)?;
+    let formula = Formula::new("=A2".into(), "=A2".into(), ast, origin, filled.version())
+        .map_err(|_| DomainError::InvalidFormula)?;
+    let before = filled.candidate(
+        &Operation::SetCellFormula {
+            address: origin,
+            formula,
+        },
+        DocumentVersion::new(4)?,
+    )?;
+    let operation = Operation::DeleteRows {
+        sheet: first.sheet,
+        rows: vec![middle],
+    };
+    let after = before.candidate(&operation, DocumentVersion::new(5)?)?;
+    assert_eq!(after.sheets()[0].rows(), &[first.row, last]);
+    assert!(!after.sheets()[0].cells().contains_key(&CellAddress {
+        row: middle,
+        ..first
+    }));
+    let CellContent::Formula(rebased) = after.sheets()[0]
+        .cells()
+        .get(&origin)
+        .ok_or(DomainError::InvalidFormula)?
+    else {
+        return Err(DomainError::InvalidFormula);
+    };
+    assert_eq!(
+        rebased.ast().nodes(),
+        &[Node::InvalidReference(ReferenceError::DeletedTarget)]
+    );
+    assert_eq!(rebased.bound_at_version().get(), 5);
+    assert_eq!(after.text_bytes(), rebased.text_bytes());
+    assert_eq!(
+        after
+            .candidate(
+                &Operation::SetCellValue {
+                    address: CellAddress {
+                        row: middle,
+                        ..first
+                    },
+                    value: CellValue::Number(2.0)
+                },
+                DocumentVersion::new(6)?,
+            )
+            .map(|_| ()),
+        Err(DomainError::MissingRow)
+    );
+    assert_eq!(
+        after
+            .candidate(
+                &Operation::InsertRowsRebased {
+                    sheet: first.sheet,
+                    before: last,
+                    rows: vec![middle]
+                },
+                DocumentVersion::new(6)?,
+            )
+            .map(|_| ()),
+        Err(DomainError::InvalidAxis)
+    );
+    let mut replay = before;
+    replay.apply_event(&CommittedEvent {
+        document_id: after.document_id(),
+        operation_id: OperationId::from_bytes([43; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([44; 16])?),
+        version: DocumentVersion::new(5)?,
+        operation,
+        state_hash: after.hash(),
+    })?;
+    assert_eq!(replay.hash(), after.hash());
+    Ok(())
+}
+
+#[test]
+fn delete_rows_shrinks_range_boundary_and_rejects_last_row() -> Result<(), DomainError> {
+    let (book, first) = seed()?;
+    let middle = RowId::from_bytes([51; 16])?;
+    let last = RowId::from_bytes([52; 16])?;
+    let book = book.candidate(
+        &Operation::ExtendRows {
+            sheet: first.sheet,
+            rows: vec![middle, last],
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let origin = CellAddress { row: last, ..first };
+    let reference = |row, delta| BoundCellReference {
+        target_sheet: first.sheet,
+        target_row: row,
+        target_column: first.column,
+        row_mode: AxisReferenceMode::Relative {
+            original_delta: delta,
+        },
+        column_mode: AxisReferenceMode::Relative { original_delta: 0 },
+    };
+    let ast = BoundAst::new(
+        AST_SCHEMA_VERSION,
+        NodeId(1),
+        vec![
+            Node::Range(BoundRangeReference {
+                start: reference(first.row, -2),
+                end: reference(middle, -1),
+            }),
+            Node::Call {
+                name: FunctionName::new("SUM".into()).map_err(|_| DomainError::InvalidFormula)?,
+                arguments: vec![NodeId(0)],
+            },
+        ],
+    )
+    .map_err(|_| DomainError::InvalidFormula)?;
+    let formula = Formula::new(
+        "=SUM(A1:A2)".into(),
+        "=SUM(A1:A2)".into(),
+        ast,
+        origin,
+        book.version(),
+    )
+    .map_err(|_| DomainError::InvalidFormula)?;
+    let before = book.candidate(
+        &Operation::SetCellFormula {
+            address: origin,
+            formula,
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let after = before.candidate(
+        &Operation::DeleteRows {
+            sheet: first.sheet,
+            rows: vec![first.row],
+        },
+        DocumentVersion::new(4)?,
+    )?;
+    let CellContent::Formula(rebased) = after.sheets()[0]
+        .cells()
+        .get(&origin)
+        .ok_or(DomainError::InvalidFormula)?
+    else {
+        return Err(DomainError::InvalidFormula);
+    };
+    assert!(matches!(&rebased.ast().nodes()[0], Node::Range(range)
+        if range.start.target_row == middle
+        && range.end.target_row == middle
+        && range.start.row_mode == AxisReferenceMode::Relative { original_delta: -1 }));
+    let only_last = after.candidate(
+        &Operation::DeleteRows {
+            sheet: first.sheet,
+            rows: vec![middle],
+        },
+        DocumentVersion::new(5)?,
+    )?;
+    let CellContent::Formula(invalidated) = only_last.sheets()[0]
+        .cells()
+        .get(&origin)
+        .ok_or(DomainError::InvalidFormula)?
+    else {
+        return Err(DomainError::InvalidFormula);
+    };
+    assert!(matches!(
+        invalidated.ast().nodes()[0],
+        Node::InvalidReference(ReferenceError::DeletedTarget)
+    ));
+    assert_eq!(
+        only_last
+            .candidate(
+                &Operation::DeleteRows {
+                    sheet: first.sheet,
+                    rows: vec![last]
+                },
+                DocumentVersion::new(6)?,
+            )
+            .map(|_| ()),
+        Err(DomainError::InvalidAxis)
+    );
     Ok(())
 }
 

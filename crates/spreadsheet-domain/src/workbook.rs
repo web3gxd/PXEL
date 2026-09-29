@@ -11,6 +11,7 @@ use thiserror::Error;
 pub const MAX_ROWS: usize = 100_000;
 pub const MAX_COLUMNS: usize = 1_000;
 pub const MAX_CELLS: usize = 100_000;
+pub const MAX_RETIRED_ROWS: usize = 1_000_000;
 pub const MAX_TEXT_BYTES: usize = 32 * 1024;
 pub const MAX_WORKBOOK_TEXT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_WORKBOOK_AST_BYTES: usize = 32 * 1024 * 1024;
@@ -316,6 +317,10 @@ pub enum Operation {
         before: RowId,
         rows: Vec<RowId>,
     },
+    DeleteRows {
+        sheet: SheetId,
+        rows: Vec<RowId>,
+    },
     SetCellValue {
         address: CellAddress,
         value: CellValue,
@@ -343,6 +348,10 @@ pub enum CommandPayload {
     InsertRows {
         sheet: SheetId,
         before: RowId,
+        rows: Vec<RowId>,
+    },
+    DeleteRows {
+        sheet: SheetId,
         rows: Vec<RowId>,
     },
     SetCellValue {
@@ -480,6 +489,24 @@ impl Sheet {
         }
         Ok(())
     }
+    fn validate_row_deletion(&self, rows: &[RowId]) -> Result<BTreeSet<RowId>, DomainError> {
+        if rows.is_empty() || rows.len() > 1_000 {
+            return Err(DomainError::LimitExceeded);
+        }
+        let mut deleted = BTreeSet::new();
+        for row in rows {
+            if !self.row_positions.contains_key(row) {
+                return Err(DomainError::MissingRow);
+            }
+            if !deleted.insert(*row) {
+                return Err(DomainError::InvalidAxis);
+            }
+        }
+        if deleted.len() >= self.rows.len() {
+            return Err(DomainError::InvalidAxis);
+        }
+        Ok(deleted)
+    }
 }
 
 #[derive(Clone)]
@@ -489,6 +516,7 @@ pub struct Workbook {
     // Derived by replay; not part of the canonical authored hash.
     last_axis_change_version: DocumentVersion,
     sheets: Vec<Sheet>,
+    retired_row_ids: BTreeSet<RowId>,
     calculation_context: Option<CalculationContext>,
     // Derived from cell contents; never persisted or included in canonical hashes.
     text_bytes: usize,
@@ -501,6 +529,7 @@ impl Workbook {
             version: DocumentVersion::ZERO,
             last_axis_change_version: DocumentVersion::ZERO,
             sheets: Vec::new(),
+            retired_row_ids: BTreeSet::new(),
             calculation_context: None,
             text_bytes: 0,
             ast_memory_bytes: 0,
@@ -571,6 +600,7 @@ impl Workbook {
             version,
             last_axis_change_version: version,
             sheets: vec![Sheet::from_seed(&seed)?],
+            retired_row_ids: BTreeSet::new(),
             calculation_context: None,
             text_bytes: 0,
             ast_memory_bytes: 0,
@@ -624,10 +654,14 @@ impl Workbook {
                 | Operation::ExtendRows { .. }
                 | Operation::InsertRows { .. }
                 | Operation::InsertRowsRebased { .. }
+                | Operation::DeleteRows { .. }
         ) {
             next.last_axis_change_version = next_version;
         }
-        if matches!(operation, Operation::InsertRowsRebased { .. }) {
+        if matches!(
+            operation,
+            Operation::InsertRowsRebased { .. } | Operation::DeleteRows { .. }
+        ) {
             for sheet in &next.sheets {
                 for (address, content) in &sheet.cells {
                     if let CellContent::Formula(formula) = content {
@@ -661,6 +695,7 @@ impl Workbook {
                 Operation::ExtendRows { .. } => return Err(DomainError::VersionConflict),
                 Operation::InsertRows { .. } => return Err(DomainError::VersionConflict),
                 Operation::InsertRowsRebased { .. } => return Err(DomainError::VersionConflict),
+                Operation::DeleteRows { .. } => return Err(DomainError::VersionConflict),
                 Operation::AdvanceCalculationEpoch { .. } => {
                     return Err(DomainError::VersionConflict);
                 }
@@ -686,6 +721,7 @@ impl Workbook {
         Ok(match operation {
             Operation::CreateWorkbook { .. } => (self.text_bytes, self.ast_memory_bytes),
             Operation::ExtendRows { sheet, rows } => {
+                self.validate_new_rows(rows)?;
                 self.sheets
                     .iter()
                     .find(|current| current.id == *sheet)
@@ -698,6 +734,7 @@ impl Workbook {
                 before,
                 rows,
             } => {
+                self.validate_new_rows(rows)?;
                 let target = self
                     .sheets
                     .iter()
@@ -722,6 +759,7 @@ impl Workbook {
                 before,
                 rows,
             } => {
+                self.validate_new_rows(rows)?;
                 let target = self
                     .sheets
                     .iter()
@@ -732,6 +770,37 @@ impl Workbook {
                     .ok_or(DomainError::MissingRow)?;
                 target.validate_row_extension(rows)?;
                 (self.text_bytes, self.ast_memory_bytes)
+            }
+            Operation::DeleteRows { sheet, rows } => {
+                let target = self
+                    .sheets
+                    .iter()
+                    .find(|current| current.id == *sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                let deleted = target.validate_row_deletion(rows)?;
+                if self.retired_row_ids.len().saturating_add(deleted.len()) > MAX_RETIRED_ROWS {
+                    return Err(DomainError::LimitExceeded);
+                }
+                let removed_text = target
+                    .cells
+                    .iter()
+                    .filter(|(address, _)| deleted.contains(&address.row))
+                    .map(|(_, content)| content.text_bytes())
+                    .sum::<usize>();
+                let removed_ast = target
+                    .cells
+                    .iter()
+                    .filter(|(address, _)| deleted.contains(&address.row))
+                    .map(|(_, content)| content.ast_memory_bytes())
+                    .sum::<usize>();
+                (
+                    self.text_bytes
+                        .checked_sub(removed_text)
+                        .ok_or(DomainError::InvalidFormula)?,
+                    self.ast_memory_bytes
+                        .checked_sub(removed_ast)
+                        .ok_or(DomainError::InvalidFormula)?,
+                )
             }
             Operation::AdvanceCalculationEpoch { context } => {
                 let expected_epoch = self
@@ -759,6 +828,18 @@ impl Workbook {
             }
             Operation::ClearCell { address } => self.updated_budgets(*address, 0, 0)?,
         })
+    }
+    fn validate_new_rows(&self, rows: &[RowId]) -> Result<(), DomainError> {
+        if rows.iter().any(|row| {
+            self.retired_row_ids.contains(row)
+                || self
+                    .sheets
+                    .iter()
+                    .any(|sheet| sheet.row_positions.contains_key(row))
+        }) {
+            return Err(DomainError::InvalidAxis);
+        }
+        Ok(())
     }
     fn apply_operation(
         &mut self,
@@ -845,6 +926,9 @@ impl Workbook {
                     }
                 }
             }
+            Operation::DeleteRows { sheet, rows } => {
+                self.apply_row_deletion(*sheet, rows, next_version)?;
+            }
             Operation::SetCellValue { address, value } => {
                 let normalized = value.normalized()?;
                 let sheet = self
@@ -887,6 +971,107 @@ impl Workbook {
         }
         self.text_bytes = text_bytes;
         self.ast_memory_bytes = ast_memory_bytes;
+        Ok(())
+    }
+    fn apply_row_deletion(
+        &mut self,
+        sheet_id: SheetId,
+        rows: &[RowId],
+        next_version: DocumentVersion,
+    ) -> Result<(), DomainError> {
+        let index = self
+            .sheets
+            .iter()
+            .position(|sheet| sheet.id == sheet_id)
+            .ok_or(DomainError::MissingSheet)?;
+        let sheet = self.sheets.get(index).ok_or(DomainError::MissingSheet)?;
+        let deleted = sheet.validate_row_deletion(rows)?;
+        let old_rows = sheet.rows.clone();
+        let old_positions = sheet.row_positions.clone();
+        let mut next_alive = vec![None; old_rows.len()];
+        let mut survivor = None;
+        for position in (0..old_rows.len()).rev() {
+            if !deleted.contains(&old_rows[position]) {
+                survivor = Some(old_rows[position]);
+            }
+            next_alive[position] = survivor;
+        }
+        let mut previous_alive = vec![None; old_rows.len()];
+        survivor = None;
+        for (position, row) in old_rows.iter().copied().enumerate() {
+            if !deleted.contains(&row) {
+                survivor = Some(row);
+            }
+            previous_alive[position] = survivor;
+        }
+        let target = self
+            .sheets
+            .get_mut(index)
+            .ok_or(DomainError::MissingSheet)?;
+        target.rows.retain(|row| !deleted.contains(row));
+        target.row_positions = target
+            .rows
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(position, row)| (row, position as u32))
+            .collect();
+        target
+            .cells
+            .retain(|address, _| !deleted.contains(&address.row));
+
+        let mut replacements = Vec::new();
+        for (sheet_index, sheet) in self.sheets.iter().enumerate() {
+            for (address, content) in &sheet.cells {
+                let CellContent::Formula(formula) = content else {
+                    continue;
+                };
+                let origin_position = sheet
+                    .row_position(address.row)
+                    .ok_or(DomainError::MissingRow)?;
+                let transformed = formula
+                    .rebase_deleted_rows(
+                        next_version,
+                        origin_position,
+                        sheet_id,
+                        &deleted,
+                        |id, row| {
+                            self.sheets
+                                .iter()
+                                .find(|sheet| sheet.id == id)
+                                .and_then(|sheet| sheet.row_position(row))
+                        },
+                        |start, end| {
+                            let first = *old_positions.get(&start)? as usize;
+                            let last = *old_positions.get(&end)? as usize;
+                            let low = first.min(last);
+                            let high = first.max(last);
+                            let low_survivor = next_alive.get(low).copied().flatten()?;
+                            let high_survivor = previous_alive.get(high).copied().flatten()?;
+                            if (*old_positions.get(&low_survivor)? as usize) > high
+                                || (*old_positions.get(&high_survivor)? as usize) < low
+                            {
+                                return None;
+                            }
+                            Some(if first <= last {
+                                (low_survivor, high_survivor)
+                            } else {
+                                (high_survivor, low_survivor)
+                            })
+                        },
+                    )
+                    .map_err(|_| DomainError::InvalidFormula)?;
+                replacements.push((sheet_index, *address, transformed));
+            }
+        }
+        for (sheet_index, address, formula) in replacements {
+            let sheet = self
+                .sheets
+                .get_mut(sheet_index)
+                .ok_or(DomainError::MissingSheet)?;
+            sheet.cells.insert(address, CellContent::Formula(formula));
+        }
+        self.retired_row_ids.extend(deleted);
         Ok(())
     }
     fn updated_budgets(
@@ -1036,6 +1221,13 @@ impl Workbook {
             hash.update((context.compatibility_profile.len() as u64).to_be_bytes());
             hash.update(context.compatibility_profile.as_bytes());
             hash.update([context.reason as u8]);
+        }
+        if !self.retired_row_ids.is_empty() {
+            hash.update(b"PXEL-RETIRED-ROWS-1\0");
+            hash.update((self.retired_row_ids.len() as u64).to_be_bytes());
+            for id in &self.retired_row_ids {
+                hash.update(id.as_bytes());
+            }
         }
         hash.finalize().into()
     }

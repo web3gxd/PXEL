@@ -67,6 +67,10 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                 before_row_id: before.as_bytes().to_vec(),
                 rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
             }),
+            Operation::DeleteRows { sheet, rows } => Kind::DeleteRows(v1::DeleteRows {
+                sheet_id: sheet.as_bytes().to_vec(),
+                rows: rows.iter().map(|id| id.as_bytes().to_vec()).collect(),
+            }),
             Operation::SetCellFormula { address, formula } => {
                 Kind::SetCellFormula(v1::SetCellFormula {
                     address: Some(addr(address)),
@@ -213,6 +217,30 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                 }
             }
         }
+        Kind::DeleteRows(deletion) => {
+            if deletion.rows.is_empty() || deletion.rows.len() > 1_000 {
+                return Err(CodecError::Invalid);
+            }
+            let rows: Vec<RowId> = deletion
+                .rows
+                .iter()
+                .map(|value| RowId::from_bytes(id(value)?).map_err(|_| CodecError::Invalid))
+                .collect::<Result<_, _>>()?;
+            if rows
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != rows.len()
+            {
+                return Err(CodecError::Invalid);
+            }
+            Operation::DeleteRows {
+                sheet: SheetId::from_bytes(id(&deletion.sheet_id)?)
+                    .map_err(|_| CodecError::Invalid)?,
+                rows,
+            }
+        }
         Kind::SetCellFormula(v) => {
             let address = decode_addr(v.address.ok_or(CodecError::Invalid)?)?;
             let formula = formula_codec::decode(v.formula.ok_or(CodecError::Invalid)?)?;
@@ -243,6 +271,7 @@ pub fn schema_version(operation: &Operation) -> u32 {
         Operation::ExtendRows { .. } => 4,
         Operation::InsertRows { .. } => 5,
         Operation::InsertRowsRebased { .. } => 6,
+        Operation::DeleteRows { .. } => 7,
         Operation::AdvanceCalculationEpoch { .. } => 3,
         Operation::SetCellFormula { .. } => 2,
         _ => 1,
@@ -275,7 +304,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=6) {
+    if !matches!(e.schema_version, 1..=7) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -291,11 +320,11 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         e.actor_id.as_slice(),
         &operation,
     ) {
-        (1 | 2 | 4 | 5 | 6, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
+        (1 | 2 | 4 | 5 | 6 | 7, 0, actor, Operation::AdvanceCalculationEpoch { .. }) => {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5 | 6, 0, actor, _) => {
+        (1 | 2 | 4 | 5 | 6 | 7, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -380,6 +409,14 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
                 h.update(row.as_bytes());
             }
         }
+        Operation::DeleteRows { sheet, rows } => {
+            h.update([8]);
+            h.update(sheet.as_bytes());
+            h.update((rows.len() as u64).to_le_bytes());
+            for row in rows {
+                h.update(row.as_bytes());
+            }
+        }
         Operation::SetCellFormula { address, formula } => {
             h.update([3]);
             h.update(address.sheet.as_bytes());
@@ -452,6 +489,13 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
                 rows: rows.clone(),
             },
         )?,
+        CommandPayload::DeleteRows { sheet, rows } => semantic_operation(
+            &mut h,
+            &Operation::DeleteRows {
+                sheet: *sheet,
+                rows: rows.clone(),
+            },
+        )?,
         CommandPayload::SetCellValue { address, value } => semantic_operation(
             &mut h,
             &Operation::SetCellValue {
@@ -506,6 +550,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::ExtendRows { .. })
         | (EventPrincipal::System, Operation::InsertRows { .. })
         | (EventPrincipal::System, Operation::InsertRowsRebased { .. })
+        | (EventPrincipal::System, Operation::DeleteRows { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
         (EventPrincipal::System, _) => h.update(b"PXEL-EVENT-SYSTEM-1"),
@@ -957,6 +1002,43 @@ mod formula_tests {
         let fingerprint = command_fingerprint(&command)?;
         if let CommandPayload::InsertRows { before, .. } = &mut command.operation {
             *before = RowId::from_bytes([9; 16])?;
+        }
+        assert_ne!(command_fingerprint(&command)?, fingerprint);
+        Ok(())
+    }
+    #[test]
+    fn delete_rows_schema_round_trips_and_fingerprint_binds_ids()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let sheet = SheetId::from_bytes([4; 16])?;
+        let rows = vec![RowId::from_bytes([5; 16])?, RowId::from_bytes([6; 16])?];
+        let event = CommittedEvent {
+            document_id: DocumentId::from_bytes([1; 16])?,
+            operation_id: OperationId::from_bytes([2; 16])?,
+            principal: EventPrincipal::User(ActorId::from_bytes([3; 16])?),
+            version: DocumentVersion::new(2)?,
+            operation: Operation::DeleteRows {
+                sheet,
+                rows: rows.clone(),
+            },
+            state_hash: [7; 32],
+        };
+        let bytes = encode(&event)?;
+        assert_eq!(
+            v1::EventEnvelope::decode(bytes.as_slice())?.schema_version,
+            7
+        );
+        assert_eq!(decode(&bytes)?, event);
+        let mut command = Command {
+            document_id: event.document_id,
+            operation_id: event.operation_id,
+            actor_id: ActorId::from_bytes([3; 16])?,
+            base_version: DocumentVersion::new(1)?,
+            client_sequence: 1,
+            operation: CommandPayload::DeleteRows { sheet, rows },
+        };
+        let fingerprint = command_fingerprint(&command)?;
+        if let CommandPayload::DeleteRows { rows, .. } = &mut command.operation {
+            rows[0] = RowId::from_bytes([8; 16])?;
         }
         assert_ne!(command_fingerprint(&command)?, fingerprint);
         Ok(())

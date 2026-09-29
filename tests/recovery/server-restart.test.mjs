@@ -11,6 +11,7 @@ import {
   formulaCommand,
   connect,
   createDocument,
+  deleteRowsCommand,
   extendRowsCommand,
   insertRowsCommand,
   getDocument,
@@ -179,6 +180,34 @@ test(
         assert.equal(
           insertedRecovery.state_hash,
           Buffer.from(insertion.value.confirmedStateHash).toString('hex'),
+        );
+        const { snapshot: deletionBase } = await createDocument(base, cookie);
+        const deletionWriter = await connect(base, cookie);
+        const formulaBeforeDelete = await deletionWriter.send(
+          formulaCommand(deletionWriter, deletionBase, '=A2', { column: 1, sequence: 1 }),
+        );
+        assert.equal(formulaBeforeDelete.case, 'committed');
+        const removed = deletionBase.sheets[0].rows[1];
+        const deletion = await deletionWriter.send(
+          deleteRowsCommand(deletionWriter, { ...deletionBase, version: '2' }, [removed], {
+            sequence: 2,
+          }),
+        );
+        assert.equal(deletion.case, 'committed');
+        deletionWriter.socket.terminate();
+        await kill();
+        await start();
+        const deletedRecovery = await getDocument(base, cookie, deletionBase.document_id);
+        assert.equal(deletedRecovery.version, '3');
+        assert.equal(deletedRecovery.sheets[0].rows.includes(removed), false);
+        assert.equal(
+          deletedRecovery.sheets[0].cells.find((cell) => cell.value.type === 'formula')?.value.value
+            .current_text,
+          '=#REF!',
+        );
+        assert.equal(
+          deletedRecovery.state_hash,
+          Buffer.from(deletion.value.confirmedStateHash).toString('hex'),
         );
       } finally {
         client.socket.terminate();

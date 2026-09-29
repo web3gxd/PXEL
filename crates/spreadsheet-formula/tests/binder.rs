@@ -167,3 +167,50 @@ fn current_a1_text_follows_stable_targets_and_expands_range()
         if reference.row_mode == AxisReferenceMode::Relative { original_delta: -3 }));
     Ok(())
 }
+
+#[test]
+fn deleted_rows_render_shrunken_ranges_and_typed_ref_errors()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (book, origin) = workbook(false)?;
+    let formula = bind("=SUM(A1:A2)", &book, origin)?;
+    let book = book.candidate(
+        &Operation::SetCellFormula {
+            address: origin,
+            formula,
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let first = book.sheets()[0].rows()[0];
+    let middle = book.sheets()[0].rows()[1];
+    let shortened = book.candidate(
+        &Operation::DeleteRows {
+            sheet: origin.sheet,
+            rows: vec![first],
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let CellContent::Formula(formula) = shortened.sheets()[0]
+        .cells()
+        .get(&origin)
+        .ok_or("missing formula")?
+    else {
+        return Err("expected formula".into());
+    };
+    assert_eq!(render_current(formula, &shortened)?, "=SUM(A1:A1)");
+    let invalid = shortened.candidate(
+        &Operation::DeleteRows {
+            sheet: origin.sheet,
+            rows: vec![middle],
+        },
+        DocumentVersion::new(4)?,
+    )?;
+    let CellContent::Formula(formula) = invalid.sheets()[0]
+        .cells()
+        .get(&origin)
+        .ok_or("missing formula")?
+    else {
+        return Err("expected formula".into());
+    };
+    assert_eq!(render_current(formula, &invalid)?, "=SUM(#REF!)");
+    Ok(())
+}

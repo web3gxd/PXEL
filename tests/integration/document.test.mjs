@@ -7,6 +7,7 @@ import {
   decodeFrame,
   connect,
   createDocument,
+  deleteRowsCommand,
   extendRowsCommand,
   insertRowsCommand,
   formulaCommand,
@@ -302,6 +303,74 @@ test('row insertion uses stable anchors, server order and rebases formulas', asy
   } finally {
     left.socket.close();
     right.socket.close();
+  }
+});
+
+test('row deletion persists typed REF, refuses stale writes and never reuses a row ID', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const writer = await connect(base, cookie);
+  const second = await connect(base, cookie);
+  try {
+    const removed = snapshot.sheets[0].rows[1];
+    assert.equal(
+      (await writer.send(setCommand(writer, snapshot, 7, { row: 1, sequence: 1 }))).case,
+      'committed',
+    );
+    assert.equal(
+      (
+        await writer.send(
+          formulaCommand(writer, { ...snapshot, version: '2' }, '=A2', {
+            row: 0,
+            column: 1,
+            sequence: 2,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    const deletion = deleteRowsCommand(writer, { ...snapshot, version: '3' }, [removed], {
+      sequence: 3,
+    });
+    const committed = await writer.send(deletion);
+    assert.equal(committed.case, 'committed');
+    assert.equal(committed.value.committedVersion, 4n);
+    const current = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(current.sheets[0].rows.length, 999);
+    assert.equal(current.sheets[0].rows.includes(removed), false);
+    const formula = current.sheets[0].cells.find((cell) => cell.value.type === 'formula')?.value
+      .value;
+    assert.equal(formula.source, '=A2');
+    assert.equal(formula.current_text, '=#REF!');
+    const calculated = await calculation(base, cookie, snapshot.document_id, 4);
+    assert.deepEqual(calculated.values[0].value, { type: 'error', value: '#REF!' });
+    const retry = await writer.send(deletion);
+    assert.equal(retry.case, 'receipt');
+    assert.equal(retry.value.committedVersion, 4n);
+    const staleWrite = await second.send(setCommand(second, snapshot, 9, { row: 1 }));
+    assert.equal(staleWrite.case, 'rejected');
+    assert.equal(staleWrite.value.code, 9);
+    const secondDelete = await second.send(
+      deleteRowsCommand(second, { ...snapshot, version: '4' }, [removed], { sequence: 2 }),
+    );
+    assert.equal(secondDelete.case, 'rejected');
+    assert.equal(secondDelete.value.code, 9);
+    const reused = await writer.send(
+      insertRowsCommand(
+        writer,
+        { ...snapshot, version: '4' },
+        snapshot.sheets[0].rows[2],
+        [removed],
+        {
+          sequence: 4,
+        },
+      ),
+    );
+    assert.equal(reused.case, 'rejected');
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).version, '4');
+  } finally {
+    writer.socket.close();
+    second.socket.close();
   }
 });
 

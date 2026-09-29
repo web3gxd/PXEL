@@ -84,3 +84,15 @@ RAND основан на versioned deterministic hash(document_id, epoch, formul
 ## Native/WASM parity
 
 Один engine, один fixture corpus, одинаковые context/profile и normalized results. Browser worker держит долгоживущую projection; initial checkpoint один раз, затем commands/patches. Preview/cache не смешивается с confirmed server calculations. Отдельно измеряются encode/decode, JS/WASM crossing и Rust calculation; workbook целиком на каждое нажатие не сериализуется.
+
+# Structural deletion in the current single-sheet profile
+
+Schema-7 `DeleteRows` preserves surviving stable row targets. A scalar bound
+reference to a deleted target becomes typed `Invalid(DeletedTarget)` and renders
+as `#REF!`. A rectangular range with deleted endpoints shrinks to its first
+and last surviving rows; if none survive, the range becomes `#REF!`. Relative
+copy offsets of surviving references are recomputed from the new axes.
+`Formula.source` is retained as edit history; the projection's `current_text`
+is derived from the transformed bound AST. This behavior is verified for
+native replay and browser display, but has not yet been certified against
+Excel for every range case. See ADR-022.

@@ -106,6 +106,17 @@ export function App() {
             >
               Строка ↑
             </button>
+            <button
+              type="button"
+              className="insert-row-action"
+              disabled={
+                !document.sheet || document.sheet.rows.length <= 1 || state.kind !== 'online'
+              }
+              title="Удалить выделенную строку"
+              onClick={() => document.deleteSelectedRow()}
+            >
+              Строка −
+            </button>
           </nav>
         </div>
         <div className="connection-area">

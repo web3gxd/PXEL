@@ -104,6 +104,7 @@ message CanonicalOperation {
     SetCellFormula set_cell_formula = 3;
     ExtendRows extend_rows = 4;
     InsertRows insert_rows = 5;
+    DeleteRows delete_rows = 6;
   }
 }
 
@@ -114,12 +115,19 @@ message ExtendRows {
   repeated bytes rows = 2;
 }
 
-// Inserts immediately before an existing stable row ID. In this first slice,
-// books containing formulas receive a typed rejection until transforms exist.
+// Inserts immediately before an existing stable row ID. Formula references
+// are transformed by the server's persisted schema-6 operation.
 message InsertRows {
   bytes sheet_id = 1;
   bytes before_row_id = 2;
   repeated bytes rows = 3;
+}
+
+// Removes 1–1,000 stable row IDs in one canonical operation. Deleted scalar
+// targets become #REF!; surviving range boundaries shrink deterministically.
+message DeleteRows {
+  bytes sheet_id = 1;
+  repeated bytes rows = 2;
 }
 
 message DocumentCommand {

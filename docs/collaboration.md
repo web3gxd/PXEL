@@ -33,6 +33,15 @@ schema-6 событие до CAS пересчитывает относитель
 по-прежнему требует resync: историческая axis projection для binding пока
 не реализована. Это не заявленная полная Excel-совместимость структуры.
 
+`DeleteRows` (ADR-022) записывается отдельным schema-7 event. Все удаляемые
+stable IDs должны быть живыми и уникальными; последняя строка остаётся.
+Удалённые IDs сохраняются как tombstones и не могут быть повторно выделены.
+Скалярная ссылка на удалённый target становится `#REF!`; частично уцелевший
+диапазон сужается к живой границе. Stale edit по удалённому ID отклоняется,
+оригинальный idempotent retry возвращает receipt. Replay проверяет тот же
+domain hash. Матрица ниже задаёт целевой контракт полного набора операций;
+inverse/undo для `DeleteRows` в текущем срезе ещё нет.
+
 ## Command, validation, event, projection
 
 Command — намерение клиента: protocol_version, operation_id (UUIDv7), document_id, actor_id, base_version, client_sequence, client_instance_id, typed payload. Server AuthContext является authority; actor_id проверяется на совпадение, не дает права. ValidatedOperation — проверенное и нормализованное действие. CommittedEvent — неизменяемый durable факт с document version и schema version. Projection — восстанавливаемое состояние, не транспортный DTO.

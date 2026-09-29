@@ -53,7 +53,13 @@ retry и replay идемпотентны. В историческом schema-5 �
 schema-5 события сохраняют прежнюю семантику. Локальные PostgreSQL/WebSocket,
 browser DPR 1/2 и hard restart recovery прошли. Criterion для candidate с
 10 000 формулами: 12.078–13.443 ms, без БД/сети; [условия](benchmarks/2026-09-29-formula-insertion-local.md).
-Фаза 4 всё ещё открыта: delete/columns, copy/paste, undo и multi-sheet
+Четвёртый срез фазы 4 (ADR-022) добавляет `DeleteRows` со schema 7:
+удалённый stable target становится `#REF!`, пустые ячейки не создаются,
+удалённые row IDs не используются повторно. PostgreSQL/WebSocket integration
+и hard restart recovery прошли. Criterion дал 14.974–17.812 ms для удаления
+target строки при 10 000 формулах в domain candidate, без БД/сети;
+[условия](benchmarks/2026-09-29-row-deletion-local.md). Browser результаты
+находятся в RUNBOOK. Фаза 4 всё ещё открыта: columns, copy/paste, undo и multi-sheet
 compatibility не завершены.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;

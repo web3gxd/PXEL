@@ -1,5 +1,6 @@
 //! Immutable normalized bound formula data. No parser, evaluator or transport types.
 use crate::workbook::{CellAddress, ColumnId, DocumentVersion, RowId, SheetId};
+use std::collections::BTreeSet;
 use std::fmt;
 use thiserror::Error;
 mod hash;
@@ -376,6 +377,66 @@ pub struct Formula {
     profile: CompatibilityProfile,
 }
 impl Formula {
+    /// Rebase a surviving formula after deletion. Deleted scalar targets become
+    /// typed REF nodes; ranges keep the surviving portion of their old span.
+    pub fn rebase_deleted_rows(
+        &self,
+        next_version: DocumentVersion,
+        origin_row_position: u32,
+        deleted_sheet: SheetId,
+        deleted_rows: &BTreeSet<RowId>,
+        row_position: impl Fn(SheetId, RowId) -> Option<u32>,
+        range_survivors: impl Fn(RowId, RowId) -> Option<(RowId, RowId)>,
+    ) -> Result<Self, FormulaValidationError> {
+        let mut nodes = self.ast.nodes().to_vec();
+        let rebase = |reference: &mut BoundCellReference| -> Result<(), FormulaValidationError> {
+            if let AxisReferenceMode::Relative { .. } = reference.row_mode {
+                let target = row_position(reference.target_sheet, reference.target_row)
+                    .ok_or(FormulaValidationError::InvalidReference)?;
+                reference.row_mode = AxisReferenceMode::Relative {
+                    original_delta: i64::from(target) - i64::from(origin_row_position),
+                };
+            }
+            Ok(())
+        };
+        for node in &mut nodes {
+            match node {
+                Node::Cell(reference) => {
+                    if reference.target_sheet == deleted_sheet
+                        && deleted_rows.contains(&reference.target_row)
+                    {
+                        *node = Node::InvalidReference(ReferenceError::DeletedTarget);
+                    } else {
+                        rebase(reference)?;
+                    }
+                }
+                Node::Range(range) => {
+                    if range.start.target_sheet == deleted_sheet {
+                        if let Some((start, end)) =
+                            range_survivors(range.start.target_row, range.end.target_row)
+                        {
+                            range.start.target_row = start;
+                            range.end.target_row = end;
+                        } else {
+                            *node = Node::InvalidReference(ReferenceError::DeletedTarget);
+                            continue;
+                        }
+                    }
+                    rebase(&mut range.start)?;
+                    rebase(&mut range.end)?;
+                }
+                _ => {}
+            }
+        }
+        let ast = BoundAst::new(self.ast.schema_version(), self.ast.root(), nodes)?;
+        Self::new(
+            self.source.clone(),
+            self.canonical.clone(),
+            ast,
+            self.origin,
+            next_version,
+        )
+    }
     /// Rebase only relative row copy offsets after a stable-ID-preserving axis
     /// change. Authored text stays immutable; the current A1 view is rendered
     /// from targets and axes by the formula adapter.

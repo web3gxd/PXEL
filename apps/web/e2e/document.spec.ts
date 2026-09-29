@@ -257,6 +257,7 @@ test('insert row before selection keeps the authored value on its stable row aft
     after.sheets[0].cells.find((cell: { row_id: string }) => cell.row_id === oldFirstRow)?.value,
   ).toEqual({ type: 'number', value: 42 });
   await page.reload();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(bar).toHaveValue('');
   await page.getByRole('region', { name: 'Область таблицы' }).focus();
   await page.keyboard.press('ArrowDown');
@@ -284,6 +285,7 @@ test('insertion with formulas retains the formula on its stable row', async ({ p
   expect(projection.sheets[0].cells[0].row_id).toBe(projection.sheets[0].rows[1]);
   expect(projection.sheets[0].cells[0].value.value.current_text).toBe('=1');
   await page.reload();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await page.getByRole('region', { name: 'Область таблицы' }).focus();
   await page.keyboard.press('ArrowDown');
   await expect(bar).toHaveValue('=1');
@@ -315,6 +317,7 @@ test('formula bar follows a shifted stable target after row insertion', async ({
   await expect(bar).toHaveValue('=A2');
   await expect(active).toHaveText('B2: 7');
   await page.reload();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await grid.focus();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowDown');
@@ -322,7 +325,52 @@ test('formula bar follows a shifted stable target after row insertion', async ({
   await expect(active).toHaveText('B2: 7');
 });
 
-test('two tabs converge after one tab disconnects during a remote edit', async ({ page }) => {
+test('deleting a referenced row shows REF and survives reload', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const id = new URL(page.url()).searchParams.get('document');
+  if (!id) throw new Error('Document ID missing');
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const active = page.getByTestId('active-cell');
+  await grid.focus();
+  await page.keyboard.press('ArrowDown');
+  await bar.fill('7');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  await expect(active).toHaveText('B1: ');
+  await bar.fill('=A2');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowLeft');
+  await expect(active).toHaveText('A2: 7');
+  await page.getByRole('button', { name: 'Строка −' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const response = await page.request.get(`/api/documents/${id}`);
+  expect(response.ok()).toBe(true);
+  expect((await response.json()).sheets[0].rows).toHaveLength(999);
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  await expect(bar).toHaveValue('=#REF!');
+  await expect(active).toHaveText('B1: #REF!');
+  await page.reload();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(bar).toHaveValue('=#REF!');
+  await expect(active).toHaveText('B1: #REF!');
+});
+
+test('two tabs converge after one tab is offline during a remote edit', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
   await page.getByRole('button', { name: 'Создать таблицу' }).click();
@@ -375,6 +423,9 @@ test('two tabs converge after one tab disconnects during a remote edit', async (
     await bar.press('Enter');
     await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
     await secondContext.setOffline(false);
+    // Whole-context offline mode can make Vite HMR navigate to chrome-error://.
+    // A fresh document navigation verifies durable recovery for either outcome.
+    await second.goto(documentUrl);
     await expect(second.getByTestId('connection-status')).toHaveText('Подключено');
     await expect(second.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('317');
   } finally {

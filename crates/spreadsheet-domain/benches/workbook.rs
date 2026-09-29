@@ -180,6 +180,16 @@ fn benches(c: &mut Criterion) {
             black_box(formula_book.candidate(black_box(&formula_insertion), insertion_version))
         })
     });
+    let deleted_row = formula_book.sheets()[0].rows()[0];
+    let formula_deletion = Operation::DeleteRows {
+        sheet: formula_book.sheets()[0].id(),
+        rows: vec![deleted_row],
+    };
+    c.bench_function("delete_target_10000_formulas", |b| {
+        b.iter(|| {
+            black_box(formula_book.candidate(black_box(&formula_deletion), insertion_version))
+        })
+    });
     for count in [1_000, 100_000] {
         let book = match fixture(count) {
             Ok(book) => book,

@@ -148,6 +148,29 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('deletes by stable row ID and cancels a draft when axes change', async () => {
+    const { store, sent } = await connectedStore();
+    expect(store.deleteSelectedRow()).toBe(false);
+    const secondRow = uuidV7();
+    const twoRows = projection();
+    twoRows.sheets[0]!.rows.push(secondRow);
+    store.load(twoRows);
+    store.selected = { row: 1, column: 0 };
+    store.begin('draft');
+    expect(store.deleteSelectedRow()).toBe(true);
+    expect(store.deleteSelectedRow()).toBe(false);
+    const payload = fromBinary(ClientEnvelopeSchema, sent[0] ?? new Uint8Array()).payload;
+    if (payload.case !== 'command' || payload.value.operation?.kind.case !== 'deleteRows')
+      throw new Error('Missing row deletion command');
+    expect(payload.value.operation.kind.value.rows.map(bytesUuid)).toEqual([secondRow]);
+    const after = projection();
+    after.version = '2';
+    store.load(after);
+    expect(store.selected.row).toBe(0);
+    expect(store.editing).toBeUndefined();
+    expect(store.error).toContain('Структура таблицы изменилась');
+    store.disconnected();
+  });
   it('queues a stable-anchor insertion and waits for canonical axes', async () => {
     const { store, sent } = await connectedStore();
     expect(store.insertRowBeforeSelection()).toBe(true);

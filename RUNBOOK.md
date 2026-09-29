@@ -1,5 +1,51 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — schema-7 DeleteRows with durable tombstones
+
+Перед срезом проверены AGENTS.md, roadmap, ADR-021 и текущие domain,
+formula, codec, actor, server и browser paths. Цель: удалять живую строку по
+stable ID без перенаправления формулы на соседнюю A1-координату. Инварианты:
+candidate до CAS, typed `#REF!`, монотонная версия, идемпотентный receipt,
+невозможность повторно выдать удалённый row ID, hash-equal replay. Риски:
+полный проход по формулам, рост tombstone set и отсутствие snapshot codec.
+
+Реализованы ограниченная команда `DeleteRows` (1–1,000 уникальных живых IDs,
+хотя бы одна строка остаётся), schema-7 persisted event и SQL migration 007.
+Удаление убирает sparse cells и их бюджеты, превращает scalar bound target в
+`Invalid(DeletedTarget)`, сужает частично живые ranges и пересчитывает
+relative offsets. Удалённые IDs остаются в capped tombstone set и участвуют
+в domain hash; новые insert/extend с тем же ID rejected. Calculation graph
+перестраивается. Canvas UI отправляет команду для выбранной строки, обновляет
+projection и отменяет активный draft при структурном изменении. Решение
+зафиксировано в ADR-022; обновлены formula/collaboration semantics, roadmap
+и живая презентация. Изменены domain/formula/collab, wire/storage protobuf,
+storage codec/journal, server transport, web store/UI, migration, benchmark
+и domain/formula/codec/integration/recovery/browser tests.
+
+Проверено на локальном PostgreSQL 18 и настоящем WebSocket: migration 007
+применена; `pnpm proto:generate`; `pnpm test:integration` 32/32 после
+отдельного запуска; `pnpm test:recovery` 1/1 с hard restart; полный Playwright
+`pnpm --filter @pxel/web exec playwright test --workers=2` 28/28 при DPR 1/2;
+`just check` pass (Rust fmt/clippy/tests/build/WASM, protobuf drift,
+Prettier/ESLint/TypeScript, Vitest 58/58, Vite build); `just sqlx-check` pass.
+Презентация открыта в Chromium при ширине 1280 и 390 px: 10 слайдов,
+горизонтального переполнения нет. `pnpm format:check` и `git diff --check`
+после документационных правок прошли.
+Criterion `delete_target_10000_formulas` на optimized domain candidate дал
+14.974–17.812 ms, point estimate 15.916 ms, 10 samples/165 iterations;
+условия — docs/benchmarks/2026-09-29-row-deletion-local.md. Первый вызов
+benchmark без `--features test-support` закономерно отказал; с feature прошёл.
+
+Наборы integration и browser одновременно запускались на одном dev-сервере и
+вызвали глобальный rate limit 64/s (`429`); последовательный запуск прошёл.
+Browser offline-сценарий обнаружил, что Chromium/Vite может перейти на
+`chrome-error://`; тест теперь явно выполняет новую навигацию после возврата
+сети и доказывает durable convergence, а не исключительно WebSocket resume.
+Структурные browser tests ждут загрузки projection после reload перед
+клавиатурным вводом. Текущий срез не закрывает columns, undo, copy/cut/sort,
+historical-axis formula binding, multi-sheet или snapshots; будущий snapshot
+обязан сохранять tombstones. Linux/Compose/remote CI не запускались.
+
 ## 2026-09-29 — schema-6 row insertion with formula rebase
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-002/020, formula semantics,
