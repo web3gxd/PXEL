@@ -148,6 +148,58 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('selects a rectangle and copies sparse values including its blank trailing cell', () => {
+    const state = projection();
+    const secondRow = uuidV7(),
+      secondColumn = uuidV7();
+    state.sheets[0]!.rows.push(secondRow);
+    state.sheets[0]!.columns.push(secondColumn);
+    state.sheets[0]!.cells.push(
+      { row_id: rowId, column_id: columnId, value: { type: 'number', value: 1 } },
+      { row_id: rowId, column_id: secondColumn, value: { type: 'boolean', value: true } },
+      { row_id: secondRow, column_id: columnId, value: { type: 'text', value: 'x' } },
+    );
+    const store = new DocumentStore();
+    store.load(state);
+    store.select({ row: 1, column: 1 }, true);
+    expect(store.selectionBounds).toEqual({ startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 });
+    expect(store.copySelectionTsv()).toBe('1\tTRUE\nx\t');
+    expect(store.pasteOrigin).toEqual({ row: 0, column: 0 });
+    store.select({ row: 1, column: 0 });
+    expect(store.selectionBounds).toEqual({ startRow: 1, endRow: 1, startColumn: 0, endColumn: 0 });
+    store.dispose();
+  });
+  it('keeps both selection endpoints on stable axes after insertion', () => {
+    const store = new DocumentStore();
+    const before = projection();
+    before.sheets[0]!.rows.push(uuidV7());
+    before.sheets[0]!.columns.push(uuidV7());
+    store.load(before);
+    store.select({ row: 1, column: 1 }, true);
+    const after = projection();
+    after.version = '2';
+    after.sheets[0]!.rows = [uuidV7(), ...before.sheets[0]!.rows];
+    after.sheets[0]!.columns = [uuidV7(), ...before.sheets[0]!.columns];
+    store.load(after);
+    expect(store.selectionAnchor).toEqual({ row: 1, column: 1 });
+    expect(store.selected).toEqual({ row: 2, column: 2 });
+    store.dispose();
+  });
+  it('rejects multi-cell formula copy rather than changing reference meaning', () => {
+    const state = projection();
+    state.sheets[0]!.columns.push(uuidV7());
+    state.sheets[0]!.cells.push({
+      row_id: rowId,
+      column_id: columnId,
+      value: { type: 'formula', value: { source: '=1+1', current_text: '=1+1' } },
+    });
+    const store = new DocumentStore();
+    store.load(state);
+    store.select({ row: 0, column: 1 }, true);
+    expect(store.copySelectionTsv()).toBeUndefined();
+    expect(store.error).toContain('формул');
+    store.dispose();
+  });
   it('uses current formula text for copy and refuses a stale clipboard version', async () => {
     const store = new DocumentStore();
     const state = projection();

@@ -305,6 +305,7 @@ export class DocumentStore {
   confirmed = new Map<string, Value>();
   pending: Pending[] = [];
   selected: Position = { row: 0, column: 0 };
+  selectionAnchor: Position = { row: 0, column: 0 };
   remotePresence: RemotePresence[] = [];
   editing: { position: Position; text: string; source: 'cell' | 'bar' } | undefined;
   error = '';
@@ -627,6 +628,7 @@ export class DocumentStore {
   load(projection: Projection) {
     const previousSheet = this.sheet;
     const nextSheet = projection.sheets[0];
+    const documentChanged = this.projection?.document_id !== projection.document_id;
     const axesChanged = Boolean(
       previousSheet &&
       nextSheet &&
@@ -642,17 +644,32 @@ export class DocumentStore {
       }
       this.remotePresence = [];
     }
-    if (this.projection?.document_id !== projection.document_id) {
+    if (documentChanged) {
       clearTimeout(this.headRefreshTimer);
       this.headRefreshVersion = 0n;
       this.headRefreshAttempts = 0;
       this.remotePresence = [];
     }
-    this.projection = projection;
-    this.selected = {
-      row: Math.min(this.selected.row, Math.max(0, (nextSheet?.rows.length ?? 1) - 1)),
-      column: Math.min(this.selected.column, Math.max(0, (nextSheet?.columns.length ?? 1) - 1)),
+    const remap = (position: Position): Position => {
+      if (documentChanged || !previousSheet || !nextSheet) return { row: 0, column: 0 };
+      if (!axesChanged) return position;
+      const priorRow = previousSheet.rows[position.row];
+      const priorColumn = previousSheet.columns[position.column];
+      const row = priorRow ? nextSheet.rows.indexOf(priorRow) : -1;
+      const column = priorColumn ? nextSheet.columns.indexOf(priorColumn) : -1;
+      return {
+        row: row >= 0 ? row : Math.min(position.row, Math.max(0, nextSheet.rows.length - 1)),
+        column:
+          column >= 0
+            ? column
+            : Math.min(position.column, Math.max(0, nextSheet.columns.length - 1)),
+      };
     };
+    const nextSelected = remap(this.selected);
+    const nextAnchor = remap(this.selectionAnchor);
+    this.projection = projection;
+    this.selected = nextSelected;
+    this.selectionAnchor = nextAnchor;
     this.confirmed = new Map(
       projection.sheets[0]?.cells.map((c) => [key(c.row_id, c.column_id), c.value]),
     );
@@ -688,11 +705,19 @@ export class DocumentStore {
       const documentId = this.projection?.document_id;
       const row = sheet?.rows[this.selected.row];
       const column = sheet?.columns[this.selected.column];
-      if (!sheet || !documentId || !row || !column || !this.sender) return;
-      const address = {
+      const anchorRow = sheet?.rows[this.selectionAnchor.row];
+      const anchorColumn = sheet?.columns[this.selectionAnchor.column];
+      if (!sheet || !documentId || !row || !column || !anchorRow || !anchorColumn || !this.sender)
+        return;
+      const focus = {
         sheetId: uuidBytes(sheet.id),
         rowId: uuidBytes(row),
         columnId: uuidBytes(column),
+      };
+      const anchor = {
+        sheetId: uuidBytes(sheet.id),
+        rowId: uuidBytes(anchorRow),
+        columnId: uuidBytes(anchorColumn),
       };
       const bytes = toBinary(
         ClientEnvelopeSchema,
@@ -700,7 +725,7 @@ export class DocumentStore {
           protocolVersion: 1,
           payload: {
             case: 'setPresence',
-            value: { documentId: uuidBytes(documentId), anchor: address, focus: address },
+            value: { documentId: uuidBytes(documentId), anchor, focus },
           },
         }),
       );
@@ -830,10 +855,64 @@ export class DocumentStore {
     this.previewStamp = undefined;
     this.previewStatus = 'idle';
   }
-  select(position: Position) {
+  select(position: Position, extend = false) {
+    if (!extend) this.selectionAnchor = { ...position };
     this.selected = position;
     this.schedulePresence();
     this.notify();
+  }
+  get selectionBounds() {
+    return {
+      startRow: Math.min(this.selectionAnchor.row, this.selected.row),
+      endRow: Math.max(this.selectionAnchor.row, this.selected.row),
+      startColumn: Math.min(this.selectionAnchor.column, this.selected.column),
+      endColumn: Math.max(this.selectionAnchor.column, this.selected.column),
+    };
+  }
+  get pasteOrigin(): Position {
+    const { startRow, startColumn } = this.selectionBounds;
+    return { row: startRow, column: startColumn };
+  }
+  copySelectionTsv() {
+    const sheet = this.sheet;
+    if (!sheet) return undefined;
+    const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
+    const count = (endRow - startRow + 1) * (endColumn - startColumn + 1);
+    if (count > 1_000) {
+      this.error = 'Можно скопировать не более 1000 ячеек за один раз.';
+      this.notify();
+      return undefined;
+    }
+    const lines: string[] = [];
+    let bytes = 0;
+    for (let row = startRow; row <= endRow; row++) {
+      const fields: string[] = [];
+      for (let column = startColumn; column <= endColumn; column++) {
+        const value = this.value({ row, column });
+        if (count > 1 && value?.type === 'formula') {
+          this.error = 'Копирование диапазона с формулами пока недоступно.';
+          this.notify();
+          return undefined;
+        }
+        const text = displayValue(value);
+        if (/\r|\n|\t/.test(text) || (value?.type === 'text' && text.startsWith('='))) {
+          this.error = 'Эту ячейку нельзя без потерь скопировать как TSV.';
+          this.notify();
+          return undefined;
+        }
+        bytes += byteLength(text);
+        if (bytes > 512 * 1024) {
+          this.error = 'Текст выделения превышает 512 КБ.';
+          this.notify();
+          return undefined;
+        }
+        fields.push(text);
+      }
+      lines.push(fields.join('\t'));
+    }
+    this.error = '';
+    this.notify();
+    return lines.join('\n');
   }
   begin(text = displayValue(this.value(this.selected)), source: 'cell' | 'bar' = 'cell') {
     if (!this.sheet) return;
@@ -945,6 +1024,11 @@ export class DocumentStore {
   }
   copyFormulaPayload() {
     if (this.pending.length || !this.projection) return undefined;
+    if (
+      this.selectionAnchor.row !== this.selected.row ||
+      this.selectionAnchor.column !== this.selected.column
+    )
+      return undefined;
     const value = this.value(this.selected);
     if (value?.type !== 'formula') return undefined;
     const source = value.value.current_text;
@@ -1018,15 +1102,13 @@ export class DocumentStore {
       this.formulaCopyInFlight = false;
     }
   }
-  pasteTsv(text: string, position: Position = this.selected) {
+  pasteTsv(text: string, position: Position = this.selected, preserveTrailingBlank = false) {
     const sheet = this.sheet,
       projection = this.projection,
       actor = this.actor;
     if (!sheet || !projection || !actor) return false;
-    const rows = text
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .replace(/\n$/, '')
+    const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const rows = (preserveTrailingBlank ? normalizedText : normalizedText.replace(/\n$/, ''))
       .split('\n')
       .map((line) => line.split('\t'));
     const count = rows.reduce((total, row) => total + row.length, 0);

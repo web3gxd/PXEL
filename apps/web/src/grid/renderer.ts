@@ -59,6 +59,24 @@ export function drawGrid(
       height - GRID.columnHeaderHeight,
     );
     context.clip();
+    const selection = document.selectionBounds;
+    if (selection.startRow !== selection.endRow || selection.startColumn !== selection.endColumn) {
+      context.fillStyle = 'rgba(35, 143, 98, 0.12)';
+      context.fillRect(
+        x(selection.startColumn),
+        y(selection.startRow),
+        (selection.endColumn - selection.startColumn + 1) * GRID.columnWidth,
+        (selection.endRow - selection.startRow + 1) * GRID.rowHeight,
+      );
+      context.strokeStyle = '#17664b';
+      context.lineWidth = 2;
+      context.strokeRect(
+        x(selection.startColumn) + 1,
+        y(selection.startRow) + 1,
+        (selection.endColumn - selection.startColumn + 1) * GRID.columnWidth - 2,
+        (selection.endRow - selection.startRow + 1) * GRID.rowHeight - 2,
+      );
+    }
     context.font = '13px "Segoe UI", sans-serif';
     context.textAlign = 'left';
     context.textBaseline = 'middle';

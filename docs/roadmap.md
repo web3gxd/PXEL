@@ -87,6 +87,13 @@ browser DPR 1/2 проверили mixed `$` modes, диапазоны, `#REF!`,
 копирований после warm-up; это не latency commit и не официальный gate
 ([условия](benchmarks/2026-09-29-formula-copy-worker-local.md)). Multi-cell
 formula copy, cut/move, undo и snapshots ещё открыты.
+Девятый срез фазы 4 (ADR-027) вводит прямоугольное выделение Shift+стрелками
+и pointer drag в Canvas, stable-ID remap anchor/focus при структурных изменениях,
+TSV-копирование до 1,000 обычных значений и вставку в левый верхний угол
+через существующий атомарный schema-10 batch. Native server event не меняется;
+browser DPR 1/2 подтвердил один commit, reload и отсутствие DOM-ячеек.
+Смешанные диапазоны с формулами требуют следующего server-side `CopyRange` с
+замороженным source; локальный TSV-copy не выдается за такую операцию.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

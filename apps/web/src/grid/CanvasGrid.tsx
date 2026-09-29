@@ -1,4 +1,4 @@
-import { displayValue, type DocumentStore } from '../document/store';
+import type { DocumentStore } from '../document/store';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { drawGrid } from './renderer';
 import { GRID, columnLabel } from './viewport';
@@ -7,6 +7,9 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const dragRef = useRef<
+    { id: number; frame: number | undefined; row: number; column: number } | undefined
+  >(undefined);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [canvasAvailable, setCanvasAvailable] = useState(true);
 
@@ -89,13 +92,13 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
       editorRef.current?.setSelectionRange(length, length);
     }
   }, [document?.editing?.source]);
-  const move = (row: number, column: number) => {
+  const move = (row: number, column: number, extend = false) => {
     if (!document?.sheet) return;
     const next = {
       row: Math.max(0, Math.min(document.sheet.rows.length - 1, row)),
       column: Math.max(0, Math.min(document.sheet.columns.length - 1, column)),
     };
-    document.select(next);
+    document.select(next, extend);
     if (next.row >= document.sheet.rows.length - 20) document.extendRows();
     const scroller = scrollRef.current;
     if (!scroller) return;
@@ -122,15 +125,29 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           if (!document?.sheet) return;
           event.preventDefault();
           const formula = event.clipboardData.getData('application/x-pxel-formula+json');
-          if (formula) void document.pasteFormulaCopy(formula);
-          else document.pasteTsv(event.clipboardData.getData('text/plain'));
+          const tsv = event.clipboardData.getData('application/x-pxel-tsv+json');
+          if (formula) void document.pasteFormulaCopy(formula, document.pasteOrigin);
+          else if (tsv) {
+            try {
+              const internal = JSON.parse(tsv) as { schema_version?: number; text?: string };
+              if (internal.schema_version === 1 && typeof internal.text === 'string')
+                document.pasteTsv(internal.text, document.pasteOrigin, true);
+              else
+                document.pasteTsv(event.clipboardData.getData('text/plain'), document.pasteOrigin);
+            } catch {
+              document.pasteTsv(event.clipboardData.getData('text/plain'), document.pasteOrigin);
+            }
+          } else document.pasteTsv(event.clipboardData.getData('text/plain'), document.pasteOrigin);
         }}
         onCopy={(event) => {
           if (!document?.sheet) return;
           event.preventDefault();
+          const text = document.copySelectionTsv();
+          if (text === undefined) return;
+          event.clipboardData.setData('text/plain', text);
           event.clipboardData.setData(
-            'text/plain',
-            displayValue(document.value(document.selected)),
+            'application/x-pxel-tsv+json',
+            JSON.stringify({ schema_version: 1, text }),
           );
           const formula = document.copyFormulaPayload();
           if (formula) event.clipboardData.setData('application/x-pxel-formula+json', formula);
@@ -142,11 +159,43 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           const x = event.clientX - box.left - GRID.rowHeaderWidth,
             y = event.clientY - box.top - GRID.columnHeaderHeight;
           if (x < 0 || y < 0) return;
-          move(
-            Math.floor((y + event.currentTarget.scrollTop) / GRID.rowHeight),
-            Math.floor((x + event.currentTarget.scrollLeft) / GRID.columnWidth),
-          );
+          const row = Math.floor((y + event.currentTarget.scrollTop) / GRID.rowHeight);
+          const column = Math.floor((x + event.currentTarget.scrollLeft) / GRID.columnWidth);
+          move(row, column);
+          dragRef.current = { id: event.pointerId, frame: undefined, row, column };
+          event.currentTarget.setPointerCapture(event.pointerId);
           event.currentTarget.focus();
+        }}
+        onPointerMove={(event) => {
+          const drag = dragRef.current;
+          if (!drag || drag.id !== event.pointerId) return;
+          const box = event.currentTarget.getBoundingClientRect();
+          drag.row = Math.floor(
+            (event.clientY - box.top - GRID.columnHeaderHeight + event.currentTarget.scrollTop) /
+              GRID.rowHeight,
+          );
+          drag.column = Math.floor(
+            (event.clientX - box.left - GRID.rowHeaderWidth + event.currentTarget.scrollLeft) /
+              GRID.columnWidth,
+          );
+          drag.frame ??= requestAnimationFrame(() => {
+            drag.frame = undefined;
+            move(drag.row, drag.column, true);
+          });
+        }}
+        onPointerUp={(event) => {
+          const drag = dragRef.current;
+          if (!drag || drag.id !== event.pointerId) return;
+          if (drag.frame !== undefined) cancelAnimationFrame(drag.frame);
+          move(drag.row, drag.column, true);
+          dragRef.current = undefined;
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onPointerCancel={(event) => {
+          const drag = dragRef.current;
+          if (!drag || drag.id !== event.pointerId) return;
+          if (drag.frame !== undefined) cancelAnimationFrame(drag.frame);
+          dragRef.current = undefined;
         }}
         onDoubleClick={() => document?.begin()}
         onKeyDown={(event) => {
@@ -163,7 +212,11 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           const delta = moves[event.key];
           if (delta) {
             event.preventDefault();
-            move(row + delta[0], column + delta[1]);
+            move(
+              row + delta[0],
+              column + delta[1],
+              event.shiftKey && event.key.startsWith('Arrow'),
+            );
           } else if (event.key === 'F2') {
             event.preventDefault();
             document.begin();
@@ -234,9 +287,19 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           {document.selected.row + 1}: {document.display(document.selected)}
         </output>
       )}
+      {document?.sheet &&
+        (document.selectionBounds.startRow !== document.selectionBounds.endRow ||
+          document.selectionBounds.startColumn !== document.selectionBounds.endColumn) && (
+          <output className="sr-only" aria-live="polite" data-testid="selection-range">
+            Выделено {columnLabel(document.selectionBounds.startColumn)}
+            {document.selectionBounds.startRow + 1}:
+            {columnLabel(document.selectionBounds.endColumn)}
+            {document.selectionBounds.endRow + 1}
+          </output>
+        )}
       <p id="grid-description" className="sr-only">
         {document?.sheet
-          ? 'Стрелки и Tab перемещают выделение. F2 или двойной щелчок открывают редактор. Enter сохраняет, Escape отменяет ввод.'
+          ? 'Стрелки и Tab перемещают выделение. Shift со стрелками выделяет диапазон, Ctrl+C и Ctrl+V копируют и вставляют значения. F2 или двойной щелчок открывают редактор. Enter сохраняет, Escape отменяет ввод.'
           : 'Пустой лист: 1000 строк и 26 столбцов. Режим просмотра. Для прокрутки используйте клавиши со стрелками или Page Down. Создайте таблицу для редактирования.'}
       </p>
       {!canvasAvailable && (

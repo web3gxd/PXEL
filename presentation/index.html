@@ -100,7 +100,7 @@
           </div>
         </div>
         <div class="slide-footer">
-          <span>Работает: создание · ввод · формулы · присутствие · reload</span
+          <span>Работает: ввод · формулы · диапазон · присутствие · reload</span
           ><span>02 / 10</span>
         </div>
       </section>
@@ -353,7 +353,7 @@
           </div>
           <div class="doing">
             <b>04</b><span>Структура</span
-            ><small>Строки, столбцы, TSV и копирование одной формулы; undo впереди</small>
+            ><small>Строки, столбцы, выделение, TSV и одна формула; undo впереди</small>
           </div>
           <div><b>05</b><span>Snapshots</span><small>S3 + recovery</small></div>
           <div><b>06</b><span>XLSX</span><small>импорт и экспорт</small></div>
@@ -366,10 +366,11 @@
           ссылок на него. TSV-вставка до 1000 обычных значений сохраняется одной операцией; доменный
           candidate для 1000 чисел измерен в 567,59–631,31 мкс, без БД и сети. Формулы в массовой
           вставке пока явно отклоняются. Одну формулу можно скопировать: Rust/WASM смещает только
-          относительные ссылки, а сервер заново связывает текст со stable IDs. Очередь отправки
-          ограничена 160 кадрами / 2 MiB. Локальные latency и paused-socket stress измерены:
-          медленный клиент закрыт после send timeout. Cross-host поведение и сетевой queue overflow
-          ещё открыты. Linux/Compose/remote CI — отдельные gates.
+          относительные ссылки, а сервер заново связывает текст со stable IDs. Shift+стрелки и drag
+          выделяют прямоугольник; Ctrl+C/V переносит до 1000 обычных значений одним commit. Очередь
+          отправки ограничена 160 кадрами / 2 MiB. Локальные latency и paused-socket stress
+          измерены: медленный клиент закрыт после send timeout. Cross-host поведение и сетевой queue
+          overflow ещё открыты. Linux/Compose/remote CI — отдельные gates.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>

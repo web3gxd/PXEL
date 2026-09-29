@@ -74,6 +74,74 @@ test('TSV paste commits one durable batch and survives reload', async ({ page })
   await expect(page.getByTestId('active-cell')).toHaveText('B2: 34');
 });
 
+test('keyboard range selection copies a sparse rectangle and pastes it in one version', async ({
+  page,
+}) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  await expect(page.getByTestId('active-cell')).toHaveText('A1: ');
+  await grid.focus();
+  await page.evaluate(() => navigator.clipboard.writeText('1\tTRUE\nx\t'));
+  await grid.focus();
+  await page.keyboard.press('ControlOrMeta+V');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(page.getByTestId('active-cell')).toHaveText('A1: 1');
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('Shift+ArrowDown');
+  await expect(page.getByTestId('selection-range')).toHaveText('Выделено A1:B2');
+  await page.keyboard.press('ControlOrMeta+C');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('1\tTRUE\nx\t');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByTestId('active-cell')).toHaveText('D4: ');
+  await page.keyboard.press('ControlOrMeta+V');
+  const id = new URL(page.url()).searchParams.get('document');
+  await expect
+    .poll(async () => {
+      const state = await page.evaluate(
+        async (documentId) => (await fetch(`/api/documents/${documentId}`)).json(),
+        id,
+      );
+      return state.version;
+    })
+    .toBe('3');
+  const state = await page.evaluate(
+    async (documentId) => (await fetch(`/api/documents/${documentId}`)).json(),
+    id,
+  );
+  expect(state.sheets[0].cells).toHaveLength(6);
+  await expect(page.getByTestId('active-cell')).toHaveText('D4: 1');
+  await page.reload();
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await grid.focus();
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
+  await expect(page.getByTestId('active-cell')).toHaveText('D4: 1');
+});
+
+test('pointer drag selects a rectangle without allocating DOM cells', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  await expect(page.getByTestId('active-cell')).toHaveText('A1: ');
+  const box = await grid.boundingBox();
+  if (!box) throw new Error('Grid has no bounds');
+  await page.mouse.move(box.x + 46 + 56, box.y + 28 + 14);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 46 + 112 + 56, box.y + 28 + 28 + 14, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.press('ControlOrMeta+C');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('\t\n\t');
+  expect(await page.locator('[role="gridcell"]').count()).toBe(0);
+});
+
 test('missing WASM visibly disables preview while server calculation remains available', async ({
   page,
 }) => {
@@ -386,10 +454,8 @@ test('formula bar follows a shifted stable target after row insertion', async ({
   await page.keyboard.press('ArrowUp');
   await page.getByRole('button', { name: 'Строка ↑' }).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await grid.focus();
-  await page.keyboard.press('ArrowDown');
-  await expect(bar).toHaveValue('=A2');
   await expect(active).toHaveText('B2: 7');
+  await expect(bar).toHaveValue('=A2');
   await page.reload();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await grid.focus();
@@ -455,6 +521,7 @@ test('inserting a column keeps formula target stable and shifts its A1 display',
   if (!id) throw new Error('Document ID missing');
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const active = page.getByTestId('active-cell');
   await bar.fill('7');
   await bar.press('Enter');
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
@@ -477,8 +544,8 @@ test('inserting a column keeps formula target stable and shifts its A1 display',
       (cell: { value: { type: string } }) => cell.value.type === 'formula',
     )?.value.value.current_text,
   ).toBe('=B1');
+  await expect(active).toHaveText('B1: 7');
   await grid.focus();
-  await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
   await expect(bar).toHaveValue('=B1');
 });
