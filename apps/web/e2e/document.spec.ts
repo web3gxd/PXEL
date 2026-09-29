@@ -296,9 +296,14 @@ test('formula bar follows a shifted stable target after row insertion', async ({
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const active = page.getByTestId('active-cell');
+  await bar.fill('7');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await grid.focus();
+  await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowRight');
-  await bar.fill('=A2');
+  await bar.fill('=A1');
   await bar.press('Enter');
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await grid.focus();
@@ -307,12 +312,14 @@ test('formula bar follows a shifted stable target after row insertion', async ({
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await grid.focus();
   await page.keyboard.press('ArrowDown');
-  await expect(bar).toHaveValue('=A3');
+  await expect(bar).toHaveValue('=A2');
+  await expect(active).toHaveText('B2: 7');
   await page.reload();
   await grid.focus();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowDown');
-  await expect(bar).toHaveValue('=A3');
+  await expect(bar).toHaveValue('=A2');
+  await expect(active).toHaveText('B2: 7');
 });
 
 test('two tabs converge after one tab disconnects during a remote edit', async ({ page }) => {

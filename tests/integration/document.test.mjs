@@ -296,6 +296,9 @@ test('row insertion uses stable anchors, server order and rebases formulas', asy
     )?.value.value;
     assert.equal(rendered.source, '=A4');
     assert.equal(rendered.current_text, '=A5');
+    const calculated = await calculation(base, cookie, snapshot.document_id, 7);
+    assert.equal(calculated.status, 'complete');
+    assert.deepEqual(calculated.values[0].value, { type: 'number', value: 100 });
   } finally {
     left.socket.close();
     right.socket.close();

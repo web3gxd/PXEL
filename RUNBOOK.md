@@ -36,6 +36,11 @@ reload прошёл 2/2 при DPR 1/2; полный browser suite после е
 многолистовой книги в MVP пока нет. Последний `just check` включал 57/57
 Vitest tests; `pnpm format:check`, `git diff --check` и presentation check
 после документационных правок прошли.
+После коммита усилен этот browser test: значение 7 осталось результатом
+`=A2` после вставки и reload (2/2 DPR). Integration scenario теперь проверяет
+не только A1-текст `=A5`, но и canonical calculation result 100 на версии 7;
+целевой прогон прошёл 1/1 на живом сервере. Остальной full suite после этого
+усиления не повторялся.
 Первый `just check` остановился только на Prettier для двух изменённых JS/TS
 файлов; после `prettier --write` прошёл. Первый полный browser suite выявил,
 что редактор показывал canonical text вместо исходной формулы после reload;
