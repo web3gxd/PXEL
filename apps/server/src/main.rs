@@ -29,6 +29,7 @@ use spreadsheet_domain::workbook::{DocumentId, DocumentVersion, SnapshotId, Work
 use spreadsheet_storage::{LocalFilesystemBlobStore, PgDatabase, SnapshotError};
 use spreadsheet_wire_protocol::{self as wire, v1};
 use std::{
+    num::NonZeroU16,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -78,6 +79,32 @@ async fn snapshot_worker(
             .is_err()
         {
             tracing::warn!(event = "snapshot_publication_failed", version);
+        }
+    }
+}
+
+async fn snapshot_cleanup_worker(
+    database: PgDatabase,
+    blobs: LocalFilesystemBlobStore,
+    retention: Duration,
+) {
+    let Some(batch) = NonZeroU16::new(100) else {
+        return;
+    };
+    let mut ticker = tokio::time::interval(Duration::from_secs(3600));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        match database
+            .cleanup_incomplete_snapshots(&blobs, retention, batch)
+            .await
+        {
+            Ok(report) => tracing::info!(
+                event = "snapshot_cleanup",
+                rejected_records = report.rejected_records,
+                delete_attempts = report.delete_attempts,
+            ),
+            Err(_) => tracing::warn!(event = "snapshot_cleanup_failed"),
         }
     }
 }
@@ -308,6 +335,11 @@ async fn main() -> anyhow::Result<()> {
         blobs.clone(),
         snapshot_receiver,
     ));
+    tokio::spawn(snapshot_cleanup_worker(
+        database.clone(),
+        blobs.clone(),
+        config.snapshot_cleanup_retention,
+    ));
     let snapshot_interval = config.snapshot_interval;
     let state = Arc::new(AppState {
         auth: auth::Auth::new(config.dev_auth, database.clone()),
@@ -327,7 +359,8 @@ async fn main() -> anyhow::Result<()> {
                             | SnapshotError::Codec(_)
                             | SnapshotError::SourceMismatch
                             | SnapshotError::TooLarge
-                            | SnapshotError::VersionNotCommitted => JournalError::Corrupt,
+                            | SnapshotError::VersionNotCommitted
+                            | SnapshotError::PublicationRetired => JournalError::Corrupt,
                             SnapshotError::Blob(_) | SnapshotError::Database(_) => {
                                 JournalError::Unavailable
                             }

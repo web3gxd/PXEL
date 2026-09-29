@@ -9,14 +9,15 @@ ADR-033 добавил PostgreSQL snapshot metadata и внутренние publ
 конечную версию. ADR-034 подключил reader к actor startup и запускает полный
 расчёт restored projection. ADR-035 добавил неблокирующий scheduler после
 каждой 1000-й committed операции по умолчанию и отдельный sequential worker.
-Локальный smoke с порогом 1 подтвердил ACTIVE v2 и чтение после restart. GC и S3
+Локальный smoke с порогом 1 подтвердил ACTIVE v2 и чтение после restart.
+ADR-037 добавил уборку incomplete/rejected объектов; полный retention GC и S3
 contract ещё не подключены. Ниже отдельно
 названы действующие механизмы и будущие требования.
 
 Controlled interruption test останавливает публикацию на шести границах
 metadata/object/transaction и проверяет, что до COMMIT восстановление идёт
-из журнала, после COMMIT — из ACTIVE snapshot. Power-loss, GC и S3 crash
-tests ещё не проведены.
+из журнала, после COMMIT — из ACTIVE snapshot. Power-loss и S3 crash
+tests ещё не проведены; гонка с локальным GC проверена отдельно.
 
 ## PostgreSQL authority
 
@@ -88,7 +89,15 @@ UPLOADING -> STORED -> VERIFIED -> ACTIVE
 5. Перевести в VERIFIED с validation metadata.
 6. Короткая DB transaction переводит record в ACTIVE и выбирает preferred snapshot pointer. Более старый поздно завершившийся job не понижает preferred version. Неизвестный/неверный engine/profile context не активируется молча.
 7. Предыдущие ACTIVE generations остаются доступными для fallback. ACTIVE означает «прошел activation», а preferred pointer указывает рекомендуемое новейшее поколение. Это не единственная строка ACTIVE на документ.
-8. GC отдельно удаляет неиспользуемые orphan/incomplete/rejected/retired objects после retention, проверяя metadata и leases незавершенных jobs. Старый ACTIVE нельзя удалять до верификации и восстановления более нового поколения. Retention не означает удаление log живого документа.
+8. GC отдельно удаляет неиспользуемые incomplete/rejected/retired objects после retention, проверяя metadata и fencing незавершённых publisher jobs. Старый ACTIVE нельзя удалять до верификации и восстановления более нового поколения. Объекты без metadata требуют отдельного безопасного inventory. Retention не означает удаление log живого документа.
+
+Текущий локальный GC (ADR-037) покрывает только incomplete/rejected metadata
+старше настроенного порога: PostgreSQL атомарно переводит их в `REJECTED`,
+publisher проверяет результат каждого перехода, а worker ограниченными
+пачками повторяет идемпотентное удаление объекта. `cleanup_attempted_at`
+обеспечивает обход всех `REJECTED` записей без starvation. `ACTIVE`
+поколения сохраняются; политика их удаления и обнаружение объектов без
+metadata остаются отдельными задачами.
 
 Crash после object upload, до metadata update оставляет незавершенный record/object: recovery reader его не использует, будущий reconciler/GC решит судьбу. Crash после activation transaction дает читателю ACTIVE record. Corrupt ACTIVE при загрузке сейчас пропускается без изменения metadata и выбирается предыдущий ACTIVE; автоматический аудируемый `REJECTED` переход будет отдельным срезом. Object existence alone никогда не активирует snapshot.
 

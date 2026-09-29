@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE document_snapshots SET state='REJECTED' WHERE snapshot_id IN (SELECT snapshot_id FROM document_snapshots WHERE state IN ('UPLOADING','STORED','VERIFIED') AND created_at < now() - ($1::bigint * interval '1 second') ORDER BY created_at, snapshot_id LIMIT $2 FOR UPDATE SKIP LOCKED) RETURNING snapshot_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "snapshot_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "snapshot_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "379ef95305e042bd302105ffc3fd37d293b0ea2934c219726cc4899c6e6fa27f"
+}

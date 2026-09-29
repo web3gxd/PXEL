@@ -10,7 +10,7 @@ use spreadsheet_domain::{
     workbook::{DocumentId, DocumentVersion, SnapshotId, Workbook},
 };
 use spreadsheet_storage_codec as codec;
-use std::sync::Arc;
+use std::{num::NonZeroU16, sync::Arc, time::Duration};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -34,6 +34,8 @@ pub enum SnapshotError {
     WorkerFailed,
     #[error("requested document version is not committed")]
     VersionNotCommitted,
+    #[error("snapshot publication was retired before activation")]
+    PublicationRetired,
     #[cfg(test)]
     #[error("test interrupted snapshot publication")]
     TestInterruption,
@@ -73,6 +75,12 @@ pub struct RecoveryResult {
     pub workbook: Workbook,
     pub snapshot_version: Option<DocumentVersion>,
     pub replayed_events: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SnapshotCleanupReport {
+    pub rejected_records: u64,
+    pub delete_attempts: u64,
 }
 
 fn uuid(bytes: &[u8; 16]) -> Uuid {
@@ -267,7 +275,10 @@ impl PgDatabase {
             .await?;
         #[cfg(test)]
         interrupt_at(PublicationBoundary::BlobPut, interruption)?;
-        sqlx::query!("UPDATE document_snapshots SET state='STORED' WHERE snapshot_id=$1 AND state='UPLOADING'", key_uuid).execute(&self.pool).await?;
+        if sqlx::query!("UPDATE document_snapshots SET state='STORED' WHERE snapshot_id=$1 AND state='UPLOADING'", key_uuid).execute(&self.pool).await?.rows_affected() != 1 {
+            blobs.delete(&key).await?;
+            return Err(SnapshotError::PublicationRetired);
+        }
         #[cfg(test)]
         interrupt_at(PublicationBoundary::Stored, interruption)?;
         let verified = async {
@@ -288,7 +299,10 @@ impl PgDatabase {
             sqlx::query!("UPDATE document_snapshots SET state='REJECTED' WHERE snapshot_id=$1 AND state='STORED'", key_uuid).execute(&self.pool).await?;
             return Err(error);
         }
-        sqlx::query!("UPDATE document_snapshots SET state='VERIFIED', verified_at=now() WHERE snapshot_id=$1 AND state='STORED'", key_uuid).execute(&self.pool).await?;
+        if sqlx::query!("UPDATE document_snapshots SET state='VERIFIED', verified_at=now() WHERE snapshot_id=$1 AND state='STORED'", key_uuid).execute(&self.pool).await?.rows_affected() != 1 {
+            blobs.delete(&key).await?;
+            return Err(SnapshotError::PublicationRetired);
+        }
         #[cfg(test)]
         interrupt_at(PublicationBoundary::Verified, interruption)?;
         let mut tx = self.pool.begin().await?;
@@ -303,7 +317,9 @@ impl PgDatabase {
         {
             return Err(SnapshotError::SourceMismatch);
         }
-        sqlx::query!("UPDATE document_snapshots SET state='ACTIVE', activated_at=now() WHERE snapshot_id=$1 AND state='VERIFIED'", key_uuid).execute(&mut *tx).await?;
+        if sqlx::query!("UPDATE document_snapshots SET state='ACTIVE', activated_at=now() WHERE snapshot_id=$1 AND state='VERIFIED'", key_uuid).execute(&mut *tx).await?.rows_affected() != 1 {
+            return Err(SnapshotError::PublicationRetired);
+        }
         sqlx::query!("UPDATE documents SET preferred_snapshot_id=$2 WHERE document_id=$1 AND (preferred_snapshot_id IS NULL OR (SELECT snapshot_version FROM document_snapshots WHERE snapshot_id=preferred_snapshot_id) <= $3)", uuid(document_id.as_bytes()), key_uuid, sql_number(workbook.version().get())?).execute(&mut *tx).await?;
         #[cfg(test)]
         interrupt_at(PublicationBoundary::ActivationUpdate, interruption)?;
@@ -314,6 +330,47 @@ impl PgDatabase {
             snapshot_id,
             document_id,
             version: workbook.version(),
+        })
+    }
+
+    /// Retires old incomplete metadata and repeatedly deletes objects owned by
+    /// rejected records. ACTIVE snapshots and the append-only journal are never touched.
+    pub async fn cleanup_incomplete_snapshots<B: BlobStore>(
+        &self,
+        blobs: &B,
+        min_age: Duration,
+        max_rows: NonZeroU16,
+    ) -> Result<SnapshotCleanupReport, SnapshotError> {
+        let seconds = sql_number(min_age.as_secs())?;
+        let limit = i64::from(max_rows.get());
+        let rejected = sqlx::query!(
+            "UPDATE document_snapshots SET state='REJECTED' WHERE snapshot_id IN (SELECT snapshot_id FROM document_snapshots WHERE state IN ('UPLOADING','STORED','VERIFIED') AND created_at < now() - ($1::bigint * interval '1 second') ORDER BY created_at, snapshot_id LIMIT $2 FOR UPDATE SKIP LOCKED) RETURNING snapshot_id",
+            seconds,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let abandoned = sqlx::query!(
+            "SELECT snapshot_id, object_key FROM document_snapshots WHERE state='REJECTED' AND created_at < now() - ($1::bigint * interval '1 second') ORDER BY cleanup_attempted_at NULLS FIRST, created_at, snapshot_id LIMIT $2",
+            seconds,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        for row in &abandoned {
+            let key =
+                BlobKey::parse(&row.object_key.to_string()).map_err(|_| SnapshotError::Corrupt)?;
+            blobs.delete(&key).await?;
+            sqlx::query!(
+                "UPDATE document_snapshots SET cleanup_attempted_at=clock_timestamp() WHERE snapshot_id=$1 AND state='REJECTED'",
+                row.snapshot_id
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(SnapshotCleanupReport {
+            rejected_records: rejected.len() as u64,
+            delete_attempts: abandoned.len() as u64,
         })
     }
 
@@ -370,11 +427,13 @@ mod tests {
     use spreadsheet_application::journal::{
         AuthenticatedActor, CommitOutcome, CommitRequest, OperationJournal,
     };
+    use spreadsheet_application::{BlobDownload, BlobSource};
     use spreadsheet_collab::{InProcessSessionDirectory, SessionDirectory, Submission};
     use spreadsheet_domain::workbook::{
         ActorId, CellAddress, CellValue, ColumnId, Command, CommandPayload, CommittedEvent,
         EventPrincipal, Operation, OperationId, RowId, SheetId, SheetSeed, WorkspaceId,
     };
+    use spreadsheet_domain::{BlobMetadata, StoredBlob};
     use std::{
         num::NonZeroU64,
         sync::{
@@ -384,6 +443,38 @@ mod tests {
     };
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    #[derive(Clone)]
+    struct PausedPutBlobStore {
+        inner: LocalFilesystemBlobStore,
+        started: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    impl BlobStore for PausedPutBlobStore {
+        async fn put(
+            &self,
+            key: &BlobKey,
+            source: BlobSource,
+            expected_checksum: Checksum,
+        ) -> Result<StoredBlob, BlobStoreError> {
+            self.started.notify_one();
+            self.release.notified().await;
+            self.inner.put(key, source, expected_checksum).await
+        }
+
+        async fn get(&self, key: &BlobKey) -> Result<BlobDownload, BlobStoreError> {
+            self.inner.get(key).await
+        }
+
+        async fn head(&self, key: &BlobKey) -> Result<BlobMetadata, BlobStoreError> {
+            self.inner.head(key).await
+        }
+
+        async fn delete(&self, key: &BlobKey) -> Result<(), BlobStoreError> {
+            self.inner.delete(key).await
+        }
+    }
 
     async fn assert_preferred(
         db: &PgDatabase,
@@ -644,6 +735,123 @@ mod tests {
                 assert_eq!(recovered.replayed_events, book.version().get());
             }
         }
+        Ok(())
+    }
+
+    async fn assert_incomplete_cleanup(
+        db: &PgDatabase,
+        blobs: &LocalFilesystemBlobStore,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        book: &Workbook,
+    ) -> TestResult {
+        let two = NonZeroU16::new(2).ok_or("invalid cleanup batch")?;
+        let no_retirement = db
+            .cleanup_incomplete_snapshots(blobs, Duration::from_secs(3600), two)
+            .await?;
+        assert_eq!(no_retirement.rejected_records, 0);
+        assert_eq!(no_retirement.delete_attempts, 0);
+        let mut rejected = 0;
+        for _ in 0..3 {
+            let report = db
+                .cleanup_incomplete_snapshots(blobs, Duration::ZERO, two)
+                .await?;
+            rejected += report.rejected_records;
+        }
+        assert_eq!(rejected, 5);
+        let counts = sqlx::query!(
+            "SELECT count(*) FILTER (WHERE state='REJECTED') AS rejected, count(*) FILTER (WHERE state='ACTIVE') AS active, count(*) FILTER (WHERE state='REJECTED' AND cleanup_attempted_at IS NOT NULL) AS cleaned FROM document_snapshots WHERE document_id=$1",
+            uuid(document_id.as_bytes())
+        )
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(counts.rejected, Some(5));
+        assert_eq!(counts.active, Some(1));
+        assert_eq!(counts.cleaned, Some(5));
+        for index in 0..5 {
+            let snapshot = SnapshotId::from_bytes([20 + index; 16])?;
+            let key = BlobKey::parse(&uuid(snapshot.as_bytes()).to_string())?;
+            assert!(matches!(
+                blobs.head(&key).await,
+                Err(BlobStoreError::NotFound)
+            ));
+        }
+        let active = SnapshotId::from_bytes([25; 16])?;
+        let active_key = BlobKey::parse(&uuid(active.as_bytes()).to_string())?;
+        assert!(blobs.head(&active_key).await.is_ok());
+        let recovered = Box::pin(db.recover_document(blobs, identity, document_id)).await?;
+        assert_eq!(recovered.snapshot_version, Some(book.version()));
+        assert_eq!(recovered.workbook.hash(), book.hash());
+
+        // A publisher may finish a late put after the first sweep. Retained
+        // REJECTED metadata keeps the key discoverable on the next sweep.
+        let late = SnapshotId::from_bytes([20; 16])?;
+        let late_key = BlobKey::parse(&uuid(late.as_bytes()).to_string())?;
+        let bytes = Bytes::from_static(b"late object");
+        blobs
+            .put(
+                &late_key,
+                Box::pin(stream::once(async move { Ok(bytes) })),
+                Checksum::from_bytes(codec::checksum(b"late object")),
+            )
+            .await?;
+        let ten = NonZeroU16::new(10).ok_or("invalid cleanup batch")?;
+        db.cleanup_incomplete_snapshots(blobs, Duration::ZERO, ten)
+            .await?;
+        assert!(matches!(
+            blobs.head(&late_key).await,
+            Err(BlobStoreError::NotFound)
+        ));
+        assert!(blobs.head(&active_key).await.is_ok());
+        Ok(())
+    }
+
+    async fn assert_cleanup_fences_late_publisher(
+        db: &PgDatabase,
+        blobs: &LocalFilesystemBlobStore,
+        document_id: DocumentId,
+        book: &Workbook,
+    ) -> TestResult {
+        let paused = PausedPutBlobStore {
+            inner: blobs.clone(),
+            started: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Notify::new()),
+        };
+        let publisher = paused.clone();
+        let database = db.clone();
+        let snapshot_id = SnapshotId::from_bytes([40; 16])?;
+        let candidate = Arc::new(book.clone());
+        let started = paused.started.clone();
+        let release = paused.release.clone();
+        let task = tokio::spawn(async move {
+            database
+                .publish_snapshot(&publisher, snapshot_id, candidate, "engine-v1", "pxel-v1")
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), started.notified()).await?;
+        let batch = NonZeroU16::new(10).ok_or("invalid cleanup batch")?;
+        let cleanup = db
+            .cleanup_incomplete_snapshots(blobs, Duration::ZERO, batch)
+            .await;
+        release.notify_one();
+        assert_eq!(cleanup?.rejected_records, 1);
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(5), task).await??,
+            Err(SnapshotError::PublicationRetired)
+        ));
+        let key = BlobKey::parse(&uuid(snapshot_id.as_bytes()).to_string())?;
+        assert!(matches!(
+            blobs.head(&key).await,
+            Err(BlobStoreError::NotFound)
+        ));
+        let metadata = sqlx::query!(
+            "SELECT state FROM document_snapshots WHERE snapshot_id=$1",
+            uuid(snapshot_id.as_bytes())
+        )
+        .fetch_one(&db.pool)
+        .await?;
+        assert_eq!(metadata.state, "REJECTED");
+        assert_preferred(db, document_id, SnapshotId::from_bytes([25; 16])?).await?;
         Ok(())
     }
 
@@ -1027,7 +1235,22 @@ mod tests {
             &blobs,
             identity,
             document_id,
-            Arc::new(book),
+            Arc::new(book.clone()),
+        ))
+        .await?;
+        Box::pin(assert_incomplete_cleanup(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            &book,
+        ))
+        .await?;
+        Box::pin(assert_cleanup_fences_late_publisher(
+            &db,
+            &blobs,
+            document_id,
+            &book,
         ))
         .await
     }

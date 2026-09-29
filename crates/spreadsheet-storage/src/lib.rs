@@ -12,4 +12,4 @@ pub use development_sessions::DevelopmentSession;
 mod permissions;
 pub use permissions::{PermissionError, PermissionReceipt, PermissionRole};
 mod snapshots;
-pub use snapshots::{RecoveryResult, SnapshotError, SnapshotReceipt};
+pub use snapshots::{RecoveryResult, SnapshotCleanupReport, SnapshotError, SnapshotReceipt};

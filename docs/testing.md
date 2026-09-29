@@ -56,6 +56,13 @@ SQLx-тест проверяет отсутствие snapshot, два ACTIVE п
 объект, точный hash, будущую версию, ACL и неизменность head. HTTP test
 проверяет маршрут и JSON projection на настоящем сервере.
 
+Уборка incomplete snapshots проверяет возрастной порог и bounded batch на
+реальных PostgreSQL/LocalFilesystemBlobStore. Один test задерживает publisher
+перед object put, запускает GC, затем продолжает publisher: он должен
+получить `PublicationRetired`, не изменить preferred pointer и удалить
+поздний объект. Повторный sweep должен убрать объект, созданный уже после
+предыдущей попытки; ACTIVE snapshot остаётся доступным.
+
 Formula differential corpus один для native/browser/WASM. Excel expected results имеют workbook/version/OS/locale/provenance и verified flag. Отсутствие Excel runtime dependency не запрещает ручную верификацию fixtures. Unknown/unsupported syntax coverage не заменяется фиктивным numerical fallback.
 
 Fuzz targets появляются с parsers: formulas, protobuf decode, snapshot decode, references/ranges, ZIP/package/XML. Stable proptest — основной повседневный gate. Если libFuzzer требует nightly, отдельный pinned testing job и ADR/обоснование, без nightly product runtime.

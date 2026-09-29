@@ -146,10 +146,14 @@ recovery API в этом случае применяет только хвост
 при пропуске milestone следующий шанс через 1000 событий. Domain-only
 benchmark snapshot + 10 000 tail events дал 5.7527–8.6369 ms против
 17.024–20.579 ms для полного replay 20 001 events; условия —
-[отчёт](benchmarks/2026-09-29-snapshot-replay-domain-local.md). Crash matrix,
-GC, полный PostgreSQL/BlobStore benchmark и S3 contract остаются открытыми.
+[отчёт](benchmarks/2026-09-29-snapshot-replay-domain-local.md). Полная crash
+matrix, retention GC, PostgreSQL/BlobStore benchmark и S3 contract остаются открытыми.
 Controlled interruption на шести границах publication уже проверил
-metadata/BlobStore/activation rollback; power-loss и GC сценарии не проверены.
+metadata/BlobStore/activation rollback; power-loss не проверен.
+Уборка incomplete/rejected snapshots ([ADR-037](adr/037-incomplete-snapshot-cleanup.md))
+проверена на PostgreSQL/LocalFilesystemBlobStore, включая гонку с publisher.
+ACTIVE поколения пока сохраняются; полный retention GC, inventory orphan
+objects и S3 contract остаются открытыми.
 Read-only historical endpoint восстанавливает точную версию из подходящего
 snapshot и хвоста журнала ([ADR-036](adr/036-historical-version-read.md));
 PostgreSQL и HTTP tests проверили v1/v2, fallback, ACL и неизменность head.

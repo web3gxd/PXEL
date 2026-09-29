@@ -110,6 +110,7 @@ GitHub Actions выполняет те же команды на Ubuntu 24.04. Н
 | `PXEL_DEV_AUTH`                           | `1` работает только с compile feature `dev-auth` и loopback bind            |
 | `PXEL_BLOB_ROOT`                          | Private writable directory; default `.local/blobs`                          |
 | `PXEL_SNAPSHOT_INTERVAL`                  | Число committed событий между snapshots; default `1000`, предел `1..100000` |
+| `PXEL_SNAPSHOT_CLEANUP_HOURS`             | Возраст incomplete snapshot до уборки; default `24`, предел `1..8760`       |
 | `PXEL_DB_PORT`                            | Порт только локального bootstrap; default `55432`                           |
 | `PXEL_PG_BIN`                             | Каталог binaries для native bootstrap                                       |
 

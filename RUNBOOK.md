@@ -1,5 +1,39 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — уборка незавершённых snapshots
+
+Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-033/035,
+snapshot publisher, BlobStore и миграция metadata. Цель — возвращать место
+после прерванной публикации без удаления ACTIVE fallback и durable log.
+Инварианты: только старые UPLOADING/STORED/VERIFIED переходят в REJECTED;
+publisher проигрывает гонку по проверенному `rows_affected`; ACTIVE и
+preferred pointer не меняются; поздний объект остаётся обнаружимым для
+повторной уборки. Риски: гонка GC/publisher, ошибка удаления, starvation
+ограниченной пачки и локальная durability файловой системы.
+
+Миграция 015 добавляет `cleanup_attempted_at` и допускает контролируемое
+обновление REJECTED metadata. `cleanup_incomplete_snapshots` использует
+PostgreSQL `FOR UPDATE SKIP LOCKED`, bounded batch и идемпотентный BlobStore
+delete. Сервер запускает worker раз в час; retention настраивается через
+`PXEL_SNAPSHOT_CLEANUP_HOURS`, default 24. Publisher проверяет все три
+перехода после object put и не активирует запись, уже отклонённую GC.
+ADR-037 описывает предел: старые ACTIVE поколения, orphan objects без
+metadata и S3 пока не удаляются.
+
+Реально выполнено: `cargo sqlx migrate run` применил миграцию 015;
+целевой SQLx test остановок и GC 1/1 прошёл на PostgreSQL и
+LocalFilesystemBlobStore; `cargo clippy -p spreadsheet-storage -p pxel-server
+--all-targets --all-features -- -D warnings` прошёл. `cargo sqlx prepare
+--workspace -- --all-targets --all-features` записал checked query metadata.
+`just check` прошёл: Rust fmt/clippy/tests/build, WASM, protobuf drift,
+frontend format/lint/typecheck, Vitest 71/71 и Vite build. `just sqlx-check`
+прошёл. Runtime smoke: сервер `cargo run --locked -p pxel-server --features
+dev-auth` запустился с `snapshot_cleanup` (0 rejected, 0 delete attempts),
+`/readyz` вернул 200, после чего сервер остановлен. Презентация прошла
+10 слайдов на 1440×900 и 390×844; `git diff --check` прошёл.
+Power-loss, S3 contract, full retained-ACTIVE GC и Linux/Compose/remote CI
+этим срезом не проверялись.
+
 ## 2026-09-29 — чтение исторической версии документа
 
 Перед срезом прочитаны AGENTS.md, roadmap, ADR-033 и текущие recovery,

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE document_snapshots SET cleanup_attempted_at=clock_timestamp() WHERE snapshot_id=$1 AND state='REJECTED'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "74e06911af93c22b88bb5987ccefdf10c47219702c8af0368304586eb04da037"
+}
