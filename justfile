@@ -45,6 +45,9 @@ formula-parity:
     node tests/parity/formula.mjs
     node tests/parity/workbook.mjs
 
+convergence:
+    cargo test --locked -p spreadsheet-domain --test convergence -- --ignored --nocapture
+
 sqlx-check:
     cargo sqlx prepare --check --workspace -- --all-targets --all-features
 

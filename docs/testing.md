@@ -24,6 +24,15 @@ Unit: lexer/parser/AST normalization/coercion/functions/reference transforms, st
 
 Convergence virtual clients: seeded delays, duplicate/out-of-order delivery, reconnect, concurrent edits/inserts, deletion during edit, permissions revoke и restart. Sort сценарии добавляются только вместе с отдельно accepted rectangular sort. После полного canonical replay версии/cacheless hashes совпадают; result hashes сравниваются только для одинаковых completed context/version.
 
+Текущий domain harness запускает в `just check` smoke 5 seeds × 300
+канонических событий; `just convergence` явно запускает полный 100 seeds ×
+1000 commands × 3 replicas. Клиенты получают повторы, задержки и сообщения
+не по порядку, затем догоняют журнал; серверная projection несколько раз
+строится заново из журнала. Это проверяет чистое применение существующих
+SetCellValue/ClearCell и cacheless hash. Тест не моделирует реальные
+WebSocket/БД, ACL, структурные команды или calculation patches; они требуют
+отдельных интеграционных сценариев по мере появления соответствующего кода.
+
 Recovery matrix: до transaction; после CAS/INSERT до второго statement; после COMMIT до publish/ACK; candidate failure; two writers CAS; unknown commit outcome; snapshot UPLOADING/STORED/VERIFIED/ACTIVE boundaries; object upload до metadata; replay interruption/gap/corrupt event. Невалидный candidate не сохраняется, committed event не теряется.
 
 Formula differential corpus один для native/browser/WASM. Excel expected results имеют workbook/version/OS/locale/provenance и verified flag. Отсутствие Excel runtime dependency не запрещает ручную верификацию fixtures. Unknown/unsupported syntax coverage не заменяется фиктивным numerical fallback.

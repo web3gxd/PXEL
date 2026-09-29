@@ -1,5 +1,41 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — seeded domain convergence harness (фаза 3, срез)
+
+Перед срезом прочитаны AGENTS, roadmap, ADR-014/015/016/017, testing и
+текущая domain/replay модель. Цель — воспроизводимо проверить, что три
+виртуальных клиента после повторов, пропусков, доставки не по порядку и
+reconnect получают одинаковый cacheless domain hash из канонического
+журнала. Инварианты: серверный порядок единственный; duplicate не меняет
+версию; клиент не применяет версию с пропуском; восстановление authoritative
+projection из log дает тот же hash.
+
+Добавлен `crates/spreadsheet-domain/tests/convergence.rs`: 100 фиксированных
+seed × 1000 SetCellValue/ClearCell commands × 3 replicas, полное восстановление
+серверной projection через каждые 250 событий и финальный replay клиентов.
+Порядок доставки, повторы и интервалы отключения порождаются детерминированным
+PRNG. В обычном `cargo test`/`just check` работает короткий smoke 5×300 с
+одним восстановлением; полный тест запускается `just convergence`. Обновлены
+`justfile`, testing, roadmap и презентация. Это проверка модели, а не
+WebSocket/PostgreSQL end-to-end и не performance benchmark.
+
+Проверено: первый прямой полный прогон 100×1000 прошёл за 60.084 s, затем
+после выделения smoke/full `cargo test --locked -p spreadsheet-domain --test
+convergence -- --nocapture` прошёл smoke за 586 ms, а `just convergence`
+повторно прошёл full за 60.073 s. Условия: Windows 10.0.26100, debug test
+profile, локальный Intel Ultra 9 185H; это wall time теста, не latency p95.
+Первый `just check` остановился на новом test-only Clippy
+`manual_is_multiple_of`; выражения заменены на `is_multiple_of` без изменения
+сценариев. Повторный `just check` завершился exit 0: fmt, оба Clippy режима,
+workspace Rust tests/build, wasm32 check, protobuf drift, Prettier, ESLint,
+TypeScript, 53 Vitest и production Vite build. Проверка презентации прошла
+10 слайдов на 1440×900 и 390×844. Сетевые
+задержки, ACL revoke, структурные операции, formula patches и реальные
+server process restarts этим harness не покрыты; для них остаются отдельные
+сценарии. Фаза 3 не закрыта.
+
+---
+
 ## 2026-09-29 — ephemeral presence и удалённое выделение (фаза 3, срез)
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-014/015/016, collaboration,
