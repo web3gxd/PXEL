@@ -42,6 +42,10 @@ bundle: 20 reloads дали p95 64.4 ms от navigation и 18.8 ms после do
 107 DOM nodes для пустой книги 1,000×26. Это локальный предварительный baseline,
 не gate для 100,000 заполненных ячеек; условия в
 [отчёте](benchmarks/2026-09-29-render-local.md).
+Синтетическая frontend projection на 100,000 ячеек (10,000×100 осей,
+14.58 MB JSON) измерена отдельно: два runs по 20 reloads, худший p95
+442.8 ms после document GET, максимум 107 DOM nodes. Persisted large-book
+path этим не проверен; [отчёт](benchmarks/2026-09-29-render-sparse-local.md).
 Локальный optimistic Canvas draw submission при удержанных WebSocket sends
 измерен в Chromium: пять runs по 100 правок дали худший p95 14.9 ms при
 неизменной серверной версии. Это узкий preliminary target, не измерение GPU

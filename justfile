@@ -54,6 +54,9 @@ bench-collab:
 bench-render:
     node tests/performance/render.mjs
 
+bench-render-sparse:
+    node tests/performance/render-sparse.mjs
+
 bench-optimistic:
     node tests/performance/optimistic.mjs
 

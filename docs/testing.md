@@ -60,6 +60,12 @@ browser Performance API в Chromium на production bundle. Последний �
 GET, 107 DOM nodes для пустой книги 1,000×26. Условия и ограничения:
 [2026-09-29-render-local.md](benchmarks/2026-09-29-render-local.md).
 
+`just bench-render-sparse` отдельно подменяет только document GET синтетической
+projection на 100,000 заполненных ячеек. Два запуска по 20 reloads дали
+худший p95 442.8 ms после ответа API и максимум 107 DOM nodes; это
+frontend-only benchmark, не проверка durable large-document path.
+[Условия](benchmarks/2026-09-29-render-sparse-local.md).
+
 `just bench-optimistic` удерживает отправку WebSocket после подписки и измеряет
 в реальном Chromium время от Enter до Canvas `fillText` для нового значения.
 Пять запусков по 20 warm-up + 100 measured edits дали худший p95 14.9 ms;

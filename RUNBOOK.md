@@ -1,5 +1,30 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — Canvas с 100,000 синтетических ячеек
+
+Перед срезом прочитаны AGENTS, roadmap, testing, существующий Canvas
+benchmark и код DocumentStore/renderer. Цель — измерить реальную загрузку
+production frontend с большим разреженным набором без создания DOM-узла на
+ячейку. Инвариант: этот frontend fixture не выдаётся за persisted canonical
+document; state hash синтетического ответа не соответствует содержимому.
+
+Добавлены `tests/performance/render-sparse.mjs`, `just bench-render-sparse`
+и [отчёт](docs/benchmarks/2026-09-29-render-sparse-local.md). Browser route
+подменяет только document GET ответом на 14.58 MB: 10,000 row IDs, 100 column
+IDs, 100,000 numeric cells. Production bundle, Canvas и frontend state
+реальные. Два запуска по 1 first load + 20 reloads прошли в Chromium 153:
+худший p95 442.8 ms после responseEnd, navigation p95 820.7 ms, максимум
+107 DOM nodes. Один p99 navigation достиг 1010 ms; он явно записан.
+Persisted 100k operations, memory, cross-host и frame presentation ещё не
+измерены. Roadmap и презентация обновлены.
+`pnpm exec prettier --write` применён к harness/report/slides;
+`presentation:check` прошёл 10 слайдов на 1440×900 и 390×844,
+`pnpm format:check` и `git diff --check` прошли. Полный `just check` после
+добавления только benchmark/docs не повторялся; предыдущий полный прогон
+успешен.
+
+---
+
 ## 2026-09-29 — причина отключения медленного WebSocket клиента
 
 Перед срезом перечитаны AGENTS, roadmap, ADR-018 и outbound writer. Цель —
