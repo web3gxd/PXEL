@@ -25,11 +25,11 @@
 
     <main id="slides">
       <section class="slide cover" id="s01" aria-labelledby="cover-title">
-        <div class="eyebrow">Инженерный обзор · 29 сентября 2026</div>
+        <div class="eyebrow">Живой инженерный отчёт · 29 сентября 2026</div>
         <div class="cover-grid" aria-hidden="true"></div>
         <div class="cover-copy">
           <p class="kicker">
-            <span class="live-dot"></span> Рабочий прототип · базовые фазы 0–2 проверены локально
+            <span class="live-dot"></span> Рабочий прототип · фазы 0–2 локально · фаза 3 в работе
           </p>
           <h1 id="cover-title">Таблицы,<br /><em>которыми</em><br />управляем мы.</h1>
           <p class="lead">
@@ -345,8 +345,8 @@
         <p class="roadmap-note">
           Презентация обновляется после каждого пройденного gate. Для фазы 3 и далее проектный
           контракт есть; очередь отправки ограничена 160 кадрами / 2 MiB. Локальные latency и
-          paused-socket stress измерены. Причина закрытия медленного сокета и cross-host поведение
-          ещё открыты. Linux/Compose/remote CI — отдельные gates.
+          paused-socket stress измерены: медленный клиент закрыт после send timeout. Cross-host
+          поведение и сетевой queue overflow ещё открыты. Linux/Compose/remote CI — отдельные gates.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>

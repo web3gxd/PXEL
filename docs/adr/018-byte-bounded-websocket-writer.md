@@ -40,7 +40,11 @@ limit, never frame content.
 
 Count/byte unit tests verify independent caps and permit release on failed
 admission. Live replay, ACL revoke, calculation, presence and two-browser
-scenarios pass through the new writer. A real kernel-level slow-reader test,
+scenarios pass through the new writer. A local paused-TCP-subscriber stress
+test committed 512 large events while the subscriber was unable to read;
+after a two-second outbound send timeout, the slow socket disconnected.
+The writer emits a content-free `outbound_send_failure` event with a typed
+`timeout` or `socket_error` reason. Network queue overflow, cross-host stress,
 queue depth histogram and reference-topology latency measurement remain open.
 The writer is local to one server process; multi-process fanout still needs a
 leader/fencing design.

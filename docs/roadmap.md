@@ -21,9 +21,9 @@ durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалё
 структурные convergence сценарии и измерения latency. Outbound queue с
 лимитом кадров/байтов реализована в ADR-018; cross-host slow-reader stress и
 очередные метрики ещё открыты. Локальный paused-socket stress выполнен:
-два прогона по 512×30,005-byte commits завершились head 513, медленный socket
-закрылся, писатель не остановился. Путь закрытия (queue overflow или send
-timeout) и cross-host case ещё требуют instrumentation;
+три прогона по 512×30,005-byte commits завершились head 513, медленный socket
+закрылся, писатель не остановился. Третий прогон обнаружил send timeout;
+queue overflow в сети и cross-host case ещё не подтверждены;
 [условия](benchmarks/2026-09-29-slow-reader-local.md).
 Живой integration test одновременной записи в одну ячейку подтвердил версии
 2/3, серверный порядок и значение победителя после replay. Это не заменяет

@@ -6,6 +6,20 @@ use spreadsheet_domain::workbook::DocumentId;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{Semaphore, mpsc, watch};
 
+async fn send_bounded(sink: &mut SplitSink<WebSocket, Message>, message: Message) -> bool {
+    match tokio::time::timeout(SEND_TIMEOUT, sink.send(message)).await {
+        Ok(Ok(())) => true,
+        Ok(Err(_)) => {
+            tracing::warn!(event = "outbound_send_failure", reason = "socket_error");
+            false
+        }
+        Err(_) => {
+            tracing::warn!(event = "outbound_send_failure", reason = "timeout");
+            false
+        }
+    }
+}
+
 // Replay may enqueue 128 canonical events plus its barrier before the writer runs.
 const MAX_QUEUED_FRAMES: usize = 160;
 const MAX_QUEUED_BYTES: u32 = 2 * 1024 * 1024;
@@ -85,16 +99,10 @@ pub fn start(
                 {
                     false
                 } else {
-                    matches!(
-                        tokio::time::timeout(SEND_TIMEOUT, sink.send(frame.message)).await,
-                        Ok(Ok(()))
-                    )
+                    send_bounded(&mut sink, frame.message).await
                 }
             } else {
-                matches!(
-                    tokio::time::timeout(SEND_TIMEOUT, sink.send(frame.message)).await,
-                    Ok(Ok(()))
-                )
+                send_bounded(&mut sink, frame.message).await
             };
             if !sent {
                 break;

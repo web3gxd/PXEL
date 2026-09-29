@@ -1,5 +1,25 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — причина отключения медленного WebSocket клиента
+
+Перед срезом перечитаны AGENTS, roadmap, ADR-018 и outbound writer. Цель —
+различить socket error и send timeout без document content в логах.
+`apps/server/src/outbound.rs` теперь пишет только `outbound_send_failure`
+и константный `reason=timeout|socket_error`; ADR-018 и отчёт stress обновлены.
+`cargo fmt --all`, server Clippy (`--all-targets --all-features -D warnings`)
+и `cargo build --release --locked -p pxel-server --features dev-auth` прошли.
+Третий `just stress-slow-reader` прошёл 512/512 commits, head 513, socket
+закрылся; сервер выдал `outbound_send_failure reason=timeout` во время
+нагрузки, затем `socket_error` после cleanup. Переполнение byte queue в
+реальном socket этим не доказано. На обложке презентации статус прямо назван
+живым инженерным отчётом: фаза 3 в работе, фазы 4–6 впереди.
+После изменений `pnpm test:integration` прошёл 27/27 против release server;
+`presentation:check` прошёл 10 слайдов на desktop/mobile; `just check`
+завершился exit 0 (fmt, оба Clippy, Rust tests/build, wasm32, protobuf
+drift, WASM build, Prettier, ESLint, TS, 53 Vitest, Vite build).
+
+---
+
 ## 2026-09-29 — медленный подписчик не блокирует документ
 
 Перед срезом прочитаны AGENTS, roadmap, ADR-018, текущие WebSocket outbound
