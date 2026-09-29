@@ -43,6 +43,9 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=NOT(A1=B1)',
     '=ABS(A1)',
     '=MOD(A1,B1)',
+    '=ROUND(A1,2)',
+    '=ROUNDUP(A1,1)',
+    '=ROUNDDOWN(A1,-1)',
   ];
   const source = sources[next() % sources.length];
   const primitive = (value) => ({ type: 'number', value });

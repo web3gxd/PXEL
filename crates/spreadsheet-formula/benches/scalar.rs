@@ -21,6 +21,17 @@ fn benchmarks(c: &mut Criterion) {
     for (name, source, expected) in [
         ("ABS_scalar", "=ABS(-123.5)", Value::Number(123.5)),
         ("MOD_scalar", "=MOD(-123.5,7)", Value::Number(2.5)),
+        ("ROUND_scalar", "=ROUND(1.005,2)", Value::Number(1.01)),
+        (
+            "ROUNDUP_scalar",
+            "=ROUNDUP(-12.34567,3)",
+            Value::Number(-12.346),
+        ),
+        (
+            "ROUNDDOWN_scalar",
+            "=ROUNDDOWN(-12.34567,3)",
+            Value::Number(-12.345),
+        ),
     ] {
         let parsed = match parse(source) {
             Ok(parsed) => parsed,

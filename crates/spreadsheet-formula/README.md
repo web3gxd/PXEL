@@ -70,12 +70,17 @@ Source provenance and documentation conflicts are retained in the corpus.
   conditions, preserving later errors even after a decisive boolean; range
   traversal is budgeted and checked. NOT takes one scalar and inverts the same
   scalar coercion as IF. Arrays/implicit intersection remain unsupported.
-  Engine identity is `pxel-formula-0.3.0`; old persisted contexts require a new
+  Engine identity is `pxel-formula-0.4.0`; old persisted contexts require a new
   authorized calculation epoch. See ADR-055 and the common fixture corpus.
 
 - ABS takes one scalar; MOD takes two and follows the divisor sign. Blank is
   coerced to zero, a zero divisor gives DIV/0, and unsafe numeric remainder
   bounds give NUM. See ADR-059 for the supported precision/coercion profile.
+
+- ROUND/ROUNDUP/ROUNDDOWN take two scalar arguments and quantize the shortest
+  round-trip decimal representation, with fractional precision truncated toward
+  zero. Work is bounded and budgeted; overflow becomes NUM. This explicit PXEL
+  profile is described in ADR-060 and does not promise bitwise Excel parity.
 
 Bounds: 32 KiB source, 4,096 AST nodes, AST depth 128 (parser call depth 256 to
 admit canonical parentheses), 255 call arguments, 100,000

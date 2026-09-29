@@ -30,6 +30,37 @@ import {
 } from '../helpers/client.mjs';
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
 
+test('ROUND family commits and incrementally recalculates a referenced input', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal((await client.send(setCommand(client, snapshot, 1.005))).case, 'committed');
+    const formula = formulaCommand(
+      client,
+      { ...snapshot, version: '2' },
+      '=IF(ROUND(A1,2)=ROUNDUP(A1,2),ROUNDDOWN(A1,2),0)',
+      { column: 1, sequence: 2 },
+    );
+    assert.equal((await client.send(formula)).case, 'committed');
+    assert.deepEqual((await calculation(base, cookie, snapshot.document_id, 3)).values[0].value, {
+      type: 'number',
+      value: 1,
+    });
+    assert.equal(
+      (await client.send(setCommand(client, { ...snapshot, version: '3' }, 1.004, { sequence: 3 })))
+        .case,
+      'committed',
+    );
+    const result = await calculation(base, cookie, snapshot.document_id, 4);
+    assert.deepEqual(result.values[0].value, { type: 'number', value: 0 });
+    assert.equal(result.engine_version, 'pxel-formula-0.4.0');
+    assert.equal((await client.send(formula)).case, 'receipt');
+  } finally {
+    client.socket.terminate();
+  }
+});
+
 test('ABS and MOD commit and recalculate after a referenced value changes', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);
@@ -52,7 +83,7 @@ test('ABS and MOD commit and recalculate after a referenced value changes', asyn
     );
     const calculated = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(calculated.values[0].value, { type: 'number', value: 0 });
-    assert.equal(calculated.engine_version, 'pxel-formula-0.3.0');
+    assert.equal(calculated.engine_version, 'pxel-formula-0.4.0');
     assert.equal((await client.send(formula)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -1514,7 +1545,7 @@ test('logical functions commit, recalculate and survive a persisted context adva
     const valueAt = async (version) => {
       const state = await calculation(base, cookie, snapshot.document_id, version);
       assert.equal(state.status, 'complete');
-      assert.equal(state.engine_version, 'pxel-formula-0.3.0');
+      assert.equal(state.engine_version, 'pxel-formula-0.4.0');
       return state.values.find((cell) => cell.column_id === snapshot.sheets[0].columns[2])?.value;
     };
     assert.deepEqual(await valueAt(4), { type: 'boolean', value: true });

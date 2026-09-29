@@ -37,7 +37,7 @@ impl EvaluationBudget {
     pub const fn remaining(&self) -> u64 {
         self.remaining
     }
-    fn charge(&mut self) -> Result<(), EvaluationError> {
+    pub(crate) fn charge(&mut self) -> Result<(), EvaluationError> {
         if self.cancelled {
             return Err(EvaluationError::Cancelled);
         }
@@ -81,7 +81,7 @@ pub fn evaluate(
     }
     eval(ast, ast.root, resolver, budget, 0)
 }
-fn number(n: f64) -> Value {
+pub(crate) fn number(n: f64) -> Value {
     if !n.is_finite() {
         Value::Error(FormulaError::Num)
     } else {
@@ -204,7 +204,10 @@ fn eval(
                         Err(error) => Value::Error(error),
                     }
                 }
-            } else if matches!(name.as_str(), "ABS" | "MOD") {
+            } else if matches!(
+                name.as_str(),
+                "ABS" | "MOD" | "ROUND" | "ROUNDUP" | "ROUNDDOWN"
+            ) {
                 scalar_math(ast, name, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "SUM" | "AVERAGE" | "MIN" | "MAX") {
                 aggregate(ast, name, arguments, resolver, budget, depth + 1)?
@@ -245,6 +248,15 @@ fn scalar_math(
         Ok(value) => value,
         Err(error) => return Ok(Value::Error(error)),
     };
+    let mode = match name {
+        "ROUND" => Some(crate::rounding::Mode::Nearest),
+        "ROUNDUP" => Some(crate::rounding::Mode::Away),
+        "ROUNDDOWN" => Some(crate::rounding::Mode::Toward),
+        _ => None,
+    };
+    if let Some(mode) = mode {
+        return crate::rounding::round(value, divisor, mode, budget);
+    }
     if divisor == 0.0 {
         return Ok(Value::Error(FormulaError::Div0));
     }

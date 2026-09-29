@@ -354,4 +354,9 @@ tail после restart. Large-book recovery profiling и публикация r
 ADR-059 добавляет scalar ABS/MOD в engine 0.3.0. Общий native/browser corpus
 155 cases прошёл, stateful parity 1001/2002 включает эти функции. Живой
 PostgreSQL suite 39/39 проверяет dependent recalculation и receipt. Manual
-Excel edge-case verification и ROUND/POWER/text/date/lookup ещё открыты.
+Excel edge-case verification и POWER/text/date/lookup ещё открыты.
+
+ADR-060 добавляет ROUND/ROUNDUP/ROUNDDOWN в engine 0.4.0: общий корпус
+202 cases, stateful native/browser parity 1001/2002, PostgreSQL 40/40,
+новые browser dependent-edit/reload tests при DPR1/2. Manual Excel rounding
+verification остаётся gate; benchmark зафиксирован отдельно.

@@ -47,6 +47,64 @@ fn abs_and_mod_scalar_contract() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[test]
+// Microsoft ROUNDUP/ROUNDDOWN examples deliberately use rounded decimal PI inputs.
+#[allow(clippy::approx_constant)]
+fn decimal_rounding_profile() -> Result<(), Box<dyn std::error::Error>> {
+    for source in ["=ROUND(-0.1,0)", "=ROUNDDOWN(-5e-324,323)"] {
+        assert!(matches!(eval(source)?, Value::Number(value) if value.to_bits() == 0));
+    }
+    for (source, expected) in [
+        ("=ROUND(2.15,1)", Value::Number(2.2)),
+        ("=ROUND(2.149,1)", Value::Number(2.1)),
+        ("=ROUND(-1.475,2)", Value::Number(-1.48)),
+        ("=ROUND(626.3,-3)", Value::Number(1000.0)),
+        ("=ROUND(1.005,2)", Value::Number(1.01)),
+        ("=ROUND(0.49999999999999994,0)", Value::Number(0.0)),
+        ("=ROUNDUP(-3.14159,3)", Value::Number(-3.142)),
+        ("=ROUNDDOWN(-3.14159,3)", Value::Number(-3.141)),
+        ("=ROUND(123.45,-1.9)", Value::Number(120.0)),
+        ("=ROUND(1e308,308)", Value::Number(1e308)),
+        ("=ROUND(5e-324,323)", Value::Number(1e-323)),
+        ("=ROUNDDOWN(5e-324,323)", Value::Number(0.0)),
+        ("=ROUNDUP(1,-309)", Value::Error(FormulaError::Num)),
+        ("=ROUND(1,-309)", Value::Number(0.0)),
+        ("=ROUND(1e308,1e308)", Value::Number(1e308)),
+        ("=ROUND(1)", Value::Error(FormulaError::Value)),
+        ("=ROUND(\"x\",1)", Value::Error(FormulaError::Value)),
+    ] {
+        assert_eq!(eval(source)?, expected, "{source}");
+    }
+    assert_eq!(
+        evaluate(
+            &parse("=IFERROR(ROUND(1.005,2),7)")?.ast,
+            &NoReferences,
+            &mut EvaluationBudget::new(5)
+        ),
+        Err(EvaluationError::CalculationLimitExceeded)
+    );
+    Ok(())
+}
+
+proptest! {
+    #[test]
+    fn rounding_thousandths_matches_integer_quantization(n in -1_000_000i64..1_000_000, digits in 0u32..=3) {
+        let divisor = 10i64.pow(3-digits);
+        let magnitude = n.abs();
+        let sign = if n < 0 { -1.0 } else { 1.0 };
+        let value = n as f64 / 1000.0;
+        for (name, units) in [
+            ("ROUND", (magnitude + divisor/2) / divisor),
+            ("ROUNDUP", (magnitude + divisor-1) / divisor),
+            ("ROUNDDOWN", magnitude / divisor),
+        ] {
+            let expected = sign * (units * divisor) as f64 / 1000.0;
+            let actual = eval(&format!("={name}({value},{digits})"));
+            prop_assert!(matches!(actual, Ok(Value::Number(result)) if result == expected));
+        }
+    }
+}
+
 proptest! {
     #[test]
     fn mod_integer_domain_matches_exact_divisor_signed_remainder(n in -1_000_000_000i64..1_000_000_000, magnitude in 1i64..1_000_000, negative in any::<bool>()) {

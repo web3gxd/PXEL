@@ -8,13 +8,13 @@ Google Sheets задает пользовательскую модель мгн�
 
 Точные правила и ограничения: [formula-semantics.md](formula-semantics.md). Convergence нашего native/WASM — exact normalized result hash. Совместимость с Excel проверяется fixtures с версией Excel/ОС/locale и указанным tolerance, где он необходим. Bitwise Excel parity не обещается.
 
-| Статус целевого профиля      | Formula feature                                                                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Supported после phase 2 gate | Literals, basic operators, A1/mixed references, bounded ranges, SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/IF/IFS/IFERROR/AND/OR/NOT/ABS/MOD   |
-| Partially supported          | Integer-only exponent first; static dependency treatment IF; range caps; date system semantics до ввода date functions               |
-| Preserved but not editable   | Unknown function при распознаваемом normalized AST: source/AST сохраняются, canonical result NAME; UI показывает unsupported feature |
-| Dropped with warning         | Импортированные calculated caches не считаются canonical values; могут показываться только как untrusted preview                     |
-| Rejected                     | Неподдержанная грамматика без lossless normalized representation; external/UDF refs; превышение limits                               |
+| Статус целевого профиля      | Formula feature                                                                                                                                                                                                        |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Supported после phase 2 gate | Literals, basic operators, A1/mixed references, bounded ranges, SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/IF/IFS/IFERROR/AND/OR/NOT/ABS/MOD                                                                                     |
+| Partially supported          | ROUND/ROUNDUP/ROUNDDOWN: explicit shortest-decimal profile (ADR-060), manual Excel verification open; integer-only exponent; static dependency treatment IF; range caps; date system semantics до ввода date functions |
+| Preserved but not editable   | Unknown function при распознаваемом normalized AST: source/AST сохраняются, canonical result NAME; UI показывает unsupported feature                                                                                   |
+| Dropped with warning         | Импортированные calculated caches не считаются canonical values; могут показываться только как untrusted preview                                                                                                       |
+| Rejected                     | Неподдержанная грамматика без lossless normalized representation; external/UDF refs; превышение limits                                                                                                                 |
 
 Формула сохраняется только с server-validated normalized AST. Сохранить неизвестный произвольный текст вместо AST и молча считать cache корректным нельзя. Native/WASM version mismatch приводит к отключению соответствующего preview/reload, а не к доверию клиентскому AST.
 

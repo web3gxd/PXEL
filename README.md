@@ -63,7 +63,8 @@ PXEL_DEV_AUTH=1 cargo run --locked -q -p pxel-server --features dev-auth -- xlsx
 
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Поддержаны AND/OR/NOT с диапазонами и typed resource limits. Текущий engine
-identity — `pxel-formula-0.3.0`; старый явно сохранённый CalculationContext
+identity — `pxel-formula-0.4.0`; доступны ROUND/ROUNDUP/ROUNDDOWN в ограниченном
+decimal profile по ADR-060; старый явно сохранённый CalculationContext
 требует действия «Пересчитать» в меню или авторизованного
 `POST /api/documents/{id}/recalculate` с новым `operation_id`, чтобы получить
 следующий durable epoch без переписывания журнала. Повтор кнопки после потери

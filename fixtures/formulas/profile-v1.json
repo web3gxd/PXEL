@@ -90,6 +90,21 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/mod-function",
       "title": "MOD function",
       "retrieved_at": "2026-09-29"
+    },
+    "round": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/round-function",
+      "title": "ROUND function",
+      "retrieved_at": "2026-09-29"
+    },
+    "roundup": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/roundup-function",
+      "title": "ROUNDUP function",
+      "retrieved_at": "2026-09-29"
+    },
+    "rounddown": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/rounddown-function",
+      "title": "ROUNDDOWN function",
+      "retrieved_at": "2026-09-29"
     }
   },
   "cases": [
@@ -2685,6 +2700,697 @@
       },
       "provenance": {
         "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_ms_215",
+      "formula": "=ROUND(2.15,1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2.2
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_ms_2149",
+      "formula": "=ROUND(2.149,1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2.1
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_ms_negative",
+      "formula": "=ROUND(-1.475,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -1.48
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_ms_negative_digits",
+      "formula": "=ROUND(21.5,-1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_ms_thousands",
+      "formula": "=ROUND(626.3,-3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1000
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_ms_zero",
+      "formula": "=ROUND(1.98,-1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_ms_negative_hundreds",
+      "formula": "=ROUND(-50.55,-2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -100
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_midpoint",
+      "formula": "=ROUND(1.005,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1.01
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_neighbor",
+      "formula": "=ROUND(0.49999999999999994,0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_carry",
+      "formula": "=ROUND(9.995,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 10
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_zero",
+      "formula": "=ROUND(-0.01,0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_fractional_digits",
+      "formula": "=ROUND(2.15,1.9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2.2
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_negative_fraction",
+      "formula": "=ROUND(123.45,-1.9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 120
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_text",
+      "formula": "=ROUND(\"2.15\",\"1\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2.2
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_boolean",
+      "formula": "=ROUND(TRUE,FALSE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_blank_number",
+      "formula": "=ROUND(A1,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_blank_precision",
+      "formula": "=ROUND(2.5,A1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_arity",
+      "formula": "=ROUND(1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_bad_text",
+      "formula": "=ROUND(\"x\",2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_error",
+      "formula": "=ROUND(1/0,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_iferror",
+      "formula": "=IFERROR(ROUND(\"x\",2),7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_huge_positive",
+      "formula": "=ROUND(1e308,1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1e308
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_huge_negative",
+      "formula": "=ROUND(1,-1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_large_exact",
+      "formula": "=ROUND(1e308,308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1e308
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_large_overflow",
+      "formula": "=ROUND(1.7e308,-308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_subnormal_tie",
+      "formula": "=ROUND(5e-324,323)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1e-323
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_subnormal_exact",
+      "formula": "=ROUND(5e-324,324)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 5e-324
+      },
+      "provenance": {
+        "sources": ["round"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "roundup_ms_positive",
+      "formula": "=ROUNDUP(3.2,0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 4
+      },
+      "provenance": {
+        "sources": ["roundup"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "roundup_ms_negative",
+      "formula": "=ROUNDUP(-3.14159,3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -3.142
+      },
+      "provenance": {
+        "sources": ["roundup"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "roundup_negative_places",
+      "formula": "=ROUNDUP(31415.92654,-2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 31500
+      },
+      "provenance": {
+        "sources": ["roundup"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "roundup_exact",
+      "formula": "=ROUNDUP(2.5,1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2.5
+      },
+      "provenance": {
+        "sources": ["roundup"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "roundup_zero",
+      "formula": "=ROUNDUP(0,-1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["roundup"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "roundup_coarse_overflow",
+      "formula": "=ROUNDUP(1,-309)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["roundup"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "roundup_subnormal",
+      "formula": "=ROUNDUP(5e-324,323)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1e-323
+      },
+      "provenance": {
+        "sources": ["roundup"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "roundup_text",
+      "formula": "=ROUNDUP(\"-2.1\",0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -3
+      },
+      "provenance": {
+        "sources": ["roundup"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "roundup_arity",
+      "formula": "=ROUNDUP(1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["roundup"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "rounddown_ms_positive",
+      "formula": "=ROUNDDOWN(3.2,0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "rounddown_ms_negative",
+      "formula": "=ROUNDDOWN(-3.14159,3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -3.141
+      },
+      "provenance": {
+        "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "rounddown_negative_places",
+      "formula": "=ROUNDDOWN(31415.92654,-2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 31400
+      },
+      "provenance": {
+        "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "rounddown_exact",
+      "formula": "=ROUNDDOWN(2.5,1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2.5
+      },
+      "provenance": {
+        "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "rounddown_coarse",
+      "formula": "=ROUNDDOWN(1,-309)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "rounddown_subnormal",
+      "formula": "=ROUNDDOWN(5e-324,323)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "rounddown_huge",
+      "formula": "=ROUNDDOWN(1.7e308,-308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1e308
+      },
+      "provenance": {
+        "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "rounddown_error",
+      "formula": "=ROUNDDOWN(2,1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["rounddown"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "round_max_finite_overflow",
+      "formula": "=ROUND(1.7976931348623157e308,-308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "error", "value": "#NUM!" },
+      "provenance": { "sources": ["round"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "rounddown_max_finite",
+      "formula": "=ROUNDDOWN(1.7976931348623157e308,-308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": { "type": "number", "value": 1e308 },
+      "provenance": { "sources": ["rounddown"], "basis": "derived", "verified_in_excel": false }
+    },
+    {
+      "id": "rounddown_arity",
+      "formula": "=ROUNDDOWN(1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["rounddown"],
         "basis": "derived",
         "verified_in_excel": false
       }
