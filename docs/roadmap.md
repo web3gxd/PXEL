@@ -167,6 +167,10 @@ read версии без снимка проверен через replay; пос
 прошёл на изолированном PostgreSQL 18: после `immediate` stop и WAL recovery
 actor поднял ACTIVE snapshot v3 и одно committed событие хвоста v4; hash
 совпал с ACK. Это не имитация потери питания или диска.
+Локальный restore drill ([ADR-041](adr/041-quiescent-backup-restore.md)) прошёл:
+`pg_basebackup` + `pg_verifybackup` и snapshot objects восстановили v4 в новом
+кластере, хотя источник после backup уже достиг v5; actor взял snapshot v3 +
+один event. Online-consistent backup, WAL archive/PITR и off-site копии открыты.
 Read-only historical endpoint восстанавливает точную версию из подходящего
 snapshot и хвоста журнала ([ADR-036](adr/036-historical-version-read.md));
 PostgreSQL и HTTP tests проверили v1/v2, fallback, ACL и неизменность head.

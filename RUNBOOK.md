@@ -1,5 +1,39 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — изолированный physical backup + snapshot restore drill
+
+Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-004/040, snapshot
+recovery и текущий приватный PostgreSQL harness. Цель — реально поднять новый
+кластер из физической копии PostgreSQL и сохранённых blob objects, затем
+сверить canonical state. Инварианты: копия должна включать metadata и объект
+ACTIVE snapshot, журнал остаётся authority, восстановленная версия не может
+содержать более поздние исходные операции. Риски: этот quiescent порядок не
+решает online-consistent backup, WAL archiving/PITR и off-site retention.
+
+Общие функции приватного recovery стенда вынесены в
+`tests/recovery/private-postgres.mjs` и используются двумя настоящими тестами.
+Новый `tests/recovery/backup-restore.test.mjs` создает отдельный PostgreSQL 18
+с `synchronous_commit=on`, `fsync=on`, `full_page_writes=on`, публикует ACTIVE
+snapshot v3 и коммитит v4. Backend останавливается, локальные blob objects
+копируются, `pg_basebackup -Fp -X stream -c fast` создает физическую копию,
+`pg_verifybackup -q` проверяет manifest и WAL. Исходный документ доходит до
+v5, затем новый PostgreSQL из backup и копия blobs восстанавливают ровно v4.
+Проверены hash v4 из ACK, значение ячейки, исторический v3 и runtime
+`document_recovery` = snapshot v3 + один event хвоста. Решение ADR-041;
+добавлен `just backup-restore-postgres`, обновлены README, persistence,
+roadmap и живая презентация.
+
+Реально выполнено: новый backup/restore test 1/1 за 10.99 s; прежний
+immediate-stop test после выделения helper 1/1 за 6.27 s. Это время node
+runner на локальном Windows, не RTO. PostgreSQL docs сверены для
+`pg_basebackup`/`pg_verifybackup`. Linux, Garage/российский S3, online backup
+при активных писателях, off-site copies, PITR и power-loss не проверены.
+Повторный `just backup-restore-postgres` прошёл 1/1 за 9.16 s. `pnpm
+format:check`, `node --check` нового теста и `git diff --check` прошли.
+Presentation check прошёл все 10 слайдов при 1440×900 и 390×844. Полный
+`just check` в этом срезе не повторялся: Rust/runtime и dependency graph не
+менялись; затронуты только JS recovery harness и документация.
+
 ## 2026-09-29 — PostgreSQL immediate-stop recovery со snapshot + tail
 
 Перед срезом прочитаны AGENTS.md, roadmap, ADR-004/033/037/039, snapshot

@@ -1,17 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
-import { once } from 'node:events';
-import {
-  closeSync,
-  mkdtempSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { createServer } from 'node:net';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
@@ -23,66 +12,9 @@ import {
   releaseSessions,
   setCommand,
 } from '../helpers/client.mjs';
+import { exe, freePort, killServer, run, startServer } from './private-postgres.mjs';
 
 const localRoot = resolve('.local');
-const exe = (name) =>
-  join(process.env.PXEL_PG_BIN ?? '', name + (process.platform === 'win32' ? '.exe' : ''));
-
-function run(command, args, env = process.env, capture = false) {
-  // pg_ctl's server process can inherit captured pipe handles, leaving spawnSync
-  // waiting for EOF forever even after pg_ctl itself exits.
-  const result = spawnSync(command, args, {
-    env,
-    encoding: 'utf8',
-    windowsHide: true,
-    stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'ignore',
-    timeout: 30000,
-  });
-  if (result.error || result.status !== 0)
-    throw new Error(
-      `${command} failed: ${result.error?.code ?? result.stderr?.trim() ?? result.status}`,
-    );
-  return capture ? result.stdout.trim() : '';
-}
-
-async function freePort() {
-  const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const port = server.address().port;
-  server.close();
-  await once(server, 'close');
-  return port;
-}
-
-async function startServer(env, base, logFile) {
-  const binary = resolve('target/debug/pxel-server' + (process.platform === 'win32' ? '.exe' : ''));
-  const log = openSync(logFile, 'a');
-  const child = spawn(binary, [], { env, stdio: ['ignore', log, log], windowsHide: true });
-  closeSync(log);
-  let startError;
-  child.on('error', (error) => {
-    startError = error;
-  });
-  for (let attempt = 0; attempt < 150; attempt++) {
-    if (startError || child.exitCode !== null || child.signalCode !== null)
-      throw startError ?? new Error('server exited before ready; inspect private server.log');
-    try {
-      if ((await fetch(base + '/readyz', { signal: AbortSignal.timeout(300) })).ok) return child;
-    } catch {}
-    await delay(100);
-  }
-  child.kill('SIGKILL');
-  throw new Error('server readiness timeout');
-}
-
-async function killServer(child) {
-  if (child && child.exitCode === null && child.signalCode === null) {
-    const exit = once(child, 'exit');
-    child.kill('SIGKILL');
-    await exit;
-  }
-}
 
 test(
   'committed tail survives immediate PostgreSQL stop and replays after ACTIVE snapshot',

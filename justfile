@@ -76,6 +76,10 @@ crash-recovery-postgres:
     cargo build --locked -p pxel-server --features dev-auth
     node --test tests/recovery/postgres-immediate-stop.test.mjs
 
+backup-restore-postgres:
+    cargo build --locked -p pxel-server --features dev-auth
+    node --test tests/recovery/backup-restore.test.mjs
+
 audit:
     cargo deny check
     cargo audit

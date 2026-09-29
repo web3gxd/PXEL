@@ -120,6 +120,16 @@ recovery сообщает только opaque версии/длительнос�
 покрывает сбой процесса PostgreSQL с WAL recovery, но не потерю питания,
 носителя, S3 объекта или backup/PITR restore.
 
+ADR-041 добавляет локальный restore drill: backend остановлен после v4,
+snapshot objects копируются как единый quiescent набор, PostgreSQL получает
+`pg_basebackup -X stream` и `pg_verifybackup`. После этого исходный документ
+доходит до v5, а новый кластер из backup восстанавливает ровно v4 через
+snapshot v3 + один event. Это подтверждает, что проверенная пара DB+blob
+копий пригодна для восстановления при выбранной последовательности действий.
+Для online backup без остановки писателей потребуется точный порядок захвата
+blobs и БД, retention/fencing, manifest и регулярный restore drill; отдельно
+нужны WAL archive и PITR.
+
 ## Replay и hashes
 
 Reader авторизует historical read, выбирает подходящий ACTIVE snapshot <=requested version, проверяет envelope/checksum/hash и последовательно применяет log tail. Versions должны быть непрерывны. Unknown event/schema, gap и checksum mismatch не пропускаются. Replay применяет сохраненные canonical operations, не повторяет сортировку/генерацию IDs или random source.

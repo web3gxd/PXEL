@@ -87,6 +87,7 @@ just smoke      # запускает/останавливает приложен
 just audit      # cargo-deny 0.20.2, cargo-audit 0.22.2, pnpm audit
 pnpm test:recovery # собирает dev-auth binary и проверяет hard restart
 just crash-recovery-postgres # отдельный PostgreSQL 18: immediate stop, WAL recovery, snapshot+tail
+just backup-restore-postgres # pg_basebackup + pg_verifybackup + snapshot objects → новый кластер
 just bench-collab # отдельный локальный замер ACK и доставки второму клиенту
 ```
 
@@ -101,6 +102,11 @@ Cargo-nextest закреплен на 0.9.146. `cargo test --workspace --all-fea
 `.local`, включает `synchronous_commit`, `fsync` и `full_page_writes`, затем
 удаляет кластер после остановки. Это проверка аварийного завершения процесса БД,
 а не физической потери питания, диска или backup/PITR.
+`backup-restore-postgres` также использует только отдельные локальные кластеры.
+Он останавливает приложение на время копирования blob-каталога и физического
+backup, проверяет manifest, затем восстанавливает PostgreSQL и blobs вместе.
+Это restore drill для согласованной копии; WAL archiving/PITR и резервирование
+S3 в присутствии писателей остаются отдельными production gates.
 
 GitHub Actions выполняет те же команды на Ubuntu 24.04. Наличие workflow
 не означает выполненный remote CI: фактический статус записывается в RUNBOOK.
