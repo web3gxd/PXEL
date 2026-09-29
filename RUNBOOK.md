@@ -1,5 +1,33 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — domain benchmark snapshot + 10 000 tail events
+
+Перед срезом прочитаны AGENTS.md, roadmap, testing docs и действующие
+snapshot/benchmark fixtures. Цель — создать реальный harness для 10 000
+событий хвоста до любой оптимизации recovery. Инварианты: одинаковый
+канонический domain hash после snapshot+tail и full replay, проверка
+expected hash каждого события, подготовка fixture вне измеряемого цикла.
+Риск — одна ячейка не моделирует большой разреженный документ и не включает
+PostgreSQL/BlobStore/codec.
+
+Добавлен Criterion bench `crates/spreadsheet-domain/benches/recovery.rs`:
+10 000 изменений до snapshot v10001 и 10 000 после него, сравнение с
+full replay 20 001 events. `cargo check -p spreadsheet-domain --features
+test-support --benches` и bench clippy прошли. Реальный запуск:
+`cargo bench --locked -p spreadsheet-domain --features test-support --bench
+recovery -- --sample-size 10 --warm-up-time 1 --measurement-time 3` прошёл.
+Criterion 95% interval: snapshot + tail 5.7527–8.6369 ms; full replay
+17.024–20.579 ms. Машина, профиль, dataset, ограничения и отсутствие
+PostgreSQL/BlobStore перечислены в
+`docs/benchmarks/2026-09-29-snapshot-replay-domain-local.md`.
+Финальные `just check` и presentation browser check прошли: Rust
+fmt/clippy/tests/build, WASM, protobuf drift, ESLint, TypeScript, Vitest
+71/71, Vite build; презентация — 10 слайдов на 1440×900 и 390×844.
+`just sqlx-check` после этого domain-only среза не запускался: SQL queries
+не менялись. Первый общий check остановился на Prettier для benchmark
+report; формат исправлен, повторный check прошёл. Следующий gate — полный
+persisted recovery benchmark и crash matrix.
+
 ## 2026-09-29 — bounded snapshot scheduler
 
 Перед срезом прочитаны AGENTS.md, roadmap, ADR-033/034 и actor/storage/server

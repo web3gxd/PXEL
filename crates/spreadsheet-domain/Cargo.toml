@@ -20,5 +20,10 @@ name = "workbook"
 harness = false
 required-features = ["test-support"]
 
+[[bench]]
+name = "recovery"
+harness = false
+required-features = ["test-support"]
+
 [lints]
 workspace = true
