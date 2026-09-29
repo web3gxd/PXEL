@@ -69,6 +69,9 @@ stress-slow-reader:
 sqlx-check:
     cargo sqlx prepare --check --workspace -- --all-targets --all-features
 
+s3-contract:
+    cargo test --locked -p spreadsheet-storage --features s3 --test s3_contract -- --ignored --nocapture
+
 audit:
     cargo deny check
     cargo audit

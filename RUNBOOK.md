@@ -1,5 +1,61 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — optional S3 adapter для snapshot объектов
+
+Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-004/033/037/038,
+BlobStore port/контракты, server composition root и snapshot code. Цель —
+подключить S3-совместимый объектный adapter без изменения PostgreSQL authority
+и протокола снимков. Инварианты: immutable key, проверка фактических bytes и
+SHA-256 до публикации, ACK документа только после durable PostgreSQL COMMIT,
+никаких credential/body в логах, локальный adapter остаётся default.
+Риски: S3-compatible серверы могут различаться в `If-None-Match: *`, metadata,
+retry и durability; Moto не является подтверждением Garage/российского S3.
+
+Добавлен feature `spreadsheet-storage/s3` и серверный `--features s3`.
+`ConfiguredBlobStore` выбирает локальный adapter или S3 по
+`PXEL_S3_ENDPOINT/Bucket/Region`; production credentials берутся через SDK
+providers. Endpoint вне loopback требует HTTPS. S3 put stage ограничен 64 MiB,
+проверяет checksum, использует условную запись, 412 → проверенный
+идемпотентный retry либо `KeyConflict`, 409 → ограниченный retry. Get/Head
+скачивают и проверяют весь объект во временный файл перед результатом;
+delete идемпотентен. SDK operation/attempt timeouts 30/10 s, download body
+timeout 60 s. Ошибки SDK наружу отображаются без содержания запросов.
+Решение — ADR-039; обновлены README, architecture/persistence/roadmap,
+justfile и промежуточная презентация.
+
+Версии проверены через `cargo info`: `aws-sdk-s3 1.150.0` и `aws-config 1.12.0`
+стабильны, Apache-2.0, rust-version 1.94.1; `url 2.5.8` MIT/Apache-2.0.
+Первый `cargo deny check` и `cargo audit` нашли четыре advisory в старой
+TLS-ветке (`h2 0.3.27`, `rustls-webpki 0.101.7`), которую притянул feature
+SDK `rustls`. Флаг удалён; современный `default-https-client` использует
+`rustls 0.23.45`. Повторные `cargo audit` и полный `cargo deny check` прошли:
+advisories/bans/licenses/sources OK; deny сохранил informational duplicate
+dependency warnings. Legacy rustls 0.21 отсутствует по `cargo tree`.
+
+Для локального теста только в игнорируемом `.local/moto-venv` установлен
+Moto 5.2.3, запущен на loopback, создан временный bucket с фиктивными
+credentials. `just s3-contract` прошёл 8/8 через реальный HTTP endpoint:
+streaming, limits, missing/invalid metadata, tampered body, checksum,
+idempotent retry, conflict, conditional concurrent put и delete.
+Первый большой async-тест на Windows завершился stack overflow; разделение
+на независимые случаи устранило его при стандартном размере стека.
+`cargo build --locked -p pxel-server --features s3,dev-auth` и прямой
+hard-restart integration test прошли дважды с `PXEL_SNAPSHOT_INTERVAL=1`:
+число ACTIVE снимков выросло 1→10, затем 10→16. Последний S3 объект имел
+размер 18 602 bytes и checksum metadata; отдельный HEAD это подтвердил.
+После тестов Moto-процесс остановлен.
+
+Финальный `just check` прошёл Rust fmt/Clippy (default/all features),
+workspace tests/build, WASM, proto drift, frontend format/lint/typecheck,
+Vitest 71/71 и production Vite build. `just sqlx-check` прошёл.
+Presentation check проверил 10 слайдов на 1440×900 и 390×844.
+Первый полный check обнаружил dead-code поля S3 config в сборке без feature;
+конфигурация разделена через `#[cfg(feature = "s3")]`, оба Clippy режима
+повторно прошли. Не запускались Garage 2.4.0 и выбранный российский S3:
+локально нет Docker/Podman/установленного WSL и нет их endpoint/credentials.
+Также не проверены Linux/Compose/remote CI, power-loss/PITR и реальные S3
+latency benchmarks. Фаза 5 остаётся открытой.
+
 ## 2026-09-29 — ограниченный retention старых ACTIVE snapshots
 
 Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-004/033/037,

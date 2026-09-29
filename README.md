@@ -112,8 +112,15 @@ GitHub Actions выполняет те же команды на Ubuntu 24.04. Н
 | `PXEL_SNAPSHOT_INTERVAL`                  | Число committed событий между snapshots; default `1000`, предел `1..100000`                                |
 | `PXEL_SNAPSHOT_CLEANUP_HOURS`             | Возраст incomplete snapshot до уборки; default `24`, предел `1..8760`                                      |
 | `PXEL_SNAPSHOT_ACTIVE_RETENTION_DAYS`     | Возраст старых ACTIVE snapshots до вывода; default `30`, предел `1..3650`; два новых поколения сохраняются |
+| `PXEL_S3_ENDPOINT`                        | При сборке с `--features s3` выбирает S3 adapter; HTTPS вне loopback                                       |
+| `PXEL_S3_BUCKET` / `PXEL_S3_REGION`       | Обязательны вместе с endpoint; credentials задаются через стандартные AWS SDK providers                    |
 | `PXEL_DB_PORT`                            | Порт только локального bootstrap; default `55432`                                                          |
 | `PXEL_PG_BIN`                             | Каталог binaries для native bootstrap                                                                      |
+
+Для проверки S3 endpoint задайте `PXEL_S3_TEST_ENDPOINT`,
+`PXEL_S3_TEST_BUCKET` и SDK credentials, затем выполните `just s3-contract`.
+Команда запускает восемь сетевых тестов. Локальный прогон на Moto 5.2.3 не
+заменяет отдельные прогоны на Garage и production S3.
 
 `GET /healthz` проверяет процесс, `GET /readyz` — подключение, точную версию/checksum
 миграций и writable blob root. Dev login требует проверенный Origin, создает

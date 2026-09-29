@@ -26,7 +26,11 @@ use spreadsheet_collab::{
     calculation::{COMPATIBILITY_PROFILE, ENGINE_VERSION},
 };
 use spreadsheet_domain::workbook::{DocumentId, DocumentVersion, SnapshotId, Workbook};
-use spreadsheet_storage::{LocalFilesystemBlobStore, PgDatabase, SnapshotError};
+#[cfg(feature = "s3")]
+use spreadsheet_storage::S3BlobStore;
+use spreadsheet_storage::{
+    ConfiguredBlobStore, LocalFilesystemBlobStore, PgDatabase, SnapshotError,
+};
 use spreadsheet_wire_protocol::{self as wire, v1};
 use std::{
     num::NonZeroU16,
@@ -39,7 +43,7 @@ use uuid::Uuid;
 
 struct AppState {
     database: PgDatabase,
-    blobs: LocalFilesystemBlobStore,
+    blobs: ConfiguredBlobStore,
     auth: auth::Auth,
     origins: Vec<String>,
     sockets: Arc<Semaphore>,
@@ -56,9 +60,27 @@ struct Status {
     status: &'static str,
 }
 
+async fn create_blob_store(config: &config::Config) -> anyhow::Result<ConfiguredBlobStore> {
+    #[cfg(feature = "s3")]
+    if let Some(settings) = &config.s3 {
+        return Ok(ConfiguredBlobStore::S3(
+            S3BlobStore::new(
+                &settings.endpoint,
+                &settings.bucket,
+                &settings.region,
+                64 * 1024 * 1024,
+            )
+            .await?,
+        ));
+    }
+    Ok(ConfiguredBlobStore::Local(
+        LocalFilesystemBlobStore::new(&config.blob_root, 64 * 1024 * 1024).await?,
+    ))
+}
+
 async fn snapshot_worker(
     database: PgDatabase,
-    blobs: LocalFilesystemBlobStore,
+    blobs: ConfiguredBlobStore,
     mut receiver: mpsc::Receiver<Arc<Workbook>>,
 ) {
     while let Some(workbook) = receiver.recv().await {
@@ -85,7 +107,7 @@ async fn snapshot_worker(
 
 async fn snapshot_cleanup_worker(
     database: PgDatabase,
-    blobs: LocalFilesystemBlobStore,
+    blobs: ConfiguredBlobStore,
     incomplete_retention: Duration,
     active_retention: Duration,
 ) {
@@ -334,7 +356,7 @@ async fn main() -> anyhow::Result<()> {
         database.close().await;
         return Ok(());
     }
-    let blobs = LocalFilesystemBlobStore::new(&config.blob_root, 64 * 1024 * 1024).await?;
+    let blobs = create_blob_store(&config).await?;
     let recovery_database = database.clone();
     let recovery_blobs = blobs.clone();
     let (snapshot_sender, snapshot_receiver) = mpsc::channel(1);

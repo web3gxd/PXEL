@@ -36,6 +36,10 @@ pub enum BlobStoreError {
     Io(#[from] std::io::Error),
     #[error("blob storage blocking task failed")]
     TaskFailed,
+    #[error("blob storage configuration is invalid")]
+    InvalidConfiguration,
+    #[error("remote blob storage request failed")]
+    Remote,
 }
 
 /// Immutable blobs. Successful put is atomic and verifies actual streamed bytes.

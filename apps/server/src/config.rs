@@ -9,6 +9,15 @@ pub struct Config {
     pub snapshot_interval: NonZeroU64,
     pub snapshot_cleanup_retention: Duration,
     pub snapshot_active_retention: Duration,
+    #[cfg(feature = "s3")]
+    pub s3: Option<S3Settings>,
+}
+
+#[cfg(feature = "s3")]
+pub struct S3Settings {
+    pub endpoint: String,
+    pub bucket: String,
+    pub region: String,
 }
 
 impl Config {
@@ -75,6 +84,22 @@ impl Config {
             Err(_) => anyhow::bail!("PXEL_SNAPSHOT_ACTIVE_RETENTION_DAYS must be Unicode"),
         };
         let snapshot_active_retention = parse_snapshot_active_days(&active_days)?;
+        #[cfg(feature = "s3")]
+        let s3 = match std::env::var("PXEL_S3_ENDPOINT") {
+            Ok(endpoint) => Some(S3Settings {
+                endpoint,
+                bucket: std::env::var("PXEL_S3_BUCKET")
+                    .map_err(|_| anyhow::anyhow!("PXEL_S3_BUCKET is required"))?,
+                region: std::env::var("PXEL_S3_REGION")
+                    .map_err(|_| anyhow::anyhow!("PXEL_S3_REGION is required"))?,
+            }),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(_) => anyhow::bail!("PXEL_S3_ENDPOINT must be Unicode"),
+        };
+        #[cfg(not(feature = "s3"))]
+        if std::env::var_os("PXEL_S3_ENDPOINT").is_some() {
+            anyhow::bail!("PXEL_S3_ENDPOINT requires the s3 build feature");
+        }
         Ok(Self {
             database_url,
             address,
@@ -83,6 +108,8 @@ impl Config {
             snapshot_interval,
             snapshot_cleanup_retention,
             snapshot_active_retention,
+            #[cfg(feature = "s3")]
+            s3,
             blob_root: std::env::var_os("PXEL_BLOB_ROOT")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(".local/blobs")),

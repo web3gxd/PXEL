@@ -126,8 +126,8 @@ server-side `CopyRange` смешанного прямоугольника до 1
 добавляет внутренний `SnapshotImage` и проверенное восстановление sparse
 projection: bound formulas, retired stable IDs, CalculationContext и
 `last_axis_change_version` сохраняются; применение хвоста даёт тот же
-domain hash, что непрерывный replay. Следующие срезы добавили codec и
-локальную activation; S3 adapter ещё не реализован.
+domain hash, что непрерывный replay. Следующие срезы добавили codec,
+локальную activation и optional S3 adapter по ADR-039.
 Второй срез фазы 5 ([ADR-032](adr/032-versioned-binary-snapshot-codec.md))
 добавляет отдельный protobuf `SnapshotEnvelope` schema 1 и строгий decoder
 с лимитом 32 MiB; формула, context, tombstones, hash и tail replay проходят
@@ -151,7 +151,7 @@ release harness с реальными PostgreSQL, checksum/codec и LocalFilesys
 дал p95 71.356–87.611 ms для snapshot + 10 000 tail events в двух локальных
 прогонах; full replay p95 131.171–139.006 ms. Условия и ограничения —
 [отчёт](benchmarks/2026-09-29-snapshot-replay-persisted-local.md). Полная crash
-matrix и S3 contract остаются открытыми.
+matrix и S3 contract для Garage/российского провайдера остаются открытыми.
 Controlled interruption на шести границах publication уже проверил
 metadata/BlobStore/activation rollback; power-loss не проверен.
 Уборка incomplete/rejected snapshots ([ADR-037](adr/037-incomplete-snapshot-cleanup.md))
@@ -159,8 +159,10 @@ metadata/BlobStore/activation rollback; power-loss не проверен.
 Ограниченный GC старых ACTIVE поколений ([ADR-038](adr/038-active-snapshot-retention.md))
 оставляет два последних снимка разных версий и полный журнал. Historical
 read версии без снимка проверен через replay; после потери newest восстановление
-идёт из предпоследнего. Inventory orphan objects и S3 contract остаются
-открытыми.
+идёт из предпоследнего. Optional S3 adapter ([ADR-039](adr/039-s3-snapshot-blob-adapter.md))
+прошёл локальный HTTP contract на Moto 5.2.3 (8/8); server hard-restart test
+с порогом snapshot 1 создал девять новых ACTIVE S3 снимков. Garage 2.4.0,
+российский S3, inventory orphan objects и power-loss остаются открытыми.
 Read-only historical endpoint восстанавливает точную версию из подходящего
 snapshot и хвоста журнала ([ADR-036](adr/036-historical-version-read.md));
 PostgreSQL и HTTP tests проверили v1/v2, fallback, ACL и неизменность head.

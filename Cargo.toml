@@ -18,6 +18,8 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+aws-config = { version = "=1.12.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-s3 = { version = "=1.150.0", default-features = false, features = ["default-https-client", "http-1x", "rt-tokio"] }
 spreadsheet-domain = { path = "crates/spreadsheet-domain", version = "=0.1.0" }
 spreadsheet-application = { path = "crates/spreadsheet-application", version = "=0.1.0" }
 spreadsheet-wire-protocol = { path = "crates/spreadsheet-wire-protocol", version = "=0.1.0" }
@@ -42,6 +44,7 @@ tower-http = { version = "=0.7.1", features = ["set-header", "limit", "timeout",
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "json"] }
 uuid = { version = "=1.26.1", features = ["v7"] }
+url = "=2.5.8"
 tempfile = "=3.27.0"
 
 [workspace.lints.rust]

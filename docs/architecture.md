@@ -7,7 +7,7 @@ Foundation: **ACCEPTED FOR PHASE 0**, 2026-09-28. Последующее пор�
 
 ## Границы системы
 
-MVP — modular monolith: один основной Axum binary, PostgreSQL как источник истины, локальное blob-хранилище. В фазе 5 появляется S3 adapter; в фазе 6 тот же binary может запускаться в изолированном режиме xlsx-worker. Redis, NATS, Kafka, микросервисы и distributed leader election не нужны.
+MVP — modular monolith: один основной Axum binary, PostgreSQL как источник истины и переключаемый BlobStore (локальный filesystem или optional S3 feature). В фазе 6 тот же binary может запускаться в изолированном режиме xlsx-worker. Redis, NATS, Kafka, микросервисы и distributed leader election не нужны.
 
 Сервер определяет порядок, canonical operations и результаты формул. Клиент хранит confirmed projection отдельно от pending intents; WASM preview остается предварительным. Никакой ACK committed до durable COMMIT. Все публичные и сохраненные форматы versioned; неизвестная обязательная семантика отклоняется целиком.
 
@@ -19,11 +19,13 @@ flowchart LR
   Server <--> Actor[Document actor]
   Actor --> PG[(PostgreSQL operation log)]
   Actor <--> Calc[Bounded CPU calculation executor]
-  Server --> Blob[BlobStore: local filesystem]
+  Server --> Blob[BlobStore: local filesystem / S3]
 ```
 
 Сейчас работают health/readiness, dev auth boundary, protobuf transport,
-Canvas editing, durable CAS journal, bounded actor и filesystem BlobStore.
+Canvas editing, durable CAS journal, bounded actor, filesystem BlobStore и
+optional S3 adapter. Moto 5.2.3 contract и server restart проверены;
+Garage/российский S3 ещё не проверены.
 Формульное ядро/bound AST и отдельный WASM parity harness реализованы;
 calculation executor и stateful preview worker приложения еще не подключены.
 
@@ -34,7 +36,7 @@ calculation executor и stateful preview worker приложения еще не
 | spreadsheet-domain        | IDs и общие domain values; позже workbook, чистые операции и normalized AST | Нет                                                  | 0, только используемые типы         |
 | spreadsheet-application   | Используемые use cases/ports                                                | domain                                               | 0: BlobStore                        |
 | spreadsheet-wire-protocol | Public protobuf DTO/codecs, без бизнес-модели                               | Нет                                                  | 0                                   |
-| spreadsheet-storage       | PostgreSQL и LocalFilesystemBlobStore; позже S3 и event persistence         | domain, application; storage-codec с первого события | 0                                   |
+| spreadsheet-storage       | PostgreSQL, filesystem/S3 BlobStore и event persistence                     | domain, application, storage-codec; optional AWS SDK | 0, S3 в фазе 5                      |
 | spreadsheet-storage-codec | Versioned durable protobuf envelope и его миграции при чтении               | domain при необходимости conversions                 | 1, когда сохраняется первое событие |
 | spreadsheet-collab        | Actor, command validation/rebase, subscriptions, SessionDirectory           | domain, application; formula с фазы 2                | 1                                   |
 | spreadsheet-formula       | Lexer/parser/binder/evaluator/graph/scheduler/locale/diagnostics            | domain                                               | 2                                   |

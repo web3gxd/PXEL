@@ -10,8 +10,9 @@ ADR-033 добавил PostgreSQL snapshot metadata и внутренние publ
 расчёт restored projection. ADR-035 добавил неблокирующий scheduler после
 каждой 1000-й committed операции по умолчанию и отдельный sequential worker.
 Локальный smoke с порогом 1 подтвердил ACTIVE v2 и чтение после restart.
-ADR-037/038 добавили уборку incomplete и старых ACTIVE snapshots; S3 adapter
-и contract suite ещё не подключены. Ниже отдельно
+ADR-037/038 добавили уборку incomplete и старых ACTIVE snapshots. ADR-039
+подключил optional S3 adapter; локальный Moto contract прошёл, Garage и
+российский S3 ещё не проверены. Ниже отдельно
 названы действующие механизмы и будущие требования.
 
 Controlled interruption test останавливает публикацию на шести границах
@@ -60,9 +61,19 @@ Application BlobStore port предоставляет put/get/head/delete с typ
 
 Local keys не являются произвольными путями: допускаются только проверенные относительные opaque names, запрещены traversal/absolute paths/drive prefixes/symlink escape. Root принадлежит сервису, создаваемые файлы private. Put проверяет checksum, пишет temporary object в том же filesystem, flush/sync и атомарно публикует; читатель видит полный old/new object, не partial file. Metadata/head соответствует полному объекту. Delete idempotent. Crash durability конкретного filesystem/ОС не приравнивается без тестов к подтвержденной durable snapshot activation.
 
-Contract suite проверяет binary round-trip, head size/checksum, checksum mismatch без опубликованного object, missing key, rejected unsafe key, atomic publication и delete. Phase 0 исполняет suite локально; S3 compatibility пока не заявляется. Phase 5 тот же suite проверяет S3BlobStore против Garage 2.4.0 candidate и выбранного российского S3.
+Filesystem contract suite проверяет binary round-trip, head size/checksum,
+checksum mismatch без опубликованного object, missing key, rejected unsafe
+key, atomic publication и delete. Отдельный S3 contract на Moto 5.2.3
+проверил HTTP path-style, stream, checksum, conditional put, conflicts и
+delete; server restart создал ACTIVE snapshots в S3. Этот результат не
+означает совместимость Garage или российского S3. Их проверяет тот же
+`just s3-contract` при доступном endpoint и credentials.
 
-S3 MVP subset: PutObject/GetObject/HeadObject/DeleteObject, позднее multipart. Наличие S3-compatible label не гарантирует контракт: [Garage API matrix](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/). MinIO и Garage не входят в phase 0 Compose. Никаких bucket/credentials без реального потребителя.
+S3 MVP subset: PutObject/GetObject/HeadObject/DeleteObject, позднее multipart.
+`If-None-Match: *` и сохранение пользовательских checksum metadata необходимы
+для текущего контракта. Наличие S3-compatible label не гарантирует эти
+семантики: [Garage API matrix](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/).
+MinIO и Garage не входят в phase 0 Compose.
 
 ## Snapshot activation (фаза 5)
 
