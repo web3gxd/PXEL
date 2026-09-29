@@ -20,6 +20,11 @@ impl ReferenceResolver for Range {
 fn benchmarks(c: &mut Criterion) {
     for (name, source, expected) in [
         ("ABS_scalar", "=ABS(-123.5)", Value::Number(123.5)),
+        (
+            "TEXT_scalar",
+            "=CONCAT(UPPER(LEFT(TRIM(\"  абв  \"),2)),LOWER(RIGHT(\"Я\",1)),MID(\"😀abc\",2,2),LEN(\"😀\"))",
+            Value::Text("АБяab1".into()),
+        ),
         ("POWER_scalar", "=POWER(4,0.5)", Value::Number(2.0)),
         ("MOD_scalar", "=MOD(-123.5,7)", Value::Number(2.5)),
         ("ROUND_scalar", "=ROUND(1.005,2)", Value::Number(1.01)),
@@ -86,6 +91,28 @@ fn benchmarks(c: &mut Criterion) {
             })
         });
     }
+    let parsed = match parse("=CONCAT(A1:A10000)") {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("invalid text range benchmark");
+            std::process::exit(1);
+        }
+    };
+    if evaluate(&parsed.ast, &Range, &mut EvaluationBudget::default())
+        != Ok(Value::Text("1".repeat(10000)))
+    {
+        eprintln!("invalid text range result");
+        std::process::exit(1);
+    }
+    c.bench_function("CONCAT_range_10k", |b| {
+        b.iter(|| {
+            black_box(evaluate(
+                black_box(&parsed.ast),
+                &Range,
+                &mut EvaluationBudget::default(),
+            ))
+        })
+    });
     c.bench_function("parse_scalar_if", |b| {
         b.iter(|| black_box(parse(black_box("=IF(A1>0,SUM($B$1:B100),-2^2)"))))
     });

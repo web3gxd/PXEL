@@ -69,7 +69,7 @@ Source provenance and documentation conflicts are retained in the corpus.
   conditions, preserving later errors even after a decisive boolean; range
   traversal is budgeted and checked. NOT takes one scalar and inverts the same
   scalar coercion as IF. Arrays/implicit intersection remain unsupported.
-  Engine identity is `pxel-formula-0.5.0`; old persisted contexts require a new
+  Engine identity is `pxel-formula-0.6.0`; old persisted contexts require a new
   authorized calculation epoch. See ADR-055 and the common fixture corpus.
 
 - ABS takes one scalar; MOD takes two and follows the divisor sign. Blank is
@@ -81,12 +81,18 @@ Source provenance and documentation conflicts are retained in the corpus.
   zero. Work is bounded and budgeted; overflow becomes NUM. This explicit PXEL
   profile is described in ADR-060 and does not promise bitwise Excel parity.
 
+- CONCAT supports scalar/range arguments in fixed order. LEFT/RIGHT/MID/LEN
+  index Unicode scalars, with optional default count for LEFT/RIGHT. TRIM only
+  collapses ASCII spaces; LOWER/UPPER use pinned locale-independent Unicode
+  mapping. Numeric text indices and string scans share the work/byte budget.
+  See ADR-062 for limits and Excel compatibility boundaries.
+
 Bounds: 32 KiB source, 4,096 AST nodes, AST depth 128 (parser call depth 256 to
 admit canonical parentheses), 255 call arguments, 100,000
 cells per rectangular range, 1,000,000 work units per evaluation. Resource limits
 produce typed errors and never substitute Blank/0. Syntax supports quoted sheets
 with doubled apostrophes, escaped text quotes, mixed references, comparisons,
-percent, concatenation and the five scalar functions. Named ranges, external/3D
+percent, concatenation and the documented scalar functions. Named ranges, external/3D
 references, array literals, locale separators and implicit intersection are not
 part of this slice.
 

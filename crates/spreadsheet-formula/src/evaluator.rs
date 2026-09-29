@@ -88,7 +88,7 @@ pub(crate) fn number(n: f64) -> Value {
         Value::Number(if n == 0.0 { 0.0 } else { n })
     }
 }
-fn numeric(value: Value) -> Result<f64, FormulaError> {
+pub(crate) fn numeric(value: Value) -> Result<f64, FormulaError> {
     match value {
         Value::Blank => Ok(0.0),
         Value::Number(n) | Value::DateTime { serial: n, .. } => {
@@ -120,7 +120,7 @@ fn logical(value: Value) -> Result<bool, FormulaError> {
         _ => Err(FormulaError::Value),
     }
 }
-fn text(value: Value) -> Result<String, FormulaError> {
+pub(crate) fn text(value: Value) -> Result<String, FormulaError> {
     match value {
         Value::Blank => Ok(String::new()),
         Value::Number(n) if n.is_finite() => Ok(if n == 0.0 { "0".into() } else { n.to_string() }),
@@ -130,7 +130,7 @@ fn text(value: Value) -> Result<String, FormulaError> {
         _ => Err(FormulaError::Value),
     }
 }
-fn eval(
+pub(crate) fn eval(
     ast: &Ast,
     id: NodeId,
     resolver: &impl ReferenceResolver,
@@ -187,7 +187,12 @@ fn eval(
             binary(*op, left, right, budget)?
         }
         Node::Call { name, arguments } => {
-            if name == "IF" {
+            if matches!(
+                name.as_str(),
+                "CONCAT" | "LEFT" | "RIGHT" | "MID" | "LEN" | "TRIM" | "LOWER" | "UPPER"
+            ) {
+                crate::text::call(ast, name, arguments, resolver, budget, depth + 1)?
+            } else if name == "IF" {
                 conditional(ast, arguments, resolver, budget, depth + 1)?
             } else if name == "IFS" {
                 conditions(ast, arguments, resolver, budget, depth + 1)?

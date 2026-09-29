@@ -110,6 +110,46 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/power-function",
       "title": "POWER function",
       "retrieved_at": "2026-09-30"
+    },
+    "concat": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/concat-function",
+      "title": "CONCAT function",
+      "retrieved_at": "2026-09-30"
+    },
+    "left": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/left-function",
+      "title": "LEFT function",
+      "retrieved_at": "2026-09-30"
+    },
+    "right": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/right-function",
+      "title": "RIGHT function",
+      "retrieved_at": "2026-09-30"
+    },
+    "mid": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/mid-function",
+      "title": "MID function",
+      "retrieved_at": "2026-09-30"
+    },
+    "len": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/len-function",
+      "title": "LEN function",
+      "retrieved_at": "2026-09-30"
+    },
+    "trim": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/trim-function",
+      "title": "TRIM function",
+      "retrieved_at": "2026-09-30"
+    },
+    "lower": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/lower-function",
+      "title": "LOWER function",
+      "retrieved_at": "2026-09-30"
+    },
+    "upper": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/upper-function",
+      "title": "UPPER function",
+      "retrieved_at": "2026-09-30"
     }
   },
   "cases": [
@@ -3920,6 +3960,739 @@
       },
       "provenance": {
         "sources": ["power"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_concat_scalars",
+      "formula": "=CONCAT(\"a\",TRUE,12,)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "aTRUE12"
+      },
+      "provenance": {
+        "sources": ["concat"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_concat_empty",
+      "formula": "=CONCAT(\"\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["concat"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_concat_arity",
+      "formula": "=CONCAT()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["concat"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_concat_error",
+      "formula": "=CONCAT(\"x\",1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["concat"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_left_example",
+      "formula": "=LEFT(\"Sale Price\",4)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "Sale"
+      },
+      "provenance": {
+        "sources": ["left"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_left_default",
+      "formula": "=LEFT(\"Sweden\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "S"
+      },
+      "provenance": {
+        "sources": ["left"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_left_zero",
+      "formula": "=LEFT(\"abc\",0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["left"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_left_huge",
+      "formula": "=LEFT(\"abc\",1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "abc"
+      },
+      "provenance": {
+        "sources": ["left"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_left_fraction",
+      "formula": "=LEFT(\"abc\",1.9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "a"
+      },
+      "provenance": {
+        "sources": ["left"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_left_negative",
+      "formula": "=LEFT(\"abc\",-0.1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["left"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_left_unicode",
+      "formula": "=LEFT(\"😀аб\",2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "😀а"
+      },
+      "provenance": {
+        "sources": ["left"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_left_boolean",
+      "formula": "=LEFT(TRUE,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "TR"
+      },
+      "provenance": {
+        "sources": ["left"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_right_example",
+      "formula": "=RIGHT(\"Sale Price\",5)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "Price"
+      },
+      "provenance": {
+        "sources": ["right"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_right_default",
+      "formula": "=RIGHT(\"abc\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "c"
+      },
+      "provenance": {
+        "sources": ["right"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_right_unicode",
+      "formula": "=RIGHT(\"😀аб\",2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "аб"
+      },
+      "provenance": {
+        "sources": ["right"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_right_huge",
+      "formula": "=RIGHT(\"abc\",1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "abc"
+      },
+      "provenance": {
+        "sources": ["right"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_right_zero",
+      "formula": "=RIGHT(\"abc\",0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["right"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_right_negative",
+      "formula": "=RIGHT(\"abc\",-1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["right"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_example",
+      "formula": "=MID(\"Fluid Flow\",1,5)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "Fluid"
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_long",
+      "formula": "=MID(\"Fluid Flow\",7,20)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "Flow"
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_past_end",
+      "formula": "=MID(\"Fluid Flow\",20,5)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_unicode",
+      "formula": "=MID(\"😀аб\",2,1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "а"
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_fraction",
+      "formula": "=MID(\"abc\",1.9,1.9)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "a"
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_zero_start",
+      "formula": "=MID(\"abc\",0,1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_fractional_start",
+      "formula": "=MID(\"abc\",0.9,1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_negative_count",
+      "formula": "=MID(\"abc\",1,-0.1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_huge",
+      "formula": "=MID(\"abc\",1e308,1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_mid_zero_count",
+      "formula": "=MID(\"abc\",1,0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["mid"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_len_spaces",
+      "formula": "=LEN(\" a \")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["len"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_len_unicode",
+      "formula": "=LEN(\"😀é️\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 4
+      },
+      "provenance": {
+        "sources": ["len"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_len_blank",
+      "formula": "=LEN(A1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["len"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_len_number",
+      "formula": "=LEN(123.5)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 5
+      },
+      "provenance": {
+        "sources": ["len"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_len_boolean",
+      "formula": "=LEN(FALSE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 5
+      },
+      "provenance": {
+        "sources": ["len"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_trim_spaces",
+      "formula": "=TRIM(\"  a  b  \")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "a b"
+      },
+      "provenance": {
+        "sources": ["trim"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_trim_all",
+      "formula": "=TRIM(\"   \")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": ""
+      },
+      "provenance": {
+        "sources": ["trim"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_trim_nbsp",
+      "formula": "=TRIM(\"  a\t  b  \")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "  a\t b "
+      },
+      "provenance": {
+        "sources": ["trim"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_lower_ascii",
+      "formula": "=LOWER(\"AbC\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "abc"
+      },
+      "provenance": {
+        "sources": ["lower"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_lower_cyrillic",
+      "formula": "=LOWER(\"ПРИВЕТ\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "привет"
+      },
+      "provenance": {
+        "sources": ["lower"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_lower_final_sigma",
+      "formula": "=LOWER(\"ΟΣ\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "ος"
+      },
+      "provenance": {
+        "sources": ["lower"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_lower_expansion",
+      "formula": "=LOWER(\"İ\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "i̇"
+      },
+      "provenance": {
+        "sources": ["lower"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_upper_ascii",
+      "formula": "=UPPER(\"abc\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "ABC"
+      },
+      "provenance": {
+        "sources": ["upper"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_upper_cyrillic",
+      "formula": "=UPPER(\"привет\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "ПРИВЕТ"
+      },
+      "provenance": {
+        "sources": ["upper"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_upper_expansion",
+      "formula": "=UPPER(\"straße\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "STRASSE"
+      },
+      "provenance": {
+        "sources": ["upper"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_upper_emoji",
+      "formula": "=UPPER(\"😀a\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "😀A"
+      },
+      "provenance": {
+        "sources": ["upper"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_text_error",
+      "formula": "=UPPER(1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["upper"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_left_error_index",
+      "formula": "=LEFT(\"x\",1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["left"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_text_iferror",
+      "formula": "=IFERROR(MID(\"abc\",0,1),\"ok\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "text",
+        "value": "ok"
+      },
+      "provenance": {
+        "sources": ["mid", "iferror"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "text_concat_rectangle",
+      "formula": "=CONCAT(A1:B2)",
+      "origin": "Sheet1!C1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "a"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 12
+        },
+        "Sheet1!A2": {
+          "type": "boolean",
+          "value": true
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "a12TRUE"
+      },
+      "provenance": {
+        "sources": ["concat"],
         "basis": "derived",
         "verified_in_excel": false
       }

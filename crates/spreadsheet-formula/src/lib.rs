@@ -12,6 +12,7 @@ mod parser;
 mod power;
 pub mod range_index;
 mod rounding;
+mod text;
 pub use ast::*;
 pub use copy::copy_formula_text;
 pub use evaluator::{EvaluationBudget, EvaluationError, NoReferences, ReferenceResolver, evaluate};

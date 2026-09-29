@@ -78,7 +78,7 @@ COUNT/COUNTA посещают диапазон в row-major порядке с т
 MOD возвращает remainder со знаком divisor, zero divisor даёт DIV/0; fixed
 binary64 n-d*floor(n/d), nonfinite или потеря sign/bounds из-за крайних чисел
 даёт NUM. Native/WASM корпус проверяет 27 новых cases; ручная Excel verification
-и extreme precision corrections остаются открыты. Engine identity 0.5.0 требует
+и extreme precision corrections остаются открыты. Engine identity 0.6.0 требует
 явного epoch advance для старых persisted contexts.
 
 ROUND/ROUNDUP/ROUNDDOWN используют bounded shortest-decimal quantization по
@@ -87,6 +87,16 @@ ROUND/ROUNDUP/ROUNDDOWN используют bounded shortest-decimal quantizati
 ROUNDDOWN к нулю. Overflow даёт NUM; -0 нормализуется. Общий корпус содержит
 202 примера, включая midpoint neighbors и extreme/subnormal values. Это явный
 PXEL профиль; полная Excel precision compatibility ещё не подтверждена.
+
+CONCAT/LEFT/RIGHT/MID/LEN/TRIM/LOWER/UPPER реализованы по [ADR-062](adr/062-bounded-text-functions.md).
+Unicode scalar indexing соответствует modern surrogate-pair profile; combining
+marks/variation selectors считаются отдельно. TRIM касается только ASCII space,
+case mapping locale-independent. CONCAT range traversal row-major, blank empty;
+arity1–253, logical32767-character cap VALUE, byte32KiB/work caps — evaluator
+errors. Numeric text indices также проверяются и расходуют бюджет до coercion.
+Вариант legacy UTF-16 counting, locale-specific case/number formatting и ручная
+Excel verification ещё открыты. Engine0.6.0 требует новый calculation epoch
+для старого context; AST/event/snapshot schemas не меняются.
 
 Forward/reverse direct edges, range nodes и reverse range index: сначала row intervals per sheet с column filtering, без полного scan всех ranges при каждом edit. Maximum 100 000 addressed cells/range, 256 range dependencies/formula и 1 000 000 deterministic work units/job. Подтверждение разумности caps — benchmark фазы 2.
 

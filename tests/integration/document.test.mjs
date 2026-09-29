@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
+import { beforeEach, test } from 'node:test';
 import {
   api,
   addSheetCommand,
@@ -29,6 +30,42 @@ import {
   uuid7,
 } from '../helpers/client.mjs';
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
+// This is a functional suite on the unmodified 64/s production admission bucket.
+// Let each case start in a fresh time window; stress suites own burst testing.
+beforeEach(async () => {
+  await delay(1100);
+});
+
+test('Unicode text formulas persist and incrementally recalculate', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal((await client.send(setCommand(client, snapshot, 'абв'))).case, 'committed');
+    const command = formulaCommand(
+      client,
+      { ...snapshot, version: '2' },
+      '=CONCAT(UPPER(LEFT(TRIM(A1),2)),LOWER(RIGHT("Я",1)),MID("😀abc",2,2),LEN(A1))',
+      { column: 1, sequence: 2 },
+    );
+    assert.equal((await client.send(command)).case, 'committed');
+    assert.deepEqual((await calculation(base, cookie, snapshot.document_id, 3)).values[0].value, {
+      type: 'text',
+      value: 'АБяab3',
+    });
+    assert.equal(
+      (await client.send(setCommand(client, { ...snapshot, version: '3' }, 'д', { sequence: 3 })))
+        .case,
+      'committed',
+    );
+    const result = await calculation(base, cookie, snapshot.document_id, 4);
+    assert.deepEqual(result.values[0].value, { type: 'text', value: 'Дяab1' });
+    assert.equal(result.engine_version, 'pxel-formula-0.6.0');
+    assert.equal((await client.send(command)).case, 'receipt');
+  } finally {
+    client.socket.terminate();
+  }
+});
 
 test('POWER and fractional exponent operator persist and recalculate', async () => {
   const cookie = await login(base);
@@ -52,7 +89,7 @@ test('POWER and fractional exponent operator persist and recalculate', async () 
     );
     const result = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 6 });
-    assert.equal(result.engine_version, 'pxel-formula-0.5.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.6.0');
     assert.equal((await client.send(command)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -83,7 +120,7 @@ test('ROUND family commits and incrementally recalculates a referenced input', a
     );
     const result = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 0 });
-    assert.equal(result.engine_version, 'pxel-formula-0.5.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.6.0');
     assert.equal((await client.send(formula)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -112,7 +149,7 @@ test('ABS and MOD commit and recalculate after a referenced value changes', asyn
     );
     const calculated = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(calculated.values[0].value, { type: 'number', value: 0 });
-    assert.equal(calculated.engine_version, 'pxel-formula-0.5.0');
+    assert.equal(calculated.engine_version, 'pxel-formula-0.6.0');
     assert.equal((await client.send(formula)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -1077,6 +1114,10 @@ test('seeded mixed-client writes, retry, extension and reconnect converge throug
 test('reconnect crosses structural events and a frozen copy without losing the barrier', async () => {
   const cookie = await login(base);
   for (let scenario = 0; scenario < 5; scenario++) {
+    // Functional replay scenarios must not share a burst with the preceding case.
+    // Production dev-login/upgrade/HTTP admission remains limited to 64/s.
+    // Dedicated network stress suites test rate/backpressure under load separately.
+    await delay(1100);
     const { snapshot } = await createDocument(base, cookie);
     const left = await connect(base, cookie);
     const right = await connect(base, cookie);
@@ -1574,7 +1615,7 @@ test('logical functions commit, recalculate and survive a persisted context adva
     const valueAt = async (version) => {
       const state = await calculation(base, cookie, snapshot.document_id, version);
       assert.equal(state.status, 'complete');
-      assert.equal(state.engine_version, 'pxel-formula-0.5.0');
+      assert.equal(state.engine_version, 'pxel-formula-0.6.0');
       return state.values.find((cell) => cell.column_id === snapshot.sheets[0].columns[2])?.value;
     };
     assert.deepEqual(await valueAt(4), { type: 'boolean', value: true });
@@ -1889,7 +1930,10 @@ test(
     const stranger = await login(base, 'stranger_' + uuid7().replaceAll('-', '').slice(-16));
     const { snapshot } = await createDocument(base, owner);
     const response = await api(base, stranger, '/api/documents/' + snapshot.document_id);
-    assert.ok([403, 404].includes(response.status));
+    assert.ok(
+      [403, 404].includes(response.status),
+      `foreign document read HTTP ${response.status}`,
+    );
     const other = await connect(base, stranger);
     try {
       const result = await other.send(setCommand(other, snapshot, 'not allowed'));

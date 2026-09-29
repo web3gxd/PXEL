@@ -48,6 +48,14 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=ROUNDDOWN(A1,-1)',
     '=POWER(A1,B1)',
     '=ABS(A1)^0.5',
+    '=CONCAT(A1:B1)',
+    '=LEFT(CONCAT(A1),2)',
+    '=RIGHT(CONCAT(A1),2)',
+    '=MID(CONCAT(A1),2,2)',
+    '=LEN(CONCAT(A1))',
+    '=TRIM(CONCAT("  ",A1,"  "))',
+    '=LOWER(CONCAT("ПРИВЕТ",A1))',
+    '=UPPER(CONCAT("straße",A1))',
   ];
   const source = sources[next() % sources.length];
   const primitive = (value) => ({ type: 'number', value });

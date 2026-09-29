@@ -4,6 +4,14 @@ import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
 
 for (const scenario of [
   {
+    name: 'Unicode text functions',
+    source: '=CONCAT(UPPER(LEFT(TRIM(A1),2)),LOWER(RIGHT("Я",1)),MID("😀abc",2,2),LEN(A1))',
+    input: 'абв',
+    edit: 'д',
+    before: 'АБяab3',
+    after: 'Дяab1',
+  },
+  {
     name: 'ROUND family',
     source: '=IF(ROUND(A1,2)=ROUNDUP(A1,2),ROUNDDOWN(A1,2),0)',
     input: '1.005',

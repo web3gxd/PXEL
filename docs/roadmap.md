@@ -365,4 +365,10 @@ ADR-061 добавляет POWER и fractional exponent в engine0.5.0 с зак
 portable libm0.2.16/force-soft-floats. 236 shared fixtures и stateful1001/2002
 сошлись native/browser; PostgreSQL41/41 и целевые UI DPR1/2 прошли. Ручная
 Excel precision verification и остальные платформы остаются отдельными gates;
-text/date/lookup/conditional aggregates и полный XLSX profile ещё впереди.
+date/lookup/conditional aggregates и полный XLSX profile ещё впереди.
+
+ADR-062 добавляет восемь text functions в engine0.6.0. Общий expected/native/
+browser corpus284, stateful1001/2002, четыре text unit/property/resource tests
+прошли; live dependent-edit/reload DPR1/2 подтверждён. Numeric text index
+coercion budget regression исправлена после adversarial review. Locale/legacy
+Unicode/manual Excel остаются gates; остальные функции и full MVP ещё открыты.
