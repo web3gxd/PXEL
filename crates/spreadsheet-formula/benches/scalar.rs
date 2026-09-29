@@ -18,6 +18,31 @@ impl ReferenceResolver for Range {
     }
 }
 fn benchmarks(c: &mut Criterion) {
+    for (name, source, expected) in [
+        ("ABS_scalar", "=ABS(-123.5)", Value::Number(123.5)),
+        ("MOD_scalar", "=MOD(-123.5,7)", Value::Number(2.5)),
+    ] {
+        let parsed = match parse(source) {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                eprintln!("invalid math benchmark syntax");
+                std::process::exit(1);
+            }
+        };
+        if evaluate(&parsed.ast, &NoReferences, &mut EvaluationBudget::default()) != Ok(expected) {
+            eprintln!("invalid math benchmark result");
+            std::process::exit(1);
+        }
+        c.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(evaluate(
+                    black_box(&parsed.ast),
+                    &NoReferences,
+                    &mut EvaluationBudget::default(),
+                ))
+            })
+        });
+    }
     for function in [
         "SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA", "AND", "OR",
     ] {

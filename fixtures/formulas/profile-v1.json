@@ -80,6 +80,16 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/not-function",
       "title": "NOT function",
       "retrieved_at": "2026-09-29"
+    },
+    "abs": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/abs-function",
+      "title": "ABS function",
+      "retrieved_at": "2026-09-29"
+    },
+    "mod": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/mod-function",
+      "title": "MOD function",
+      "retrieved_at": "2026-09-29"
     }
   },
   "cases": [
@@ -2270,6 +2280,411 @@
       },
       "provenance": {
         "sources": ["not"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_negative",
+      "formula": "=ABS(-3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_zero",
+      "formula": "=ABS(-0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_numeric_text",
+      "formula": "=ABS(\"-2.5\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 2.5
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_boolean",
+      "formula": "=ABS(TRUE)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_blank_reference",
+      "formula": "=ABS(A1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_empty_text",
+      "formula": "=ABS(\"\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_arity",
+      "formula": "=ABS(1,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_missing",
+      "formula": "=ABS()",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_error",
+      "formula": "=ABS(1/0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "abs_subnormal",
+      "formula": "=ABS(-5e-324)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 5e-324
+      },
+      "provenance": {
+        "sources": ["abs"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_pp",
+      "formula": "=MOD(3,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_np",
+      "formula": "=MOD(-3,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_pn",
+      "formula": "=MOD(3,-2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -1
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_nn",
+      "formula": "=MOD(-3,-2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": -1
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_fraction",
+      "formula": "=MOD(5.5,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1.5
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_zero",
+      "formula": "=MOD(-4,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_zero_divisor",
+      "formula": "=MOD(3,0)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_blank_divisor",
+      "formula": "=MOD(3,A1)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_blank_number",
+      "formula": "=MOD(A1,2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_text",
+      "formula": "=MOD(\"-3\",\"2\")",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_text_error",
+      "formula": "=MOD(\"x\",2)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_arity",
+      "formula": "=MOD(3)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_overflow",
+      "formula": "=MOD(1e308,1e-308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_underflow_sign",
+      "formula": "=MOD(-5e-324,1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_subnormal",
+      "formula": "=MOD(5e-324,1e308)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 5e-324
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_nested",
+      "formula": "=ABS(MOD(3,-2))",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["mod"],
+        "basis": "derived",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "mod_iferror",
+      "formula": "=IFERROR(MOD(1,0),7)",
+      "origin": "Sheet1!C1",
+      "cells": {},
+      "expected": {
+        "type": "number",
+        "value": 7
+      },
+      "provenance": {
+        "sources": ["mod"],
         "basis": "derived",
         "verified_in_excel": false
       }

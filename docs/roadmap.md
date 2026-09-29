@@ -350,3 +350,8 @@ tail после restart. Large-book recovery profiling и публикация r
 остаются gates.
 Изолированный release benchmark: p95 26.795 ms для 100 структурных переходов,
 без PostgreSQL/сети/UI (см. docs/benchmarks/2026-09-29-historical-formula-binding-local.md).
+
+ADR-059 добавляет scalar ABS/MOD в engine 0.3.0. Общий native/browser corpus
+155 cases прошёл, stateful parity 1001/2002 включает эти функции. Живой
+PostgreSQL suite 39/39 проверяет dependent recalculation и receipt. Manual
+Excel edge-case verification и ROUND/POWER/text/date/lookup ещё открыты.

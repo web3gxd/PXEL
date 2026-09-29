@@ -30,6 +30,35 @@ import {
 } from '../helpers/client.mjs';
 const base = process.env.PXEL_TEST_SERVER ?? 'http://127.0.0.1:8080';
 
+test('ABS and MOD commit and recalculate after a referenced value changes', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal((await client.send(setCommand(client, snapshot, -3))).case, 'committed');
+    const formula = formulaCommand(client, { ...snapshot, version: '2' }, '=ABS(MOD(A1,2))', {
+      column: 1,
+      sequence: 2,
+    });
+    assert.equal((await client.send(formula)).case, 'committed');
+    assert.deepEqual((await calculation(base, cookie, snapshot.document_id, 3)).values[0].value, {
+      type: 'number',
+      value: 1,
+    });
+    assert.equal(
+      (await client.send(setCommand(client, { ...snapshot, version: '3' }, 4, { sequence: 3 })))
+        .case,
+      'committed',
+    );
+    const calculated = await calculation(base, cookie, snapshot.document_id, 4);
+    assert.deepEqual(calculated.values[0].value, { type: 'number', value: 0 });
+    assert.equal(calculated.engine_version, 'pxel-formula-0.3.0');
+    assert.equal((await client.send(formula)).case, 'receipt');
+  } finally {
+    client.socket.terminate();
+  }
+});
+
 test('AddSheet is durable, idempotent and rejects a duplicate sheet name', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);
@@ -517,7 +546,9 @@ test('concurrent row extensions append stable IDs in server order and survive re
     } finally {
       returning.socket.close();
     }
-    const delayedFormula = await first.send(formulaCommand(first, snapshot, '=A1', { sequence: 2 }));
+    const delayedFormula = await first.send(
+      formulaCommand(first, snapshot, '=A1', { sequence: 2 }),
+    );
     assert.equal(delayedFormula.case, 'committed');
     assert.equal(delayedFormula.value.committedVersion, 4n);
     const calculated = await calculation(base, cookie, snapshot.document_id, 4);
@@ -534,10 +565,18 @@ test('delayed formula binding preserves original targets across insertion and ra
   const { snapshot } = await createDocument(base, cookie);
   const client = await connect(base, cookie);
   try {
-    assert.equal((await client.send(setCommand(client, snapshot, 11, { sequence: 1 }))).case, 'committed');
-    assert.equal((await client.send(setCommand(client, snapshot, 22, { row: 1, sequence: 2 }))).case, 'committed');
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 11, { sequence: 1 }))).case,
+      'committed',
+    );
+    assert.equal(
+      (await client.send(setCommand(client, snapshot, 22, { row: 1, sequence: 2 }))).case,
+      'committed',
+    );
     const seen = { ...snapshot, version: '3' };
-    const inserted = insertRowsCommand(client, seen, snapshot.sheets[0].rows[0], [uuid7()], { sequence: 3 });
+    const inserted = insertRowsCommand(client, seen, snapshot.sheets[0].rows[0], [uuid7()], {
+      sequence: 3,
+    });
     assert.equal((await client.send(inserted)).case, 'committed');
     const delayed = formulaCommand(client, seen, '=A1+1', { row: 1, column: 2, sequence: 4 });
     const committed = await client.send(delayed);
@@ -547,20 +586,41 @@ test('delayed formula binding preserves original targets across insertion and ra
     const result = async (version, row, column) => {
       const calculated = await calculation(base, cookie, snapshot.document_id, version);
       assert.equal(calculated.status, 'complete');
-      return calculated.values.find((cell) => cell.row_id === snapshot.sheets[0].rows[row] && cell.column_id === snapshot.sheets[0].columns[column])?.value;
+      return calculated.values.find(
+        (cell) =>
+          cell.row_id === snapshot.sheets[0].rows[row] &&
+          cell.column_id === snapshot.sheets[0].columns[column],
+      )?.value;
     };
     assert.deepEqual(await result(5, 1, 2), { type: 'number', value: 12 });
     const current = await getDocument(base, cookie, snapshot.document_id);
-    assert.equal((await client.send(deleteRowsCommand(client, current, [snapshot.sheets[0].rows[0]], { sequence: 5 }))).case, 'committed');
+    assert.equal(
+      (
+        await client.send(
+          deleteRowsCommand(client, current, [snapshot.sheets[0].rows[0]], { sequence: 5 }),
+        )
+      ).case,
+      'committed',
+    );
     assert.deepEqual(await result(6, 1, 2), { type: 'error', value: '#REF!' });
-    const delayedRange = formulaCommand(client, seen, '=SUM(A1:A2)', { row: 2, column: 3, sequence: 6 });
+    const delayedRange = formulaCommand(client, seen, '=SUM(A1:A2)', {
+      row: 2,
+      column: 3,
+      sequence: 6,
+    });
     assert.equal((await client.send(delayedRange)).case, 'committed');
     assert.deepEqual(await result(7, 2, 3), { type: 'number', value: 22 });
     const replayed = await getDocument(base, cookie, snapshot.document_id);
     assert.equal(replayed.version, '7');
-    const canonical = replayed.sheets[0].cells.find((cell) => cell.row_id === snapshot.sheets[0].rows[2] && cell.column_id === snapshot.sheets[0].columns[3]);
+    const canonical = replayed.sheets[0].cells.find(
+      (cell) =>
+        cell.row_id === snapshot.sheets[0].rows[2] &&
+        cell.column_id === snapshot.sheets[0].columns[3],
+    );
     assert.equal(canonical.value.value.current_text, '=SUM(A2:A2)');
-  } finally { client.socket.close(); }
+  } finally {
+    client.socket.close();
+  }
 });
 
 test('appending rows preserves an existing formula target and calculated value', async () => {
@@ -1454,7 +1514,7 @@ test('logical functions commit, recalculate and survive a persisted context adva
     const valueAt = async (version) => {
       const state = await calculation(base, cookie, snapshot.document_id, version);
       assert.equal(state.status, 'complete');
-      assert.equal(state.engine_version, 'pxel-formula-0.2.0');
+      assert.equal(state.engine_version, 'pxel-formula-0.3.0');
       return state.values.find((cell) => cell.column_id === snapshot.sheets[0].columns[2])?.value;
     };
     assert.deepEqual(await valueAt(4), { type: 'boolean', value: true });

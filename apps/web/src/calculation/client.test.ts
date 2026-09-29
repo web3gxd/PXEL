@@ -32,7 +32,7 @@ function harness() {
     preview: true,
     complete: true,
     full: request.kind === 'init',
-    formula_engine_version: 'pxel-formula-0.2.0',
+    formula_engine_version: 'pxel-formula-0.3.0',
     compatibility_profile: 'pxel-excel-subset-v1',
     normalized_result_hash: 'a'.repeat(64),
     evaluated_cells: 1,

@@ -2,6 +2,37 @@ import { expect, test } from '@playwright/test';
 import { fromBinary } from '@bufbuild/protobuf';
 import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
 
+test('ABS and MOD update a referenced input and survive reload', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  await bar.fill('-3');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  await bar.fill('=ABS(MOD(A1,2))');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await expect(page.getByTestId('active-cell')).toHaveText('B1: 1');
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+  await page.keyboard.press('ArrowLeft');
+  await bar.fill('4');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await page.reload();
+  await grid.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByTestId('active-cell')).toHaveText('B1: 0');
+  await expect(bar).toHaveValue('=ABS(MOD(A1,2))');
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+});
+
 test('delayed formula retains its target after another tab inserts a row', async ({
   page,
   context,
@@ -57,6 +88,7 @@ test('delayed formula retains its target after another tab inserts a row', async
   await expect(bar).toHaveValue('=(A2+1)');
   await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
   await other.reload();
+  await expect(other.getByTestId('save-status')).toHaveText('Сохранено');
   await other.getByRole('region', { name: 'Область таблицы' }).focus();
   await other.keyboard.press('ArrowDown');
   await other.keyboard.press('ArrowRight');

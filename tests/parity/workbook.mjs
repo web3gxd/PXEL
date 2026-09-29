@@ -41,6 +41,8 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=AND(A1>0,B1>0)',
     '=OR(A1:B1)',
     '=NOT(A1=B1)',
+    '=ABS(A1)',
+    '=MOD(A1,B1)',
   ];
   const source = sources[next() % sources.length];
   const primitive = (value) => ({ type: 'number', value });

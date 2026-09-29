@@ -204,6 +204,8 @@ fn eval(
                         Err(error) => Value::Error(error),
                     }
                 }
+            } else if matches!(name.as_str(), "ABS" | "MOD") {
+                scalar_math(ast, name, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "SUM" | "AVERAGE" | "MIN" | "MAX") {
                 aggregate(ast, name, arguments, resolver, budget, depth + 1)?
             } else if matches!(name.as_str(), "COUNT" | "COUNTA") {
@@ -221,6 +223,47 @@ fn eval(
         }
     })
 }
+fn scalar_math(
+    ast: &Ast,
+    name: &str,
+    args: &[NodeId],
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Value, EvaluationError> {
+    if args.len() != if name == "ABS" { 1 } else { 2 } {
+        return Ok(Value::Error(FormulaError::Value));
+    }
+    let value = match numeric(eval(ast, args[0], resolver, budget, depth)?) {
+        Ok(value) => value,
+        Err(error) => return Ok(Value::Error(error)),
+    };
+    if name == "ABS" {
+        return Ok(number(value.abs()));
+    }
+    let divisor = match numeric(eval(ast, args[1], resolver, budget, depth)?) {
+        Ok(value) => value,
+        Err(error) => return Ok(Value::Error(error)),
+    };
+    if divisor == 0.0 {
+        return Ok(Value::Error(FormulaError::Div0));
+    }
+    let quotient = value / divisor;
+    if !quotient.is_finite() {
+        return Ok(Value::Error(FormulaError::Num));
+    }
+    // Fixed binary64 order from the profile's n - d * floor(n/d) definition.
+    // No platform remainder function, fused operation or epsilon correction.
+    let result = value - divisor * quotient.floor();
+    if result != 0.0
+        && (result.is_sign_negative() != divisor.is_sign_negative()
+            || result.abs() >= divisor.abs())
+    {
+        return Ok(Value::Error(FormulaError::Num));
+    }
+    Ok(number(result))
+}
+
 fn logical_aggregate(
     ast: &Ast,
     all: bool,

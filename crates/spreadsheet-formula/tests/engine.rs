@@ -10,6 +10,55 @@ fn eval(text: &str) -> Result<Value, Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn abs_and_mod_scalar_contract() -> Result<(), Box<dyn std::error::Error>> {
+    for (formula, expected) in [
+        ("=ABS(-3)", Value::Number(3.0)),
+        ("=ABS(-0)", Value::Number(0.0)),
+        ("=ABS(\"-2.5\")", Value::Number(2.5)),
+        ("=ABS(TRUE)", Value::Number(1.0)),
+        ("=ABS()", Value::Error(FormulaError::Value)),
+        ("=ABS(1,2)", Value::Error(FormulaError::Value)),
+        ("=MOD(3,2)", Value::Number(1.0)),
+        ("=MOD(-3,2)", Value::Number(1.0)),
+        ("=MOD(3,-2)", Value::Number(-1.0)),
+        ("=MOD(-3,-2)", Value::Number(-1.0)),
+        ("=MOD(5.5,2)", Value::Number(1.5)),
+        ("=MOD(-4,2)", Value::Number(0.0)),
+        ("=MOD(3,0)", Value::Error(FormulaError::Div0)),
+        ("=MOD(1e308,1e-308)", Value::Error(FormulaError::Num)),
+        ("=MOD(\"x\",2)", Value::Error(FormulaError::Value)),
+        ("=MOD(3)", Value::Error(FormulaError::Value)),
+        ("=IFERROR(MOD(1,0),7)", Value::Number(7.0)),
+    ] {
+        assert_eq!(eval(formula)?, expected, "{formula}");
+    }
+    let zero = eval("=ABS(-0)")?;
+    assert!(matches!(zero, Value::Number(value) if value.to_bits() == 0));
+    let remainder_zero = eval("=MOD(-4,2)")?;
+    assert!(matches!(remainder_zero, Value::Number(value) if value.to_bits() == 0));
+    assert_eq!(
+        evaluate(
+            &parse("=IFERROR(MOD(1,2),7)")?.ast,
+            &NoReferences,
+            &mut EvaluationBudget::new(3)
+        ),
+        Err(EvaluationError::CalculationLimitExceeded),
+    );
+    Ok(())
+}
+
+proptest! {
+    #[test]
+    fn mod_integer_domain_matches_exact_divisor_signed_remainder(n in -1_000_000_000i64..1_000_000_000, magnitude in 1i64..1_000_000, negative in any::<bool>()) {
+        let divisor = if negative { -magnitude } else { magnitude };
+        let mut expected = n % divisor;
+        if expected != 0 && (expected < 0) != (divisor < 0) { expected += divisor; }
+        let actual = eval(&format!("=MOD({n},{divisor})"));
+        prop_assert!(matches!(actual, Ok(Value::Number(value)) if value == expected as f64));
+    }
+}
+
+#[test]
 fn scalar_contract_and_lazy_if() -> Result<(), Box<dyn std::error::Error>> {
     for (formula, expected) in [
         ("=1+2*3", Value::Number(7.0)),

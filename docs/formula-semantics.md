@@ -73,6 +73,14 @@ COUNT/COUNTA посещают диапазон в row-major порядке с т
 
 ## Dependency graph и budgets
 
+Скалярные ABS/MOD реализованы по [ADR-059](adr/059-scalar-abs-mod-profile.md):
+арность 1/2, существующий arithmetic coercion, blank как zero, ошибки сохраняются.
+MOD возвращает remainder со знаком divisor, zero divisor даёт DIV/0; fixed
+binary64 n-d*floor(n/d), nonfinite или потеря sign/bounds из-за крайних чисел
+даёт NUM. Native/WASM корпус проверяет 27 новых cases; ручная Excel verification
+и extreme precision corrections остаются открыты. Engine identity 0.3.0 требует
+явного epoch advance для старых persisted contexts.
+
 Forward/reverse direct edges, range nodes и reverse range index: сначала row intervals per sheet с column filtering, без полного scan всех ranges при каждом edit. Maximum 100 000 addressed cells/range, 256 range dependencies/formula и 1 000 000 deterministic work units/job. Подтверждение разумности caps — benchmark фазы 2.
 
 Range index связывается со stable boundaries/current axis projection; structural event обновляет индекс прежде, чем dirty propagation пользуется новыми positions. Change formula удаляет старые dependencies. Topological/SCC traversal детерминирован и ограничен dirty subgraph; long chains не используют рекурсию на 10k depth. Cycles дают CYCLE, не зависание.
