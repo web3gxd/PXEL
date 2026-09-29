@@ -95,6 +95,75 @@ test('multi-sheet XLSX is committed, replayed and exported with both sheets', as
   }
 });
 
+test('cross-sheet XLSX formula recalculates after a browser edit and survives export', async () => {
+  const owner = await login(base);
+  const identity = await (await api(base, owner, '/api/dev/identity')).json();
+  const imported = importFixture('fixtures/xlsx/cross_sheet_formula.xlsx', identity);
+  assert.equal(imported.status, 0, imported.stderr);
+  const documentId = /Imported document ([0-9a-f-]+)/i.exec(imported.stdout)?.[1];
+  assert.ok(documentId);
+  const initial = await getDocument(base, owner, documentId);
+  assert.equal(initial.sheets.length, 2);
+  assert.equal(initial.sheets[0].cells[0].value.value.source, '=Plan!A1+2');
+  const calculated = async (version, expected) => {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const response = await api(base, owner, `/api/documents/${documentId}/calculation`);
+      if (response.status === 200) {
+        const state = await response.json();
+        if (state.input_version === version && state.status === 'complete') {
+          assert.equal(state.values[0]?.value.value, expected);
+          return;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.fail(`Calculation for version ${version} did not complete`);
+  };
+  await calculated(initial.version, 5);
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    try {
+      const [name, value] = owner.split('=');
+      await context.addCookies([{ name, value, domain: 'localhost', path: '/api' }]);
+      const page = await context.newPage();
+      await page.goto(`${browserOrigin}/?document=${documentId}`);
+      await page.getByRole('button', { name: 'Перейти на лист Plan' }).click();
+      const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+      await bar.fill('9');
+      await bar.press('Enter');
+      await page.getByTestId('save-status').filter({ hasText: 'Сохранено' }).waitFor();
+      await page.getByRole('button', { name: 'Перейти на лист Budget' }).click();
+      await page.getByTestId('active-cell').filter({ hasText: 'A1: 11' }).waitFor();
+    } finally {
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+  const edited = await getDocument(base, owner, documentId);
+  assert.equal(edited.version, '5');
+  await calculated(edited.version, 11);
+  const exported = await api(base, owner, `/api/documents/${documentId}/export.xlsx`);
+  assert.equal(exported.status, 200);
+  const directory = mkdtempSync(join(tmpdir(), 'pxel-cross-sheet-roundtrip-'));
+  try {
+    const path = join(directory, 'roundtrip.xlsx');
+    writeFileSync(path, Buffer.from(await exported.arrayBuffer()));
+    const again = importFixture(path, identity);
+    assert.equal(again.status, 0, again.stderr);
+    const restoredId = /Imported document ([0-9a-f-]+)/i.exec(again.stdout)?.[1];
+    assert.ok(restoredId);
+    const restored = await getDocument(base, owner, restoredId);
+    assert.equal(restored.sheets.length, 2);
+    assert.equal(restored.sheets[0].cells[0].value.type, 'formula');
+    assert.equal(restored.sheets[0].cells[0].value.value.source, "=('Plan'!A1+2)");
+    assert.equal(restored.sheets[1].cells[0].value.value, 9);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('merge metadata is reported and cannot be silently dropped during import', async () => {
   const owner = await login(base);
   const identity = await (await api(base, owner, '/api/dev/identity')).json();

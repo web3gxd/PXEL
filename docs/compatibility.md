@@ -26,6 +26,8 @@ Google Sheets задает пользовательскую модель мгн�
 
 После [ADR-051](adr/051-durable-multiple-sheets.md) локальный импорт сохраняет 1–64 листа при суммарном лимите 1000 scalar-ячеек; бинарный snapshot schema 2 хранит их по порядку. [ADR-052](adr/052-active-sheet-ui.md) добавляет переключение листов в Canvas UI. [ADR-053](adr/053-multi-sheet-wasm-preview.md) включает локальный WASM preview межлистовых формул с общим native/browser hash для проверенного fixture; серверный расчёт остаётся каноническим. Интерактивное создание/удаление листов, стили и Excel golden parity открыты.
 
+Синтетический `cross_sheet_formula.xlsx` также прошёл локальный import/edit/export/reimport с формулой `Plan!A1+2`: ложный cached result `999` не использован, а экспортный нормализованный текст `=('Plan'!A1+2)` повторно связан с целевым листом. Это один проверенный профиль, не общий Excel golden corpus.
+
 ZIP → OOXML package relationships → streaming XML → NormalizedImportWorkbook → parent schema validation → server formula binding → canonical document publication. Export идет из согласованной document version через отдельную Export IR. XLSX DTO не становится внутренней workbook model.
 
 | Статус                     | Feature и границы                                                                                                                                                                                       |

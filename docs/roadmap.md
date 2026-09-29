@@ -264,6 +264,10 @@ sparse cells всех листов, patch schema 1 адресует stable sheet
 differential corpus 1001 книг/2002 patches, включая межлистовую формулу, дал
 одинаковые native/WASM outputs и hashes. Создание/удаление листов в UI,
 Excel golden parity и большой multi-sheet performance gate остаются открыты.
+Синтетический XLSX fixture дополнительно прошёл import → server calculation →
+browser edit второго листа → server recalculation первого → export/reimport;
+ложный calculated cache был проигнорирован. Это ограниченный сквозной сценарий,
+а не полный XLSX compatibility gate.
 Для snapshot schema 2 дополнительно прошёл PostgreSQL recovery test: один
 снимок двух листов + tail event на втором листе дали тот же domain hash, что
 полный replay всех четырёх событий. Это локальный filesystem/DB сценарий;

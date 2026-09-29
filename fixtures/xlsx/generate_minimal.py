@@ -51,3 +51,12 @@ with ZipFile(ROOT / "single_sheet_merge.xlsx", "w") as archive:
         info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
         info.compress_type = ZIP_DEFLATED
         archive.writestr(info, content.encode("utf-8"))
+
+cross_sheet_parts = dict(PARTS)
+cross_sheet_parts["xl/worksheets/sheet1.xml"] = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><f>Plan!A1+2</f><v>999</v></c></row></sheetData></worksheet>'
+cross_sheet_parts["xl/worksheets/sheet2.xml"] = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>3</v></c></row></sheetData></worksheet>'
+with ZipFile(ROOT / "cross_sheet_formula.xlsx", "w") as archive:
+    for name, content in sorted(cross_sheet_parts.items()):
+        info = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+        info.compress_type = ZIP_DEFLATED
+        archive.writestr(info, content.encode("utf-8"))

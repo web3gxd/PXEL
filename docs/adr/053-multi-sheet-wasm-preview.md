@@ -15,3 +15,5 @@ The browser sends the full sparse projection only on init/reinit. It caches a ro
 ## Verification and limits
 
 Rust stateful tests cover cross-sheet incremental recalculation and compare the result hash with the native calculation core. The Chromium differential corpus includes the same two-sheet book with two patches and compares full native/WASM outputs. A web store test checks init sheet contents and patch sheet ownership. This is convergence compatibility for the tested fixture, not Excel golden parity or a measured large multi-sheet UI latency. Cross-sheet copy/move semantics and dynamic structural changes remain separate work.
+
+A subsequent synthetic XLSX fixture exercises `Plan!A1+2` through local import, server calculation, browser edit on Plan, recalculation on Budget, export and reimport. The deliberately false XLSX formula cache is ignored. Export emits the canonical quoted form `=('Plan'!A1+2)`; the authored value and sheet target survive the round trip. This tests one bounded formula and package shape, not general Excel compatibility.
