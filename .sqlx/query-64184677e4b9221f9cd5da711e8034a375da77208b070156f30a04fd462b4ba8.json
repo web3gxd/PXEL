@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE documents SET preferred_snapshot_id=$2 WHERE document_id=$1 AND (preferred_snapshot_id IS NULL OR (SELECT snapshot_version FROM document_snapshots WHERE snapshot_id=preferred_snapshot_id) <= $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "64184677e4b9221f9cd5da711e8034a375da77208b070156f30a04fd462b4ba8"
+}

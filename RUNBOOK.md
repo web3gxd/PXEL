@@ -1,5 +1,43 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — локальная activation snapshots (фаза 5, внутренний срез)
+
+Перед срезом прочитаны AGENTS.md, roadmap, ADR-004/031/032 и domain,
+codec, storage, server runtime. Цель — сделать бинарный образ пригодным для
+локального восстановления только после повторной проверки объекта.
+Инварианты: PostgreSQL остается authority, snapshot не заменяет log,
+`ACTIVE` означает проверенный объект, старое поколение сохраняется,
+кодек и metadata versioned. Риск — разрыв между snapshot publication и
+startup actor; он оставлен явно открытым.
+
+Migration 014 добавила immutable metadata и state transition trigger;
+`SnapshotId` введён как доменный ID. `PgDatabase::publish_snapshot`
+сверяет источник с проверенным journal event, пишет объект в
+LocalFilesystemBlobStore, перечитывает bytes/checksum/decoded hash и
+активирует metadata короткой transaction. `latest_valid_snapshot` читает
+только `ACTIVE` и выбирает более старый при повреждении нового. Reader
+проверяет максимум 128 поколений за вызов. Решение — ADR-033; обновлены
+persistence, roadmap и живая презентация.
+
+Реально выполнено: `cargo run --locked -p pxel-server --features dev-auth --
+migrate` (migration 014); точечный PostgreSQL/BlobStore тест 1/1 с
+round-trip двух поколений, повреждением более нового и fallback до полного
+replay; `cargo check -p spreadsheet-storage`; `cargo clippy -p
+spreadsheet-storage --all-targets -- -D warnings`; `cargo sqlx prepare
+--workspace -- --all-targets --all-features`; финальные `just check` и
+`just sqlx-check` прошли. Browser presentation check проверил 10 слайдов
+на 1440×900 и 390×844. `just check` включает Rust tests, format/clippy,
+WASM build, protobuf drift, ESLint, TypeScript, Vitest 71/71 и Vite build.
+
+Первый общий check остановился на Prettier для изменённого слайда; формат
+исправлен. После добавления дополнительного теста Windows test thread
+переполнил штатный стек из-за размера составного async future; тестовый
+сценарий вынесен в heap-allocated future, затем тот же тест прошёл на
+штатном стеке. После добавления checked SQL query `.sqlx` metadata
+перегенерирована; повторный `just sqlx-check` прошёл.
+Автоматический startup через snapshot, scheduler, tail replay integration,
+crash injection, GC, S3 contract, XLSX и фаза 6 остаются открытыми.
+
 ## 2026-09-29 — schema-9 DeleteColumns with durable tombstones
 
 Перед срезом прочитаны AGENTS.md, roadmap, ADR-023 и текущие domain,

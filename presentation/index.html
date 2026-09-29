@@ -288,8 +288,9 @@
           </div>
         </div>
         <div class="context-warning">
-          Replay из PostgreSQL проверен; snapshots пока не реализованы. RAND/NOW/TODAY пока не
-          включены: сначала нужен общий native/WASM контекст и differential corpus.
+          Replay из PostgreSQL проверен; локальный snapshot ещё не подключён к запуску actor.
+          RAND/NOW/TODAY пока не включены: сначала нужен общий native/WASM контекст и differential
+          corpus.
         </div>
         <div class="slide-footer">
           <span>Старые schema 1/2 и их hash goldens сохранены</span><span>07 / 10</span>
@@ -358,7 +359,9 @@
           </div>
           <div class="doing">
             <b>05</b><span>Snapshots</span
-            ><small>Образ и бинарный codec проверены; storage activation впереди</small>
+            ><small
+              >Образ, codec и локальная activation проверены; startup ещё на полном replay</small
+            >
           </div>
           <div><b>06</b><span>XLSX</span><small>импорт и экспорт</small></div>
         </div>

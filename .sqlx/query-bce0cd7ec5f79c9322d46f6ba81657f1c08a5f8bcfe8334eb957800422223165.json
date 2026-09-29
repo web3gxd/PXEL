@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE document_snapshots SET state='VERIFIED', verified_at=now() WHERE snapshot_id=$1 AND state='STORED'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bce0cd7ec5f79c9322d46f6ba81657f1c08a5f8bcfe8334eb957800422223165"
+}

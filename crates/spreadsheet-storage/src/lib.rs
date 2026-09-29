@@ -11,3 +11,5 @@ mod journal;
 pub use development_sessions::DevelopmentSession;
 mod permissions;
 pub use permissions::{PermissionError, PermissionReceipt, PermissionRole};
+mod snapshots;
+pub use snapshots::{SnapshotError, SnapshotReceipt};

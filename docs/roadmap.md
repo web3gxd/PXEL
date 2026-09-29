@@ -126,13 +126,19 @@ server-side `CopyRange` смешанного прямоугольника до 1
 добавляет внутренний `SnapshotImage` и проверенное восстановление sparse
 projection: bound formulas, retired stable IDs, CalculationContext и
 `last_axis_change_version` сохраняются; применение хвоста даёт тот же
-domain hash, что непрерывный replay. Бинарный format, PostgreSQL metadata,
-BlobStore activation, corruption fallback и S3 adapter ещё не реализованы.
+domain hash, что непрерывный replay. Следующие срезы добавили codec и
+локальную activation; S3 adapter ещё не реализован.
 Второй срез фазы 5 ([ADR-032](adr/032-versioned-binary-snapshot-codec.md))
 добавляет отдельный protobuf `SnapshotEnvelope` schema 1 и строгий decoder
 с лимитом 32 MiB; формула, context, tombstones, hash и tail replay проходят
-codec test. Runtime recovery по-прежнему читает полный журнал до появления
-ACTIVE metadata и проверенной записи в BlobStore.
+codec test. Runtime recovery по-прежнему читает полный журнал.
+
+Третий срез фазы 5 ([ADR-033](adr/033-snapshot-metadata-activation.md))
+добавляет `document_snapshots`, локальную публикацию `UPLOADING → STORED →
+VERIFIED → ACTIVE` и проверенный reader с fallback к предыдущему `ACTIVE`.
+PostgreSQL/BlobStore тест проверяет повреждение нового объекта. Startup actor,
+scheduler, crash matrix, GC и S3 contract остаются открытыми. Runtime recovery
+пока читает полный журнал.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

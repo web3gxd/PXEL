@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE document_snapshots SET state='REJECTED' WHERE snapshot_id=$1 AND state='STORED'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f156bdcb5b9c56a4769d1e0938b6fd0b8671d7d4f581969c52f2a9472fc1a31f"
+}

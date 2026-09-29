@@ -1,11 +1,12 @@
 # Persistence и recovery
 
 Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
-operations реализованы локально; первый доменный срез фазы 5 создаёт
-`SnapshotImage` и проверяет tail replay. ADR-032 добавил versioned binary
-codec с лимитом 32 MiB и проверкой ожидаемых metadata. PostgreSQL snapshot
-records, BlobStore activation и startup recovery ещё не подключены. Ниже
-смешаны действующие контракты журнала и отдельно названные будущие требования.
+operations реализованы локально. `SnapshotImage` и binary codec проверены.
+ADR-033 добавил PostgreSQL snapshot metadata и внутренние publish/read API:
+локальный объект проходит повторное чтение перед `ACTIVE`, reader выбирает
+предыдущее поколение при повреждении нового. Actor startup, scheduler,
+tail replay wiring, GC и S3 contract ещё не подключены. Ниже отдельно
+названы действующие механизмы и будущие требования.
 
 ## PostgreSQL authority
 
@@ -56,9 +57,9 @@ S3 MVP subset: PutObject/GetObject/HeadObject/DeleteObject, позднее multi
 
 ADR-031 реализует внутренний образ и восстановление в domain crate.
 Он сохраняет tombstones, bound formulas, calculation context и последнюю
-версию изменения осей. ADR-032 добавляет отдельный бинарный codec, но reader
-пока не выбирает снимок при запуске; перечисленные
-ниже переходы состояния остаются контрактом следующего storage среза.
+версию изменения осей. ADR-032 добавляет отдельный бинарный codec. ADR-033
+реализует metadata state machine и внутренний reader; runtime actor пока не
+выбирает снимок при запуске.
 
 Snapshot имеет immutable document version, schema version, engine/profile/context, domain encoding version, length, byte checksum и content hash. Scheduler берет согласованный immutable candidate на V, не читает изменяемую книгу во время записи.
 
@@ -79,7 +80,7 @@ UPLOADING -> STORED -> VERIFIED -> ACTIVE
 7. Предыдущие ACTIVE generations остаются доступными для fallback. ACTIVE означает «прошел activation», а preferred pointer указывает рекомендуемое новейшее поколение. Это не единственная строка ACTIVE на документ.
 8. GC отдельно удаляет неиспользуемые orphan/incomplete/rejected/retired objects после retention, проверяя metadata и leases незавершенных jobs. Старый ACTIVE нельзя удалять до верификации и восстановления более нового поколения. Retention не означает удаление log живого документа.
 
-Crash после object upload, до metadata update оставляет незавершенный record/object: recovery reader его не использует, reconciler/GC решает судьбу. Crash после activation transaction дает читателю ACTIVE record. Corrupt ACTIVE при загрузке помечается unusable/REJECTED аудируемым переходом и выбирается предыдущий ACTIVE, затем full replay. Object existence alone никогда не активирует snapshot.
+Crash после object upload, до metadata update оставляет незавершенный record/object: recovery reader его не использует, будущий reconciler/GC решит судьбу. Crash после activation transaction дает читателю ACTIVE record. Corrupt ACTIVE при загрузке сейчас пропускается без изменения metadata и выбирается предыдущий ACTIVE; автоматический аудируемый `REJECTED` переход будет отдельным срезом. Object existence alone никогда не активирует snapshot.
 
 ## Replay и hashes
 
