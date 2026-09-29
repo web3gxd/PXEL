@@ -131,15 +131,17 @@ domain hash, что непрерывный replay. Следующие срезы
 Второй срез фазы 5 ([ADR-032](adr/032-versioned-binary-snapshot-codec.md))
 добавляет отдельный protobuf `SnapshotEnvelope` schema 1 и строгий decoder
 с лимитом 32 MiB; формула, context, tombstones, hash и tail replay проходят
-codec test. Runtime recovery по-прежнему читает полный журнал.
+codec test. На том срезе runtime ещё читал полный журнал.
 
 Третий срез фазы 5 ([ADR-033](adr/033-snapshot-metadata-activation.md))
 добавляет `document_snapshots`, локальную публикацию `UPLOADING → STORED →
 VERIFIED → ACTIVE` и проверенный reader с fallback к предыдущему `ACTIVE`.
 PostgreSQL/BlobStore тест проверяет повреждение нового объекта; внутренний
 recovery API в этом случае применяет только хвост, а без валидных снимков
-читает весь журнал. Startup actor, scheduler, crash matrix, GC и S3 contract
-остаются открытыми. Runtime actor пока читает полный журнал.
+читает весь журнал. Четвёртый срез ([ADR-034](adr/034-actor-bootstrap-from-snapshot.md))
+подключил проверенное восстановление к startup actor; при восстановлении
+запускается полный пересчёт cache. Scheduler, crash matrix, GC, benchmark
+snapshot + 10k tail и S3 contract остаются открытыми.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

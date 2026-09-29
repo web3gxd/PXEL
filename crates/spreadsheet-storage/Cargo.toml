@@ -24,3 +24,4 @@ workspace = true
 
 [dev-dependencies]
 spreadsheet-formula.workspace = true
+spreadsheet-collab.workspace = true

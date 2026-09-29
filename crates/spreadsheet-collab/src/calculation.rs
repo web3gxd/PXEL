@@ -114,6 +114,21 @@ impl CalculationHandle {
         self.0.notify.notify_one();
     }
 
+    /// A restored projection has no trusted calculated cache. Rebuild its graph
+    /// and results even when there are no journal events after the snapshot.
+    pub fn publish_full(&self, book: Arc<Workbook>) {
+        let Ok(mut pending) = self.0.pending.lock() else {
+            tracing::error!(event = "calculation_lane_poisoned");
+            return;
+        };
+        pending.cancel.store(true, Ordering::Relaxed);
+        pending.head = book.version();
+        pending.latest = Some(book);
+        pending.changed.clear();
+        pending.rebuild = true;
+        self.0.notify.notify_one();
+    }
+
     pub fn stop(&self) {
         if let Ok(mut pending) = self.0.pending.lock() {
             pending.stopped = true;

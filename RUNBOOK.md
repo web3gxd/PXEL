@@ -1,5 +1,44 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — actor startup из проверенного snapshot
+
+Перед срезом прочитаны AGENTS.md, roadmap, ADR-004/033 и пути collab,
+storage, server. Цель — использовать проверенную snapshot projection в
+рабочем document actor. Инварианты: ACL до и после открытия, только один
+actor на документ, committed state отделён от calculation cache, журнал
+остаётся authority. Риски: гонка параллельных открытий и отсутствие
+calculated cache у restored image.
+
+`InProcessSessionDirectory::with_recovery` вызывает recovery вне общего
+mutex, затем повторно проверяет каталог перед spawn. Admission ограничен
+четырьмя recovery одновременно и timeout 10 секунд. Server подключает
+`PgDatabase::recover_document` с LocalFilesystemBlobStore. Actor получает
+готовую книгу, запускает полный расчёт, затем `refresh` догоняет события,
+появившиеся после recovery. Базовый каталог без callback по-прежнему
+поддерживает полный replay. Решение — ADR-034. PostgreSQL/BlobStore тест
+проверил, что actor открывает v2 snapshot без journal tail и получает
+calculated state v2; тот же сценарий проверяет fallback к v1 + tail и full
+replay после повреждения/удаления объектов.
+
+Точечный тест `cargo test -p spreadsheet-storage
+active_snapshot_round_trip_and_corrupt_newest_falls_back -- --nocapture`
+прошёл 1/1; `cargo check -p pxel-server --features dev-auth` и точечный
+clippy для collab/storage/server прошли. Финальный `just check` прошёл:
+Rust tests/build, WASM, protobuf drift, format/lint/TypeScript, Vitest
+71/71 и Vite build. `just sqlx-check` прошёл. `pnpm test:recovery`
+прошёл 1/1 с hard server restart, `pnpm test:integration` — 40/40,
+`pnpm test:e2e` — 48/48 в Chromium DPR 1/2. Презентация проверена на
+1440×900 и 390×844: 10 слайдов, навигация и layout без ошибок.
+
+Первый общий check остановился на rustfmt после дополнительного timeout;
+формат исправлен, повторный check прошёл. Первый integration запуск был без
+локального сервера (`ECONNREFUSED`); после запуска `just dev` первый полный
+прогон дал 39/40 из-за timeout calculation stream. Отдельный повтор этого
+теста прошёл, следующий полный прогон дал 40/40. Причина разового timeout
+пока не воспроизведена; это открытое наблюдение, а не заявленная
+детерминированная исправленная ошибка. Scheduler, crash
+matrix, S3 contract, 10k-tail benchmark и XLSX остаются открытыми.
+
 ## 2026-09-29 — authenticated snapshot tail recovery API
 
 Цель следующего среза фазы 5 — доказать восстановление из снимка и хвоста

@@ -20,10 +20,10 @@ use axum::{
 use futures_util::StreamExt;
 use prost::Message as ProstMessage;
 use serde::Serialize;
-use spreadsheet_application::journal::{DocumentAccess, OperationJournal};
+use spreadsheet_application::journal::{DocumentAccess, JournalError, OperationJournal};
 use spreadsheet_collab::{DocumentSession, HeadUpdate, SessionDirectory};
 use spreadsheet_domain::workbook::{DocumentId, DocumentVersion};
-use spreadsheet_storage::{LocalFilesystemBlobStore, PgDatabase};
+use spreadsheet_storage::{LocalFilesystemBlobStore, PgDatabase, SnapshotError};
 use spreadsheet_wire_protocol::{self as wire, v1};
 use std::{
     sync::Arc,
@@ -269,9 +269,33 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     let blobs = LocalFilesystemBlobStore::new(&config.blob_root, 64 * 1024 * 1024).await?;
+    let recovery_database = database.clone();
+    let recovery_blobs = blobs.clone();
     let state = Arc::new(AppState {
         auth: auth::Auth::new(config.dev_auth, database.clone()),
-        sessions: spreadsheet_collab::InProcessSessionDirectory::new(database.clone()),
+        sessions: spreadsheet_collab::InProcessSessionDirectory::with_recovery(
+            database.clone(),
+            move |identity, document| {
+                let database = recovery_database.clone();
+                let blobs = recovery_blobs.clone();
+                async move {
+                    database
+                        .recover_document(&blobs, identity, document)
+                        .await
+                        .map(|result| result.workbook)
+                        .map_err(|error| match error {
+                            SnapshotError::Journal(error) => error,
+                            SnapshotError::Corrupt
+                            | SnapshotError::Codec(_)
+                            | SnapshotError::SourceMismatch
+                            | SnapshotError::TooLarge => JournalError::Corrupt,
+                            SnapshotError::Blob(_) | SnapshotError::Database(_) => {
+                                JournalError::Unavailable
+                            }
+                        })
+                }
+            },
+        ),
         delivery: delivery::DeliveryGates::default(),
         presence: presence::PresenceDirectory::default(),
         database,

@@ -32,9 +32,9 @@ Reader видит только `ACTIVE`, повторно проверяет о�
 
 ## Границы
 
-Пока это внутренний API storage crate. Actor startup по-прежнему читает полный
-журнал; scheduler, startup wiring, исторический endpoint, GC, crash
-injection и S3 contract ещё не реализованы. На одном вызове reader проверяет
+API storage crate подключён к actor startup по ADR-034. Scheduler,
+исторический endpoint, GC, crash injection и S3 contract ещё не реализованы.
+На одном вызове reader проверяет
 не более 128 поколений: при их исчерпании возможен full replay. Временную
 I/O-ошибку reader возвращает, а повреждённый или отсутствующий объект
 пропускает. Production durability Windows filesystem и S3 не заявляются.

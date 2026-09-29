@@ -273,9 +273,14 @@ mod tests {
     use spreadsheet_application::journal::{
         AuthenticatedActor, CommitOutcome, CommitRequest, OperationJournal,
     };
+    use spreadsheet_collab::{InProcessSessionDirectory, SessionDirectory};
     use spreadsheet_domain::workbook::{
         ActorId, CellAddress, CellValue, ColumnId, Command, CommandPayload, CommittedEvent,
         EventPrincipal, Operation, OperationId, RowId, SheetId, SheetSeed, WorkspaceId,
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
     };
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -316,6 +321,53 @@ mod tests {
         let recovered = Box::pin(db.recover_document(blobs, identity, document_id)).await?;
         assert_eq!(recovered.snapshot_version, None);
         assert_eq!(recovered.replayed_events, through.get());
+        Ok(())
+    }
+
+    async fn assert_actor_boots_from_snapshot(
+        db: &PgDatabase,
+        blobs: &LocalFilesystemBlobStore,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        expected: &Workbook,
+    ) -> TestResult {
+        let observed_replay = Arc::new(AtomicU64::new(u64::MAX));
+        let observed = observed_replay.clone();
+        let database = db.clone();
+        let blobs = blobs.clone();
+        let directory =
+            InProcessSessionDirectory::with_recovery(db.clone(), move |actor, document| {
+                let database = database.clone();
+                let blobs = blobs.clone();
+                let observed = observed.clone();
+                async move {
+                    let result = database
+                        .recover_document(&blobs, actor, document)
+                        .await
+                        .map_err(|_| JournalError::Corrupt)?;
+                    observed.store(result.replayed_events, Ordering::SeqCst);
+                    Ok(result.workbook)
+                }
+            });
+        let session = directory.session(identity, document_id).await?;
+        let opened = session.read(identity).await?;
+        assert_eq!(opened.version(), expected.version());
+        assert_eq!(opened.hash(), expected.hash());
+        assert_eq!(observed_replay.load(Ordering::SeqCst), 0);
+        let mut calculated = session.watch_calculation(identity).await?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if calculated
+                    .borrow_and_update()
+                    .as_ref()
+                    .is_some_and(|state| state.input_version == expected.version())
+                {
+                    return Ok::<(), tokio::sync::watch::error::RecvError>(());
+                }
+                calculated.changed().await?;
+            }
+        })
+        .await??;
         Ok(())
     }
 
@@ -428,6 +480,14 @@ mod tests {
         assert_eq!(from_newest.snapshot_version, Some(book2.version()));
         assert_eq!(from_newest.replayed_events, 0);
         assert_eq!(from_newest.workbook.hash(), book2.hash());
+        Box::pin(assert_actor_boots_from_snapshot(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            &book2,
+        ))
+        .await?;
         let newer_key = BlobKey::parse(&uuid(newer_id.as_bytes()).to_string())?;
         let blob_path = temp.path().join("blobs").join(newer_key.as_str());
         let mut damaged = tokio::fs::read(&blob_path).await?;

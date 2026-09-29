@@ -11,7 +11,7 @@ use spreadsheet_domain::workbook::{
     CalculationContext, CellContent, CellWriteKind, Command, CommandPayload, CommittedEvent,
     DocumentId, DocumentVersion, DomainError, EventPrincipal, Operation, OperationId, Workbook,
 };
-use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::{Mutex, Semaphore, mpsc, oneshot, watch};
 
@@ -213,16 +213,23 @@ pub trait SessionDirectory: Send + Sync {
 
 pub struct InProcessSessionDirectory<J> {
     journal: J,
+    recovery: Option<RecoveryFn>,
     sessions: Arc<Mutex<HashMap<DocumentId, DocumentSession>>>,
     calculation_slots: Arc<Semaphore>,
+    recovery_slots: Arc<Semaphore>,
 }
+
+type RecoveryFuture = Pin<Box<dyn Future<Output = Result<Workbook, JournalError>> + Send>>;
+type RecoveryFn = Arc<dyn Fn(AuthenticatedActor, DocumentId) -> RecoveryFuture + Send + Sync>;
 
 impl<J: Clone> Clone for InProcessSessionDirectory<J> {
     fn clone(&self) -> Self {
         Self {
             journal: self.journal.clone(),
+            recovery: self.recovery.clone(),
             sessions: self.sessions.clone(),
             calculation_slots: self.calculation_slots.clone(),
+            recovery_slots: self.recovery_slots.clone(),
         }
     }
 }
@@ -231,9 +238,26 @@ impl<J> InProcessSessionDirectory<J> {
     pub fn new(journal: J) -> Self {
         Self {
             journal,
+            recovery: None,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             calculation_slots: Arc::new(Semaphore::new(2)),
+            recovery_slots: Arc::new(Semaphore::new(4)),
         }
+    }
+
+    /// Bootstraps actors from a verified projection. The callback is invoked
+    /// outside the directory lock; full journal replay remains the fallback
+    /// when no callback is configured.
+    pub fn with_recovery<F, Fut>(journal: J, recovery: F) -> Self
+    where
+        F: Fn(AuthenticatedActor, DocumentId) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Workbook, JournalError>> + Send + 'static,
+    {
+        let mut directory = Self::new(journal);
+        directory.recovery = Some(Arc::new(move |identity, document| {
+            Box::pin(recovery(identity, document))
+        }));
+        directory
     }
 }
 
@@ -246,6 +270,29 @@ impl<J: OperationJournal + Clone + Send + Sync + 'static> SessionDirectory
         document: DocumentId,
     ) -> Result<DocumentSession, SessionError> {
         self.journal.access(identity, document).await?;
+        {
+            let mut sessions = self.sessions.lock().await;
+            sessions.retain(|_, session| !session.sender.is_closed());
+            if let Some(session) = sessions.get(&document) {
+                return Ok(session.clone());
+            }
+        }
+        let _recovery_permit = self
+            .recovery_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| SessionError::QueueFull)?;
+        let initial = match &self.recovery {
+            Some(recovery) => {
+                tokio::time::timeout(Duration::from_secs(10), recovery(identity, document))
+                    .await
+                    .map_err(|_| SessionError::Unavailable)??
+            }
+            None => Workbook::empty(document),
+        };
+        if initial.document_id() != document {
+            return Err(JournalError::Corrupt.into());
+        }
         let mut sessions = self.sessions.lock().await;
         sessions.retain(|_, session| !session.sender.is_closed());
         if let Some(session) = sessions.get(&document) {
@@ -268,7 +315,7 @@ impl<J: OperationJournal + Clone + Send + Sync + 'static> SessionDirectory
         sessions.insert(document, session.clone());
         tokio::spawn(run(
             self.journal.clone(),
-            document,
+            initial,
             receiver,
             calculation,
             head_sender,
@@ -279,12 +326,15 @@ impl<J: OperationJournal + Clone + Send + Sync + 'static> SessionDirectory
 
 async fn run<J: OperationJournal>(
     journal: J,
-    document: DocumentId,
+    initial: Workbook,
     mut receiver: mpsc::Receiver<Request>,
     calculation: CalculationHandle,
     head_sender: watch::Sender<HeadUpdate>,
 ) {
-    let mut workbook = Arc::new(Workbook::empty(document));
+    let mut workbook = Arc::new(initial);
+    if workbook.version() != DocumentVersion::ZERO {
+        calculation.publish_full(workbook.clone());
+    }
     while let Ok(Some(request)) =
         tokio::time::timeout(Duration::from_secs(60), receiver.recv()).await
     {
