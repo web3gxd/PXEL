@@ -53,3 +53,10 @@ target, current text becomes A2, and retry returns a receipt. A second restart
 after deletion admits an old formula on a surviving origin and returns #REF!
 for its deleted target. The dedicated test binary keeps the user's editor live.
 This local scenario does not replace the full crash/snapshot/ACL stress matrix.
+
+Boundary unit tests additionally cover exhausted admission without invoking
+recovery, invalid base versions, wrong recovered version and domain hash,
+authorization refusal on tail read, task cancellation and the real ten-second
+timeout. A rejecting test-only journal verifies no unintended tail access;
+the tests do not substitute an in-memory journal for production storage.
+Permit release and unchanged caller head are asserted on failure paths.

@@ -2,6 +2,8 @@
 mod axis_history;
 pub mod calculation;
 #[cfg(test)]
+mod historical_recovery_tests;
+#[cfg(test)]
 mod watch_tests;
 use calculation::{CalculatedState, CalculationHandle};
 use spreadsheet_application::journal::{
