@@ -454,6 +454,8 @@ async fn main() -> anyhow::Result<()> {
     let blobs = create_blob_store(&config).await?;
     let recovery_database = database.clone();
     let recovery_blobs = blobs.clone();
+    let historical_database = database.clone();
+    let historical_blobs = blobs.clone();
     let (snapshot_sender, snapshot_receiver) = mpsc::channel(1);
     tokio::spawn(snapshot_worker(
         database.clone(),
@@ -504,6 +506,23 @@ async fn main() -> anyhow::Result<()> {
                 }
             },
         )
+        .with_historical_recovery(move |identity, document, version| {
+            let database = historical_database.clone();
+            let blobs = historical_blobs.clone();
+            async move {
+                database
+                    .recover_document_at_version(&blobs, identity, document, version)
+                    .await
+                    .map(|result| result.workbook)
+                    .map_err(|error| match error {
+                        SnapshotError::Journal(error) => error,
+                        SnapshotError::Blob(_)
+                        | SnapshotError::Database(_)
+                        | SnapshotError::WorkerFailed => JournalError::Unavailable,
+                        _ => JournalError::Corrupt,
+                    })
+            }
+        })
         .with_snapshot_enqueue(snapshot_interval, move |workbook| {
             if snapshot_sender.try_send(workbook).is_err() {
                 tracing::warn!(event = "snapshot_queue_full_or_closed");

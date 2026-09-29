@@ -345,6 +345,8 @@ ADR-057 добавляет ограниченный historical binding для з
 axes-only checkpoints, 10 000 версий / 16 MiB accounted cache, work budget.
 Native тесты и живой delayed insertion/deletion сценарий проверяют stable targets;
 Browser delayed preview проверен отдельным двухвкладочным тестом при DPR 1/2;
-restart hydration исторических осей остаётся gate.
+ADR-058 добавляет on-demand recovery точной base projection и проверенного
+tail после restart. Large-book recovery profiling и публикация rebase floor
+остаются gates.
 Изолированный release benchmark: p95 26.795 ms для 100 структурных переходов,
 без PostgreSQL/сети/UI (см. docs/benchmarks/2026-09-29-historical-formula-binding-local.md).

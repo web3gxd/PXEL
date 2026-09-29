@@ -217,6 +217,7 @@ pub trait SessionDirectory: Send + Sync {
 pub struct InProcessSessionDirectory<J> {
     journal: J,
     recovery: Option<RecoveryFn>,
+    historical: Option<HistoricalRecovery>,
     snapshots: Option<SnapshotSchedule>,
     sessions: Arc<Mutex<HashMap<DocumentId, DocumentSession>>>,
     calculation_slots: Arc<Semaphore>,
@@ -225,6 +226,13 @@ pub struct InProcessSessionDirectory<J> {
 
 type RecoveryFuture = Pin<Box<dyn Future<Output = Result<Workbook, JournalError>> + Send>>;
 type RecoveryFn = Arc<dyn Fn(AuthenticatedActor, DocumentId) -> RecoveryFuture + Send + Sync>;
+type HistoricalFn =
+    Arc<dyn Fn(AuthenticatedActor, DocumentId, DocumentVersion) -> RecoveryFuture + Send + Sync>;
+#[derive(Clone)]
+struct HistoricalRecovery {
+    recover: HistoricalFn,
+    slots: Arc<Semaphore>,
+}
 type SnapshotEnqueue = Arc<dyn Fn(Arc<Workbook>) + Send + Sync>;
 #[derive(Clone)]
 struct SnapshotSchedule {
@@ -246,6 +254,7 @@ impl<J: Clone> Clone for InProcessSessionDirectory<J> {
         Self {
             journal: self.journal.clone(),
             recovery: self.recovery.clone(),
+            historical: self.historical.clone(),
             snapshots: self.snapshots.clone(),
             sessions: self.sessions.clone(),
             calculation_slots: self.calculation_slots.clone(),
@@ -259,6 +268,7 @@ impl<J> InProcessSessionDirectory<J> {
         Self {
             journal,
             recovery: None,
+            historical: None,
             snapshots: None,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             calculation_slots: Arc::new(Semaphore::new(2)),
@@ -279,6 +289,22 @@ impl<J> InProcessSessionDirectory<J> {
             Box::pin(recovery(identity, document))
         }));
         directory
+    }
+
+    /// Recover exact historical projections only when delayed binding misses
+    /// the actor cache. Shares the bounded recovery admission with startup.
+    pub fn with_historical_recovery<F, Fut>(mut self, recovery: F) -> Self
+    where
+        F: Fn(AuthenticatedActor, DocumentId, DocumentVersion) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Workbook, JournalError>> + Send + 'static,
+    {
+        self.historical = Some(HistoricalRecovery {
+            recover: Arc::new(move |identity, document, version| {
+                Box::pin(recovery(identity, document, version))
+            }),
+            slots: self.recovery_slots.clone(),
+        });
+        self
     }
 
     /// Snapshot scheduling observes only newly committed actor states. The
@@ -354,6 +380,7 @@ impl<J: OperationJournal + Clone + Send + Sync + 'static> SessionDirectory
             calculation,
             head_sender,
             self.snapshots.clone(),
+            self.historical.clone(),
         ));
         Ok(session)
     }
@@ -366,6 +393,7 @@ async fn run<J: OperationJournal>(
     calculation: CalculationHandle,
     head_sender: watch::Sender<HeadUpdate>,
     snapshots: Option<SnapshotSchedule>,
+    historical: Option<HistoricalRecovery>,
 ) {
     let mut axes = axis_history::AxisHistory::new(&initial);
     let mut workbook = Arc::new(initial);
@@ -400,6 +428,7 @@ async fn run<J: OperationJournal>(
                     command,
                     &calculation,
                     &mut axes,
+                    historical.as_ref(),
                 )
                 .await;
                 if let Ok(Submission::Committed { event, .. }) = &result {
@@ -500,6 +529,61 @@ async fn replay_to_head<J: OperationJournal>(
     Ok(access)
 }
 
+async fn restore_axis_history<J: OperationJournal>(
+    journal: &J,
+    identity: AuthenticatedActor,
+    head: &Workbook,
+    base: DocumentVersion,
+    recovery: &HistoricalRecovery,
+) -> Result<axis_history::AxisHistory, SessionError> {
+    if base == DocumentVersion::ZERO
+        || base > head.version()
+        || head.version().get().saturating_sub(base.get()) > axis_history::MAX_VERSIONS
+    {
+        return Err(SessionError::RebaseWindowExceeded);
+    }
+    let _permit = recovery
+        .slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| SessionError::QueueFull)?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut book = (recovery.recover)(identity, head.document_id(), base).await?;
+        if book.document_id() != head.document_id() || book.version() != base {
+            return Err(JournalError::Corrupt.into());
+        }
+        let mut axes = axis_history::AxisHistory::new(&book);
+        while book.version() < head.version() {
+            let count = (head.version().get() - book.version().get()).min(128) as u32;
+            let events = journal
+                .load_events(identity, head.document_id(), book.version(), count)
+                .await?;
+            if events.is_empty() {
+                return Err(JournalError::Corrupt.into());
+            }
+            for event in events {
+                if event.version > head.version() {
+                    return Err(JournalError::Corrupt.into());
+                }
+                book.apply_event(&event)?;
+                let checkpoint = if axis_history::AxisHistory::structural(&event.operation) {
+                    axes.prepare(&book, &event.operation)
+                } else {
+                    None
+                };
+                axes.publish(&book, &event.operation, checkpoint);
+                tokio::task::yield_now().await;
+            }
+        }
+        if book.hash() != head.hash() {
+            return Err(JournalError::Corrupt.into());
+        }
+        Ok(axes)
+    })
+    .await
+    .map_err(|_| SessionError::Unavailable)?
+}
+
 async fn submit<J: OperationJournal>(
     journal: &J,
     identity: AuthenticatedActor,
@@ -507,6 +591,7 @@ async fn submit<J: OperationJournal>(
     command: Command,
     calculation: &CalculationHandle,
     axes: &mut axis_history::AxisHistory,
+    historical: Option<&HistoricalRecovery>,
 ) -> Result<Submission, SessionError> {
     if command.actor_id != identity.actor_id {
         return Err(SessionError::ActorMismatch);
@@ -570,7 +655,24 @@ async fn submit<J: OperationJournal>(
                     kind: None,
                 }
             }
-            _ => normalize(&command, workbook, axes)?,
+            _ => match normalize(&command, workbook, axes) {
+                Err(SessionError::RebaseWindowExceeded)
+                    if matches!(command.operation, CommandPayload::SetCellFormula { .. })
+                        && !axes.covers(command.base_version) =>
+                {
+                    let recovery = historical.ok_or(SessionError::RebaseWindowExceeded)?;
+                    *axes = restore_axis_history(
+                        journal,
+                        identity,
+                        workbook,
+                        command.base_version,
+                        recovery,
+                    )
+                    .await?;
+                    normalize(&command, workbook, axes)?
+                }
+                result => result?,
+            },
         };
         let candidate = match workbook.candidate(&operation, next) {
             Ok(candidate) => Arc::new(candidate),

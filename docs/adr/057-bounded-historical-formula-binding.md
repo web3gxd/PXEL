@@ -32,7 +32,8 @@ After durable commit, publication moves prepared buffers. CAS refresh/replay
 also updates the cache. PostgreSQL events remain the source of truth; the cache
 is disposable. A recovered actor starts at its recovered head, so history
 crossing earlier structural changes may require resync. Durable historical axis
-hydration and advertising the actual rebase floor are separate recovery work.
+hydration is added on demand by ADR-058. Advertising the actual rebase floor
+remains separate work.
 
 Wire formula text does not carry the complete bound AST. A delayed formula
 therefore uses the existing projection-resync path: `transformed=true` and no

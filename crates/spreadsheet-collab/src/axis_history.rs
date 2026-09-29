@@ -3,7 +3,7 @@ use crate::SessionError;
 use spreadsheet_domain::{formula::Formula, workbook::*};
 use std::collections::{BTreeSet, VecDeque};
 
-const MAX_VERSIONS: u64 = 10_000;
+pub(crate) const MAX_VERSIONS: u64 = 10_000;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 
 pub(crate) struct Checkpoint {
@@ -17,6 +17,11 @@ pub(crate) struct AxisHistory {
     bytes: usize,
 }
 impl AxisHistory {
+    pub(crate) fn covers(&self, base: DocumentVersion) -> bool {
+        self.checkpoints
+            .front()
+            .is_some_and(|entry| entry.version <= base)
+    }
     pub(crate) fn new(book: &Workbook) -> Self {
         let mut history = Self {
             checkpoints: VecDeque::new(),

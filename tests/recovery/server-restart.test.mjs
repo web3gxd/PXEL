@@ -33,7 +33,10 @@ test(
     let child;
     async function start() {
       child = spawn(
-        resolve('target/debug/pxel-server' + (process.platform === 'win32' ? '.exe' : '')),
+        resolve(
+          process.env.PXEL_RECOVERY_SERVER_BINARY ??
+            'target/debug/pxel-server' + (process.platform === 'win32' ? '.exe' : ''),
+        ),
         [],
         {
           env: { ...process.env, PXEL_DEV_AUTH: '1', PXEL_BIND: '127.0.0.1:18082' },
@@ -429,6 +432,91 @@ test(
         const rangeRetry = await connect(base, cookie);
         assert.equal((await rangeRetry.send(rangeCopy)).case, 'receipt');
         rangeRetry.socket.terminate();
+
+        const { snapshot: delayedBase } = await createDocument(base, cookie);
+        const delayedWriter = await connect(base, cookie);
+        assert.equal(
+          (await delayedWriter.send(setCommand(delayedWriter, delayedBase, 11))).case,
+          'committed',
+        );
+        const authored = { ...delayedBase, version: '2' };
+        const delayedFormula = formulaCommand(delayedWriter, authored, '=A1+1', {
+          column: 1,
+          sequence: 3,
+        });
+        assert.equal(
+          (
+            await delayedWriter.send(
+              insertRowsCommand(delayedWriter, authored, authored.sheets[0].rows[0], [uuid7()], {
+                sequence: 2,
+              }),
+            )
+          ).case,
+          'committed',
+        );
+        delayedWriter.socket.terminate();
+        await kill();
+        await start();
+        // Force head recovery first: the actor cache has no pre-restart axes.
+        assert.equal((await getDocument(base, cookie, delayedBase.document_id)).version, '3');
+        const delayedRetry = await connect(base, cookie);
+        try {
+          const bound = await delayedRetry.send(delayedFormula);
+          assert.equal(bound.case, 'committed');
+          assert.equal(bound.value.committedVersion, 4n);
+          assert.equal(bound.value.transformed, true);
+          assert.equal(bound.value.canonicalOperation, undefined);
+          const result = await calculation(base, cookie, delayedBase.document_id, 4);
+          assert.deepEqual(result.values[0].value, { type: 'number', value: 12 });
+          const projection = await getDocument(base, cookie, delayedBase.document_id);
+          const stored = projection.sheets[0].cells.find((cell) => cell.value.type === 'formula');
+          assert.equal(stored.value.value.source, '=A1+1');
+          assert.equal(stored.value.value.current_text, '=(A2+1)');
+          assert.equal((await delayedRetry.send(delayedFormula)).case, 'receipt');
+          assert.equal(
+            (
+              await delayedRetry.send(
+                deleteRowsCommand(delayedRetry, projection, [authored.sheets[0].rows[0]], {
+                  sequence: 4,
+                }),
+              )
+            ).case,
+            'committed',
+          );
+          delayedRetry.socket.terminate();
+          await kill();
+          await start();
+          assert.equal((await getDocument(base, cookie, delayedBase.document_id)).version, '5');
+          const afterDeletion = await connect(base, cookie);
+          try {
+            // The formula origin must survive even though its old A1 target was deleted.
+            const survivingOrigin = {
+              ...authored,
+              sheets: [
+                {
+                  ...authored.sheets[0],
+                  rows: [authored.sheets[0].rows[1], ...authored.sheets[0].rows.slice(2)],
+                },
+              ],
+            };
+            const command = formulaCommand(afterDeletion, survivingOrigin, '=A1', {
+              column: 2,
+              sequence: 5,
+            });
+            assert.equal((await afterDeletion.send(command)).case, 'committed');
+            const errors = await calculation(base, cookie, delayedBase.document_id, 6);
+            assert.deepEqual(
+              errors.values.map((cell) => cell.value),
+              [{ type: 'error', value: '#REF!' }],
+            );
+            assert.equal(errors.values[0].row_id, authored.sheets[0].rows[1]);
+            assert.equal(errors.values[0].column_id, authored.sheets[0].columns[2]);
+          } finally {
+            afterDeletion.socket.terminate();
+          }
+        } finally {
+          delayedRetry.socket.terminate();
+        }
       } finally {
         client.socket.terminate();
       }
