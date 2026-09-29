@@ -1221,7 +1221,16 @@ pub(crate) fn committed_message(event: &CommittedEvent) -> Option<v1::OperationC
     let EventPrincipal::User(actor_id) = event.principal else {
         return None;
     };
-    let operation = canonical(event.operation.clone());
+    // A delayed formula's authored A1 source is not safe to rebind at head.
+    // Keep the durable bound AST, but use the existing projection-resync path
+    // until wire carries a rendered text view for this exact committed version.
+    let transformed = matches!(&event.operation, Operation::SetCellFormula { formula, .. }
+        if formula.bound_at_version().get() < event.version.get().saturating_sub(1));
+    let operation = if transformed {
+        None
+    } else {
+        canonical(event.operation.clone())
+    };
     Some(v1::OperationCommitted {
         document_id: event.document_id.as_bytes().to_vec(),
         operation_id: event.operation_id.as_bytes().to_vec(),
@@ -1229,7 +1238,7 @@ pub(crate) fn committed_message(event: &CommittedEvent) -> Option<v1::OperationC
         committed_version: event.version.get(),
         canonical_operation: operation,
         confirmed_state_hash: event.state_hash.to_vec(),
-        transformed: false,
+        transformed,
     })
 }
 

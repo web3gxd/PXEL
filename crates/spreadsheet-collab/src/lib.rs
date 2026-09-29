@@ -1,4 +1,5 @@
 //! Ordered document sessions; persistence remains behind application ports.
+mod axis_history;
 pub mod calculation;
 #[cfg(test)]
 mod watch_tests;
@@ -366,6 +367,7 @@ async fn run<J: OperationJournal>(
     head_sender: watch::Sender<HeadUpdate>,
     snapshots: Option<SnapshotSchedule>,
 ) {
+    let mut axes = axis_history::AxisHistory::new(&initial);
     let mut workbook = Arc::new(initial);
     if workbook.version() != DocumentVersion::ZERO {
         calculation.publish_full(workbook.clone());
@@ -375,13 +377,13 @@ async fn run<J: OperationJournal>(
     {
         match request {
             Request::ReadHead { identity, reply } => {
-                let result = refresh(&journal, identity, &mut workbook, &calculation)
+                let result = refresh(&journal, identity, &mut workbook, &calculation, &mut axes)
                     .await
                     .map(|_| workbook.version());
                 let _ = reply.send(result);
             }
             Request::Read { identity, reply } => {
-                let result = refresh(&journal, identity, &mut workbook, &calculation)
+                let result = refresh(&journal, identity, &mut workbook, &calculation, &mut axes)
                     .await
                     .map(|_| workbook.as_ref().clone());
                 let _ = reply.send(result);
@@ -391,7 +393,15 @@ async fn run<J: OperationJournal>(
                 command,
                 reply,
             } => {
-                let result = submit(&journal, identity, &mut workbook, command, &calculation).await;
+                let result = submit(
+                    &journal,
+                    identity,
+                    &mut workbook,
+                    command,
+                    &calculation,
+                    &mut axes,
+                )
+                .await;
                 if let Ok(Submission::Committed { event, .. }) = &result {
                     head_sender.send_replace(HeadUpdate {
                         version: event.version,
@@ -415,6 +425,7 @@ async fn run<J: OperationJournal>(
                     operation_id,
                     &sampled_context,
                     &calculation,
+                    &mut axes,
                 )
                 .await;
                 if result.is_ok() && workbook.version() > before {
@@ -438,8 +449,9 @@ async fn refresh<J: OperationJournal>(
     identity: AuthenticatedActor,
     workbook: &mut Arc<Workbook>,
     calculation: &CalculationHandle,
+    axes: &mut axis_history::AxisHistory,
 ) -> Result<DocumentAccess, SessionError> {
-    let result = replay_to_head(journal, identity, workbook, calculation).await;
+    let result = replay_to_head(journal, identity, workbook, calculation, axes).await;
     if matches!(
         &result,
         Err(SessionError::Domain(_))
@@ -458,6 +470,7 @@ async fn replay_to_head<J: OperationJournal>(
     identity: AuthenticatedActor,
     workbook: &mut Arc<Workbook>,
     calculation: &CalculationHandle,
+    axes: &mut axis_history::AxisHistory,
 ) -> Result<DocumentAccess, SessionError> {
     let access = journal.access(identity, workbook.document_id()).await?;
     if access.head < workbook.version() {
@@ -475,6 +488,12 @@ async fn replay_to_head<J: OperationJournal>(
                 break;
             }
             Arc::make_mut(workbook).apply_event(&event)?;
+            let checkpoint = if axis_history::AxisHistory::structural(&event.operation) {
+                axes.prepare(workbook, &event.operation)
+            } else {
+                None
+            };
+            axes.publish(workbook, &event.operation, checkpoint);
             calculation.publish(workbook.clone(), &event.operation);
         }
     }
@@ -487,6 +506,7 @@ async fn submit<J: OperationJournal>(
     workbook: &mut Arc<Workbook>,
     command: Command,
     calculation: &CalculationHandle,
+    axes: &mut axis_history::AxisHistory,
 ) -> Result<Submission, SessionError> {
     if command.actor_id != identity.actor_id {
         return Err(SessionError::ActorMismatch);
@@ -498,7 +518,7 @@ async fn submit<J: OperationJournal>(
         return Err(SessionError::InvalidCommand);
     }
     for attempt in 0..3 {
-        let access = refresh(journal, identity, workbook, calculation).await?;
+        let access = refresh(journal, identity, workbook, calculation, axes).await?;
         if !access.can_edit {
             return Err(JournalError::Unauthorized.into());
         }
@@ -550,7 +570,7 @@ async fn submit<J: OperationJournal>(
                     kind: None,
                 }
             }
-            _ => normalize(&command, workbook)?,
+            _ => normalize(&command, workbook, axes)?,
         };
         let candidate = match workbook.candidate(&operation, next) {
             Ok(candidate) => Arc::new(candidate),
@@ -580,6 +600,11 @@ async fn submit<J: OperationJournal>(
                 }
             }
         }
+        let axis_checkpoint = if axis_history::AxisHistory::structural(&operation) {
+            axes.prepare(&candidate, &operation)
+        } else {
+            None
+        };
         let event = CommittedEvent {
             document_id: command.document_id,
             operation_id: command.operation_id,
@@ -600,6 +625,7 @@ async fn submit<J: OperationJournal>(
             Ok(CommitOutcome::Committed(receipt)) => {
                 // The only post-COMMIT state transition is this infallible prepared swap.
                 *workbook = candidate;
+                axes.publish(workbook, &event.operation, axis_checkpoint);
                 calculation.publish(workbook.clone(), &event.operation);
                 tracing::info!(event = "operation_committed", version = next.get());
                 return Ok(Submission::Committed {
@@ -625,9 +651,10 @@ async fn advance_context<J: OperationJournal>(
     operation_id: OperationId,
     sampled_context: &CalculationContext,
     calculation: &CalculationHandle,
+    axes: &mut axis_history::AxisHistory,
 ) -> Result<CommitReceipt, SessionError> {
     for attempt in 0..3 {
-        let access = refresh(journal, identity, workbook, calculation).await?;
+        let access = refresh(journal, identity, workbook, calculation, axes).await?;
         if !access.can_edit {
             return Err(JournalError::Unauthorized.into());
         }
@@ -661,12 +688,13 @@ async fn advance_context<J: OperationJournal>(
         match journal.commit_system(&request).await {
             Ok(CommitOutcome::Committed(receipt)) => {
                 *workbook = candidate;
+                axes.publish(workbook, &event.operation, None);
                 calculation.publish(workbook.clone(), &event.operation);
                 tracing::info!(event = "calculation_epoch_advanced", version = next.get());
                 return Ok(receipt);
             }
             Ok(CommitOutcome::AlreadyCommitted(receipt)) => {
-                refresh(journal, identity, workbook, calculation).await?;
+                refresh(journal, identity, workbook, calculation, axes).await?;
                 return Ok(receipt);
             }
             Err(JournalError::Conflict) if attempt < 2 => continue,
@@ -676,10 +704,12 @@ async fn advance_context<J: OperationJournal>(
     Err(JournalError::Conflict.into())
 }
 
-/// Stable-ID value commands may cross an axis change. Formula text is bound only
-/// when the client's base is at least the latest axis-change version; historical
-/// axis projections are not yet available for an older formula command.
-fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, SessionError> {
+/// Formula text is bound against the bounded historical axes the client saw.
+fn normalize(
+    command: &Command,
+    workbook: &Workbook,
+    axes: &axis_history::AxisHistory,
+) -> Result<Operation, SessionError> {
     match &command.operation {
         CommandPayload::AddSheet { sheet } => Ok(Operation::AddSheet {
             sheet: sheet.clone(),
@@ -845,26 +875,7 @@ fn normalize(command: &Command, workbook: &Workbook) -> Result<Operation, Sessio
             kind: Some(CellWriteKind::Clear),
         }),
         CommandPayload::SetCellFormula { address, source } => {
-            if command.base_version == DocumentVersion::ZERO
-                || command.base_version < workbook.last_axis_change_version()
-                || workbook
-                    .version()
-                    .get()
-                    .saturating_sub(command.base_version.get())
-                    > 10_000
-            {
-                return Err(SessionError::RebaseWindowExceeded);
-            }
-            let current = spreadsheet_formula::binder::bind(source.as_str(), workbook, *address)
-                .map_err(|_| SessionError::InvalidFormula)?;
-            let formula = spreadsheet_domain::formula::Formula::new(
-                current.source().to_owned(),
-                current.canonical().to_owned(),
-                current.ast().clone(),
-                *address,
-                command.base_version,
-            )
-            .map_err(|_| SessionError::InvalidFormula)?;
+            let formula = axes.bind(source.as_str(), workbook, *address, command.base_version)?;
             Ok(Operation::SetCellFormula {
                 address: *address,
                 formula,

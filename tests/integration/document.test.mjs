@@ -503,9 +503,6 @@ test('concurrent row extensions append stable IDs in server order and survive re
     const retry = await first.send(leftCommand);
     assert.equal(retry.case, 'receipt');
     assert.equal(retry.value.committedVersion, left.value.committedVersion);
-    const staleFormula = await first.send(formulaCommand(first, snapshot, '=A1', { sequence: 2 }));
-    assert.equal(staleFormula.case, 'rejected');
-    assert.equal(staleFormula.value.code, 10);
     const returning = await connect(base, cookie);
     try {
       const [older, newer, barrier] = await receiveFrames(returning, 3, () =>
@@ -520,10 +517,50 @@ test('concurrent row extensions append stable IDs in server order and survive re
     } finally {
       returning.socket.close();
     }
+    const delayedFormula = await first.send(formulaCommand(first, snapshot, '=A1', { sequence: 2 }));
+    assert.equal(delayedFormula.case, 'committed');
+    assert.equal(delayedFormula.value.committedVersion, 4n);
+    const calculated = await calculation(base, cookie, snapshot.document_id, 4);
+    assert.equal(calculated.status, 'complete');
+    assert.deepEqual(calculated.values[0].value, { type: 'error', value: '#CYCLE!' });
   } finally {
     first.socket.close();
     second.socket.close();
   }
+});
+
+test('delayed formula binding preserves original targets across insertion and range deletion', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal((await client.send(setCommand(client, snapshot, 11, { sequence: 1 }))).case, 'committed');
+    assert.equal((await client.send(setCommand(client, snapshot, 22, { row: 1, sequence: 2 }))).case, 'committed');
+    const seen = { ...snapshot, version: '3' };
+    const inserted = insertRowsCommand(client, seen, snapshot.sheets[0].rows[0], [uuid7()], { sequence: 3 });
+    assert.equal((await client.send(inserted)).case, 'committed');
+    const delayed = formulaCommand(client, seen, '=A1+1', { row: 1, column: 2, sequence: 4 });
+    const committed = await client.send(delayed);
+    assert.equal(committed.case, 'committed');
+    assert.equal(committed.value.committedVersion, 5n);
+    assert.equal((await client.send(delayed)).case, 'receipt');
+    const result = async (version, row, column) => {
+      const calculated = await calculation(base, cookie, snapshot.document_id, version);
+      assert.equal(calculated.status, 'complete');
+      return calculated.values.find((cell) => cell.row_id === snapshot.sheets[0].rows[row] && cell.column_id === snapshot.sheets[0].columns[column])?.value;
+    };
+    assert.deepEqual(await result(5, 1, 2), { type: 'number', value: 12 });
+    const current = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal((await client.send(deleteRowsCommand(client, current, [snapshot.sheets[0].rows[0]], { sequence: 5 }))).case, 'committed');
+    assert.deepEqual(await result(6, 1, 2), { type: 'error', value: '#REF!' });
+    const delayedRange = formulaCommand(client, seen, '=SUM(A1:A2)', { row: 2, column: 3, sequence: 6 });
+    assert.equal((await client.send(delayedRange)).case, 'committed');
+    assert.deepEqual(await result(7, 2, 3), { type: 'number', value: 22 });
+    const replayed = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(replayed.version, '7');
+    const canonical = replayed.sheets[0].cells.find((cell) => cell.row_id === snapshot.sheets[0].rows[2] && cell.column_id === snapshot.sheets[0].columns[3]);
+    assert.equal(canonical.value.value.current_text, '=SUM(A2:A2)');
+  } finally { client.socket.close(); }
 });
 
 test('appending rows preserves an existing formula target and calculated value', async () => {

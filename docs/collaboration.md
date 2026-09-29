@@ -20,18 +20,19 @@ process-local payload send gate (ADR-016). Два разных dev-пользо�
 ограниченный batch стабильных row IDs только в конец оси, сериализует
 конкурентные запросы через CAS, а WebSocket-клиент обновляет авторизованную
 projection после структурного события. `last_axis_change_version` выводится
-при replay; формула со старой base version пока получает
-`RebaseWindowExceeded`, поскольку историческая axis projection ещё не создана.
-Это консервативное ограничение снимается только вместе с проверенным binding
-и transformation для insert/delete.
+при replay. ADR-057 добавляет historical axis binding: формула связывается
+по осям base version и трансформируется по позднейшим insert/delete. Cache
+ограничен 10 000 версиями / 16 MiB accounted bytes и budget работы;
+недоступная история требует typed `RebaseWindowExceeded` и resync.
 
 `InsertRows` (ADR-020/021) использует stable row anchor, а не позицию клиента.
 Два append-before одного anchor сохраняются в server commit order. Новое
 schema-6 событие до CAS пересчитывает относительные row deltas всех формул,
 а текущий A1-текст выводится из stable targets. Историческое schema-5 событие
 сохраняет formula-free guard. Новый formula command со старой base axis version
-по-прежнему требует resync: историческая axis projection для binding пока
-не реализована. Это не заявленная полная Excel-совместимость структуры.
+может связываться через cache ADR-057; после рестарта история до recovered
+head не гарантируется и требует resync. Это не заявленная полная
+Excel-совместимость структуры.
 
 `DeleteRows` (ADR-022) записывается отдельным schema-7 event. Все удаляемые
 stable IDs должны быть живыми и уникальными; последняя строка остаётся.
@@ -46,7 +47,8 @@ inverse/undo для `DeleteRows` в текущем срезе ещё нет.
 schema-8 событие. Конкурентные вставки перед одним anchor следуют server
 commit order; target IDs формул не меняются. Relative column offsets и
 отображаемый A1-текст пересчитываются в candidate до CAS. Stale new formula
-после изменения оси по-прежнему требует resync. Inverse этой операции
+после изменения оси использует bounded history ADR-057 или требует resync,
+если history недоступна. Inverse этой операции
 остаётся планом из матрицы.
 
 `DeleteColumns` (ADR-024) является отдельным schema-9 event. Все IDs должны

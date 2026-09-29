@@ -340,3 +340,10 @@ SortRange не входит в ранний MVP. Будущий отдельны
 | HISTORY-HTTP-ACL | HTTP body send не ограждён WebSocket delivery gate     | Тест гонки revoke/read доказывает отсутствие payload после завершённого revoke             |
 
 Ни одна запись этой roadmap сама по себе не означает реализованную или протестированную возможность.
+
+ADR-057 добавляет ограниченный historical binding для задержанных формул:
+axes-only checkpoints, 10 000 версий / 16 MiB accounted cache, work budget.
+Native тесты и живой delayed insertion/deletion сценарий проверяют stable targets;
+restart hydration исторических осей и browser delayed preview остаются gates.
+Изолированный release benchmark: p95 26.795 ms для 100 структурных переходов,
+без PostgreSQL/сети/UI (см. docs/benchmarks/2026-09-29-historical-formula-binding-local.md).

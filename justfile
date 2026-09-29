@@ -40,6 +40,9 @@ e2e:
 smoke:
     node scripts/smoke.mjs
 
+bench-formula-rebase:
+    cargo test --locked --release -p spreadsheet-collab --lib axis_history::tests::historical_formula_binding_benchmark -- --ignored --exact --nocapture
+
 formula-parity:
     node scripts/wasm.mjs
     node tests/parity/formula.mjs
