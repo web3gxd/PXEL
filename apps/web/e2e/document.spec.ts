@@ -1,4 +1,68 @@
 import { expect, test } from '@playwright/test';
+import { fromBinary } from '@bufbuild/protobuf';
+import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
+
+test('delayed formula retains its target after another tab inserts a row', async ({
+  page,
+  context,
+}) => {
+  let holding = false;
+  let release: (() => void) | undefined;
+  await page.routeWebSocket('**/api/ws', (route) => {
+    const server = route.connectToServer();
+    route.onMessage((message) => {
+      if (holding && typeof message !== 'string') {
+        const payload = fromBinary(ClientEnvelopeSchema, new Uint8Array(message)).payload;
+        if (payload.case === 'command' && payload.value.formulaCommand) {
+          release ??= () => {
+            holding = false;
+            server.send(message);
+          };
+          return;
+        }
+      }
+      server.send(message);
+    });
+  });
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  await bar.fill('11');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  holding = true;
+  await bar.fill('=A1+1');
+  await bar.press('Enter');
+  await expect.poll(() => release !== undefined).toBe(true);
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await expect(other.getByTestId('connection-status')).toHaveText('Подключено');
+  await other.getByRole('button', { name: 'Строка ↑', exact: true }).click();
+  const id = new URL(page.url()).searchParams.get('document');
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/documents/${id}`)).json()).version)
+    .toBe('3');
+  release?.();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/documents/${id}`)).json()).version)
+    .toBe('4');
+  await grid.focus();
+  await expect(page.getByTestId('active-cell')).toHaveText('B2: 12');
+  await expect(bar).toHaveValue('=(A2+1)');
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+  await other.reload();
+  await other.getByRole('region', { name: 'Область таблицы' }).focus();
+  await other.keyboard.press('ArrowDown');
+  await other.keyboard.press('ArrowRight');
+  await expect(other.getByTestId('active-cell')).toHaveText('B2: 12');
+  await expect(other.getByTestId('calculation-preview')).toHaveCount(0);
+});
 
 function uuidV7() {
   const id = crypto.getRandomValues(new Uint8Array(16));

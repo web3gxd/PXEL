@@ -53,5 +53,10 @@ restart rejection and eviction under 1,200 structural changes. Real PostgreSQL
 integration covers delayed binding across insertion/deletion and idempotent
 retry. The isolated release harness measures historical binding, not commit
 latency: [conditions and results](../benchmarks/2026-09-29-historical-formula-binding-local.md).
-Browser preview convergence for this path remains an explicit gate until its
-dedicated delayed-command test runs.
+The dedicated browser case holds the original binary formula frame while a
+second tab commits an insertion, then releases it to the real server. At DPR
+1 and 2, the original tab converges without reload to B2=12 and current source
+`=(A2+1)`; the second tab retains the result after reload. The preview marker
+clears after server confirmation. The harness uses the documented
+[WebSocket interception API](https://playwright.dev/docs/api/class-websocketroute),
+forwards traffic to the actual server and does not synthesize acknowledgements.
