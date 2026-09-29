@@ -1,5 +1,22 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — конкурентная запись одного свойства
+
+Перед срезом прочитаны AGENTS, roadmap, collaboration contract и действующие
+integration helpers. Цель — проверить server-order semantics при двух
+одновременных записях в одну ячейку из двух WebSocket-сессий на одинаковой
+base_version. Инварианты: обе принятые команды имеют последовательные
+версии; значение в canonical projection и replay определяется событием с
+последней версией, а не временем ответа клиентам.
+
+Добавлен живой `tests/integration/document.test.mjs` сценарий: два клиента
+параллельно отправляют разные значения, проверяются версии 2/3, состояние
+HTTP projection и late-subscriber replay. `pnpm test:integration` против
+release backend и реальной PostgreSQL прошёл 27/27. Структурных операций,
+сетевых задержек и server restart этот конкретный сценарий не покрывает.
+
+---
+
 ## 2026-09-29 — optimistic Canvas latency без серверного подтверждения
 
 Перед срезом прочитаны AGENTS, roadmap, testing, текущие DocumentStore,

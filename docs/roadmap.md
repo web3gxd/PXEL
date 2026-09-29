@@ -21,6 +21,9 @@ durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалё
 структурные convergence сценарии и измерения latency. Outbound queue с
 лимитом кадров/байтов реализована в ADR-018; slow-reader network stress и
 очередные метрики ещё открыты.
+Живой integration test одновременной записи в одну ячейку подтвердил версии
+2/3, серверный порядок и значение победителя после replay. Это не заменяет
+случайные multi-user сценарии с разными задержками и отказами.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

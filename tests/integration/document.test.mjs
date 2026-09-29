@@ -107,6 +107,47 @@ test('another socket receives a canonical live event and late subscriber replays
   }
 });
 
+test('concurrent writes to one cell follow server version order and replay the winner', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const first = await connect(base, cookie);
+  const second = await connect(base, cookie);
+  try {
+    const [left, right] = await Promise.all([
+      first.send(setCommand(first, snapshot, 101, { sequence: 1 })),
+      second.send(setCommand(second, snapshot, 202, { sequence: 1 })),
+    ]);
+    assert.equal(left.case, 'committed');
+    assert.equal(right.case, 'committed');
+    assert.deepEqual(
+      [left.value.committedVersion, right.value.committedVersion].sort((a, b) => Number(a - b)),
+      [2n, 3n],
+    );
+    const winner = left.value.committedVersion === 3n ? 101 : 202;
+    const authoritative = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(authoritative.version, '3');
+    assert.equal(authoritative.sheets[0].cells[0].value.value, winner);
+    const returning = await connect(base, cookie);
+    try {
+      const [older, newer, complete] = await receiveFrames(returning, 3, () =>
+        subscribeDocument(returning, snapshot.document_id, 1),
+      );
+      assert.equal(older.value.headVersion, 2n);
+      assert.equal(newer.value.headVersion, 3n);
+      assert.equal(complete.case, 'replayComplete');
+      assert.equal(
+        newer.value.latestOperation.canonicalOperation.kind.value.value.kind.value,
+        winner,
+      );
+    } finally {
+      returning.socket.close();
+    }
+  } finally {
+    first.socket.close();
+    second.socket.close();
+  }
+});
+
 test('late subscriber receives every missed version in order before the replay barrier', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);
