@@ -29,8 +29,10 @@ Convergence virtual clients: seeded delays, duplicate/out-of-order delivery, rec
 1000 commands × 3 replicas. Клиенты получают повторы, задержки и сообщения
 не по порядку, затем догоняют журнал; серверная projection несколько раз
 строится заново из журнала. Это проверяет чистое применение существующих
-SetCellValue/ClearCell и cacheless hash. Тест не моделирует реальные
-WebSocket/БД, ACL, структурные команды или calculation patches; они требуют
+SetCellValue/ClearCell, вставку и удаление stable-ID строк/столбцов, frozen
+`CopyRange` обычных значений/пустот и cacheless hash. Для каждого seed
+проверяется, что структурные и copy ветви действительно исполнены. Тест не
+моделирует реальные WebSocket/БД, ACL, формулы в CopyRange или calculation patches; они требуют
 отдельных интеграционных сценариев по мере появления соответствующего кода.
 
 Recovery matrix: до transaction; после CAS/INSERT до второго statement; после COMMIT до publish/ACK; candidate failure; two writers CAS; unknown commit outcome; snapshot UPLOADING/STORED/VERIFIED/ACTIVE boundaries; object upload до metadata; replay interruption/gap/corrupt event. Невалидный candidate не сохраняется, committed event не теряется.

@@ -1,6 +1,6 @@
 use spreadsheet_domain::workbook::{
-    ActorId, CellAddress, CellValue, ColumnId, CommittedEvent, DocumentId, DocumentVersion,
-    EventPrincipal, Operation, OperationId, RowId, SheetId, SheetSeed, Workbook,
+    ActorId, CellAddress, CellValue, ColumnId, CommittedEvent, ContentWrite, DocumentId,
+    DocumentVersion, EventPrincipal, Operation, OperationId, RowId, SheetId, SheetSeed, Workbook,
 };
 use std::{collections::BTreeMap, time::Instant};
 
@@ -85,15 +85,68 @@ fn run_convergence(
             })
             .collect();
         let mut random = seed ^ 0x9e37_79b9_7f4a_7c15;
+        let mut inserts = 0;
+        let mut deletes = 0;
+        let mut column_inserts = 0;
+        let mut column_deletes = 0;
+        let mut copies = 0;
         for sequence in 1..=commands_per_scenario {
-            let row = (next_random(&mut random) % 8) as usize;
-            let column = (next_random(&mut random) % 8) as usize;
+            let live_rows = authority.sheets()[0].rows();
+            let live_columns = authority.sheets()[0].columns();
+            let row = (next_random(&mut random) % live_rows.len() as u64) as usize;
+            let column = (next_random(&mut random) % live_columns.len() as u64) as usize;
             let address = CellAddress {
                 sheet,
-                row: rows[row],
-                column: columns[column],
+                row: live_rows[row],
+                column: live_columns[column],
             };
-            let operation = if sequence.is_multiple_of(17) {
+            let operation = if sequence.is_multiple_of(131) && live_rows.len() > rows.len() {
+                Operation::DeleteRows {
+                    sheet,
+                    rows: vec![live_rows[row]],
+                }
+            } else if sequence.is_multiple_of(97) {
+                Operation::InsertRows {
+                    sheet,
+                    before: live_rows[row],
+                    rows: vec![RowId::from_bytes(bytes(seed, 10_000 + sequence))?],
+                }
+            } else if sequence.is_multiple_of(223) && live_columns.len() > columns.len() {
+                Operation::DeleteColumns {
+                    sheet,
+                    columns: vec![live_columns[column]],
+                }
+            } else if sequence.is_multiple_of(211) {
+                Operation::InsertColumnsRebased {
+                    sheet,
+                    before: live_columns[column],
+                    columns: vec![ColumnId::from_bytes(bytes(seed, 20_000 + sequence))?],
+                }
+            } else if sequence.is_multiple_of(53) {
+                let source_column =
+                    (next_random(&mut random) % (live_columns.len() - 1) as u64) as usize;
+                let destination_column =
+                    (next_random(&mut random) % (live_columns.len() - 1) as u64) as usize;
+                let destination_row = (next_random(&mut random) % live_rows.len() as u64) as usize;
+                let writes = (0..2)
+                    .map(|offset| {
+                        let source = CellAddress {
+                            sheet,
+                            row: live_rows[row],
+                            column: live_columns[source_column + offset],
+                        };
+                        Ok(ContentWrite {
+                            address: CellAddress {
+                                sheet,
+                                row: live_rows[destination_row],
+                                column: live_columns[destination_column + offset],
+                            },
+                            content: authority.cell_content(source)?.cloned(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, spreadsheet_domain::workbook::DomainError>>()?;
+                Operation::CopyRange { writes }
+            } else if sequence.is_multiple_of(17) {
                 Operation::ClearCell { address }
             } else {
                 Operation::SetCellValue {
@@ -101,6 +154,14 @@ fn run_convergence(
                     value: CellValue::Number((seed * commands_per_scenario + sequence) as f64),
                 }
             };
+            match &operation {
+                Operation::InsertRows { .. } => inserts += 1,
+                Operation::DeleteRows { .. } => deletes += 1,
+                Operation::InsertColumnsRebased { .. } => column_inserts += 1,
+                Operation::DeleteColumns { .. } => column_deletes += 1,
+                Operation::CopyRange { .. } => copies += 1,
+                _ => {}
+            }
             let version = DocumentVersion::new(sequence + 1)?;
             let next = authority.candidate(&operation, version)?;
             let event = CommittedEvent {
@@ -155,6 +216,10 @@ fn run_convergence(
             );
             assert_eq!(replica.book.hash(), authority.hash(), "hash seed {seed}");
         }
+        assert!(
+            inserts > 0 && deletes > 0 && column_inserts > 0 && column_deletes > 0 && copies > 0,
+            "operation mix seed {seed}"
+        );
     }
     eprintln!(
         "convergence: {scenarios} seeds × {commands_per_scenario} commands, {CLIENTS} replicas, elapsed {:?}",

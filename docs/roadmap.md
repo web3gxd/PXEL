@@ -17,8 +17,9 @@ Criterion: 41.822–42.905 ms (optimized, Windows/Ultra 9 185H, 10 samples).
 Фаза 3 идёт отдельными срезами: bounded PostgreSQL replay/barrier (ADR-015),
 durable ACL access epoch/send gate (ADR-016) и ephemeral presence с удалённым
 выделением (ADR-017) локально проверены. Domain-only seeded convergence
-100×1000×3 прошёл. Полный gate фазы 3 ещё не закрыт: нужны сетевые/ACL и
-структурные convergence сценарии и измерения latency. Outbound queue с
+100×1000×3 прошёл; harness дополнен вставкой/удалением стабильных строк и
+столбцов и frozen CopyRange значений. Полный gate фазы 3 ещё не закрыт:
+нужны сетевые/ACL/формульные convergence сценарии и измерения latency. Outbound queue с
 лимитом кадров/байтов реализована в ADR-018; cross-host slow-reader stress и
 очередные метрики ещё открыты. Локальный paused-socket stress выполнен:
 три прогона по 512×30,005-byte commits завершились head 513, медленный socket
