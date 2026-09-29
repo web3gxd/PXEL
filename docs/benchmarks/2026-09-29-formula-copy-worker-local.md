@@ -1,0 +1,5 @@
+# Formula copy Worker boundary, 2026-09-29
+
+Command: `node apps/web/scripts/bench-formula-copy.mjs`, with local Vite dev server at `http://127.0.0.1:5173/`. Fixture: copy `=A1+$B$1` from C1 to D2, expecting `=(B2+$B$1)`. Five untimed warm-ups followed by 50 sequential samples. Each timed sample creates a fresh Worker, loads cached WASM, copies one formula and receives the JS reply. The sample excludes document commit, network, clipboard events and rendering. This is a browser-side latency sample, not the optimistic edit p95 or a fixed-runner gate.
+
+Host: Windows 10.0.26100, Intel Core Ultra 9 185H, 15.6 GiB RAM. Chromium 153.0.8010.12 through Playwright. One run: p50 **12.50 ms**, p95 **16.10 ms**, maximum **16.90 ms**. The earlier exploratory run was p50 11.10 ms/p95 13.50 ms with the same parameters; this variation is one reason not to present a single run as a universal performance guarantee. The script prints machine and browser details so future runs can be compared on like-for-like conditions.

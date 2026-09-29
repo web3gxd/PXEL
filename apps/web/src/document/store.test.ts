@@ -148,6 +148,26 @@ async function connectedStore() {
   return { store, sent };
 }
 describe('document projection and pending intents', () => {
+  it('uses current formula text for copy and refuses a stale clipboard version', async () => {
+    const store = new DocumentStore();
+    const state = projection();
+    state.sheets[0]!.cells.push({
+      row_id: rowId,
+      column_id: columnId,
+      value: { type: 'formula', value: { source: '=A1', current_text: '=B1' } },
+    });
+    store.load(state);
+    const raw = store.copyFormulaPayload();
+    expect(raw).toContain('=B1');
+    state.sheets[0]!.cells[0]!.value = { type: 'formula', value: { source: '=A1' } };
+    store.load(state);
+    expect(store.copyFormulaPayload()).toBeUndefined();
+    state.version = '2';
+    store.load(state);
+    expect(await store.pasteFormulaCopy(raw ?? '')).toBe(false);
+    expect(store.error).toContain('Скопируйте');
+    store.dispose();
+  });
   it('pastes a TSV rectangle as one optimistic durable command', async () => {
     const { store, sent } = await connectedStore();
     const secondRow = uuidV7(),

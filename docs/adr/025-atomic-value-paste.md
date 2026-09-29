@@ -12,6 +12,8 @@ Sending one command per pasted cell creates partial ranges and many document ver
 
 The Canvas clipboard adapter accepts plain TSV. It overlays all pending writes immediately, then refreshes from the confirmed projection after the canonical batch arrives. Pasted fields beginning with `=` are rejected with a visible message until formula copy/binding semantics are implemented. The current adapter copies one selected cell as plain text. Rich clipboard, multi-cell selection, formula copy, cut/move and undo are separate slices.
 
+ADR-026 later adds an internal clipboard path for one copied formula. Arbitrary formula text in bulk TSV remains rejected.
+
 ## Consequences
 
 This command covers value paste without a partial-commit window. It does not claim Excel-compatible formula paste. One large event remains under bounded wire, decoded and calculation budgets. The client uses a projection refresh after commit rather than applying a batch locally; this is correct but may cost an HTTP round trip. The 1,000-write candidate benchmark measures domain work only.

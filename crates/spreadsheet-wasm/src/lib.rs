@@ -319,6 +319,20 @@ pub fn evaluate_wasm(source: &str, cells_json: &str) -> Result<String, JsValue> 
     evaluate_fixture(source, cells_json).map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
+/// Clipboard text transformation is the same pure Rust logic in native and WASM.
+/// The server still parses and binds the returned source when it is committed.
+#[wasm_bindgen(js_name = copyFormulaText)]
+pub fn copy_formula_text_wasm(
+    source: &str,
+    from_row: u32,
+    from_column: u32,
+    to_row: u32,
+    to_column: u32,
+) -> Result<String, JsValue> {
+    spreadsheet_formula::copy_formula_text(source, (from_row, from_column), (to_row, to_column))
+        .map_err(|_| JsValue::from_str("InvalidFormulaCopy"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

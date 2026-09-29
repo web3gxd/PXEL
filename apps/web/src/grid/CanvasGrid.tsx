@@ -121,7 +121,9 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
         onPaste={(event) => {
           if (!document?.sheet) return;
           event.preventDefault();
-          document.pasteTsv(event.clipboardData.getData('text/plain'));
+          const formula = event.clipboardData.getData('application/x-pxel-formula+json');
+          if (formula) void document.pasteFormulaCopy(formula);
+          else document.pasteTsv(event.clipboardData.getData('text/plain'));
         }}
         onCopy={(event) => {
           if (!document?.sheet) return;
@@ -130,6 +132,8 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
             'text/plain',
             displayValue(document.value(document.selected)),
           );
+          const formula = document.copyFormulaPayload();
+          if (formula) event.clipboardData.setData('application/x-pxel-formula+json', formula);
         }}
         onPointerDown={(event) => {
           if (!document?.sheet) return;

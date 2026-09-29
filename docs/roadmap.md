@@ -79,6 +79,14 @@ Copy/paste, undo, multi-sheet compatibility и snapshots ещё открыты.
 для 1,000 numeric writes в domain candidate: 567.59–631.31 µs
 ([условия](benchmarks/2026-09-29-value-batch-local.md)). Копирование формул,
 rich clipboard, cut/move и undo остаются отдельными срезами.
+Восьмой срез фазы 4 (ADR-026) добавляет copy/paste одной формулы в пределах
+документа: текущий A1-текст преобразуется общим Rust-кодом в WASM Worker,
+сервер заново bind-ит полученный текст через `SetCellFormula`. Native tests и
+browser DPR 1/2 проверили mixed `$` modes, диапазоны, `#REF!`, commit и reload.
+Локальный Worker benchmark: p50 12.50 ms, p95 16.10 ms для 50 fresh-Worker
+копирований после warm-up; это не latency commit и не официальный gate
+([условия](benchmarks/2026-09-29-formula-copy-worker-local.md)). Multi-cell
+formula copy, cut/move, undo и snapshots ещё открыты.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

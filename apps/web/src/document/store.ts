@@ -1,5 +1,6 @@
 import { create, toBinary } from '@bufbuild/protobuf';
 import { PreviewClient, type PreviewStatus } from '../calculation/client';
+import { copyFormulaInWorker } from '../calculation/formula-copy';
 import type { Stamp, PreviewCell } from '../calculation/protocol';
 import {
   ClientEnvelopeSchema,
@@ -326,6 +327,7 @@ export class DocumentStore {
   private headRefreshVersion = 0n;
   private headRefreshAttempts = 0;
   private inflight: string | undefined;
+  private formulaCopyInFlight = false;
   private sequence = 0n;
   private syncGeneration = 0;
   private connectionGeneration = 0;
@@ -941,6 +943,81 @@ export class DocumentStore {
     this.flush();
     return true;
   }
+  copyFormulaPayload() {
+    if (this.pending.length || !this.projection) return undefined;
+    const value = this.value(this.selected);
+    if (value?.type !== 'formula') return undefined;
+    const source = value.value.current_text;
+    if (!source) return undefined;
+    return JSON.stringify({
+      schema_version: 1,
+      document_id: this.projection.document_id,
+      version: this.projection.version,
+      source,
+      from_row: this.selected.row,
+      from_column: this.selected.column,
+    });
+  }
+  async pasteFormulaCopy(raw: string, position: Position = this.selected) {
+    const projection = this.projection;
+    if (!projection || byteLength(raw) > 64 * 1024 || this.formulaCopyInFlight) return false;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return false;
+    }
+    if (!payload || typeof payload !== 'object') return false;
+    const copy = payload as Record<string, unknown>;
+    if (
+      copy.schema_version !== 1 ||
+      copy.document_id !== projection.document_id ||
+      copy.version !== projection.version ||
+      typeof copy.source !== 'string' ||
+      !copy.source.startsWith('=') ||
+      byteLength(copy.source) > 32 * 1024 ||
+      !Number.isInteger(copy.from_row) ||
+      !Number.isInteger(copy.from_column) ||
+      (copy.from_row as number) < 0 ||
+      (copy.from_column as number) < 0 ||
+      (copy.from_row as number) >= 1_048_576 ||
+      (copy.from_column as number) >= 16_384 ||
+      !this.sheet?.rows[position.row] ||
+      !this.sheet.columns[position.column]
+    ) {
+      this.error = 'Источник формулы изменился. Скопируйте ячейку ещё раз.';
+      this.notify();
+      return false;
+    }
+    const row = this.sheet.rows[position.row],
+      column = this.sheet.columns[position.column];
+    this.formulaCopyInFlight = true;
+    try {
+      const source = await copyFormulaInWorker({
+        source: copy.source,
+        fromRow: copy.from_row as number,
+        fromColumn: copy.from_column as number,
+        toRow: position.row,
+        toColumn: position.column,
+      });
+      if (
+        this.projection?.version !== projection.version ||
+        this.sheet?.rows[position.row] !== row ||
+        this.sheet.columns[position.column] !== column
+      ) {
+        this.error = 'Структура таблицы изменилась. Скопируйте ячейку ещё раз.';
+        this.notify();
+        return false;
+      }
+      return this.set(position, parseInput(source));
+    } catch {
+      this.error = 'Не удалось скопировать формулу.';
+      this.notify();
+      return false;
+    } finally {
+      this.formulaCopyInFlight = false;
+    }
+  }
   pasteTsv(text: string, position: Position = this.selected) {
     const sheet = this.sheet,
       projection = this.projection,
@@ -1337,6 +1414,7 @@ export class DocumentStore {
         type: 'formula',
         value: decodeFormula({
           source: formula.source,
+          current_text: formula.canonical,
           canonical: formula.canonical,
           ast_schema: formula.ast.schemaVersion,
           compatibility_profile: formulaProfile,

@@ -1,5 +1,50 @@
 import { expect, test } from '@playwright/test';
 
+test('copying one formula shifts relative references in WASM and commits server-bound text', async ({
+  page,
+}) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('2');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  await bar.fill('3');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  await bar.fill('=A1+$B$1');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ControlOrMeta+C');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('A1');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ControlOrMeta+V');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(page.getByTestId('active-cell')).toHaveText('D2: 3');
+  await expect(bar).toHaveValue(/B2.*\$B\$1/);
+  await page.reload();
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await expect(bar).toHaveValue('2');
+  await grid.focus();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByTestId('active-cell')).toHaveText('D2: 3');
+});
+
 test('TSV paste commits one durable batch and survives reload', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
