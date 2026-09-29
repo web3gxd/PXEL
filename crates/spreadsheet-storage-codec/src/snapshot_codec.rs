@@ -120,6 +120,7 @@ pub fn decode_snapshot(
     bytes: &[u8],
     expected_document: DocumentId,
     expected_version: DocumentVersion,
+    expected_last_axis_change_version: DocumentVersion,
     expected_hash: [u8; 32],
     expected_engine_version: &str,
     expected_compatibility_profile: &str,
@@ -133,6 +134,7 @@ pub fn decode_snapshot(
     }
     if envelope.document_id.as_slice() != expected_document.as_bytes()
         || envelope.document_version != expected_version.get()
+        || envelope.last_axis_change_version != expected_last_axis_change_version.get()
         || envelope.state_hash.as_slice() != expected_hash
         || envelope.writer_engine_version != expected_engine_version
         || envelope.writer_compatibility_profile != expected_compatibility_profile
@@ -301,6 +303,7 @@ mod tests {
             &bytes,
             document,
             DocumentVersion::new(6)?,
+            book.last_axis_change_version(),
             expected_hash,
             "engine-v1",
             "pxel-excel-subset-v1",
@@ -333,6 +336,7 @@ mod tests {
                 &envelope.encode_to_vec(),
                 document,
                 book.version(),
+                book.last_axis_change_version(),
                 expected_hash,
                 "engine-v1",
                 "pxel-excel-subset-v1"
@@ -348,6 +352,7 @@ mod tests {
                 &envelope.encode_to_vec(),
                 document,
                 book.version(),
+                book.last_axis_change_version(),
                 expected_hash,
                 "engine-v1",
                 "pxel-excel-subset-v1"
@@ -363,6 +368,7 @@ mod tests {
                 &envelope.encode_to_vec(),
                 document,
                 book.version(),
+                book.last_axis_change_version(),
                 expected_hash,
                 "engine-v1",
                 "pxel-excel-subset-v1"
@@ -374,8 +380,21 @@ mod tests {
                 &bytes,
                 document,
                 book.version(),
+                book.last_axis_change_version(),
                 expected_hash,
                 "engine-v2",
+                "pxel-excel-subset-v1"
+            ),
+            Err(CodecError::Invalid)
+        ));
+        assert!(matches!(
+            decode_snapshot(
+                &bytes,
+                document,
+                book.version(),
+                DocumentVersion::new(3)?,
+                expected_hash,
+                "engine-v1",
                 "pxel-excel-subset-v1"
             ),
             Err(CodecError::Invalid)
@@ -385,6 +404,7 @@ mod tests {
                 &vec![0; MAX_SNAPSHOT_BYTES + 1],
                 document,
                 book.version(),
+                book.last_axis_change_version(),
                 expected_hash,
                 "engine-v1",
                 "pxel-excel-subset-v1"
@@ -396,6 +416,7 @@ mod tests {
                 &bytes,
                 document,
                 book.version(),
+                book.last_axis_change_version(),
                 [0; 32],
                 "engine-v1",
                 "pxel-excel-subset-v1"
