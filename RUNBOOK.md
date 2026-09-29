@@ -1,5 +1,37 @@
 # PXEL — RUNBOOK
 
+## 2026-09-29 — controlled interruption при публикации snapshot
+
+Перед срезом прочитаны AGENTS.md, roadmap, ADR-033, persistence/testing docs
+и текущий publisher/reader. Цель — проверить, что незавершённая публикация
+не активирует snapshot и не скрывает durable журнал. Инварианты:
+`ACTIVE` только после DB COMMIT, preferred pointer обновляется атомарно,
+reader не использует UPLOADING/STORED/VERIFIED, восстановленный domain hash
+совпадает с журналом. Риск: controlled early return не моделирует потерю
+питания и гарантию flush конкретного диска.
+
+В `publish_snapshot_inner` добавлены только test-only точки остановки после
+metadata INSERT, blob PUT, STORED, VERIFIED, UPDATE внутри activation
+transaction и activation COMMIT. Отдельный SQLx test использует настоящие
+PostgreSQL и LocalFilesystemBlobStore. Он проверяет metadata state, наличие
+объекта, preferred pointer и `recover_document` после каждой остановки.
+Пять остановок до COMMIT дают полный journal replay; UPDATE ACTIVE внутри
+незавершённой transaction откатывается. Остановка после COMMIT оставляет
+читаемый ACTIVE snapshot и preferred pointer. Ранее проверенный тест двух
+поколений и повреждения объекта также остался зелёным.
+
+Реально выполнено: targeted crash test 1/1, прежний snapshot test 1/1,
+`cargo clippy -p spreadsheet-storage --all-targets --all-features -- -D
+warnings`, общий `just check` (Rust fmt/clippy/tests/build, WASM,
+protobuf drift, frontend format/lint/typecheck, Vitest 71/71, Vite build),
+`just sqlx-check` и `node apps/web/scripts/check-presentation.mjs`
+(10 слайдов на 1440×900 и 390×844). Первый `just sqlx-check` выявил
+отсутствующую metadata для нового test query; выполнен `cargo sqlx prepare
+--workspace -- --all-targets --all-features`, затем check прошёл.
+Первый targeted run прошёл, но clippy выявил одинаковый префикс вариантов
+test enum; названия исправлены и targeted/clippy повторены. Power-loss,
+GC, полный persisted benchmark и S3 остаются открытыми.
+
 ## 2026-09-29 — domain benchmark snapshot + 10 000 tail events
 
 Перед срезом прочитаны AGENTS.md, roadmap, testing docs и действующие

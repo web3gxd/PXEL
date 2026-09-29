@@ -32,6 +32,32 @@ pub enum SnapshotError {
     Journal(#[from] JournalError),
     #[error("snapshot encoding worker failed")]
     WorkerFailed,
+    #[cfg(test)]
+    #[error("test interrupted snapshot publication")]
+    TestInterruption,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PublicationBoundary {
+    MetadataInsert,
+    BlobPut,
+    Stored,
+    Verified,
+    ActivationUpdate,
+    ActivationCommit,
+}
+
+#[cfg(test)]
+fn interrupt_at(
+    actual: PublicationBoundary,
+    requested: Option<PublicationBoundary>,
+) -> Result<(), SnapshotError> {
+    if requested == Some(actual) {
+        Err(SnapshotError::TestInterruption)
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -141,6 +167,27 @@ impl PgDatabase {
         engine_version: &str,
         compatibility_profile: &str,
     ) -> Result<SnapshotReceipt, SnapshotError> {
+        self.publish_snapshot_inner(
+            blobs,
+            snapshot_id,
+            workbook,
+            engine_version,
+            compatibility_profile,
+            #[cfg(test)]
+            None,
+        )
+        .await
+    }
+
+    async fn publish_snapshot_inner<B: BlobStore>(
+        &self,
+        blobs: &B,
+        snapshot_id: SnapshotId,
+        workbook: Arc<Workbook>,
+        engine_version: &str,
+        compatibility_profile: &str,
+        #[cfg(test)] interruption: Option<PublicationBoundary>,
+    ) -> Result<SnapshotReceipt, SnapshotError> {
         let document_id = workbook.document_id();
         let source = sqlx::query!(
             "SELECT o.payload, o.payload_checksum, o.canonical_event_hash, d.head_version, d.state FROM document_operations o JOIN documents d ON d.document_id=o.document_id WHERE o.document_id=$1 AND o.committed_version=$2",
@@ -181,6 +228,8 @@ impl PgDatabase {
             sql_number(workbook.last_axis_change_version().get())?, key_uuid,
             sql_number(body.len() as u64)?, &checksum[..], &workbook.hash()[..], engine_version, compatibility_profile
         ).execute(&self.pool).await?;
+        #[cfg(test)]
+        interrupt_at(PublicationBoundary::MetadataInsert, interruption)?;
         blobs
             .put(
                 &key,
@@ -188,7 +237,11 @@ impl PgDatabase {
                 Checksum::from_bytes(checksum),
             )
             .await?;
+        #[cfg(test)]
+        interrupt_at(PublicationBoundary::BlobPut, interruption)?;
         sqlx::query!("UPDATE document_snapshots SET state='STORED' WHERE snapshot_id=$1 AND state='UPLOADING'", key_uuid).execute(&self.pool).await?;
+        #[cfg(test)]
+        interrupt_at(PublicationBoundary::Stored, interruption)?;
         let verified = async {
             let verified = read_verified(blobs, &key, body_len, checksum).await?;
             codec::decode_snapshot(
@@ -208,6 +261,8 @@ impl PgDatabase {
             return Err(error);
         }
         sqlx::query!("UPDATE document_snapshots SET state='VERIFIED', verified_at=now() WHERE snapshot_id=$1 AND state='STORED'", key_uuid).execute(&self.pool).await?;
+        #[cfg(test)]
+        interrupt_at(PublicationBoundary::Verified, interruption)?;
         let mut tx = self.pool.begin().await?;
         let document = sqlx::query!(
             "SELECT head_version, state FROM documents WHERE document_id=$1 FOR UPDATE",
@@ -222,7 +277,11 @@ impl PgDatabase {
         }
         sqlx::query!("UPDATE document_snapshots SET state='ACTIVE', activated_at=now() WHERE snapshot_id=$1 AND state='VERIFIED'", key_uuid).execute(&mut *tx).await?;
         sqlx::query!("UPDATE documents SET preferred_snapshot_id=$2 WHERE document_id=$1 AND (preferred_snapshot_id IS NULL OR (SELECT snapshot_version FROM document_snapshots WHERE snapshot_id=preferred_snapshot_id) <= $3)", uuid(document_id.as_bytes()), key_uuid, sql_number(workbook.version().get())?).execute(&mut *tx).await?;
+        #[cfg(test)]
+        interrupt_at(PublicationBoundary::ActivationUpdate, interruption)?;
         tx.commit().await?;
+        #[cfg(test)]
+        interrupt_at(PublicationBoundary::ActivationCommit, interruption)?;
         Ok(SnapshotReceipt {
             snapshot_id,
             document_id,
@@ -447,6 +506,72 @@ mod tests {
         Ok(())
     }
 
+    async fn assert_publication_crash_boundaries(
+        db: &PgDatabase,
+        blobs: &LocalFilesystemBlobStore,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        book: Arc<Workbook>,
+    ) -> TestResult {
+        let cases = [
+            (PublicationBoundary::MetadataInsert, "UPLOADING", false),
+            (PublicationBoundary::BlobPut, "UPLOADING", true),
+            (PublicationBoundary::Stored, "STORED", true),
+            (PublicationBoundary::Verified, "VERIFIED", true),
+            (PublicationBoundary::ActivationUpdate, "VERIFIED", true),
+            (PublicationBoundary::ActivationCommit, "ACTIVE", true),
+        ];
+        for (index, (boundary, expected_state, object_exists)) in cases.into_iter().enumerate() {
+            let snapshot_id = SnapshotId::from_bytes([20 + index as u8; 16])?;
+            assert!(matches!(
+                Box::pin(db.publish_snapshot_inner(
+                    blobs,
+                    snapshot_id,
+                    book.clone(),
+                    "engine-v1",
+                    "pxel-v1",
+                    Some(boundary)
+                ))
+                .await,
+                Err(SnapshotError::TestInterruption)
+            ));
+            let metadata = sqlx::query!(
+                "SELECT state FROM document_snapshots WHERE snapshot_id=$1",
+                uuid(snapshot_id.as_bytes())
+            )
+            .fetch_one(&db.pool)
+            .await?;
+            assert_eq!(metadata.state, expected_state);
+            let preferred = sqlx::query!(
+                "SELECT preferred_snapshot_id FROM documents WHERE document_id=$1",
+                uuid(document_id.as_bytes())
+            )
+            .fetch_one(&db.pool)
+            .await?;
+            assert_eq!(
+                preferred.preferred_snapshot_id,
+                if boundary == PublicationBoundary::ActivationCommit {
+                    Some(uuid(snapshot_id.as_bytes()))
+                } else {
+                    None
+                }
+            );
+            let key = BlobKey::parse(&uuid(snapshot_id.as_bytes()).to_string())?;
+            assert_eq!(blobs.head(&key).await.is_ok(), object_exists);
+            let recovered = Box::pin(db.recover_document(blobs, identity, document_id)).await?;
+            assert_eq!(recovered.workbook.hash(), book.hash());
+            if boundary == PublicationBoundary::ActivationCommit {
+                assert_eq!(recovered.snapshot_version, Some(book.version()));
+                assert_eq!(recovered.replayed_events, 0);
+                assert_preferred(db, document_id, snapshot_id).await?;
+            } else {
+                assert_eq!(recovered.snapshot_version, None);
+                assert_eq!(recovered.replayed_events, book.version().get());
+            }
+        }
+        Ok(())
+    }
+
     #[sqlx::test(migrations = false)]
     async fn active_snapshot_round_trip_and_corrupt_newest_falls_back(
         pool: sqlx::PgPool,
@@ -610,5 +735,59 @@ mod tests {
         ))
         .await?;
         Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn interrupted_snapshot_publication_never_exposes_unverified_state(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        Box::pin(crash_scenario(pool)).await
+    }
+
+    async fn crash_scenario(pool: sqlx::PgPool) -> TestResult {
+        let db = PgDatabase { pool };
+        db.migrate().await?;
+        let identity = AuthenticatedActor {
+            actor_id: ActorId::from_bytes([1; 16])?,
+            workspace_id: WorkspaceId::from_bytes([2; 16])?,
+        };
+        db.issue_development_session([3; 32], identity.actor_id, identity.workspace_id)
+            .await?;
+        let document_id = DocumentId::from_bytes([4; 16])?;
+        let operation = Operation::CreateWorkbook {
+            sheet: SheetSeed {
+                id: SheetId::from_bytes([5; 16])?,
+                name: "Crash".into(),
+                rows: vec![RowId::from_bytes([6; 16])?],
+                columns: vec![ColumnId::from_bytes([7; 16])?],
+            },
+        };
+        let book = Workbook::empty(document_id).candidate(&operation, DocumentVersion::new(1)?)?;
+        db.create(
+            identity,
+            CommittedEvent {
+                document_id,
+                operation_id: OperationId::from_bytes([8; 16])?,
+                principal: EventPrincipal::User(identity.actor_id),
+                version: book.version(),
+                operation,
+                state_hash: book.hash(),
+            },
+        )
+        .await?;
+        let temp = tempfile::tempdir()?;
+        let blobs = LocalFilesystemBlobStore::new(
+            temp.path().join("blobs"),
+            codec::MAX_SNAPSHOT_BYTES as u64,
+        )
+        .await?;
+        Box::pin(assert_publication_crash_boundaries(
+            &db,
+            &blobs,
+            identity,
+            document_id,
+            Arc::new(book),
+        ))
+        .await
     }
 }

@@ -148,6 +148,8 @@ benchmark snapshot + 10 000 tail events дал 5.7527–8.6369 ms против
 17.024–20.579 ms для полного replay 20 001 events; условия —
 [отчёт](benchmarks/2026-09-29-snapshot-replay-domain-local.md). Crash matrix,
 GC, полный PostgreSQL/BlobStore benchmark и S3 contract остаются открытыми.
+Controlled interruption на шести границах publication уже проверил
+metadata/BlobStore/activation rollback; power-loss и GC сценарии не проверены.
 Локальный release baseline на одной машине (5×1000 samples, PostgreSQL
 durability on) дал худший p95 7.86 ms до ACK и 11.11 ms до второго клиента;
 условия и пределы находятся в [отчёте](benchmarks/2026-09-29-phase3-local.md).

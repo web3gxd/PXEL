@@ -13,6 +13,11 @@ ADR-033 добавил PostgreSQL snapshot metadata и внутренние publ
 contract ещё не подключены. Ниже отдельно
 названы действующие механизмы и будущие требования.
 
+Controlled interruption test останавливает публикацию на шести границах
+metadata/object/transaction и проверяет, что до COMMIT восстановление идёт
+из журнала, после COMMIT — из ACTIVE snapshot. Power-loss, GC и S3 crash
+tests ещё не проведены.
+
 ## PostgreSQL authority
 
 Метаданные tenant/users/memberships/documents/ACL и append-only operation log живут в PostgreSQL. Workbook не сохраняется единым JSON. Tables появляются с use cases; import/export jobs и snapshot metadata не создают видимость работающих функций до соответствующей фазы.

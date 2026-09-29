@@ -44,6 +44,13 @@ SetCellValue/ClearCell, вставку и удаление stable-ID строк/
 
 Recovery matrix: до transaction; после CAS/INSERT до второго statement; после COMMIT до publish/ACK; candidate failure; two writers CAS; unknown commit outcome; snapshot UPLOADING/STORED/VERIFIED/ACTIVE boundaries; object upload до metadata; replay interruption/gap/corrupt event. Невалидный candidate не сохраняется, committed event не теряется.
 
+Публикация snapshot имеет тест шести управляемых остановок на настоящих
+PostgreSQL и LocalFilesystemBlobStore: после metadata INSERT, blob PUT,
+STORED, VERIFIED, UPDATE внутри activation transaction и activation COMMIT.
+Тест проверяет metadata, preferred pointer и восстановление из журнала или
+ACTIVE snapshot. Это проверки границ исполнения, не симуляция потери питания;
+orphan cleanup и реальный процессный crash harness остаются отдельной работой.
+
 Formula differential corpus один для native/browser/WASM. Excel expected results имеют workbook/version/OS/locale/provenance и verified flag. Отсутствие Excel runtime dependency не запрещает ручную верификацию fixtures. Unknown/unsupported syntax coverage не заменяется фиктивным numerical fallback.
 
 Fuzz targets появляются с parsers: formulas, protobuf decode, snapshot decode, references/ranges, ZIP/package/XML. Stable proptest — основной повседневный gate. Если libFuzzer требует nightly, отдельный pinned testing job и ADR/обоснование, без nightly product runtime.

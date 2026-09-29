@@ -32,9 +32,19 @@ Reader видит только `ACTIVE`, повторно проверяет о�
 
 ## Границы
 
-API storage crate подключён к actor startup по ADR-034. Scheduler,
-исторический endpoint, GC, crash injection и S3 contract ещё не реализованы.
+API storage crate подключён к actor startup по ADR-034; scheduler добавлен
+ADR-035. Исторический endpoint, GC и S3 contract ещё не реализованы.
 На одном вызове reader проверяет
 не более 128 поколений: при их исчерпании возможен full replay. Временную
 I/O-ошибку reader возвращает, а повреждённый или отсутствующий объект
 пропускает. Production durability Windows filesystem и S3 не заявляются.
+
+## Проверка controlled interruption
+
+Test-only точки остановки после metadata INSERT, blob PUT, переходов STORED
+и VERIFIED, UPDATE внутри activation transaction и её COMMIT проверяют
+настоящие PostgreSQL/LocalFilesystemBlobStore adapters. До COMMIT reader
+видит только full journal replay, а preferred pointer остаётся пустым;
+обновление ACTIVE внутри незавершённой transaction откатывается. После
+COMMIT reader видит ACTIVE snapshot и preferred pointer. Это не тест
+потери питания, повреждения файловой системы или restart процесса.
