@@ -64,4 +64,6 @@ Wire compatibility: additive optional fields, reserved retired tags, explicit ca
 
 Round-trip acceptance: supported workbook import → edit → export → import сохраняет поддержанные values/formulas/styles и сообщает об отличиях. Нельзя назвать функцию Excel-compatible на основании одной интуитивной формулы или отсутствия panic.
 
-ADR-065: NOW/TODAY/RAND — Partially supported: persisted explicit epoch, native/WASM convergence, numeric serial без автоматического date formatting. Перед первым использованием нужно «Пересчитать»; automatic open/timer/dependency triggers и ручные Excel goldens остаются открыты. RAND sequence является собственным deterministic profile, не Excel RNG parity.
+ADR-065: NOW/TODAY/RAND — Partially supported: persisted epoch, native/WASM convergence, numeric serial без автоматического date formatting. ADR-066 создаёт первый контекст автоматически; кнопка «Пересчитать» создаёт следующий epoch. Automatic open-renewal/timer/dependency triggers и ручные Excel goldens остаются открыты. RAND sequence является собственным deterministic profile, не Excel RNG parity.
+
+ADR-066 снимает ручной bootstrap prerequisite для NOW/TODAY/RAND: первый durable контекст создаётся сервером автоматически. Статус всё ещё Partially supported до automatic dependency/timer epochs и Excel verification; compatible context/value сохраняется после reload.

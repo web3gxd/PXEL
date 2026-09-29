@@ -83,3 +83,5 @@ The first implementation slice should persist and replay the context with
 these invariants before enabling volatile functions or timer triggers.
 
 Update2026-09-30 ADR-065: explicit-epoch NOW/TODAY/RAND evaluator реализован; смена контекста dirty-all с budget, native snapshot restoration сохраняет calculated hash. Automatic open/timer/dependency admission и общая production snapshot/recovery matrix остаются открыты.
+
+Update2026-09-30 ADR-066: automatic first context при volatile edit/legacy read реализован. SystemCommitRequest проверяет tenant/роль/access epochs внутри PostgreSQL transaction. Receipt-first lookup и повторный refresh разрешают uncertain bootstrap без лишнего epoch. Полные automatic open/dependency/timer triggers остаются открыты.

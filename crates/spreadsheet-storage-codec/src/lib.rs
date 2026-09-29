@@ -1097,28 +1097,39 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
     Ok(h.finalize().into())
 }
 pub fn system_fingerprint(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
-    if e.principal != EventPrincipal::System
-        || !matches!(e.operation, Operation::AdvanceCalculationEpoch { .. })
-    {
+    let Operation::AdvanceCalculationEpoch { context } = &e.operation else {
+        return Err(CodecError::Invalid);
+    };
+    if e.principal != EventPrincipal::System {
         return Err(CodecError::Invalid);
     }
+    Ok(system_trigger_fingerprint(
+        e.document_id,
+        e.operation_id,
+        context,
+    ))
+}
+/// The same persisted idempotency key without constructing a synthetic event.
+pub fn system_trigger_fingerprint(
+    document_id: DocumentId,
+    operation_id: OperationId,
+    context: &CalculationContext,
+) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(b"PXEL-SYSTEM-COMMAND-1");
-    h.update(e.document_id.as_bytes());
-    h.update(e.operation_id.as_bytes());
-    if let Operation::AdvanceCalculationEpoch { context } = &e.operation {
-        h.update([context.reason() as u8]);
-        if context.reason() != CalculationReason::Explicit {
-            h.update(context.context_id().as_bytes());
-            h.update(context.effective_timestamp_utc_ms().to_le_bytes());
-            h.update(context.utc_offset_minutes().to_le_bytes());
-            h.update(context.civil_day_since_unix_epoch().to_le_bytes());
-            h.update(context.random_seed());
-            field(&mut h, context.engine_version().as_bytes());
-            field(&mut h, context.compatibility_profile().as_bytes());
-        }
+    h.update(document_id.as_bytes());
+    h.update(operation_id.as_bytes());
+    h.update([context.reason() as u8]);
+    if context.reason() != CalculationReason::Explicit {
+        h.update(context.context_id().as_bytes());
+        h.update(context.effective_timestamp_utc_ms().to_le_bytes());
+        h.update(context.utc_offset_minutes().to_le_bytes());
+        h.update(context.civil_day_since_unix_epoch().to_le_bytes());
+        h.update(context.random_seed());
+        field(&mut h, context.engine_version().as_bytes());
+        field(&mut h, context.compatibility_profile().as_bytes());
     }
-    Ok(h.finalize().into())
+    h.finalize().into()
 }
 pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
     let mut h = Sha256::new();

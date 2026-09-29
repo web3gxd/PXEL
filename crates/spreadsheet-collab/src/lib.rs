@@ -1,5 +1,6 @@
 //! Ordered document sessions; persistence remains behind application ports.
 mod axis_history;
+mod bootstrap;
 pub mod calculation;
 #[cfg(test)]
 mod historical_recovery_tests;
@@ -221,6 +222,7 @@ pub struct InProcessSessionDirectory<J> {
     recovery: Option<RecoveryFn>,
     historical: Option<HistoricalRecovery>,
     snapshots: Option<SnapshotSchedule>,
+    context_sampler: Option<bootstrap::Sampler>,
     sessions: Arc<Mutex<HashMap<DocumentId, DocumentSession>>>,
     calculation_slots: Arc<Semaphore>,
     recovery_slots: Arc<Semaphore>,
@@ -241,6 +243,11 @@ struct SnapshotSchedule {
     interval: NonZeroU64,
     enqueue: SnapshotEnqueue,
 }
+struct ActorOptions {
+    snapshots: Option<SnapshotSchedule>,
+    historical: Option<HistoricalRecovery>,
+    context_sampler: Option<bootstrap::Sampler>,
+}
 
 fn maybe_snapshot(schedule: Option<&SnapshotSchedule>, workbook: &Arc<Workbook>) {
     if let Some(schedule) = schedule {
@@ -258,6 +265,7 @@ impl<J: Clone> Clone for InProcessSessionDirectory<J> {
             recovery: self.recovery.clone(),
             historical: self.historical.clone(),
             snapshots: self.snapshots.clone(),
+            context_sampler: self.context_sampler.clone(),
             sessions: self.sessions.clone(),
             calculation_slots: self.calculation_slots.clone(),
             recovery_slots: self.recovery_slots.clone(),
@@ -272,6 +280,7 @@ impl<J> InProcessSessionDirectory<J> {
             recovery: None,
             historical: None,
             snapshots: None,
+            context_sampler: None,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             calculation_slots: Arc::new(Semaphore::new(2)),
             recovery_slots: Arc::new(Semaphore::new(4)),
@@ -319,6 +328,19 @@ impl<J> InProcessSessionDirectory<J> {
             interval,
             enqueue: Arc::new(enqueue),
         });
+        self
+    }
+    /// Trusted server clock/seed boundary; never a wire or persisted DTO.
+    pub fn with_context_sampler<F>(mut self, sampler: F) -> Self
+    where
+        F: Fn(
+                spreadsheet_domain::workbook::CalculationReason,
+            ) -> Result<(OperationId, CalculationContext), SessionError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.context_sampler = Some(Arc::new(sampler));
         self
     }
 }
@@ -381,8 +403,11 @@ impl<J: OperationJournal + Clone + Send + Sync + 'static> SessionDirectory
             receiver,
             calculation,
             head_sender,
-            self.snapshots.clone(),
-            self.historical.clone(),
+            ActorOptions {
+                snapshots: self.snapshots.clone(),
+                historical: self.historical.clone(),
+                context_sampler: self.context_sampler.clone(),
+            },
         ));
         Ok(session)
     }
@@ -394,9 +419,14 @@ async fn run<J: OperationJournal>(
     mut receiver: mpsc::Receiver<Request>,
     calculation: CalculationHandle,
     head_sender: watch::Sender<HeadUpdate>,
-    snapshots: Option<SnapshotSchedule>,
-    historical: Option<HistoricalRecovery>,
+    options: ActorOptions,
 ) {
+    let ActorOptions {
+        snapshots,
+        historical,
+        context_sampler,
+    } = options;
+    let mut bootstrap = bootstrap::Bootstrap::new(context_sampler);
     let mut axes = axis_history::AxisHistory::new(&initial);
     let mut workbook = Arc::new(initial);
     if workbook.version() != DocumentVersion::ZERO {
@@ -413,9 +443,18 @@ async fn run<J: OperationJournal>(
                 let _ = reply.send(result);
             }
             Request::Read { identity, reply } => {
-                let result = refresh(&journal, identity, &mut workbook, &calculation, &mut axes)
-                    .await
-                    .map(|_| workbook.as_ref().clone());
+                let result = async {
+                    refresh(&journal, identity, &mut workbook, &calculation, &mut axes).await?;
+                    let before = workbook.version();
+                    bootstrap
+                        .ensure(&journal, identity, &mut workbook, &calculation, &mut axes)
+                        .await?;
+                    if workbook.version() > before {
+                        maybe_snapshot(snapshots.as_ref(), &workbook);
+                    }
+                    Ok(workbook.as_ref().clone())
+                }
+                .await;
                 let _ = reply.send(result);
             }
             Request::Submit {
@@ -440,7 +479,20 @@ async fn run<J: OperationJournal>(
                     });
                     maybe_snapshot(snapshots.as_ref(), &workbook);
                 }
+                let volatile = matches!(&result, Ok(Submission::Committed { event, .. }) if bootstrap::operation_is_volatile(&event.operation));
                 let _ = reply.send(result);
+                if volatile {
+                    let before = workbook.version();
+                    if bootstrap
+                        .ensure(&journal, identity, &mut workbook, &calculation, &mut axes)
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!(event = "calculation_bootstrap_pending");
+                    } else if workbook.version() > before {
+                        maybe_snapshot(snapshots.as_ref(), &workbook);
+                    }
+                }
             }
             Request::AdvanceContext {
                 identity,
@@ -458,7 +510,8 @@ async fn run<J: OperationJournal>(
                     &calculation,
                     &mut axes,
                 )
-                .await;
+                .await
+                .and_then(|receipt| receipt.ok_or(SessionError::InvalidCommand));
                 if result.is_ok() && workbook.version() > before {
                     maybe_snapshot(snapshots.as_ref(), &workbook);
                 }
@@ -756,11 +809,32 @@ async fn advance_context<J: OperationJournal>(
     sampled_context: &CalculationContext,
     calculation: &CalculationHandle,
     axes: &mut axis_history::AxisHistory,
-) -> Result<CommitReceipt, SessionError> {
+) -> Result<Option<CommitReceipt>, SessionError> {
     for attempt in 0..3 {
         let access = refresh(journal, identity, workbook, calculation, axes).await?;
-        if !access.can_edit {
+        if sampled_context.reason() == spreadsheet_domain::workbook::CalculationReason::Explicit
+            && !access.can_edit
+        {
             return Err(JournalError::Unauthorized.into());
+        }
+        if let Some(receipt) = journal
+            .system_receipt(
+                identity,
+                workbook.document_id(),
+                operation_id,
+                sampled_context,
+            )
+            .await?
+        {
+            if receipt.current_head_version > workbook.version() {
+                refresh(journal, identity, workbook, calculation, axes).await?;
+            }
+            return Ok(Some(receipt));
+        }
+        if sampled_context.reason() != spreadsheet_domain::workbook::CalculationReason::Explicit
+            && bootstrap::needed(workbook).is_none()
+        {
+            return Ok(None);
         }
         let next = DocumentVersion::new(
             workbook
@@ -786,6 +860,8 @@ async fn advance_context<J: OperationJournal>(
             state_hash: candidate.hash(),
         };
         let request = SystemCommitRequest {
+            identity,
+            expected_access: access,
             expected_head: workbook.version(),
             event: event.clone(),
         };
@@ -795,11 +871,11 @@ async fn advance_context<J: OperationJournal>(
                 axes.publish(workbook, &event.operation, None);
                 calculation.publish(workbook.clone(), &event.operation);
                 tracing::info!(event = "calculation_epoch_advanced", version = next.get());
-                return Ok(receipt);
+                return Ok(Some(receipt));
             }
             Ok(CommitOutcome::AlreadyCommitted(receipt)) => {
                 refresh(journal, identity, workbook, calculation, axes).await?;
-                return Ok(receipt);
+                return Ok(Some(receipt));
             }
             Err(JournalError::Conflict) if attempt < 2 => continue,
             Err(error) => return Err(error.into()),

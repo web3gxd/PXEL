@@ -163,4 +163,6 @@ source/canonical text is retained; `current_text` reflects the transformed
 bound AST. Native replay and browser display are verified, while full Excel
 range parity remains outside the current profile. See ADR-024.
 
-ADR-065: engine0.8.0 включает NOW/TODAY/RAND только в сохранённом explicit epoch. NOW/TODAY возвращают numeric serial с fixed offset, RAND — 53-bit SHA256 derivation по document/epoch/stable cell/AST node/seed. Missing context — typed error, не host clock fallback. Смена контекста помечает все formulas dirty с graph budget. Automatic open/timer/dependency admission ещё не реализован; legacy context требует нового «Пересчитать».
+ADR-065: engine0.8.0 включает NOW/TODAY/RAND только в сохранённом epoch. NOW/TODAY возвращают numeric serial с fixed offset, RAND — 53-bit SHA256 derivation по document/epoch/stable cell/AST node/seed. Missing context — typed error, не host clock fallback. Смена контекста помечает все formulas dirty с graph budget. ADR-066 добавляет initial/legacy bootstrap; automatic open-renewal/timer/dependency admission ещё не реализован.
+
+ADR-066: первое сохранение volatile формулы автоматически записывает initial context отдельным system event после user commit. Authorized read legacy volatile книги также bootstrap/migrates context. Compatible epoch переиспользуется, repeated reads/replay не генерируют новое время; явная кнопка остаётся для следующего epoch. Timer/dependency advancement ещё не включён.

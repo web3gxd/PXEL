@@ -2,6 +2,36 @@ import { expect, test } from '@playwright/test';
 import { fromBinary } from '@bufbuild/protobuf';
 import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
 
+test('first volatile formula calculates without manual recalc and keeps context on reload', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  await bar.fill('=RAND()');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  const active = page.getByTestId('active-cell');
+  await expect(active).toHaveText(/^A1: 0\./);
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+  const value = await active.textContent();
+  const id = new URL(page.url()).searchParams.get('document');
+  const state = await (await page.request.get(`/api/documents/${id}`)).json();
+  expect(state.version).toBe('3');
+  expect(state.calculation_context.epoch).toBe('1');
+  expect(state.calculation_context.reason).toBe('open');
+  await page.reload();
+  await expect(active).toHaveText(value!);
+  await expect(bar).toHaveValue('=RAND()');
+  const restored = await (await page.request.get(`/api/documents/${id}`)).json();
+  expect(restored.version).toBe('3');
+  expect(restored.calculation_context).toEqual(state.calculation_context);
+});
+
 test('volatile RAND preview stays separate and durable epoch survives reload', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');

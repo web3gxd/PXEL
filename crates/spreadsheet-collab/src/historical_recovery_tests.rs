@@ -6,7 +6,7 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 // A rejecting boundary double, never a production persistence implementation.
 #[derive(Default)]
-struct RejectJournal(AtomicUsize);
+pub(crate) struct RejectJournal(AtomicUsize);
 macro_rules! reject {
     ($name:ident ($($arg:ident: $ty:ty),*) -> $output:ty) => {
         async fn $name(&self, $($arg: $ty),*) -> Result<$output, JournalError> {
@@ -21,6 +21,7 @@ impl OperationJournal for RejectJournal {
     reject!(load_undo_target(_identity: AuthenticatedActor, _document: DocumentId, _target: OperationId) -> CommittedEvent);
     reject!(commit(_request: &CommitRequest) -> CommitOutcome);
     reject!(commit_system(_request: &SystemCommitRequest) -> CommitOutcome);
+    reject!(system_receipt(_identity: AuthenticatedActor, _document: DocumentId, _operation: OperationId, _context: &CalculationContext) -> Option<CommitReceipt>);
     reject!(receipt(_identity: AuthenticatedActor, _command: &Command) -> Option<CommitReceipt>);
     async fn load_events(
         &self,

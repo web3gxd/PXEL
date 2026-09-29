@@ -387,3 +387,5 @@ metadata в strict Worker DTO. NOW/TODAY/RAND evaluator и автоматиче�
 volatile triggers ещё открыты; wire/storage schemas не менялись.
 
 ADR-065 включает deterministic NOW/TODAY/RAND в engine0.8.0 через explicit durable epoch. Native boundary/resource/golden tests, snapshot restoration, stateful native/browser parity и live PostgreSQL/reload/preview проверяются. Следующий обязательный срез — bounded/coalesced automatic epoch admission при open/volatile changes и timer только для volatile consumers. Общие MVP gates остаются открыты.
+
+ADR-066 добавляет automatic first context после volatile user commit и при authorized current read старой volatile книги. Transactional system ACL recheck и receipt-first coalescing закрывают гонки внешнего context/удаления formulas/receipt lookup. Compatible context сохраняется. Automatic dependency/open-renewal/timer epochs и общий MVP остаются обязательной дальнейшей работой.

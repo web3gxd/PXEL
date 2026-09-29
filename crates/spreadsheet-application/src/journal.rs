@@ -1,5 +1,6 @@
 use spreadsheet_domain::workbook::{
-    ActorId, Command, CommittedEvent, DocumentId, DocumentVersion, OperationId, WorkspaceId,
+    ActorId, CalculationContext, Command, CommittedEvent, DocumentId, DocumentVersion, OperationId,
+    WorkspaceId,
 };
 use std::future::Future;
 use thiserror::Error;
@@ -32,6 +33,8 @@ pub struct CommitRequest {
 /// Prepared, internal-only event. The caller must validate and apply it to a
 /// private candidate before asking the journal to advance the durable head.
 pub struct SystemCommitRequest {
+    pub identity: AuthenticatedActor,
+    pub expected_access: DocumentAccess,
     pub expected_head: DocumentVersion,
     pub event: CommittedEvent,
 }
@@ -101,6 +104,14 @@ pub trait OperationJournal: Send + Sync {
         &self,
         request: &SystemCommitRequest,
     ) -> impl Future<Output = Result<CommitOutcome, JournalError>> + Send;
+    /// Resolve an uncertain internal trigger before admitting another epoch.
+    fn system_receipt(
+        &self,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        operation_id: OperationId,
+        sampled_context: &CalculationContext,
+    ) -> impl Future<Output = Result<Option<CommitReceipt>, JournalError>> + Send;
     fn receipt(
         &self,
         identity: AuthenticatedActor,

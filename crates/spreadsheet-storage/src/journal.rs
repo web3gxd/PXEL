@@ -588,6 +588,25 @@ impl OperationJournal for PgDatabase {
         tx.commit().await.map_err(error)?;
         Ok(CommitOutcome::Committed(receipt))
     }
+    async fn system_receipt(
+        &self,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+        operation_id: OperationId,
+        sampled_context: &CalculationContext,
+    ) -> Result<Option<CommitReceipt>, JournalError> {
+        let mut tx = self.pool.begin().await.map_err(error)?;
+        let access = access_locked(&mut tx, identity, document_id).await?;
+        if sampled_context.reason() == CalculationReason::Explicit && !access.can_edit {
+            return Err(JournalError::Unauthorized);
+        }
+        let fingerprint =
+            codec::system_trigger_fingerprint(document_id, operation_id, sampled_context);
+        let receipt =
+            existing(&mut tx, document_id, operation_id, fingerprint, access.head).await?;
+        tx.commit().await.map_err(error)?;
+        Ok(receipt)
+    }
     async fn commit_system(
         &self,
         request: &SystemCommitRequest,
@@ -606,18 +625,13 @@ impl OperationJournal for PgDatabase {
         }
         let fingerprint = codec::system_fingerprint(event).map_err(invalid)?;
         let mut tx = self.pool.begin().await.map_err(error)?;
-        let row = sqlx::query!(
-            "SELECT head_version, state FROM documents WHERE document_id=$1 FOR UPDATE",
-            uuid(event.document_id.as_bytes())
-        )
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(error)?
-        .ok_or(JournalError::NotFound)?;
-        if row.state != "active" {
-            return Err(JournalError::Unavailable);
+        let access = access_locked(&mut tx, request.identity, event.document_id).await?;
+        if matches!(&event.operation, Operation::AdvanceCalculationEpoch { context } if context.reason() == CalculationReason::Explicit)
+            && !access.can_edit
+        {
+            return Err(JournalError::Unauthorized);
         }
-        let head = version(row.head_version)?;
+        let head = access.head;
         if let Some(receipt) = existing(
             &mut tx,
             event.document_id,
@@ -630,7 +644,10 @@ impl OperationJournal for PgDatabase {
             tx.commit().await.map_err(error)?;
             return Ok(CommitOutcome::AlreadyCommitted(receipt));
         }
-        if head != request.expected_head {
+        if head != request.expected_head
+            || access.document_access_epoch != request.expected_access.document_access_epoch
+            || access.membership_access_epoch != request.expected_access.membership_access_epoch
+        {
             return Err(JournalError::Conflict);
         }
         let updated = sqlx::query!(
@@ -867,6 +884,118 @@ impl PgDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Clone)]
+    struct ReceiptRaceJournal {
+        database: PgDatabase,
+        event: std::sync::Arc<SystemCommitRequest>,
+        pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    macro_rules! delegate_journal {
+        ($name:ident ($($arg:ident: $ty:ty),*) -> $output:ty) => {
+            async fn $name(&self,$($arg:$ty),*) -> Result<$output,JournalError> { self.database.$name($($arg),*).await }
+        };
+    }
+    impl OperationJournal for ReceiptRaceJournal {
+        delegate_journal!(quarantine(document:DocumentId) -> ());
+        delegate_journal!(access(identity:AuthenticatedActor,document:DocumentId) -> DocumentAccess);
+        delegate_journal!(create(identity:AuthenticatedActor,event:CommittedEvent) -> CommitReceipt);
+        delegate_journal!(load_events(identity:AuthenticatedActor,document:DocumentId,after:DocumentVersion,limit:u32) -> Vec<CommittedEvent>);
+        delegate_journal!(load_undo_target(identity:AuthenticatedActor,document:DocumentId,target:OperationId) -> CommittedEvent);
+        delegate_journal!(commit(request:&CommitRequest) -> CommitOutcome);
+        delegate_journal!(commit_system(request:&SystemCommitRequest) -> CommitOutcome);
+        delegate_journal!(receipt(identity:AuthenticatedActor,command:&Command) -> Option<CommitReceipt>);
+        async fn system_receipt(
+            &self,
+            identity: AuthenticatedActor,
+            document: DocumentId,
+            operation: OperationId,
+            context: &CalculationContext,
+        ) -> Result<Option<CommitReceipt>, JournalError> {
+            if self
+                .pending
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.database.commit_system(&self.event).await?;
+            }
+            self.database
+                .system_receipt(identity, document, operation, context)
+                .await
+        }
+    }
+    #[sqlx::test(migrations = false)]
+    async fn bootstrap_receipt_race_refreshes_before_returning_projection(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        use spreadsheet_collab::SessionDirectory;
+        use std::sync::{Arc, atomic::AtomicBool};
+        let (database, identity, book) = fixture(pool).await?;
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        let mut formula = request(&database, identity, &book, 109).await?;
+        formula.command.operation = CommandPayload::SetCellFormula {
+            address,
+            source: spreadsheet_domain::formula::FormulaSource::new("=NOW()".into())?,
+        };
+        formula.event.operation = Operation::SetCellFormula {
+            address,
+            formula: spreadsheet_formula::binder::bind("=NOW()", &book, address)?,
+        };
+        let authored = book.candidate(&formula.event.operation, DocumentVersion::new(2)?)?;
+        formula.event.state_hash = authored.hash();
+        database.commit(&formula).await?;
+        let context = CalculationContext::new(
+            CalculationContextId::from_bytes([110; 16])?,
+            1,
+            86400000,
+            0,
+            1,
+            [111; 32],
+            spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+            spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+            CalculationReason::Open,
+        )?;
+        let operation = Operation::AdvanceCalculationEpoch {
+            context: context.clone(),
+        };
+        let expected = authored.candidate(&operation, DocumentVersion::new(3)?)?;
+        let operation_id = OperationId::from_bytes([112; 16])?;
+        let journal = ReceiptRaceJournal {
+            database: database.clone(),
+            pending: Arc::new(AtomicBool::new(true)),
+            event: Arc::new(SystemCommitRequest {
+                identity,
+                expected_access: database.access(identity, book.document_id()).await?,
+                expected_head: authored.version(),
+                event: CommittedEvent {
+                    document_id: book.document_id(),
+                    operation_id,
+                    principal: EventPrincipal::System,
+                    version: expected.version(),
+                    operation,
+                    state_hash: expected.hash(),
+                },
+            }),
+        };
+        let directory = spreadsheet_collab::InProcessSessionDirectory::new(journal)
+            .with_context_sampler(move |_| Ok((operation_id, context.clone())));
+        let session = directory.session(identity, book.document_id()).await?;
+        let returned = session.read(identity).await?;
+        assert_eq!(returned.version().get(), 3);
+        assert_eq!(returned.hash(), expected.hash());
+        assert_eq!(session.head(identity).await?.get(), 3);
+        assert_eq!(
+            database
+                .access(identity, book.document_id())
+                .await?
+                .head
+                .get(),
+            3
+        );
+        Ok(())
+    }
     type TestResult = Result<(), Box<dyn std::error::Error>>;
     #[sqlx::test(migrations = false)]
     async fn imported_events_publish_atomically_and_retry_exactly(
@@ -1817,6 +1946,8 @@ mod tests {
         let operation = Operation::AdvanceCalculationEpoch { context };
         let candidate = book.candidate(&operation, DocumentVersion::new(2)?)?;
         let request = SystemCommitRequest {
+            identity,
+            expected_access: db.access(identity, book.document_id()).await?,
             expected_head: book.version(),
             event: CommittedEvent {
                 document_id: book.document_id(),
@@ -1864,6 +1995,8 @@ mod tests {
             Some(1)
         );
         let duplicate_http_trigger = SystemCommitRequest {
+            identity,
+            expected_access: request.expected_access,
             event: CommittedEvent {
                 operation: Operation::AdvanceCalculationEpoch {
                     context: CalculationContext::new(
@@ -1887,6 +2020,8 @@ mod tests {
             CommitOutcome::AlreadyCommitted(_)
         ));
         let collision = SystemCommitRequest {
+            identity,
+            expected_access: request.expected_access,
             event: CommittedEvent {
                 operation: Operation::AdvanceCalculationEpoch {
                     context: CalculationContext::new(
@@ -1912,6 +2047,243 @@ mod tests {
         Ok(())
     }
 
+    async fn bootstrap_external_progress_case(pool: sqlx::PgPool, mode: u8) -> TestResult {
+        use spreadsheet_collab::SessionDirectory;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let (db, identity, book) = fixture(pool).await?;
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        let mut formula = request(&db, identity, &book, 101).await?;
+        formula.command.operation = CommandPayload::SetCellFormula {
+            address,
+            source: spreadsheet_domain::formula::FormulaSource::new("=NOW()".into())?,
+        };
+        formula.event.operation = Operation::SetCellFormula {
+            address,
+            formula: spreadsheet_formula::binder::bind("=NOW()", &book, address)?,
+        };
+        let authored = book.candidate(&formula.event.operation, DocumentVersion::new(2)?)?;
+        formula.event.state_hash = authored.hash();
+        db.commit(&formula).await?;
+        sqlx::raw_sql("CREATE FUNCTION fail_bootstrap_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.principal_kind='system' THEN RAISE EXCEPTION 'injected'; END IF; RETURN NEW; END $$; CREATE TRIGGER fail_bootstrap_event BEFORE INSERT ON document_operations FOR EACH ROW EXECUTE FUNCTION fail_bootstrap_event()") .execute(&db.pool).await?;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let directory = spreadsheet_collab::InProcessSessionDirectory::new(db.clone())
+            .with_context_sampler(move |reason| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok((
+                    OperationId::from_bytes([102; 16])?,
+                    CalculationContext::new(
+                        CalculationContextId::from_bytes([103; 16])?,
+                        1,
+                        0,
+                        0,
+                        0,
+                        [104; 32],
+                        spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                        spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                        reason,
+                    )?,
+                ))
+            });
+        let session = directory.session(identity, book.document_id()).await?;
+        assert!(session.read(identity).await.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(db.access(identity, book.document_id()).await?.head.get(), 2);
+        sqlx::raw_sql("DROP TRIGGER fail_bootstrap_event ON document_operations")
+            .execute(&db.pool)
+            .await?;
+        let expected = if mode == 1 {
+            let mut clear = request(&db, identity, &authored, 105).await?;
+            clear.command.operation = CommandPayload::ClearCell { address };
+            clear.event.operation = Operation::ClearCell { address };
+            let candidate = authored.candidate(&clear.event.operation, DocumentVersion::new(3)?)?;
+            clear.event.state_hash = candidate.hash();
+            db.commit(&clear).await?;
+            candidate
+        } else {
+            let resolved = mode == 2;
+            let operation = Operation::AdvanceCalculationEpoch {
+                context: CalculationContext::new(
+                    CalculationContextId::from_bytes([if resolved { 103 } else { 106 }; 16])?,
+                    1,
+                    if resolved { 0 } else { 86400000 },
+                    0,
+                    if resolved { 0 } else { 1 },
+                    [if resolved { 104 } else { 107 }; 32],
+                    spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                    spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                    if resolved {
+                        CalculationReason::Open
+                    } else {
+                        CalculationReason::Explicit
+                    },
+                )?,
+            };
+            let candidate = authored.candidate(&operation, DocumentVersion::new(3)?)?;
+            db.commit_system(&SystemCommitRequest {
+                identity,
+                expected_access: db.access(identity, book.document_id()).await?,
+                expected_head: authored.version(),
+                event: CommittedEvent {
+                    document_id: book.document_id(),
+                    operation_id: OperationId::from_bytes([if resolved { 102 } else { 108 }; 16])?,
+                    principal: EventPrincipal::System,
+                    version: candidate.version(),
+                    operation,
+                    state_hash: candidate.hash(),
+                },
+            })
+            .await?;
+            candidate
+        };
+        let refreshed = session.read(identity).await?;
+        assert_eq!(refreshed.hash(), expected.hash());
+        assert_eq!(refreshed.version().get(), 3);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(db.access(identity, book.document_id()).await?.head.get(), 3);
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
+    async fn bootstrap_pending_is_superseded_by_external_context(pool: sqlx::PgPool) -> TestResult {
+        bootstrap_external_progress_case(pool, 0).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn bootstrap_pending_is_cancelled_after_last_volatile_formula_removed(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        bootstrap_external_progress_case(pool, 1).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn bootstrap_pending_receipt_resolves_without_another_epoch(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        bootstrap_external_progress_case(pool, 2).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn system_trigger_checks_role_epochs_and_revocation_inside_commit(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        let (db, identity, book) = fixture(pool).await?;
+        let make = |reason| -> Result<Operation, DomainError> {
+            Ok(Operation::AdvanceCalculationEpoch {
+                context: CalculationContext::new(
+                    CalculationContextId::from_bytes([92; 16])?,
+                    1,
+                    0,
+                    0,
+                    0,
+                    [93; 32],
+                    "pxel-formula-0.8.0".into(),
+                    "pxel-excel-subset-v1".into(),
+                    reason,
+                )?,
+            })
+        };
+        let operation = make(CalculationReason::Explicit)?;
+        let candidate = book.candidate(&operation, DocumentVersion::new(2)?)?;
+        let mut request = SystemCommitRequest {
+            identity,
+            expected_access: db.access(identity, book.document_id()).await?,
+            expected_head: book.version(),
+            event: CommittedEvent {
+                document_id: book.document_id(),
+                operation_id: OperationId::from_bytes([94; 16])?,
+                principal: EventPrincipal::System,
+                version: candidate.version(),
+                operation,
+                state_hash: candidate.hash(),
+            },
+        };
+        sqlx::raw_sql("UPDATE documents SET access_epoch=access_epoch+1")
+            .execute(&db.pool)
+            .await?;
+        assert!(matches!(
+            db.commit_system(&request).await,
+            Err(JournalError::Conflict)
+        ));
+        assert_eq!(
+            db.access(identity, book.document_id()).await?.head,
+            book.version()
+        );
+        request.expected_access = db.access(identity, book.document_id()).await?;
+        sqlx::raw_sql("UPDATE document_permissions SET role='viewer'")
+            .execute(&db.pool)
+            .await?;
+        assert!(matches!(
+            db.commit_system(&request).await,
+            Err(JournalError::Unauthorized)
+        ));
+        request.event.operation = make(CalculationReason::Open)?;
+        request.event.state_hash = book
+            .candidate(&request.event.operation, DocumentVersion::new(2)?)?
+            .hash();
+        assert!(matches!(
+            db.commit_system(&request).await?,
+            CommitOutcome::Committed(_)
+        ));
+        assert!(matches!(
+            db.commit_system(&request).await?,
+            CommitOutcome::AlreadyCommitted(_)
+        ));
+        sqlx::raw_sql("DELETE FROM document_permissions")
+            .execute(&db.pool)
+            .await?;
+        assert!(matches!(
+            db.commit_system(&request).await,
+            Err(JournalError::Unauthorized)
+        ));
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
+    async fn system_trigger_cannot_cross_tenant_after_preflight(pool: sqlx::PgPool) -> TestResult {
+        let (db, identity, book) = fixture(pool).await?;
+        let operation = Operation::AdvanceCalculationEpoch {
+            context: CalculationContext::new(
+                CalculationContextId::from_bytes([95; 16])?,
+                1,
+                0,
+                0,
+                0,
+                [96; 32],
+                "pxel-formula-0.8.0".into(),
+                "pxel-excel-subset-v1".into(),
+                CalculationReason::Open,
+            )?,
+        };
+        let candidate = book.candidate(&operation, DocumentVersion::new(2)?)?;
+        let request = SystemCommitRequest {
+            identity: AuthenticatedActor {
+                workspace_id: WorkspaceId::from_bytes([97; 16])?,
+                ..identity
+            },
+            expected_access: db.access(identity, book.document_id()).await?,
+            expected_head: book.version(),
+            event: CommittedEvent {
+                document_id: book.document_id(),
+                operation_id: OperationId::from_bytes([98; 16])?,
+                principal: EventPrincipal::System,
+                version: candidate.version(),
+                operation,
+                state_hash: candidate.hash(),
+            },
+        };
+        assert!(matches!(
+            db.commit_system(&request).await,
+            Err(JournalError::Unauthorized) | Err(JournalError::NotFound)
+        ));
+        assert_eq!(
+            db.access(identity, book.document_id()).await?.head,
+            book.version()
+        );
+        Ok(())
+    }
     #[sqlx::test(migrations = false)]
     async fn system_cas_retry_reuses_sampled_context_after_user_commit(
         pool: sqlx::PgPool,
@@ -1934,6 +2306,8 @@ mod tests {
         };
         let before_user = book.candidate(&operation, DocumentVersion::new(2)?)?;
         let stale = SystemCommitRequest {
+            identity,
+            expected_access: db.access(identity, book.document_id()).await?,
             expected_head: book.version(),
             event: CommittedEvent {
                 document_id: book.document_id(),
@@ -1957,6 +2331,8 @@ mod tests {
         after_user.apply_event(&user.event)?;
         let candidate = after_user.candidate(&operation, DocumentVersion::new(3)?)?;
         let retry = SystemCommitRequest {
+            identity,
+            expected_access: db.access(identity, book.document_id()).await?,
             expected_head: after_user.version(),
             event: CommittedEvent {
                 version: DocumentVersion::new(3)?,

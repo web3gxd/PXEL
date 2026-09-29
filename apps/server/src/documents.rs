@@ -14,7 +14,6 @@ use spreadsheet_storage::{ExportAuditError, PermissionError, PermissionRole, Sna
 use spreadsheet_wire_protocol::{self as wire, v1};
 use spreadsheet_xlsx::{NormalizedCell, NormalizedCellValue, NormalizedSheet, NormalizedWorkbook};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -154,29 +153,8 @@ pub async fn recalculate(
     let document_id = DocumentId::from_bytes(parse_id(&id)?).map_err(domain_error)?;
     let operation_id =
         OperationId::from_bytes(parse_id(&input.operation_id)?).map_err(domain_error)?;
-    let milliseconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "clock_unavailable"))?
-        .as_millis();
-    let timestamp = i64::try_from(milliseconds)
-        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "clock_unavailable"))?;
-    let civil_day = i32::try_from(timestamp.div_euclid(86_400_000))
-        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "clock_unavailable"))?;
-    let mut seed = [0_u8; 32];
-    seed[..16].copy_from_slice(Uuid::new_v4().as_bytes());
-    seed[16..].copy_from_slice(Uuid::new_v4().as_bytes());
-    let context = CalculationContext::new(
-        CalculationContextId::from_bytes(*Uuid::now_v7().as_bytes()).map_err(domain_error)?,
-        1,
-        timestamp,
-        0,
-        civil_day,
-        seed,
-        spreadsheet_collab::calculation::ENGINE_VERSION.into(),
-        spreadsheet_collab::calculation::COMPATIBILITY_PROFILE.into(),
-        CalculationReason::Explicit,
-    )
-    .map_err(domain_error)?;
+    let (_, context) = crate::calculation_context::sample(CalculationReason::Explicit)
+        .map_err(session_api_error)?;
     let session = state
         .sessions
         .session(principal.identity, document_id)

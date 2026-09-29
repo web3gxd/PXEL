@@ -37,6 +37,46 @@ beforeEach(async () => {
   await delay(1100);
 });
 
+test('volatile first edit bootstraps one durable context without manual recalculation', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  assert.equal(snapshot.calculation_context, null);
+  const first = await connect(base, cookie);
+  const second = await connect(base, cookie);
+  try {
+    const command = formulaCommand(first, snapshot, '=RAND()');
+    const committed = await first.send(command);
+    assert.equal(committed.case, 'committed');
+    assert.equal(committed.value.committedVersion, 2n);
+    const projections = await Promise.all(
+      Array.from({ length: 8 }, () => getDocument(base, cookie, snapshot.document_id)),
+    );
+    const projection = projections[0];
+    assert.equal(projection.version, '3');
+    assert.equal(projection.calculation_context.epoch, '1');
+    assert.equal(projection.calculation_context.reason, 'open');
+    for (const state of projections)
+      assert.deepEqual(state.calculation_context, projection.calculation_context);
+    const result = await calculation(base, cookie, snapshot.document_id, 3);
+    assert.equal(result.status, 'complete');
+    assert.equal(result.values[0].value.type, 'number');
+    assert.ok(result.values[0].value.value >= 0 && result.values[0].value.value < 1);
+    const duplicate = await first.send(command);
+    assert.equal(duplicate.case, 'receipt');
+    assert.equal(duplicate.value.committedVersion, 2n);
+    const later = await second.send(formulaCommand(second, snapshot, '=NOW()', { column: 1 }));
+    assert.equal(later.case, 'committed');
+    assert.equal(later.value.committedVersion, 4n);
+    const after = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(after.version, '4');
+    assert.deepEqual(after.calculation_context, projection.calculation_context);
+    assert.equal((await calculation(base, cookie, snapshot.document_id, 4)).status, 'complete');
+  } finally {
+    first.socket.terminate();
+    second.socket.terminate();
+  }
+});
+
 test('volatile formulas use durable context and survive epoch change and reload', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);

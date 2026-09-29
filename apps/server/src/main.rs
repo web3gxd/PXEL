@@ -1,4 +1,5 @@
 mod auth;
+mod calculation_context;
 mod calculation_stream;
 mod config;
 mod delivery;
@@ -523,6 +524,7 @@ async fn main() -> anyhow::Result<()> {
                     })
             }
         })
+        .with_context_sampler(calculation_context::sample)
         .with_snapshot_enqueue(snapshot_interval, move |workbook| {
             if snapshot_sender.try_send(workbook).is_err() {
                 tracing::warn!(event = "snapshot_queue_full_or_closed");
