@@ -418,3 +418,13 @@ one-based positions; detailed outcomes are recorded in RUNBOOK.
 Preliminary100k bound evaluator measurements are in benchmarks/2026-09-30-match-local.md;
 controlled-runner attribution is still needed. VLOOKUP/HLOOKUP and XLOOKUP plus
 conditional aggregates remain next functional work; general MVP gates stay open.
+
+VLOOKUP/HLOOKUP bounded table slice (ADR072) locally verified:443 shared fixtures,
+1010books/2020patches native/browser parity, seven native table tests and two
+source/selector/structural tests passed. Real PostgreSQL50 HTTP,86 browser,
+83frontend unit and2hard-restart tests passed. Scalar result semantics, typed
+boundary errors and positional return index documented; manual Excel/locale,
+dynamic selected dependencies and arrays remain open. Preliminary100k-cell table
+benchmark in benchmarks/2026-09-30-table-lookup-local.md. Next functional slice:
+XLOOKUP, then conditional aggregates; broader XLSX/structure/recovery/load and
+Linux/Compose/remote CI/production gates remain open. This is not full-MVP completion.

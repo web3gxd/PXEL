@@ -109,6 +109,66 @@ test(
         });
         assert.equal(grant.status, 200);
         const recipient = await login(base, recipientAccount, ownerIdentity.workspace_id);
+        const tableSource = '=VLOOKUP(7,A1:A2,1,FALSE)+HLOOKUP(7,A1:A2,2,FALSE)';
+        const { snapshot: tableBook } = await createDocument(base, cookie);
+        const tableWriter = await connect(base, cookie);
+        assert.equal(
+          (await tableWriter.send(setCommand(tableWriter, tableBook, 7))).case,
+          'committed',
+        );
+        assert.equal(
+          (
+            await tableWriter.send(
+              setCommand(tableWriter, { ...tableBook, version: '2' }, 13, { row: 1, sequence: 2 }),
+            )
+          ).case,
+          'committed',
+        );
+        const tableCommand = formulaCommand(
+          tableWriter,
+          { ...tableBook, version: '3' },
+          tableSource,
+          { column: 1, sequence: 3 },
+        );
+        const tableAck = await tableWriter.send(tableCommand);
+        assert.equal(tableAck.case, 'committed');
+        const tableBefore = await calculation(base, cookie, tableBook.document_id, 4);
+        assert.deepEqual(tableBefore.values[0].value, { type: 'number', value: 20 });
+        tableWriter.socket.terminate();
+        await kill();
+        await start();
+        const tableRestored = await getDocument(base, cookie, tableBook.document_id);
+        assert.equal(tableRestored.version, '4');
+        assert.equal(
+          tableRestored.state_hash,
+          Buffer.from(tableAck.value.confirmedStateHash).toString('hex'),
+        );
+        assert.equal(
+          tableRestored.sheets[0].cells.find((cell) => cell.value.type === 'formula').value.value
+            .source,
+          tableSource,
+        );
+        const tableAfter = await calculation(base, cookie, tableBook.document_id, 4);
+        assert.equal(tableAfter.calculated_state_hash, tableBefore.calculated_state_hash);
+        assert.deepEqual(tableAfter.values, tableBefore.values);
+        const tableEditor = await connect(base, cookie);
+        try {
+          assert.equal((await tableEditor.send(tableCommand)).case, 'receipt');
+          assert.equal(
+            (
+              await tableEditor.send(
+                setCommand(tableEditor, tableRestored, 21, { row: 1, sequence: 4 }),
+              )
+            ).case,
+            'committed',
+          );
+          assert.deepEqual(
+            (await calculation(base, cookie, tableBook.document_id, 5)).values[0].value,
+            { type: 'number', value: 28 },
+          );
+        } finally {
+          tableEditor.socket.terminate();
+        }
         assert.equal((await getDocument(base, recipient, snapshot.document_id)).version, '3');
         client.socket.terminate();
         await kill();

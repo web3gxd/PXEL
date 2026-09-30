@@ -2,7 +2,7 @@
 use crate::{
     Ast, EvaluationBudget, EvaluationError, FormulaError, MAX_DEPTH, MAX_RANGE_CELLS,
     MAX_SOURCE_BYTES, Node, NodeId, RangeReference, ReferenceResolver, Value,
-    evaluator::{eval, numeric},
+    evaluator::{eval, logical, number, numeric},
     index::Selection,
 };
 use std::cmp::Ordering;
@@ -211,6 +211,13 @@ pub(crate) fn call(
         }
         Selection::Value(_) => return Ok(Value::Error(FormulaError::Value)),
     };
+    let (rows, columns) = normalize(&mut range)?;
+    if rows != 1 && columns != 1 {
+        return Ok(Value::Error(FormulaError::Value));
+    }
+    search(&range, lookup, mode, resolver, budget)
+}
+fn normalize(range: &mut RangeReference) -> Result<(u32, u32), EvaluationError> {
     if range.start.sheet != range.end.sheet
         || range.start.row >= 1_048_576
         || range.end.row >= 1_048_576
@@ -219,12 +226,8 @@ pub(crate) fn call(
     {
         return Err(EvaluationError::InvalidAst);
     }
-    let expected = range.cell_count();
-    if expected > MAX_RANGE_CELLS {
+    if range.cell_count() > MAX_RANGE_CELLS {
         return Err(EvaluationError::CalculationLimitExceeded);
-    }
-    if range.start.row != range.end.row && range.start.column != range.end.column {
-        return Ok(Value::Error(FormulaError::Value));
     }
     let (row, col) = (
         range.start.row.min(range.end.row),
@@ -234,6 +237,111 @@ pub(crate) fn call(
     range.end.column = range.start.column.max(range.end.column);
     range.start.row = row;
     range.start.column = col;
+    Ok((range.end.row - row + 1, range.end.column - col + 1))
+}
+
+fn checked_scalar(value: Value, budget: &mut EvaluationBudget) -> Result<Value, EvaluationError> {
+    if matches!(value, Value::Array { .. }) {
+        return Err(EvaluationError::UnsupportedCompatibilityFeature);
+    }
+    if let Value::Text(text) = &value {
+        if text.len() > MAX_SOURCE_BYTES {
+            return Err(EvaluationError::CalculationLimitExceeded);
+        }
+        for _ in text.chars() {
+            budget.charge()?;
+        }
+    }
+    Ok(value)
+}
+pub(crate) fn table_call(
+    ast: &Ast,
+    args: &[NodeId],
+    vertical: bool,
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Value, EvaluationError> {
+    budget.charge()?;
+    if depth > MAX_DEPTH {
+        return Err(EvaluationError::CalculationLimitExceeded);
+    }
+    if !(3..=4).contains(&args.len()) {
+        return Ok(Value::Error(FormulaError::Value));
+    }
+    let lookup = match key(eval(ast, args[0], resolver, budget, depth + 1)?, budget)? {
+        Key::Error(error) => return Ok(Value::Error(error)),
+        Key::Blank => Key::Number(0.0),
+        value => value,
+    };
+    let mut table = match source(ast, args[1], resolver, budget, depth)? {
+        Selection::Reference(range) => range,
+        Selection::Value(Value::Error(error)) => return Ok(Value::Error(error)),
+        Selection::Value(Value::Array { .. }) => {
+            return Err(EvaluationError::UnsupportedCompatibilityFeature);
+        }
+        Selection::Value(_) => return Ok(Value::Error(FormulaError::Value)),
+    };
+    let (rows, columns) = normalize(&mut table)?;
+    let index = checked_scalar(eval(ast, args[2], resolver, budget, depth + 1)?, budget)?;
+    let index = match numeric(index) {
+        Ok(n) if n >= 1.0 => n.trunc(),
+        Ok(_) => return Ok(Value::Error(FormulaError::Value)),
+        Err(error) => return Ok(Value::Error(error)),
+    };
+    let extent = if vertical { columns } else { rows };
+    if index > f64::from(extent) {
+        return Ok(Value::Error(FormulaError::Ref));
+    }
+    let approximate = if let Some(id) = args.get(3) {
+        let mode = checked_scalar(eval(ast, *id, resolver, budget, depth + 1)?, budget)?;
+        match logical(mode) {
+            Ok(value) => value,
+            Err(error) => return Ok(Value::Error(error)),
+        }
+    } else {
+        true
+    };
+    let mut axis = table.clone();
+    if vertical {
+        axis.end.column = axis.start.column;
+    } else {
+        axis.end.row = axis.start.row;
+    }
+    let position = match search(&axis, lookup, i8::from(approximate), resolver, budget)? {
+        Value::Number(n) => n as u32,
+        value => return Ok(value),
+    };
+    // Search cardinality and index bounds prove offsets fit within the table.
+    let mut selected = table.start;
+    if vertical {
+        selected.row += position - 1;
+        selected.column += index as u32 - 1;
+    } else {
+        selected.row += index as u32 - 1;
+        selected.column += position - 1;
+    }
+    budget.charge()?;
+    let value = checked_scalar(resolver.resolve_cell(&selected), budget)?;
+    Ok(match value {
+        Value::Blank => Value::Number(0.0),
+        Value::Number(n) => number(n),
+        Value::DateTime { serial, system } if serial.is_finite() => Value::DateTime {
+            serial: if serial == 0.0 { 0.0 } else { serial },
+            system,
+        },
+        Value::DateTime { .. } => Value::Error(FormulaError::Num),
+        value => value,
+    })
+}
+fn search(
+    range: &RangeReference,
+    lookup: Key,
+    mode: i8,
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+) -> Result<Value, EvaluationError> {
+    let expected = range.cell_count();
     let tokens = if let (0, Key::Text(text)) = (mode, &lookup) {
         Some(pattern(text, budget)?)
     } else {
@@ -244,7 +352,7 @@ pub(crate) fn call(
     let mut previous = None;
     let mut error = None;
     let mut unsorted = false;
-    resolver.visit_range(&range, &mut |value| {
+    resolver.visit_range(range, &mut |value| {
         budget.charge()?;
         visits += 1;
         if visits > expected {

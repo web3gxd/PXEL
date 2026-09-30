@@ -3113,3 +3113,71 @@ Final0.10 admission regressions: collab22/22 plus2ignored passed10.02s, actual-P
 Final MATCH: full Playwright84/84 passed4.9min (83246 terminalexit0). Recovery2/2 passed8746.158ms, including additive separate MATCH book: source/content hash and calculated hash match after hard kill, prior command returnsreceipt, subsequentsource edit changes2->10. Existing INDEX/scalar/ACL/convergence assertions retained. Verified29612 stopped only after fullbrowser, exit captured immediately and finally restarted hidden29072; PG/data preserved.
 
 Added structural MATCH position test after final runtime suite: initial test failedInvalidProjection because it used cell-edit prepare helper for axis operations. Read real calculation lane/source: structural operations deliberately rebuild graph. Fixed test to use that existing production path; assertions2->3->2 remain unchanged. Targeted dependency/structural2/2 and final formula all-targets clippy passed. No production change for this correction, so completed native/WASM/live evidence remains scoped to the same production code. ADR071 accepted for bounded MATCH slice only. Changed purelookup/helpervisibility/dispatch/currentversionguards, tests/fixtures/parity, HTTP/browser/recovery, benchmark and docs; no new dependencies or schemas. Final format/readiness/diff and gitcommit follow. Full original MVP remains active; VLOOKUP/HLOOKUP are next, plus XLOOKUP/criteria/full XLSX/structure/recovery/load/manualExcel/Linux/Compose/CI gates.
+
+## 2026-09-30 — VLOOKUP/HLOOKUP table slice, in progress
+
+Previous goal turn was status-only/no progress. Revalidated current worktree,
+AGENTS, roadmap and ADR072. Continued incremental/TDD workflow. Pure table lookup
+reuses MATCH search, validates whole table, visits only key axis and selected
+return cell, and returns scalar values. No new dependencies or schema changes.
+Initial basic RED was NAME; native implementation is now green. Added transpose
+property with independent exact/floor oracle, duplicate/scalar/coercion/index/error
+tests, instrumented axis/selected-cell reads and malformed visitor cardinality.
+Oversized-table test first failed at parser LimitExceeded; corrected it to assert
+that existing parser gate explicitly, without weakening the range limit. Runtime
+AST boundary coverage is still pending. Clippy found needless borrow and a
+redundant test guard, both corrected without suppressions.
+
+Actually passed six table tests, four existing MATCH tests, and native shared
+corpus443 fixtures (34 new derived table cases); formula all-targets clippy passed.
+Independent read-only review found no concrete defect and requested further
+argument/DateTime/runtime-cap/dependency tests. Reviewer ran no tests. Fixtures
+remain explicitly not manually verified in Excel. Engine bump, WASM parity,
+real PostgreSQL/UI/restart and benchmark verification remain pending; ADR072 is
+PROPOSED. Local running binary is still previous verified0.10.0. Full MVP remains
+active; no stage or production gate is claimed complete.
+
+VLOOKUP/HLOOKUP verification update: seven native boundary/property/visitor tests,
+source/return/index/mode dependency/cache/cycle test and full native formula/WASM
+suites passed.443 shared fixtures agree expected/native/browser;1010books and
+2020patches converge.83 frontend unit tests passed. Initial typecheck raced the
+launcher rebuilding generated WASM files; rerun after generation passed, as did
+lint, all-targets clippy formula/WASM/collab/storage/server-dev-auth, SQLx check,
+default server check and production frontend build. Targeted live PostgreSQL1/1
+and DPR1/2 browser2/2 passed; full HTTP50/50 passed77686.8969ms. Full browser86
+suite is still live85168. Engine/current guards0.11.0, launcher24440 verified;
+no wire/storage schema changes. Collab22passed/2ignored, actual-PG volatile4,
+Open11 and Timer6passed/1benchmarkignored passed.
+
+Initial table benchmark failed after VLOOKUP measurements: HLOOKUP fixture used
+10k columns beyond domain MAX_COLUMNS1000. Corrected fixture to100rows x1000cols,
+retaining100k total cells and meaningful first-row search. No production limit
+changed. Corrected release benchmark runs47758; initial incomplete measurements
+are not accepted as final report. Recovery fixture now includes additive real
+hard restart/table source/hash/receipt/source-edit checks, not executed yet.
+
+Corrected table benchmark47758 exited0: actual bound100k-cell fixtures, VLOOKUP
+50kkeys exact16.642ms(16.030-17.544),approx13.759ms(13.020-14.510);
+HLOOKUP1000keys exact145.99us(135.24-161.33),approx114.76us(111.53-118.39).
+Concurrent load uncontrolled; Criterion earlier-run comparison is not attributable
+regression evidence. Report docs/benchmarks/2026-09-30-table-lookup-local.md records
+failed fixture/correction and exclusions. No p95 or performance gate claimed.
+Added actual structural rebuild test: V target survives inserted/deleted row;
+H numeric return index remains positional, result34->21->34. Both new calculation
+tests pass, final formula all-targets clippy passes, frontend/readyz200. Full86
+browser still live85168. Recovery waits for terminal browser before stopping
+Windows launcher; new recovery assertions not yet executed.
+
+Final table slice: full Playwright86/86 passed5.3min (85168 terminalexit0).
+After confirmed terminal browser, verified and stopped only launcher24440 tree.
+Real hard-restart recovery2/2 passed8759.6345ms after4.72s build: additive table
+book restores source/content hash and calculated hash, receipt retry and source
+edit20->28; existing scalar/INDEX/MATCH/ACL/convergence assertions retained.
+Finally restarted hidden launcher21204, PostgreSQL/data preserved. ADR072 accepted
+for bounded table slice only. Second read-only review found no new concrete defect;
+reviewer ran no tests. Changed pure lookup/search/dispatch, engine guards0.11,
+fixtures/parity/calculation/boundary tests, live/browser/recovery tests, benchmarks
+and docs. No new dependencies or wire/storage/AST schemas. Final formatting,
+readiness and git commit follow. Next functional slice XLOOKUP; full original goal
+remains active, with manual Excel/full XLSX/structure/load/recovery/production and
+Linux/Compose/remote CI gates open.

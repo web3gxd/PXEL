@@ -194,3 +194,14 @@ scalars, with bounded scratch storage. Entire-source boundary validation remains
 active after a hit. AST/wire/storage formats are unchanged; engine context identity
 changes and old contexts require the existing authorized upgrade epoch. ADR071
 specifies provisional blank/error/type/coercion rules and manual Excel gaps.
+
+## VLOOKUP/HLOOKUP (engine0.11.0)
+
+Table lookups reuse deterministic MATCH search but return scalar values.
+VLOOKUP reads the first column; HLOOKUP reads the first row. Explicit blank mode
+means exact, omitted mode means ascending approximate. Return index and boolean
+mode evaluation preserve typed resource/unsupported errors through IFERROR.
+Selected blank is zero, numeric nonfinite is NUM, selected date preserves its
+system and normalizes negative zero. Arrays remain typed unsupported. Source,
+lookup key, index and mode have conservative dependencies; an unselected source
+formula may still form a cycle. See ADR072 for limits and provisional Excel rules.

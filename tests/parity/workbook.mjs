@@ -65,6 +65,8 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=INDEX(INDEX(A1:B1,1,0),1,1)',
     '=MATCH(A1,A1:B1,0)',
     '=MATCH(B1,A1:B1,0)',
+    '=VLOOKUP(A1,A1:B1,2,FALSE)',
+    '=HLOOKUP(B1,A1:B1,1,FALSE)',
     '=INDEX(A1:B1,1,MATCH(B1,A1:B1,0))',
   ];
   const source = sources[next() % sources.length];
@@ -158,7 +160,7 @@ const contextTemplate = {
   utc_offset_minutes: 180,
   civil_day_since_unix_epoch: 1,
   random_seed: '01'.repeat(32),
-  engine_version: 'pxel-formula-0.10.0',
+  engine_version: 'pxel-formula-0.11.0',
   compatibility_profile: 'pxel-excel-subset-v1',
   reason: 'explicit',
 };

@@ -18,6 +18,10 @@ impl ReferenceResolver for Range {
     }
 }
 fn benchmarks(c: &mut Criterion) {
+    if table_benchmarks(c).is_err() {
+        eprintln!("invalid table lookup benchmark fixture");
+        std::process::exit(1);
+    }
     if index_benchmarks(c).is_err() {
         eprintln!("invalid INDEX benchmark fixture");
         std::process::exit(1);
@@ -189,6 +193,79 @@ fn volatile_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Erro
 }
 criterion_group!(scalar, benchmarks);
 criterion_main!(scalar);
+
+fn table_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>> {
+    use spreadsheet_domain::workbook::*;
+    use std::collections::BTreeMap;
+    for (vertical, row_count, column_count, end) in [
+        (true, 50000u32, 2u32, "B50000"),
+        (false, 100, 1000, "ALL100"),
+    ] {
+        let sheet = SheetId::from_bytes([1; 16])?;
+        let rows = (1..=row_count)
+            .map(|n| RowId::from_bytes(u128::from(n).to_be_bytes()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let columns = (1..=column_count)
+            .map(|n| ColumnId::from_bytes(u128::from(n).to_be_bytes()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let origin = CellAddress {
+            sheet,
+            row: rows[0],
+            column: columns[0],
+        };
+        let mut cells = Vec::new();
+        for (r, row) in rows.iter().enumerate() {
+            for (col, column) in columns.iter().enumerate() {
+                let key = if vertical { col == 0 } else { r == 0 };
+                cells.push((
+                    CellAddress {
+                        sheet,
+                        row: *row,
+                        column: *column,
+                    },
+                    CellContent::Value(CellValue::Number(if key { 1. } else { 2. })),
+                ));
+            }
+        }
+        let book = Workbook::from_content_fixture(
+            DocumentId::from_bytes([3; 16])?,
+            DocumentVersion::new(1)?,
+            SheetSeed {
+                id: sheet,
+                name: "Sheet1".into(),
+                rows,
+                columns,
+            },
+            cells,
+        )?;
+        let cache = BTreeMap::new();
+        for approximate in [false, true] {
+            let function = if vertical { "VLOOKUP" } else { "HLOOKUP" };
+            let mode = if approximate { "TRUE" } else { "FALSE" };
+            let formula =
+                binder::bind(&format!("={function}(1,A1:{end},2,{mode})"), &book, origin)?;
+            if bound::evaluate_bound(&formula, &book, &cache, &mut EvaluationBudget::default())?
+                != Value::Number(2.)
+            {
+                return Err("invalid table expected result".into());
+            }
+            c.bench_function(
+                &format!("{function}_bound_table_{row_count}x{column_count}_{mode}"),
+                |b| {
+                    b.iter(|| {
+                        black_box(bound::evaluate_bound(
+                            black_box(&formula),
+                            &book,
+                            &cache,
+                            &mut EvaluationBudget::default(),
+                        ))
+                    })
+                },
+            );
+        }
+    }
+    Ok(())
+}
 
 fn index_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>> {
     use spreadsheet_domain::workbook::*;

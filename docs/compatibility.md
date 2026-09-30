@@ -97,3 +97,14 @@ source error precedence, mode coercion and Unicode lowercase/scalar collation
 are explicit provisional PXEL rules; derived fixtures are not Excel goldens.
 Array literals and locale collation remain open. Cardinality, source/text size
 and work/cancellation checks remain active after a first exact match.
+
+## Table lookup profile (ADR-072)
+
+Engine0.11.0: partially supported. VLOOKUP/HLOOKUP accept a contiguous table,
+cell or nested INDEX reference. Exact mode returns the first key match with
+wildcards; approximate mode requires ascending keys and returns the last floor.
+Return index is one-based, positive fractions truncate; selected blank becomes
+scalar zero. All tables admit at most100k cells; only the key axis and one return
+cell are read. Scalar coercion/error/type/collation rules are provisional, derived
+fixtures are not manually verified Excel goldens. Dynamic arrays, multi-area,
+locale collation and selected-only dependency tracking remain open.

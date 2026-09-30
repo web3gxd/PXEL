@@ -170,6 +170,16 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/match-function",
       "title": "MATCH function",
       "retrieved_at": "2026-09-30"
+    },
+    "vlookup": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/vlookup-function",
+      "title": "VLOOKUP function",
+      "retrieved_at": "2026-09-30"
+    },
+    "hlookup": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/hlookup-function",
+      "title": "HLOOKUP function",
+      "retrieved_at": "2026-09-30"
     }
   },
   "cases": [
@@ -7679,6 +7689,1366 @@
       "provenance": {
         "sources": ["match"],
         "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-exact",
+      "formula": "=VLOOKUP(25,A1:B3,2,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-floor",
+      "formula": "=VLOOKUP(26,A1:B3,2)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-missing",
+      "formula": "=VLOOKUP(26,A1:B3,2,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-below",
+      "formula": "=VLOOKUP(4,A1:B3,2,TRUE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-above",
+      "formula": "=VLOOKUP(100,A1:B3,2,TRUE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "third"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-nested",
+      "formula": "=VLOOKUP(25,INDEX(A1:B3,0,0),2,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-fraction",
+      "formula": "=VLOOKUP(25,A1:B3,2.9,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-zero",
+      "formula": "=VLOOKUP(25,A1:B3,0,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-negative",
+      "formula": "=VLOOKUP(25,A1:B3,-1,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-oversize",
+      "formula": "=VLOOKUP(25,A1:B3,3,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#REF!"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-tiny",
+      "formula": "=VLOOKUP(25,A1:B3,0.9,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-huge",
+      "formula": "=VLOOKUP(25,A1:B3,1E100,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#REF!"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-text-index",
+      "formula": "=VLOOKUP(25,A1:B3,\"2\",\"FALSE\")",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-missing-mode",
+      "formula": "=VLOOKUP(26,A1:B3,2,)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-count-text",
+      "formula": "=COUNT(VLOOKUP(25,A1:B3,2,FALSE))",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-counta-text",
+      "formula": "=COUNTA(VLOOKUP(25,A1:B3,2,FALSE))",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "vlookup-sum-text",
+      "formula": "=SUM(VLOOKUP(25,A1:B3,2,FALSE))",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["vlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-exact",
+      "formula": "=HLOOKUP(25,A1:C2,2,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-floor",
+      "formula": "=HLOOKUP(26,A1:C2,2)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-missing",
+      "formula": "=HLOOKUP(26,A1:C2,2,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-below",
+      "formula": "=HLOOKUP(4,A1:C2,2,TRUE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-above",
+      "formula": "=HLOOKUP(100,A1:C2,2,TRUE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "third"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-nested",
+      "formula": "=HLOOKUP(25,INDEX(A1:C2,0,0),2,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-fraction",
+      "formula": "=HLOOKUP(25,A1:C2,2.9,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-zero",
+      "formula": "=HLOOKUP(25,A1:C2,0,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-negative",
+      "formula": "=HLOOKUP(25,A1:C2,-1,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-oversize",
+      "formula": "=HLOOKUP(25,A1:C2,3,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#REF!"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-tiny",
+      "formula": "=HLOOKUP(25,A1:C2,0.9,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-huge",
+      "formula": "=HLOOKUP(25,A1:C2,1E100,FALSE)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#REF!"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-text-index",
+      "formula": "=HLOOKUP(25,A1:C2,\"2\",\"FALSE\")",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "text",
+        "value": "second"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-missing-mode",
+      "formula": "=HLOOKUP(26,A1:C2,2,)",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-count-text",
+      "formula": "=COUNT(HLOOKUP(25,A1:C2,2,FALSE))",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-counta-text",
+      "formula": "=COUNTA(HLOOKUP(25,A1:C2,2,FALSE))",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "hlookup-sum-text",
+      "formula": "=SUM(HLOOKUP(25,A1:C2,2,FALSE))",
+      "origin": "Sheet1!D4",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "first"
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "second"
+        },
+        "Sheet1!C2": {
+          "type": "text",
+          "value": "third"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["hlookup"],
+        "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
         "verified_in_excel": false
       }
     }

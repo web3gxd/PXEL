@@ -6,6 +6,72 @@ use spreadsheet_formula::{
 };
 use std::{collections::BTreeSet, sync::atomic::AtomicBool};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+#[test]
+fn table_lookup_tracks_keys_returns_selectors_and_mode() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(7.))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(13.))),
+            (address(0, 1)?, CellContent::Value(CellValue::Number(21.))),
+            (address(1, 1)?, CellContent::Value(CellValue::Number(29.))),
+            (address(0, 3)?, CellContent::Value(CellValue::Number(7.))),
+            (address(0, 4)?, CellContent::Value(CellValue::Number(2.))),
+            (
+                address(0, 5)?,
+                CellContent::Value(CellValue::Boolean(false)),
+            ),
+        ],
+        2,
+        7,
+    )?;
+    for (column, source) in [(2, "=VLOOKUP(D1,A1:B2,E1,F1)"), (6, "=1+2")] {
+        let operation = formula(&book, address(0, column)?, source)?;
+        book = book.candidate(&operation, DocumentVersion::new(book.version().get() + 1)?)?;
+    }
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(21.))
+    );
+    for (row, column, value, expected) in [
+        (0, 1, CellValue::Number(31.), Value::Number(31.)),
+        (0, 3, CellValue::Number(13.), Value::Number(29.)),
+        (0, 4, CellValue::Number(1.), Value::Number(13.)),
+        (1, 0, CellValue::Number(17.), Value::Error(FormulaError::Na)),
+        (0, 5, CellValue::Boolean(true), Value::Number(7.)),
+    ] {
+        edit(
+            &mut book,
+            &mut projection,
+            Operation::SetCellValue {
+                address: address(row, column)?,
+                value,
+            },
+        )?;
+        let patch =
+            projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+        assert_eq!(patch.evaluated_cells, 1);
+        assert_eq!(projection.results().get(&address(0, 2)?), Some(&expected));
+        assert_eq!(
+            projection.results().get(&address(0, 6)?),
+            Some(&Value::Number(3.))
+        );
+        let mut rebuilt =
+            CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+        rebuilt.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+        assert_eq!(projection.result_hash()?, rebuilt.result_hash()?);
+    }
+    let operation = formula(&book, address(0, 2)?, "=VLOOKUP(7,A1:C2,2,FALSE)")?;
+    edit(&mut book, &mut projection, operation)?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Error(FormulaError::Cycle))
+    );
+    Ok(())
+}
 fn address(row: u32, column: u8) -> Result<CellAddress, DomainError> {
     Ok(CellAddress {
         sheet: SheetId::from_bytes([1; 16])?,
@@ -286,6 +352,57 @@ fn match_position_follows_inserted_and_deleted_blank_row_with_stable_targets() -
     projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
     projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
     assert_eq!(projection.results().get(&at), Some(&Value::Number(2.0)));
+    Ok(())
+}
+
+#[test]
+fn table_lookup_structural_targets_and_positional_return_index() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(7.))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(13.))),
+            (address(1, 1)?, CellContent::Value(CellValue::Number(21.))),
+        ],
+        2,
+        3,
+    )?;
+    let at = address(0, 2)?;
+    let operation = formula(
+        &book,
+        at,
+        "=VLOOKUP(13,A1:B2,2,FALSE)+HLOOKUP(7,A1:A2,2,FALSE)",
+    )?;
+    book = book.candidate(&operation, DocumentVersion::new(2)?)?;
+    let inserted = address(20, 0)?.row;
+    for (operation, expected) in [
+        (None, 34.),
+        (
+            Some(Operation::InsertRowsRebased {
+                sheet: at.sheet,
+                before: address(1, 0)?.row,
+                rows: vec![inserted],
+            }),
+            21.,
+        ),
+        (
+            Some(Operation::DeleteRows {
+                sheet: at.sheet,
+                rows: vec![inserted],
+            }),
+            34.,
+        ),
+    ] {
+        if let Some(operation) = operation {
+            book = book.candidate(&operation, DocumentVersion::new(book.version().get() + 1)?)?;
+        }
+        let mut projection =
+            CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+        projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+        assert_eq!(
+            projection.results().get(&at),
+            Some(&Value::Number(expected))
+        );
+    }
     Ok(())
 }
 
