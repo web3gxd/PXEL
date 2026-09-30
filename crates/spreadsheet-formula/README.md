@@ -83,7 +83,7 @@ Source provenance and documentation conflicts are retained in the corpus.
   conditions, preserving later errors even after a decisive boolean; range
   traversal is budgeted and checked. NOT takes one scalar and inverts the same
   scalar coercion as IF. Arrays/implicit intersection remain unsupported.
-  Engine identity is `pxel-formula-0.11.0`; old persisted contexts require a new
+  Engine identity is `pxel-formula-0.12.0`; old persisted contexts require a new
   authorized calculation epoch. See ADR-055 and the common fixture corpus.
 
 - ABS takes one scalar; MOD takes two and follows the divisor sign. Blank is
@@ -111,7 +111,8 @@ Source provenance and documentation conflicts are retained in the corpus.
   clock or mutable RNG is consulted. RAND uses versioned SHA-256 derivation with
   document/epoch/stable cell/AST node/seed, returning 53-bit values in [0,1).
   Missing or incompatible context is a typed error. Explicit epoch changes dirty
-  all formulas; automatic open/timer/dependency epoch triggers remain pending.
+  all formulas. The server supplies durable bootstrap/edit/Open/Timer epochs
+  (ADRs066–069); the pure evaluator and browser preview never advance them locally.
 
 Bounds: 32 KiB source, 4,096 AST nodes, AST depth 128 (parser call depth 256 to
 admit canonical parentheses), 255 call arguments, 100,000
@@ -124,12 +125,20 @@ part of this slice.
 
 ## Verification
 
+XLOOKUP (ADR-073) supports contiguous reference selection, lazy missing fallback,
+forward/reverse exact/nearest/wildcard and validated ascending/descending binary
+search. Reference results survive aggregate/INDEX/XLOOKUP composition. Binary
+wildcards, spills and reference-valued colon syntax remain unsupported. Whole
+source validation makes total binary cost O(n); tie/coercion/error/collation rules
+are provisional. INDEX scalar materialization now shares checked text/array/date
+normalization, closing nested boundary bypasses without changing AST formats.
+
 VLOOKUP/HLOOKUP (ADR-072) reuse bounded MATCH search on the first table axis,
 then resolve one return cell. They return scalar values rather than references;
 blank returns zero. Whole-table100k cap, visitor cardinality, text/array boundaries
 and cancellation remain enforced. Mixed-type/coercion/error/collation edge cases
 are provisional; manual Excel validation and dynamic selected dependencies remain
-open. Current identity is pxel-formula-0.11.0.
+open. Current identity is pxel-formula-0.12.0.
 
 `cargo test -p spreadsheet-formula` runs scalar/reference fixtures, canonical
 round trips, generated UTF-8 parsing (both raw and prefixed `=`), malformed arena

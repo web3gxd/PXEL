@@ -195,7 +195,9 @@ pub(crate) fn eval(
             binary(*op, left, right, budget)?
         }
         Node::Call { name, arguments } => {
-            if name == "VLOOKUP" || name == "HLOOKUP" {
+            if name == "XLOOKUP" {
+                crate::lookup::xcall(ast, arguments, resolver, budget, depth)?
+            } else if name == "VLOOKUP" || name == "HLOOKUP" {
                 crate::lookup::table_call(
                     ast,
                     arguments,

@@ -71,13 +71,16 @@ PXEL_DEV_AUTH=1 cargo run --locked -q -p pxel-server --features dev-auth -- xlsx
 
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Поддержаны AND/OR/NOT с диапазонами и typed resource limits. Текущий engine
-identity — `pxel-formula-0.11.0`; INDEX поддерживает выбор из contiguous range
+identity — `pxel-formula-0.12.0`; INDEX поддерживает выбор из contiguous range
 и ссылочные аргументы агрегатов (ADR-070). Dynamic spill и multi-area ещё
 не поддержаны.
 MATCH выполняет exact/wildcard и sorted approximate lookup в одномерных
 диапазонах (ADR-071, provisional blank/error/collation profile).
 VLOOKUP/HLOOKUP выбирают scalar result из contiguous table, с exact/wildcard
 и sorted approximate режимами (ADR-072; edge-case Excel verification ещё впереди).
+XLOOKUP поддерживает ссылочные результаты, forward/reverse и проверенный sorted
+binary search, ближайшие значения и wildcard mode (ADR-073). Spill и сочетание
+wildcard с binary search пока отклоняются как неподдерживаемые.
 Доступны DATE/YEAR/MONTH/DAY в календарном
 профиле ADR-063 (книги редактора используют 1900; чистый evaluator проверен также
 для 1904; выбор системы книги ещё впереди). NOW/TODAY/RAND работают в явно

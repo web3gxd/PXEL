@@ -8,6 +8,64 @@ use std::{collections::BTreeSet, sync::atomic::AtomicBool};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
+fn xlookup_arguments_invalidate_only_dependent_formula() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(7.))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(13.))),
+            (address(0, 1)?, CellContent::Value(CellValue::Number(21.))),
+            (address(1, 1)?, CellContent::Value(CellValue::Number(29.))),
+            (address(0, 3)?, CellContent::Value(CellValue::Number(7.))),
+            (address(0, 4)?, CellContent::Value(CellValue::Number(0.))),
+            (address(0, 5)?, CellContent::Value(CellValue::Number(1.))),
+        ],
+        2,
+        7,
+    )?;
+    for (column, source) in [(2, "=XLOOKUP(D1,A1:A2,B1:B2,99,E1,F1)"), (6, "=1+2")] {
+        let operation = formula(&book, address(0, column)?, source)?;
+        book = book.candidate(&operation, DocumentVersion::new(book.version().get() + 1)?)?;
+    }
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    for (row, column, value, expected) in [
+        (0, 1, 31., 31.),
+        (0, 3, 12., 99.),
+        (0, 4, -1., 31.),
+        (0, 5, -1., 31.),
+        (1, 0, 12., 29.),
+    ] {
+        edit(
+            &mut book,
+            &mut projection,
+            Operation::SetCellValue {
+                address: address(row, column)?,
+                value: CellValue::Number(value),
+            },
+        )?;
+        let patch =
+            projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+        assert_eq!(patch.evaluated_cells, 1);
+        assert_eq!(
+            projection.results().get(&address(0, 2)?),
+            Some(&Value::Number(expected))
+        );
+        assert_eq!(
+            projection.results().get(&address(0, 6)?),
+            Some(&Value::Number(3.))
+        );
+    }
+    let operation = formula(&book, address(0, 2)?, "=SUM(XLOOKUP(7,A1:A2,B1:C2))")?;
+    edit(&mut book, &mut projection, operation)?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Error(FormulaError::Cycle))
+    );
+    Ok(())
+}
+
+#[test]
 fn table_lookup_tracks_keys_returns_selectors_and_mode() -> TestResult {
     let mut book = fixture(
         vec![
@@ -402,6 +460,44 @@ fn table_lookup_structural_targets_and_positional_return_index() -> TestResult {
             projection.results().get(&at),
             Some(&Value::Number(expected))
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn xlookup_range_targets_survive_structural_insert_delete() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(7.))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(13.))),
+            (address(1, 1)?, CellContent::Value(CellValue::Number(29.))),
+        ],
+        2,
+        3,
+    )?;
+    let at = address(0, 2)?;
+    let operation = formula(&book, at, "=XLOOKUP(13,A1:A2,B1:B2)")?;
+    book = book.candidate(&operation, DocumentVersion::new(2)?)?;
+    let inserted = address(20, 0)?.row;
+    for operation in [
+        None,
+        Some(Operation::InsertRowsRebased {
+            sheet: at.sheet,
+            before: address(1, 0)?.row,
+            rows: vec![inserted],
+        }),
+        Some(Operation::DeleteRows {
+            sheet: at.sheet,
+            rows: vec![inserted],
+        }),
+    ] {
+        if let Some(operation) = operation {
+            book = book.candidate(&operation, DocumentVersion::new(book.version().get() + 1)?)?;
+        }
+        let mut projection =
+            CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+        projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+        assert_eq!(projection.results().get(&at), Some(&Value::Number(29.)));
     }
     Ok(())
 }

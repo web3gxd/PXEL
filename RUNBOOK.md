@@ -3181,3 +3181,71 @@ and docs. No new dependencies or wire/storage/AST schemas. Final formatting,
 readiness and git commit follow. Next functional slice XLOOKUP; full original goal
 remains active, with manual Excel/full XLSX/structure/load/recovery/production and
 Linux/Compose/remote CI gates open.
+
+## 2026-09-30 — XLOOKUP reference/search slice, in progress
+
+Previous goal turn made verified progress: table lookup committedf5ce729, local
+readiness200. Read AGENTS/RUNBOOK/roadmap/ADR072/current INDEX/lookup contracts.
+Incremental/TDD skills continued; official Microsoft XLOOKUP documentation read.
+ADR073 PROPOSED covers contiguous reference returns, forward/reverse and nearest/
+wildcard/binary modes, lazy fallback and unresolved manual compatibility/spill/
+colon/dynamic dependency gaps. First native RED observed NAME. Linear/reference
+implementation passed basic8cases including SUM selected row, nested INDEX and
+lazy error fallback; existing native INDEX4/table7/shared443 corpus remained green.
+Binary test then RED typed Unsupported; implemented bounded sorted validation and
+lower-bound search. Both XLOOKUP tests now pass. Clippy collapse warning fixed
+without suppression; further tests/review/fixtures/parity/graph/live/recovery/
+benchmarks and engine bump pending. Running app remains last verified0.11.0.
+No dependencies or schemas changed, no full-MVP completion claimed.
+
+Review/coverage update: Missing fallback placeholder initially returned0; regression
+RED reproduced, filtering Node::Missing now keeps defaultNA and explicit blank-cell
+fallback separate. Selected oversized text via COUNT/SUM also observed RED; shared
+reference visitor now checks text/array/work boundaries. Nested scalar INDEX(XLOOKUP)
+had the same bypass; separate RED closed with shared scalar_result. DateTime-0
+bits then failed a targeted test; scalar INDEX now normalizes dates/nonfinite serial
+consistently with XLOOKUP. No AST/wire/storage migrations required. Initial nested
+reference test had mismatched2-vs3 axis lengths; corrected its lookup range to the
+intended matching3-cell row, retaining its expected21. Compiler Result/Value mismatch
+and clippy collapse fixed; no assertions deleted/suppressions added.
+
+Nine native XLOOKUP tests now pass, including independent random nearest/binary
+oracles, duplicate distinct payloads, horizontal/nested/ref coercion, typed limits,
+mode/fallback/DateTime cases. Two graph/structural tests pass: sources/returns/key/
+mode/direction invalidate one formula, independent cache retained, conservative cycle,
+and insertion/deletion preserves targets.39derived fixtures added,482total native/
+browser expected parity passed;1010books/2020patches parity passed. Full native
+formula/WASM tests passed; structural test added afterwards and targeted run passed.
+83frontend unit/typecheck/lint/build, all-targets clippy formula/WASM/collab/storage/
+server-dev-auth and SQLx checks passed. Engine guards0.12, verified launcher21204
+stopped and rebuilt as29612; no new dependencies or schemas. Targeted HTTP1/1
+passed1437.9743ms, browserDPR1/2 passed2/2 in6.7s. Full HTTP51/51 passed83878.9652ms;
+full88browser still live40422. Recovery additive XLOOKUP source/hash/receipt/edit
+fixture prepared, not run yet. Native100k release benchmark46969 passed; preliminary
+32.011/25.132/23.658/17.490ms forward/reverse/ascending/descending, uncontrolled
+load, notp95. Report docs/benchmarks/2026-09-30-xlookup-local.md. Full MVP active.
+
+Final pre-recovery checks: default server check passed2.40s; collab22passed/2ignored
+passed10.01s, actual-PG volatile4/Open11/Timer6passed plus one intentional ignored
+benchmark passed. Third read-only review found no new concrete defect; reviewer
+ran no tests. Added runtime oversized lookup/return AST and wildcard DP work tests;
+all10XLOOKUP tests and final all-targets formula clippy passed, rustc actual1.98.1
+verified. Production code unchanged by these added tests, so native/browser/live
+results retain their scope. Full format:check/rustfmt/diff passed, current engine
+0.12guard scan had no remaining0.11 current guards; frontend/readyz200. Full88browser
+40422 remains live and recovery awaits its terminal state. No open production/
+manual Excel/Linux/Compose/CI/full XLSX/load/structure gate is marked complete.
+
+Final XLOOKUP: full Playwright88/88 passed5.0min (40422 terminalexit0). Verified
+launcher29612 and stopped its tree only after browser completion. Hard-restart
+recovery2/2 passed8812.3616ms after0.39s build: additive XLOOKUP source/content hash
+and calculated hash restore exactly, duplicate command returns receipt, source
+edit14->22 recalculates. Existing table/INDEX/MATCH/scalar/ACL/convergence checks
+retained. Finally restarted hidden3284; PG/data preserved. Formula README stale
+claim that automatic epochs were pending corrected to existing ADR066-069 server
+behavior. ADR073 accepted only for bounded XLOOKUP/reference slice. Changed pure
+lookup/INDEX materialization/dispatch and engine0.12guards, tests/fixtures/parity,
+HTTP/browser/recovery, benchmarks and docs; no new dependencies or schema. Final
+format/readiness/diff and commit follow. Next SUMIF/COUNTIF then SUMIFS/COUNTIFS;
+full original goal remains active, production/manualExcel/full XLSX/structure/
+recovery/load/Linux/Compose/remote CI gates open.

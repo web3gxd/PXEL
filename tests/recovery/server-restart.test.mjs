@@ -233,6 +233,49 @@ test(
         } finally {
           indexEditor.socket.terminate();
         }
+        const xSource = '=SUM(XLOOKUP(A1,A1:A2,A1:A2))+XLOOKUP(7,A1:A2,A1:A2,9)';
+        const { snapshot: xBook } = await createDocument(base, cookie);
+        const xWriter = await connect(base, cookie);
+        assert.equal((await xWriter.send(setCommand(xWriter, xBook, 7))).case, 'committed');
+        const xCommand = formulaCommand(xWriter, { ...xBook, version: '2' }, xSource, {
+          column: 1,
+          sequence: 2,
+        });
+        const xAck = await xWriter.send(xCommand);
+        assert.equal(xAck.case, 'committed');
+        const xBefore = await calculation(base, cookie, xBook.document_id, 3);
+        assert.deepEqual(xBefore.values[0].value, { type: 'number', value: 14 });
+        xWriter.socket.terminate();
+        await kill();
+        await start();
+        const xRestored = await getDocument(base, cookie, xBook.document_id);
+        assert.equal(xRestored.version, '3');
+        assert.equal(
+          xRestored.state_hash,
+          Buffer.from(xAck.value.confirmedStateHash).toString('hex'),
+        );
+        assert.equal(
+          xRestored.sheets[0].cells.find((cell) => cell.value.type === 'formula').value.value
+            .source,
+          xSource,
+        );
+        const xAfter = await calculation(base, cookie, xBook.document_id, 3);
+        assert.equal(xAfter.calculated_state_hash, xBefore.calculated_state_hash);
+        assert.deepEqual(xAfter.values, xBefore.values);
+        const xEditor = await connect(base, cookie);
+        try {
+          assert.equal((await xEditor.send(xCommand)).case, 'receipt');
+          assert.equal(
+            (await xEditor.send(setCommand(xEditor, xRestored, 13, { sequence: 3 }))).case,
+            'committed',
+          );
+          assert.deepEqual(
+            (await calculation(base, cookie, xBook.document_id, 4)).values[0].value,
+            { type: 'number', value: 22 },
+          );
+        } finally {
+          xEditor.socket.terminate();
+        }
         const matchSource = '=MATCH(A1+1,A1:A2,1)+IFERROR(MATCH(7,A1:A2,0),9)';
         const { snapshot: matchBook } = await createDocument(base, cookie);
         const matchWriter = await connect(base, cookie);

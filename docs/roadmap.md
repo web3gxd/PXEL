@@ -428,3 +428,13 @@ dynamic selected dependencies and arrays remain open. Preliminary100k-cell table
 benchmark in benchmarks/2026-09-30-table-lookup-local.md. Next functional slice:
 XLOOKUP, then conditional aggregates; broader XLSX/structure/recovery/load and
 Linux/Compose/remote CI/production gates remain open. This is not full-MVP completion.
+
+XLOOKUP reference/search slice (ADR073) locally verified:482shared fixtures,
+1010books/2020patches native/browser parity,10native contract/resource/property
+and2graph/structural tests. Real PostgreSQL51HTTP,88browser,83frontend unit and
+2hard-restart tests passed. Forward/reverse and validated binary modes, exact/
+nearest/wildcard, lazy fallback and reference composition documented; spills,
+colon/binary-wildcard/manual Excel/locale/dynamic selected dependencies remain
+open. Preliminary100k bound benchmarks in benchmarks/2026-09-30-xlookup-local.md.
+Next functional slice SUMIF/COUNTIF, then SUMIFS/COUNTIFS; remaining full XLSX,
+structure/recovery/load/production and Linux/Compose/remote CI gates stay open.

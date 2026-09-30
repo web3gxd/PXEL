@@ -180,6 +180,11 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/hlookup-function",
       "title": "HLOOKUP function",
       "retrieved_at": "2026-09-30"
+    },
+    "xlookup": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/xlookup-function",
+      "title": "XLOOKUP function",
+      "retrieved_at": "2026-09-30"
     }
   },
   "cases": [
@@ -9049,6 +9054,2034 @@
       "provenance": {
         "sources": ["hlookup"],
         "basis": "derived PXEL bounded table lookup profile; coercion/error/collation edges provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1--1-4",
+      "formula": "=XLOOKUP(4,A1:A4,B1:B4,99,-1,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1--1-25",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,-1,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1--1-26",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,99,-1,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1--1-50",
+      "formula": "=XLOOKUP(50,A1:A4,B1:B4,99,-1,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 40
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1-0-4",
+      "formula": "=XLOOKUP(4,A1:A4,B1:B4,99,0,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1-0-25",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,0,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1-0-26",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,99,0,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1-0-50",
+      "formula": "=XLOOKUP(50,A1:A4,B1:B4,99,0,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1-1-4",
+      "formula": "=XLOOKUP(4,A1:A4,B1:B4,99,1,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 10
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1-1-25",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,1,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1-1-26",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,99,1,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 40
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear-1-1-50",
+      "formula": "=XLOOKUP(50,A1:A4,B1:B4,99,1,1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1--1-4",
+      "formula": "=XLOOKUP(4,A1:A4,B1:B4,99,-1,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1--1-25",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,-1,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1--1-26",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,99,-1,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1--1-50",
+      "formula": "=XLOOKUP(50,A1:A4,B1:B4,99,-1,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 40
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1-0-4",
+      "formula": "=XLOOKUP(4,A1:A4,B1:B4,99,0,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1-0-25",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,0,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1-0-26",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,99,0,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1-0-50",
+      "formula": "=XLOOKUP(50,A1:A4,B1:B4,99,0,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1-1-4",
+      "formula": "=XLOOKUP(4,A1:A4,B1:B4,99,1,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 10
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1-1-25",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,1,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1-1-26",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,99,1,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 40
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-linear--1-1-50",
+      "formula": "=XLOOKUP(50,A1:A4,B1:B4,99,1,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-default",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-missing-fallback",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,,0,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-blank-fallback",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,C4,0,-1)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-lazy-fallback",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,1/0)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-aggregate-reference",
+      "formula": "=SUM(XLOOKUP(25,A1:A4,B1:C4))",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 22
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-nested-index",
+      "formula": "=INDEX(XLOOKUP(25,A1:A4,B1:C4),1,2)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-invalid-match",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,3)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-invalid-search",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,0,0)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-shape",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B3,99)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-binary-exact",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,0,2)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-binary-floor",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,99,-1,2)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-binary-ceiling",
+      "formula": "=XLOOKUP(26,A1:A4,B1:B4,99,1,2)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 40
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-binary-below",
+      "formula": "=XLOOKUP(4,A1:A4,B1:B4,99,-1,2)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-binary-above",
+      "formula": "=XLOOKUP(50,A1:A4,B1:B4,99,1,2)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "xlookup-unsorted-binary",
+      "formula": "=XLOOKUP(25,A1:A4,B1:B4,99,0,-2)",
+      "origin": "Sheet1!D5",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!A4": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B4": {
+          "type": "number",
+          "value": 40
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 2
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["xlookup"],
+        "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
         "verified_in_excel": false
       }
     }

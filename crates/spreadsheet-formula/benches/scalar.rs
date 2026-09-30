@@ -322,6 +322,26 @@ fn index_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>>
             1.0,
         ),
         (
+            "XLOOKUP_bound_forward_100k",
+            "=XLOOKUP(1,A1:A100000,A1:A100000)",
+            1.0,
+        ),
+        (
+            "XLOOKUP_bound_reverse_100k",
+            "=XLOOKUP(1,A1:A100000,A1:A100000,,0,-1)",
+            1.0,
+        ),
+        (
+            "XLOOKUP_bound_binary_ascending_100k",
+            "=XLOOKUP(1,A1:A100000,A1:A100000,,0,2)",
+            1.0,
+        ),
+        (
+            "XLOOKUP_bound_binary_descending_100k",
+            "=XLOOKUP(1,A1:A100000,A1:A100000,,0,-2)",
+            1.0,
+        ),
+        (
             "MATCH_bound_approx_last_100k",
             "=MATCH(1,A1:A100000,1)",
             100000.0,

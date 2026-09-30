@@ -2,7 +2,7 @@
 use crate::{
     Ast, FormulaError, MAX_DEPTH, MAX_RANGE_CELLS, MAX_SOURCE_BYTES, Node, NodeId, RangeReference,
     ReferenceResolver, Value,
-    evaluator::{EvaluationBudget, EvaluationError, eval, number, numeric},
+    evaluator::{EvaluationBudget, EvaluationError, eval, numeric},
 };
 pub(crate) enum Selection {
     Reference(RangeReference),
@@ -58,6 +58,9 @@ pub(crate) fn select(
         Node::Range(range) => Selection::Reference(range.clone()),
         Node::Call { name, arguments } if name == "INDEX" => {
             select(ast, arguments, resolver, budget, depth + 1)?
+        }
+        Node::Call { name, arguments } if name == "XLOOKUP" => {
+            crate::lookup::xselect(ast, arguments, resolver, budget, depth + 1)?
         }
         _ => Selection::Value(eval(ast, args[0], resolver, budget, depth + 1)?),
     };
@@ -157,12 +160,7 @@ pub(crate) fn call(
         }
         Selection::Value(value) => value,
     };
-    Ok(match value {
-        Value::Blank => Value::Number(0.0),
-        Value::Number(n) => number(n),
-        Value::Array { .. } => return Err(EvaluationError::UnsupportedCompatibilityFeature),
-        value => value,
-    })
+    crate::lookup::scalar_result(value, budget)
 }
 /// False means non-INDEX argument; reference coercion is preserved for selected cells.
 pub(crate) fn visit(
@@ -177,10 +175,15 @@ pub(crate) fn visit(
     else {
         return Ok(false);
     };
-    if name != "INDEX" {
+    if name != "INDEX" && name != "XLOOKUP" {
         return Ok(false);
     }
-    match select(ast, arguments, resolver, budget, depth)? {
+    let selected = if name == "INDEX" {
+        select(ast, arguments, resolver, budget, depth)?
+    } else {
+        crate::lookup::xselect(ast, arguments, resolver, budget, depth)?
+    };
+    match selected {
         Selection::Value(value) => visitor(value, false)?,
         Selection::Reference(range) => {
             let expected = range.cell_count();
@@ -191,10 +194,7 @@ pub(crate) fn visit(
                 if visits > expected {
                     return Err(EvaluationError::InvalidResolverResult);
                 }
-                if matches!(value, Value::Array { .. }) {
-                    return Err(EvaluationError::UnsupportedCompatibilityFeature);
-                }
-                visitor(value, true)
+                visitor(crate::lookup::checked_scalar(value, budget)?, true)
             })?;
             if visits != expected {
                 return Err(EvaluationError::InvalidResolverResult);

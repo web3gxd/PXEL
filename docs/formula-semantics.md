@@ -205,3 +205,18 @@ Selected blank is zero, numeric nonfinite is NUM, selected date preserves its
 system and normalizes negative zero. Arrays remain typed unsupported. Source,
 lookup key, index and mode have conservative dependencies; an unselected source
 formula may still form a cycle. See ADR072 for limits and provisional Excel rules.
+
+## XLOOKUP reference search (engine0.12.0)
+
+Aligned return range selects one row/column preserving an intermediate reference;
+scalar context requires a single cell. Missing fallback differs from explicit blank
+reference and is lazy. Forward/reverse nearest search accepts unsorted sources;
+exact beats nearest, nearest equal values retain traversal priority. Binary validates
+order, finds lower_bound (first sorted exact duplicate), otherwise chooses adjacent
+eligible boundary; these duplicate tie rules need manual Excel verification. All
+key values retain boundary checks even after an exact hit; source spreadsheet errors
+follow the documented provisional traversal policy and do not invoke fallback.
+Shared INDEX/XLOOKUP scalar materialization enforces text work/caps and normalized
+DateTime/nonfinite results; aggregate reference coercion remains separate. No AST,
+wire or storage schema change. Unsupported spill/colon/binary-wildcard combinations
+fail typed. See ADR073 and the preliminary benchmark for remaining limitations.

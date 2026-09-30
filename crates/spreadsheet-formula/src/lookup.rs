@@ -158,9 +158,300 @@ fn source(
             Node::Call { name, arguments } if name == "INDEX" => {
                 crate::index::select(ast, arguments, resolver, budget, depth + 1)?
             }
+            Node::Call { name, arguments } if name == "XLOOKUP" => {
+                xselect(ast, arguments, resolver, budget, depth + 1)?
+            }
             _ => Selection::Value(eval(ast, id, resolver, budget, depth + 1)?),
         },
     )
+}
+
+fn xorder(
+    left: &Key,
+    right: &Key,
+    budget: &mut EvaluationBudget,
+) -> Result<Ordering, EvaluationError> {
+    match (left, right) {
+        (Key::Blank, Key::Blank) => {
+            budget.charge()?;
+            Ok(Ordering::Equal)
+        }
+        (Key::Blank, _) => {
+            budget.charge()?;
+            Ok(Ordering::Less)
+        }
+        (_, Key::Blank) => {
+            budget.charge()?;
+            Ok(Ordering::Greater)
+        }
+        _ => order(left, right, budget),
+    }
+}
+fn xmode(
+    ast: &Ast,
+    id: Option<&NodeId>,
+    default: i8,
+    allowed: &[i8],
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Result<i8, FormulaError>, EvaluationError> {
+    let Some(id) = id else {
+        return Ok(Ok(default));
+    };
+    if matches!(ast.nodes.get(id.0), Some(Node::Missing)) {
+        return Ok(Ok(default));
+    }
+    let value = checked_scalar(eval(ast, *id, resolver, budget, depth + 1)?, budget)?;
+    Ok(numeric(value).and_then(|n| {
+        allowed
+            .iter()
+            .copied()
+            .find(|m| f64::from(*m) == n)
+            .ok_or(FormulaError::Value)
+    }))
+}
+fn xbinary(
+    values: &[Key],
+    lookup: &Key,
+    mode: i8,
+    descending: bool,
+    budget: &mut EvaluationBudget,
+) -> Result<Result<Option<usize>, FormulaError>, EvaluationError> {
+    for (position, value) in values.iter().enumerate() {
+        budget.charge()?;
+        if let Key::Error(code) = value {
+            return Ok(Err(*code));
+        }
+        if position > 0 {
+            let comparison = xorder(&values[position - 1], value, budget)?;
+            if (!descending && comparison == Ordering::Greater)
+                || (descending && comparison == Ordering::Less)
+            {
+                return Ok(Err(FormulaError::Na));
+            }
+        }
+    }
+    let mut low = 0;
+    let mut high = values.len();
+    while low < high {
+        budget.charge()?;
+        let mid = low + (high - low) / 2;
+        let mut comparison = xorder(&values[mid], lookup, budget)?;
+        if descending {
+            comparison = comparison.reverse();
+        }
+        if comparison == Ordering::Less {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    if let Some(value) = values.get(low)
+        && xorder(value, lookup, budget)? == Ordering::Equal
+    {
+        return Ok(Ok(Some(low)));
+    }
+    let mut selected = None;
+    for candidate in [
+        low.checked_sub(1),
+        if low < values.len() { Some(low) } else { None },
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let comparison = xorder(&values[candidate], lookup, budget)?;
+        if (mode == -1 && comparison == Ordering::Less)
+            || (mode == 1 && comparison == Ordering::Greater)
+        {
+            selected = Some(candidate);
+        }
+    }
+    Ok(Ok(selected))
+}
+pub(crate) fn xselect(
+    ast: &Ast,
+    args: &[NodeId],
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Selection, EvaluationError> {
+    budget.charge()?;
+    if depth > MAX_DEPTH {
+        return Err(EvaluationError::CalculationLimitExceeded);
+    }
+    if !(3..=6).contains(&args.len()) {
+        return Ok(Selection::Value(Value::Error(FormulaError::Value)));
+    }
+    let lookup = key(eval(ast, args[0], resolver, budget, depth + 1)?, budget)?;
+    if let Key::Error(code) = lookup {
+        return Ok(Selection::Value(Value::Error(code)));
+    }
+    let mut keys = match source(ast, args[1], resolver, budget, depth + 1)? {
+        Selection::Reference(range) => range,
+        Selection::Value(Value::Error(code)) => return Ok(Selection::Value(Value::Error(code))),
+        Selection::Value(Value::Array { .. }) => {
+            return Err(EvaluationError::UnsupportedCompatibilityFeature);
+        }
+        _ => return Ok(Selection::Value(Value::Error(FormulaError::Value))),
+    };
+    let (rows, columns) = normalize(&mut keys)?;
+    if rows != 1 && columns != 1 {
+        return Ok(Selection::Value(Value::Error(FormulaError::Value)));
+    }
+    let mut returns = match source(ast, args[2], resolver, budget, depth + 1)? {
+        Selection::Reference(range) => range,
+        Selection::Value(Value::Error(code)) => return Ok(Selection::Value(Value::Error(code))),
+        Selection::Value(Value::Array { .. }) => {
+            return Err(EvaluationError::UnsupportedCompatibilityFeature);
+        }
+        _ => return Ok(Selection::Value(Value::Error(FormulaError::Value))),
+    };
+    let (return_rows, return_columns) = normalize(&mut returns)?;
+    let vertical = columns == 1;
+    if (vertical && rows != return_rows) || (!vertical && columns != return_columns) {
+        return Ok(Selection::Value(Value::Error(FormulaError::Value)));
+    }
+    let mode = match xmode(ast, args.get(4), 0, &[-1, 0, 1, 2], resolver, budget, depth)? {
+        Ok(n) => n,
+        Err(code) => return Ok(Selection::Value(Value::Error(code))),
+    };
+    let direction = match xmode(
+        ast,
+        args.get(5),
+        1,
+        &[-2, -1, 1, 2],
+        resolver,
+        budget,
+        depth,
+    )? {
+        Ok(n) => n,
+        Err(code) => return Ok(Selection::Value(Value::Error(code))),
+    };
+    if direction.abs() == 2 && mode == 2 {
+        return Err(EvaluationError::UnsupportedCompatibilityFeature);
+    }
+    let mut values = Vec::new();
+    resolver.visit_range(&keys, &mut |value| {
+        budget.charge()?;
+        if values.len() as u64 >= keys.cell_count() {
+            return Err(EvaluationError::InvalidResolverResult);
+        }
+        values.push(key(value, budget)?);
+        Ok(())
+    })?;
+    if values.len() as u64 != keys.cell_count() {
+        return Err(EvaluationError::InvalidResolverResult);
+    }
+    let tokens = if let (2, Key::Text(text)) = (mode, &lookup) {
+        Some(pattern(text, budget)?)
+    } else {
+        None
+    };
+    let mut selected = if direction.abs() == 2 {
+        match xbinary(&values, &lookup, mode, direction == -2, budget)? {
+            Ok(position) => position,
+            Err(code) => return Ok(Selection::Value(Value::Error(code))),
+        }
+    } else {
+        None
+    };
+    if direction.abs() == 1 {
+        for offset in 0..values.len() {
+            budget.charge()?;
+            let position = if direction < 0 {
+                values.len() - 1 - offset
+            } else {
+                offset
+            };
+            let candidate = &values[position];
+            if let Key::Error(code) = candidate {
+                return Ok(Selection::Value(Value::Error(*code)));
+            }
+            let comparison = xorder(candidate, &lookup, budget)?;
+            let exact = if let (Some(tokens), Key::Text(text)) = (&tokens, candidate) {
+                wildcard(tokens, text, budget)?
+            } else {
+                comparison == Ordering::Equal
+            };
+            if exact {
+                selected = Some(position);
+                break;
+            }
+            if (mode == -1 && comparison == Ordering::Less)
+                || (mode == 1 && comparison == Ordering::Greater)
+            {
+                let better = if let Some(previous) = selected {
+                    let order = xorder(candidate, &values[previous], budget)?;
+                    if mode == -1 {
+                        order == Ordering::Greater
+                    } else {
+                        order == Ordering::Less
+                    }
+                } else {
+                    true
+                };
+                if better {
+                    selected = Some(position);
+                }
+            }
+        }
+    }
+    let Some(position) = selected else {
+        return if let Some(id) = args
+            .get(3)
+            .filter(|id| !matches!(ast.nodes.get(id.0), Some(Node::Missing)))
+        {
+            Ok(Selection::Value(checked_scalar(
+                eval(ast, *id, resolver, budget, depth + 1)?,
+                budget,
+            )?))
+        } else {
+            Ok(Selection::Value(Value::Error(FormulaError::Na)))
+        };
+    };
+    if vertical {
+        returns.start.row += position as u32;
+        returns.end.row = returns.start.row;
+    } else {
+        returns.start.column += position as u32;
+        returns.end.column = returns.start.column;
+    }
+    Ok(Selection::Reference(returns))
+}
+pub(crate) fn xcall(
+    ast: &Ast,
+    args: &[NodeId],
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Value, EvaluationError> {
+    let value = match xselect(ast, args, resolver, budget, depth)? {
+        Selection::Reference(range) => {
+            if range.cell_count() != 1 {
+                return Err(EvaluationError::UnsupportedCompatibilityFeature);
+            }
+            budget.charge()?;
+            resolver.resolve_cell(&range.start)
+        }
+        Selection::Value(value) => value,
+    };
+    scalar_result(value, budget)
+}
+pub(crate) fn scalar_result(
+    value: Value,
+    budget: &mut EvaluationBudget,
+) -> Result<Value, EvaluationError> {
+    Ok(match checked_scalar(value, budget)? {
+        Value::Blank => Value::Number(0.),
+        Value::Number(n) => number(n),
+        Value::DateTime { serial, .. } if !serial.is_finite() => Value::Error(FormulaError::Num),
+        Value::DateTime { serial, system } => Value::DateTime {
+            serial: if serial == 0. { 0. } else { serial },
+            system,
+        },
+        value => value,
+    })
 }
 pub(crate) fn call(
     ast: &Ast,
@@ -240,7 +531,10 @@ fn normalize(range: &mut RangeReference) -> Result<(u32, u32), EvaluationError> 
     Ok((range.end.row - row + 1, range.end.column - col + 1))
 }
 
-fn checked_scalar(value: Value, budget: &mut EvaluationBudget) -> Result<Value, EvaluationError> {
+pub(crate) fn checked_scalar(
+    value: Value,
+    budget: &mut EvaluationBudget,
+) -> Result<Value, EvaluationError> {
     if matches!(value, Value::Array { .. }) {
         return Err(EvaluationError::UnsupportedCompatibilityFeature);
     }

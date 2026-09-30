@@ -188,6 +188,14 @@ test('opening a second tab publishes the same renewed RAND to both clients', asy
 
 for (const scenario of [
   {
+    name: 'XLOOKUP reference selection',
+    source: '=SUM(XLOOKUP(A1,A1:A2,A1:A2))+XLOOKUP(7,A1:A2,A1:A2,9)',
+    input: '7',
+    edit: '13',
+    before: '14',
+    after: '22',
+  },
+  {
     name: 'VLOOKUP and HLOOKUP table values',
     source: '=VLOOKUP(A1,A1:A2,1,FALSE)+HLOOKUP(A1,A1:A2,1,FALSE)',
     input: '7',

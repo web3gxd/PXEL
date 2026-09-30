@@ -108,3 +108,15 @@ scalar zero. All tables admit at most100k cells; only the key axis and one retur
 cell are read. Scalar coercion/error/type/collation rules are provisional, derived
 fixtures are not manually verified Excel goldens. Dynamic arrays, multi-area,
 locale collation and selected-only dependency tracking remain open.
+
+## XLOOKUP reference profile (ADR-073)
+
+Engine0.12.0: partially supported. Contiguous lookup vectors with aligned return
+rectangles, reference results through SUM/COUNT/INDEX/nested XLOOKUP, lazy missing
+fallback, exact/nearest/wildcard and forward/reverse/validated binary modes.
+Omitted fallback meansNA, explicit blank-cell fallback becomes scalar0. Binary
+wildcard, dynamic spill/array literals and reference-valued colon remain unsupported.
+Sorted validation returnsNA on unsorted binary source; binary duplicate tie rules
+and type/blank/error/coercion/collation are provisional. Manual Excel goldens remain
+open. All keys and selected result boundaries are bounded and charged; binary total
+cost isO(n). Conservative full-source dependencies may report unselected cycles.

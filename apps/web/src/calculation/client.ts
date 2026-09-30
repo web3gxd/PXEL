@@ -192,7 +192,7 @@ function validResult(result: PreviewResult) {
     result.preview === true &&
     result.complete === true &&
     typeof result.full === 'boolean' &&
-    result.formula_engine_version === 'pxel-formula-0.11.0' &&
+    result.formula_engine_version === 'pxel-formula-0.12.0' &&
     result.compatibility_profile === 'pxel-excel-subset-v1' &&
     /^[0-9a-f]{64}$/.test(result.normalized_result_hash) &&
     Array.isArray(result.results) &&
