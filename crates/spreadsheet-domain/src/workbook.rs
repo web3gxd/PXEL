@@ -315,6 +315,7 @@ pub struct ContentWrite {
 pub enum CellWriteKind {
     SetValue,
     Clear,
+    SetFormula,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
@@ -439,6 +440,21 @@ pub enum CommandPayload {
     UndoCell {
         target_operation_id: OperationId,
     },
+}
+impl Operation {
+    pub const fn changes_axes(&self) -> bool {
+        matches!(
+            self,
+            Self::CreateWorkbook { .. }
+                | Self::AddSheet { .. }
+                | Self::ExtendRows { .. }
+                | Self::InsertRows { .. }
+                | Self::InsertRowsRebased { .. }
+                | Self::DeleteRows { .. }
+                | Self::InsertColumnsRebased { .. }
+                | Self::DeleteColumns { .. }
+        )
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Command {
@@ -973,17 +989,7 @@ impl Workbook {
         let mut next = self.clone();
         next.apply_operation(operation, budgets, next_version)?;
         next.version = next_version;
-        if matches!(
-            operation,
-            Operation::CreateWorkbook { .. }
-                | Operation::AddSheet { .. }
-                | Operation::ExtendRows { .. }
-                | Operation::InsertRows { .. }
-                | Operation::InsertRowsRebased { .. }
-                | Operation::DeleteRows { .. }
-                | Operation::InsertColumnsRebased { .. }
-                | Operation::DeleteColumns { .. }
-        ) {
+        if operation.changes_axes() {
             next.last_axis_change_version = next_version;
         }
         if matches!(
@@ -1244,6 +1250,11 @@ impl Workbook {
                         return Err(DomainError::InvalidValue);
                     }
                     Some(CellWriteKind::Clear) if content.is_some() => {
+                        return Err(DomainError::InvalidValue);
+                    }
+                    Some(CellWriteKind::SetFormula)
+                        if !matches!(content, Some(CellContent::Formula(_))) =>
+                    {
                         return Err(DomainError::InvalidValue);
                     }
                     _ => {}

@@ -457,3 +457,15 @@ and manual Excel goldens remain open. Preliminary100k measurements are in
 benchmarks/2026-09-30-multi-criteria-local.md. Next functional work returns to phase4
 undo coverage: authored formula writes, then broader history/batch/redo semantics.
 The wider XLSX/structure/recovery/load/production and deployment gates stay open.
+
+Authored formula Undo (ADR076) is locally verified. New formula writes record
+server-derived exact preimages in schema16 and use the existing guarded
+compensation/CAS/receipt path. Formula-bearing inverses reject axes changed after
+the target both in actor and transaction. Older formula binding versions trigger
+projection resync so historical source never masquerades as current A1 text,
+including structural changes before the overwritten edit. Final64HTTP integration/
+network/security,96browser DPR1/2,83frontend unit and2hard-restart cases passed;
+detailed native/codec/PostgreSQL checks and discovered/fixed regressions are in
+RUNBOOK. This closes authored-formula eligibility only. Multi-step per-user
+history, batch/structural compensation and redo remain required phase4 work;
+full XLSX/recovery/load/production/Linux/Compose/remoteCI gates stay open.

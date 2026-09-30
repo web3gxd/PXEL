@@ -3376,3 +3376,97 @@ or schema. Next phase4 gap: authored formula write undo, then broader history/
 batch/redo. Manual Excel/full XLSX/structure/recovery/load/production/Linux/Compose/
 remoteCI gates remain open and original full goal active. Final readiness/format/
 diff check and commit follow.
+
+## 2026-09-30 — Authored formula write undo, in progress
+
+Previous turn progressed and committed892116f, verified SUMIFS/COUNTIFS. Read
+AGENTS/RUNBOOK/roadmap/ADR028/029 and current domain/codec/actor/journal/frontend
+undo contracts. Continue incremental implementation/TDD skills. ADR076 PROPOSED
+extends server-derived CellWrite preimage to SetFormula using schema16/authored_kind3
+and independent hash tag17, keeping old event bytes and wire patches unchanged.
+Both formula result and formula preimage refuse restoration across axis changes;
+ownership/equal-write/tail-window/CAS/ACL/receipt guards stay. Native specification
+test added before new enum/API. Running dev remains verified0.14; full MVP active.
+
+Authored formula undo: domain specification first failed to compile without the
+new kind, then all five domain undo tests passed. Codec schema16 specification
+first rejected the new write; after implementation all23 codec tests passed,
+including legacy hash goldens. Frontend eligibility assertion first failed, then
+all83 frontend unit tests passed. Full domain/codec suites passed with one
+intentional domain stress ignore. Protobuf generation passed. The new HTTP test
+was RED against the previous running backend (undo rejected); rebuild/migration,
+live PostgreSQL and browser/restart checks remain pending. Removed an unreachable
+test-helper arm and clarified the historical-axis guard comment. No full-MVP gate
+is closed by these unit results.
+
+Launcher26420 identity verified and only its tree stopped; hidden20888 rebuilt
+backend/WASM and applied schema16 migration while preserving PostgreSQL/data.
+Live authored-formula restoration test passed (value/formula/blank, dependent
+recalculation, exact receipt retry). New real-PG journal test passed, including
+schema16 decode, equal rewrite UndoConflict and compensation replay/hash/receipt.
+Existing undo guards4passed/1intentional timing ignore. Focused editor DPR1/2
+2passed; authored formula after axis change correctly rejected with unchanged
+head. Strict all-targets domain/codec/collab/storage/server-dev clippy passed;
+protobuf check, frontend typecheck/lint/build, SQLx prepare check and rustfmt passed.
+Collab22passed/2intentional benchmark ignores. Full integration/browser session5644
+is still live; additive hard-restart source/hash/result/receipt test prepared,
+not yet run. No new performance claim or full-phase gate closure.
+
+Full first regression:63 HTTP integration/network/security cases passed (includes
+54 document cases),92/94 browser passed. Both failed browser cases were delayed
+formula text after row insertion: correct value12 but old authored A1 display.
+Root cause: committed_message transformed detection matched only legacy
+SetCellFormula, not new authored CellWrite. Extended detection to authored
+SetFormula only, preserving unchanged-axis formula compensation wire behavior.
+Independent read-only review found two concrete gaps (no tests run by reviewer):
+transactional formula-axis guard and codec future-binding encode symmetry. Both
+reproduced RED. Encoder now rejects new-schema result/preimage future bindings;
+all23 codec tests passed. Shared domain Operation::changes_axes now drives domain
+axis version and journal history guard; actual PG inverse after ExtendRows now
+fails NotUndoable before head/receipt mutation. Undo tests5passed/1timing ignore.
+Stopped verified20888 only after browser terminal failure and restarted hidden
+31724 for fixes. New full regression/recovery still pending; failures retained.
+
+Hard restart tests2/2 passed12570.9939ms with new authored-write event recovered
+before undo, restored formula result/hash after undo restart and idempotent receipt.
+Review found a further display defect: an axis edit BEFORE the overwritten target
+can leave a formula preimage whose durable canonical text is historical. New browser
+regression initially exposed a harness navigation error (bar Enter does not move
+selection); corrected target assertion then RED reproduced '=B1+1' instead of
+current '=(B2+1)' at DPR1/2. Formula compensation now also uses the existing
+transformed/projection refresh for older binding versions. Updated HTTP contract
+assertion explicitly checks transformed/no raw canonical payload, retaining exact
+source/result checks. No assertion weakened to tolerate historical display.
+Verified18784 stopped after tests terminal; restarted15992. Final focused cases
+and full regression remain pending. Engine identity stays0.14; no benchmark claim.
+
+Final focused regressions6browser DPR1/2 and4HTTP passed after compensation
+projection-resync fix. Default-feature server check,83frontend unit tests,
+protobuf/rustfmt checks passed. Full final integration64/64 passed90047.8298ms
+(includes55document tests and9network/security tests);96browser cases remain live
+session1669. Presentation updated verified0.14 corpus counts554fixtures and
+1010books/2020patches plus bounded function families, keeping explicit incomplete
+MVP disclaimer. Real presentation Chromium checker passed1440x900 and390x844,
+10slides/navigation/no page errors/no horizontal overflow. No new timing results
+or Excel golden claim. Final browser/recovery of last display fix still pending.
+
+Verification command correction: cargo test -p pxel-server --features dev-auth
+--lib failed because server is binary-only (no test executed). Correct --bin
+pxel-server command passed17/17 unit tests. Final SQLx prepare check and format
+check passed. Read-only review follow-up confirmed both first findings fixed and
+identified historical compensation display; browser RED/GREEN evidence above
+covers that finding. Final browser session1669 remains live; no completion claim.
+
+Final ADR076 regression:96/96 Playwright passed5.3min (1669 terminal exit0).
+Verified15992 and stopped only its tree after browser completion. Final hard
+restart2/2 passed10863.8576ms after3.62s build, covering original schema16 recovery,
+formula compensation source/result/content+calculated hashes and receipt after
+restart. ADR076 accepted for authored formula Undo only. Changed domain kind/shared
+axis predicate, actor normalization, journal+codec schema/hash/guards and migration,
+protobuf enum/descriptor, frontend eligibility, server transformed/resync handling,
+unit/live/browser/recovery regressions and persistence/collaboration/roadmap/docs.
+Presentation refreshed existing verified corpus and passed its actual browser
+checker at two viewport sizes. No dependencies or engine identity change; no new
+performance benchmark or manual Excel/whole-phase/production claim. Broader
+history/batch/redo, XLSX/recovery/load/production/Linux/Compose/remoteCI remain open.
+Restart local development stack and final format/readiness/commit follow.

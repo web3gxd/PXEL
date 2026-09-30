@@ -1,5 +1,13 @@
 # Persistence и recovery
 
+ADR-076 добавляет schema16 authored formula write: source, normalized bound AST,
+exact preimage и authored_kind3. Старые schema2/11 bytes и hash tags неизменны;
+новый semantic hash tag17 независим от protobuf bytes. Компенсации остаются
+schema12/13. Migration расширяет principal constraint до16. Formula-bearing undo
+повторяет проверку axis history внутри CAS transaction; отказ не меняет head и
+не создаёт receipt. Кодек отвергает будущую binding version и при encode, и при
+decode нового формата.
+
 Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
 operations реализованы локально. `SnapshotImage` и binary codec проверены.
 ADR-033 добавил PostgreSQL snapshot metadata и внутренние publish/read/recover API:

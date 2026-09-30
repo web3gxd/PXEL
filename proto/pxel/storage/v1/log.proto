@@ -61,7 +61,7 @@ message DeleteRows { bytes sheet_id = 1; repeated bytes rows = 2; }
 message InsertColumns { bytes sheet_id = 1; bytes before_column_id = 2; repeated bytes columns = 3; }
 message DeleteColumns { bytes sheet_id = 1; repeated bytes columns = 2; }
 message SetCellValues { repeated SetCellValue writes = 1; }
-// Schema 11/12 preserve the exact preimage; schema 13 restores formula preimages.
+// Schema 11/12 preserve the preimage; 13 restores formulas; 16 authors formulas.
 message CellWrite {
  CellAddress address = 1;
  CellContent content = 2;
@@ -78,6 +78,7 @@ enum AuthoredWriteKind {
  AUTHORED_WRITE_KIND_UNSPECIFIED = 0;
  AUTHORED_WRITE_KIND_SET_VALUE = 1;
  AUTHORED_WRITE_KIND_CLEAR = 2;
+ AUTHORED_WRITE_KIND_SET_FORMULA = 3;
 }
 message CellAddress { bytes sheet_id = 1; bytes row_id = 2; bytes column_id = 3; }
 message SetCellValue { CellAddress address = 1; CellValue value = 2; }

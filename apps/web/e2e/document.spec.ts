@@ -1050,6 +1050,63 @@ test('one-step undo is a durable compensation broadcast to another browser', asy
   }
 });
 
+test('undo of an authored formula restores the previous formula and survives reload', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  await bar.fill('=2+3');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await expect(bar).toHaveValue('=2+3');
+  await bar.fill('=4+5');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await expect(bar).toHaveValue('=4+5');
+  await page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(bar).toHaveValue('=2+3');
+  await page.reload();
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('=2+3');
+});
+
+test('formula undo renders a preimage transformed before the overwritten edit', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  const grid = page.getByRole('region', { name: 'Область таблицы' });
+  await bar.fill('=B1+1');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await page.keyboard.press('ArrowUp');
+  await page.getByRole('button', { name: 'Строка ↑', exact: true }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(bar).toHaveValue('=(B2+1)');
+  await bar.fill('=42');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await grid.focus();
+  await expect(bar).toHaveValue('=42');
+  await page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(bar).toHaveValue('=(B2+1)');
+  await expect(page.getByTestId('active-cell')).toHaveText('A2: 1');
+});
+
 test('undo restores a formula overwritten by a plain value', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');

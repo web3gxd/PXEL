@@ -776,10 +776,11 @@ async fn submit<J: OperationJournal>(
                 else {
                     return Err(JournalError::NotUndoable.into());
                 };
-                // A historical bound formula was not present in the workbook
-                // while this value occupied its cell, so axis edits could not
-                // rebase it. Restore it only when the axes have not changed.
-                if matches!(previous, Some(CellContent::Formula(_)))
+                // Recorded formula content and preimages do not follow later
+                // axis edits. Reject their inverse until historical reference
+                // transformation is supported explicitly.
+                if (matches!(previous, Some(CellContent::Formula(_)))
+                    || matches!(content, Some(CellContent::Formula(_))))
                     && workbook.last_axis_change_version() > target.version
                 {
                     return Err(JournalError::NotUndoable.into());
@@ -1141,9 +1142,13 @@ fn normalize(
         }),
         CommandPayload::SetCellFormula { address, source } => {
             let formula = axes.bind(source.as_str(), workbook, *address, command.base_version)?;
-            Ok(Operation::SetCellFormula {
+            Ok(Operation::CellWrite {
                 address: *address,
-                formula,
+                content: Some(CellContent::Formula(formula)),
+                previous: workbook.cell_content(*address)?.cloned(),
+                kind: Some(CellWriteKind::SetFormula),
+                undoes: None,
+                undoes_version: None,
             })
         }
         CommandPayload::CreateWorkbook { .. } | CommandPayload::UndoCell { .. } => {

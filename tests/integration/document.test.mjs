@@ -2308,6 +2308,144 @@ test(
   },
 );
 
+test('undo of authored formula restores value formula and blank with dependent recalculation', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal((await client.send(setCommand(client, snapshot, 7))).case, 'committed');
+    assert.equal(
+      (
+        await client.send(
+          setCommand(client, { ...snapshot, version: '2' }, 9, { column: 1, sequence: 2 }),
+        )
+      ).case,
+      'committed',
+    );
+    const first = formulaCommand(client, { ...snapshot, version: '3' }, '=A1+1', {
+      column: 1,
+      sequence: 3,
+    });
+    assert.equal((await client.send(first)).case, 'committed');
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, { ...snapshot, version: '4' }, '=B1*2', {
+            column: 2,
+            sequence: 4,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    const undo = undoCellCommand(client, { ...snapshot, version: '5' }, first.operationId, {
+      sequence: 5,
+    });
+    assert.equal((await client.send(undo)).case, 'committed');
+    assert.deepEqual(
+      (await calculation(base, cookie, snapshot.document_id, 6)).values.map((cell) => cell.value),
+      [{ type: 'number', value: 18 }],
+    );
+    assert.equal((await client.send(undo)).case, 'receipt');
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, { ...snapshot, version: '6' }, '=A1+2', {
+            column: 1,
+            sequence: 6,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    const second = formulaCommand(client, { ...snapshot, version: '7' }, '=A1+3', {
+      column: 1,
+      sequence: 7,
+    });
+    assert.equal((await client.send(second)).case, 'committed');
+    assert.equal(
+      (
+        await client.send(
+          undoCellCommand(client, { ...snapshot, version: '8' }, second.operationId, {
+            sequence: 8,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    assert.deepEqual(
+      (await calculation(base, cookie, snapshot.document_id, 9)).values.map((cell) => cell.value),
+      [
+        { type: 'number', value: 9 },
+        { type: 'number', value: 18 },
+      ],
+    );
+    const blank = formulaCommand(client, { ...snapshot, version: '9' }, '=1', {
+      column: 3,
+      sequence: 9,
+    });
+    assert.equal((await client.send(blank)).case, 'committed');
+    assert.equal(
+      (
+        await client.send(
+          undoCellCommand(client, { ...snapshot, version: '10' }, blank.operationId, {
+            sequence: 10,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    const restored = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(restored.version, '11');
+    assert.equal(
+      restored.sheets[0].cells.find((cell) => cell.column_id === snapshot.sheets[0].columns[1])
+        .value.value.source,
+      '=A1+2',
+    );
+    assert.equal(
+      restored.sheets[0].cells.some((cell) => cell.column_id === snapshot.sheets[0].columns[3]),
+      false,
+    );
+    assert.equal((await client.send(undo)).case, 'receipt');
+  } finally {
+    client.socket.terminate();
+  }
+});
+
+test('undo of authored formula rejects historical inverse after an axis change', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    const authored = formulaCommand(client, snapshot, '=1');
+    assert.equal((await client.send(authored)).case, 'committed');
+    assert.equal(
+      (
+        await client.send(
+          insertRowsCommand(
+            client,
+            { ...snapshot, version: '2' },
+            snapshot.sheets[0].rows[0],
+            [uuid7()],
+            { sequence: 2 },
+          ),
+        )
+      ).case,
+      'committed',
+    );
+    const rejected = await client.send(
+      undoCellCommand(client, { ...snapshot, version: '3' }, authored.operationId, { sequence: 3 }),
+    );
+    assert.equal(rejected.case, 'rejected');
+    assert.equal(rejected.value.code, 14);
+    const state = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(state.version, '3');
+    assert.equal(state.sheets[0].cells[0].value.value.source, '=1');
+  } finally {
+    client.socket.terminate();
+  }
+});
+
 test('undo restores a formula preimage only while its axes are unchanged', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);
@@ -2335,7 +2473,10 @@ test('undo restores a formula preimage only while its axes are unchanged', async
       }),
     );
     assert.equal(undo.case, 'committed', `undo rejected with code ${undo.value?.code}`);
-    assert.equal(undo.value.canonicalOperation.kind.case, 'setCellFormula');
+    // Historical bound content needs a projection-rendered A1 view, even when
+    // this particular inverse has unchanged axes.
+    assert.equal(undo.value.transformed, true);
+    assert.equal(undo.value.canonicalOperation, undefined);
     const restored = await getDocument(base, cookie, snapshot.document_id);
     assert.equal(restored.version, '5');
     assert.equal(

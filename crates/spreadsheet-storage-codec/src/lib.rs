@@ -318,6 +318,7 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                 let authored_kind = match (kind, undoes, undoes_version) {
                     (Some(CellWriteKind::SetValue), None, None) => 1,
                     (Some(CellWriteKind::Clear), None, None) => 2,
+                    (Some(CellWriteKind::SetFormula), None, None) => 3,
                     (None, Some(_), Some(_)) => 0,
                     _ => return Err(CodecError::Invalid),
                 };
@@ -328,6 +329,11 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                         return Err(CodecError::Invalid);
                     }
                     Some(CellWriteKind::Clear) if content.is_some() => {
+                        return Err(CodecError::Invalid);
+                    }
+                    Some(CellWriteKind::SetFormula)
+                        if !matches!(content, Some(CellContent::Formula(_))) =>
+                    {
                         return Err(CodecError::Invalid);
                     }
                     _ => {}
@@ -638,6 +644,7 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                     Some(match write.authored_kind {
                         1 => CellWriteKind::SetValue,
                         2 => CellWriteKind::Clear,
+                        3 => CellWriteKind::SetFormula,
                         _ => return Err(CodecError::Invalid),
                     }),
                     None,
@@ -651,6 +658,11 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                     return Err(CodecError::Invalid);
                 }
                 Some(CellWriteKind::Clear) if content.is_some() => {
+                    return Err(CodecError::Invalid);
+                }
+                Some(CellWriteKind::SetFormula)
+                    if !matches!(content, Some(CellContent::Formula(_))) =>
+                {
                     return Err(CodecError::Invalid);
                 }
                 _ => {}
@@ -668,6 +680,10 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::CellWrite {
+            kind: Some(CellWriteKind::SetFormula),
+            ..
+        } => 16,
         Operation::AddSheet { .. } => 15,
         Operation::CopyRange { .. } => 14,
         Operation::CellWrite {
@@ -692,6 +708,18 @@ pub fn schema_version(operation: &Operation) -> u32 {
     }
 }
 pub fn encode(event: &CommittedEvent) -> Result<Vec<u8>, CodecError> {
+    if let Operation::CellWrite {
+        kind: Some(CellWriteKind::SetFormula),
+        content,
+        previous,
+        ..
+    } = &event.operation
+        && content.iter().chain(previous.iter()).any(|content| {
+            matches!(content, CellContent::Formula(formula) if formula.bound_at_version() >= event.version)
+        })
+    {
+        return Err(CodecError::Invalid);
+    }
     let (actor_id, principal_kind) = match (event.principal, &event.operation) {
         (EventPrincipal::User(actor), Operation::AdvanceCalculationEpoch { .. }) => {
             let _ = actor;
@@ -724,7 +752,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=15) {
+    if !matches!(e.schema_version, 1..=16) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -741,7 +769,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         &operation,
     ) {
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -749,13 +777,18 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15, 0, actor, _) => {
+        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16, 0, actor, _) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
         _ => return Err(CodecError::Invalid),
     };
     if matches!(&operation,Operation::SetCellFormula{formula,..} if formula.bound_at_version().get()>=e.committed_version)
+    {
+        return Err(CodecError::Invalid);
+    }
+    if let Operation::CellWrite {kind:Some(CellWriteKind::SetFormula),content,previous,..} = &operation
+        && content.iter().chain(previous.iter()).any(|content|matches!(content,CellContent::Formula(formula) if formula.bound_at_version().get()>=e.committed_version))
     {
         return Err(CodecError::Invalid);
     }
@@ -966,6 +999,7 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
             let tag = match (kind, undoes, undoes_version) {
                 (Some(CellWriteKind::SetValue), None, None) => 12,
                 (Some(CellWriteKind::Clear), None, None) => 13,
+                (Some(CellWriteKind::SetFormula), None, None) => 17,
                 (None, Some(_), Some(_)) => 14,
                 _ => return Err(CodecError::Invalid),
             };
@@ -1858,6 +1892,94 @@ mod formula_tests {
             target_operation_id: OperationId::from_bytes([8; 16])?,
         };
         assert_ne!(command_fingerprint(&retry)?, fingerprint);
+        Ok(())
+    }
+    #[test]
+    fn authored_formula_write_has_schema_sixteen_and_rejects_downgrade()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let formula = fixture()?;
+        let address = formula.origin();
+        let event = CommittedEvent {
+            document_id: DocumentId::from_bytes([7; 16])?,
+            operation_id: OperationId::from_bytes([8; 16])?,
+            principal: EventPrincipal::User(ActorId::from_bytes([9; 16])?),
+            version: DocumentVersion::new(4)?,
+            operation: Operation::CellWrite {
+                address,
+                content: Some(CellContent::Formula(formula.clone())),
+                previous: Some(CellContent::Value(CellValue::Number(7.))),
+                kind: Some(CellWriteKind::SetFormula),
+                undoes: None,
+                undoes_version: None,
+            },
+            state_hash: [11; 32],
+        };
+        let encoded = encode(&event)?;
+        let dto = v1::EventEnvelope::decode(encoded.as_slice())?;
+        assert_eq!(dto.schema_version, 16);
+        assert_eq!(decode(&encoded)?, event);
+        assert_eq!(event_hash(&decode(&encoded)?)?, event_hash(&event)?);
+        let future_binding = CommittedEvent {
+            version: formula.bound_at_version(),
+            ..event.clone()
+        };
+        assert!(matches!(encode(&future_binding), Err(CodecError::Invalid)));
+        let legacy = CommittedEvent {
+            operation: Operation::SetCellFormula { address, formula },
+            ..event.clone()
+        };
+        assert_ne!(event_hash(&event)?, event_hash(&legacy)?);
+        let mut old = dto.clone();
+        old.schema_version = 11;
+        assert!(matches!(
+            decode(&old.encode_to_vec()),
+            Err(CodecError::UnsupportedSchema)
+        ));
+        let mut bad = dto.clone();
+        if let Some(v1::Operation {
+            kind: Some(v1::operation::Kind::AuthoredCellWrite(write)),
+        }) = bad.operation.as_mut()
+        {
+            write.authored_kind = 1;
+        } else {
+            return Err("unexpected authored DTO".into());
+        }
+        assert!(matches!(
+            decode(&bad.encode_to_vec()),
+            Err(CodecError::Invalid)
+        ));
+        let mut future = dto;
+        if let Some(v1::Operation {
+            kind: Some(v1::operation::Kind::AuthoredCellWrite(write)),
+        }) = future.operation.as_mut()
+        {
+            if let Some(v1::CellContent {
+                kind: Some(v1::cell_content::Kind::Formula(formula)),
+            }) = write.content.as_mut()
+            {
+                formula.bound_at_version = 4;
+            } else {
+                return Err("unexpected formula DTO".into());
+            }
+        } else {
+            return Err("unexpected authored DTO".into());
+        }
+        assert!(matches!(
+            decode(&future.encode_to_vec()),
+            Err(CodecError::Invalid)
+        ));
+        let malformed = CommittedEvent {
+            operation: Operation::CellWrite {
+                address,
+                content: Some(CellContent::Value(CellValue::Number(7.))),
+                previous: None,
+                kind: Some(CellWriteKind::SetFormula),
+                undoes: None,
+                undoes_version: None,
+            },
+            ..event
+        };
+        assert!(matches!(encode(&malformed), Err(CodecError::Invalid)));
         Ok(())
     }
     #[test]

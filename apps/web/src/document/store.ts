@@ -2126,7 +2126,7 @@ export class DocumentStore {
       )
         this.selectSheet(pending.sheetId);
       if (pending?.kind === 'cell') {
-        this.lastUndoableOperation = pending.value.type === 'formula' ? undefined : pending.id;
+        this.lastUndoableOperation = pending.id;
       } else if (pending) {
         this.lastUndoableOperation = undefined;
       }

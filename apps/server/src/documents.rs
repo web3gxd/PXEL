@@ -1228,8 +1228,17 @@ pub(crate) fn committed_message(event: &CommittedEvent) -> Option<v1::OperationC
     // A delayed formula's authored A1 source is not safe to rebind at head.
     // Keep the durable bound AST, but use the existing projection-resync path
     // until wire carries a rendered text view for this exact committed version.
-    let transformed = matches!(&event.operation, Operation::SetCellFormula { formula, .. }
-        if formula.bound_at_version().get() < event.version.get().saturating_sub(1));
+    let formula = match &event.operation {
+        Operation::SetCellFormula { formula, .. }
+        | Operation::CellWrite {
+            content: Some(spreadsheet_domain::workbook::CellContent::Formula(formula)),
+            ..
+        } => Some(formula),
+        _ => None,
+    };
+    let transformed = formula.is_some_and(|formula| {
+        formula.bound_at_version().get() < event.version.get().saturating_sub(1)
+    });
     let operation = if transformed {
         None
     } else {

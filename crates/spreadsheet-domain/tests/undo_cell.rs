@@ -45,6 +45,63 @@ fn authored_write(
 }
 
 #[test]
+fn authored_formula_write_records_preimage_and_compensates() -> Result<(), DomainError> {
+    let (book, address) = seed()?;
+    let previous = Some(CellContent::Value(CellValue::Number(7.)));
+    let book = book.candidate(
+        &Operation::SetCellValue {
+            address,
+            value: CellValue::Number(7.),
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let formula = Formula::new(
+        "=42".into(),
+        "=42".into(),
+        BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Number(42.)])
+            .map_err(|_| DomainError::InvalidFormula)?,
+        address,
+        book.version(),
+    )
+    .map_err(|_| DomainError::InvalidFormula)?;
+    let content = Some(CellContent::Formula(formula));
+    let authored = authored_write(
+        address,
+        content.clone(),
+        previous.clone(),
+        CellWriteKind::SetFormula,
+    );
+    let next = book.candidate(&authored, DocumentVersion::new(3)?)?;
+    assert_eq!(next.cell_content(address)?, content.as_ref());
+    let compensation = Operation::CellWrite {
+        address,
+        content: previous.clone(),
+        previous: content,
+        kind: None,
+        undoes: Some(OperationId::from_bytes([5; 16])?),
+        undoes_version: Some(DocumentVersion::new(3)?),
+    };
+    let restored = next.candidate(&compensation, DocumentVersion::new(4)?)?;
+    assert_eq!(restored.cell_content(address)?, previous.as_ref());
+    for invalid in [None, previous] {
+        assert_eq!(
+            book.candidate(
+                &authored_write(
+                    address,
+                    invalid,
+                    book.cell_content(address)?.cloned(),
+                    CellWriteKind::SetFormula
+                ),
+                DocumentVersion::new(3)?
+            )
+            .err(),
+            Some(DomainError::InvalidValue)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn guarded_write_and_compensation_replay_to_same_hash() -> Result<(), DomainError> {
     let (mut original, address) = seed()?;
     let authored_id = OperationId::from_bytes([5; 16])?;

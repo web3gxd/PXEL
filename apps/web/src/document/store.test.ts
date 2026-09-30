@@ -1666,6 +1666,7 @@ describe('formula intents and versioned server calculation', () => {
     expect(store.calculationStatus).toBe('complete');
     expect(store.display(cellPosition)).toBe('3');
     expect(displayValue(store.value(cellPosition))).toBe('=1+2');
+    expect(store.canUndo).toBe(true);
     store.begin();
     expect(store.editing?.text).toBe('=1+2');
     expect(store.pending).toHaveLength(0);

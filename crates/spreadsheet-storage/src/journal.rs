@@ -48,7 +48,7 @@ struct StoredEventRow<'a> {
     canonical_event_hash: &'a [u8],
 }
 fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=15) {
+    if !matches!(row.schema_version, 1..=16) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -229,6 +229,10 @@ async fn guard_undo_tail(
     address: CellAddress,
     head: DocumentVersion,
 ) -> Result<(), JournalError> {
+    let formula_history = matches!(&target.operation,
+        Operation::CellWrite { content, previous, .. }
+        if content.iter().chain(previous.iter()).any(|cell| matches!(cell, CellContent::Formula(_)))
+    );
     let mut rows = sqlx::query!(
         "SELECT committed_version, operation_id, actor_id, principal_kind, schema_version, payload, payload_checksum, canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version>$2 AND committed_version<=$3 ORDER BY committed_version",
         uuid(document.as_bytes()),
@@ -255,6 +259,9 @@ async fn guard_undo_tail(
         }
         if touches_address(&event.operation, address) {
             return Err(JournalError::UndoConflict);
+        }
+        if formula_history && event.operation.changes_axes() {
+            return Err(JournalError::NotUndoable);
         }
     }
     if expected != head.get() {
@@ -527,6 +534,23 @@ impl OperationJournal for PgDatabase {
                 },
                 (Some(CellWriteKind::Clear), None, None, None) => {
                     CommandPayload::ClearCell { address: *address }
+                }
+                (
+                    Some(CellWriteKind::SetFormula),
+                    None,
+                    None,
+                    Some(CellContent::Formula(formula)),
+                ) => {
+                    if formula.origin() != *address
+                        || formula.bound_at_version() > request.expected_head
+                    {
+                        return Err(JournalError::Corrupt);
+                    }
+                    CommandPayload::SetCellFormula {
+                        address: *address,
+                        source: FormulaSource::new(formula.source().to_owned())
+                            .map_err(|_| JournalError::Corrupt)?,
+                    }
                 }
                 (None, Some(target_operation_id), Some(_), _) => CommandPayload::UndoCell {
                     target_operation_id: *target_operation_id,
@@ -1249,7 +1273,15 @@ mod tests {
                 None,
                 CommandPayload::ClearCell { address },
             ),
-            _ => return Err("invalid guarded-write test fixture".into()),
+            (Some(CellContent::Formula(formula)), None) => (
+                Some(CellWriteKind::SetFormula),
+                None,
+                None,
+                CommandPayload::SetCellFormula {
+                    address,
+                    source: FormulaSource::new(formula.source().to_owned())?,
+                },
+            ),
         };
         let operation = Operation::CellWrite {
             address,
@@ -1283,6 +1315,183 @@ mod tests {
                 state_hash: candidate.hash(),
             },
         })
+    }
+    #[sqlx::test(migrations = false)]
+    async fn formula_undo_transaction_rejects_axis_changes_without_actor(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        use spreadsheet_domain::formula::{AST_SCHEMA_VERSION, BoundAst, Formula, Node, NodeId};
+        let (db, identity, book) = fixture(pool).await?;
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        let formula = Some(CellContent::Formula(Formula::new(
+            "=42".into(),
+            "=42".into(),
+            BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Number(42.)])?,
+            address,
+            book.version(),
+        )?));
+        let original =
+            guarded_write_request(&db, identity, &book, 111, formula.clone(), None, None).await?;
+        assert!(matches!(
+            db.commit(&original).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let after = book.candidate(&original.event.operation, original.event.version)?;
+        let rows = vec![RowId::from_bytes([112; 16])?];
+        let operation = Operation::ExtendRows {
+            sheet: address.sheet,
+            rows: rows.clone(),
+        };
+        let next = DocumentVersion::new(3)?;
+        let extended = after.candidate(&operation, next)?;
+        let operation_id = OperationId::from_bytes([113; 16])?;
+        let extension = CommitRequest {
+            identity,
+            expected_head: after.version(),
+            expected_access: db.access(identity, book.document_id()).await?,
+            command: Command {
+                operation_id,
+                document_id: book.document_id(),
+                actor_id: identity.actor_id,
+                base_version: after.version(),
+                client_sequence: 2,
+                operation: CommandPayload::ExtendRows {
+                    sheet: address.sheet,
+                    rows,
+                },
+            },
+            event: CommittedEvent {
+                document_id: book.document_id(),
+                operation_id,
+                principal: EventPrincipal::User(identity.actor_id),
+                version: next,
+                operation,
+                state_hash: extended.hash(),
+            },
+        };
+        assert!(matches!(
+            db.commit(&extension).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let inverse = guarded_write_request(
+            &db,
+            identity,
+            &extended,
+            114,
+            None,
+            formula,
+            Some((original.event.operation_id, original.event.version)),
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&inverse).await,
+            Err(JournalError::NotUndoable)
+        ));
+        assert_eq!(db.access(identity, book.document_id()).await?.head, next);
+        assert!(db.receipt(identity, &inverse.command).await?.is_none());
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
+    async fn authored_formula_undo_is_durable_and_equal_rewrite_conflicts(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        use spreadsheet_domain::formula::{AST_SCHEMA_VERSION, BoundAst, Formula, Node, NodeId};
+        let (db, identity, book) = fixture(pool).await?;
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        let formula = Some(CellContent::Formula(Formula::new(
+            "=42".into(),
+            "=42".into(),
+            BoundAst::new(AST_SCHEMA_VERSION, NodeId(0), vec![Node::Number(42.)])?,
+            address,
+            book.version(),
+        )?));
+        let original =
+            guarded_write_request(&db, identity, &book, 101, formula.clone(), None, None).await?;
+        assert!(matches!(
+            db.commit(&original).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let target = db
+            .load_undo_target(identity, book.document_id(), original.event.operation_id)
+            .await?;
+        assert_eq!(target.operation, original.event.operation);
+        let after = book.candidate(&target.operation, target.version)?;
+        let undo = guarded_write_request(
+            &db,
+            identity,
+            &after,
+            102,
+            None,
+            formula.clone(),
+            Some((target.operation_id, target.version)),
+        )
+        .await?;
+        let rewrite = guarded_write_request(
+            &db,
+            identity,
+            &after,
+            103,
+            formula.clone(),
+            formula.clone(),
+            None,
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&rewrite).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let after_rewrite = after.candidate(&rewrite.event.operation, rewrite.event.version)?;
+        let stale_inverse = guarded_write_request(
+            &db,
+            identity,
+            &after_rewrite,
+            104,
+            None,
+            formula.clone(),
+            Some((target.operation_id, target.version)),
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&stale_inverse).await,
+            Err(JournalError::UndoConflict)
+        ));
+        let inverse = guarded_write_request(
+            &db,
+            identity,
+            &after_rewrite,
+            105,
+            formula.clone(),
+            formula,
+            Some((rewrite.event.operation_id, rewrite.event.version)),
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&inverse).await?,
+            CommitOutcome::Committed(_)
+        ));
+        assert!(matches!(
+            db.commit(&inverse).await?,
+            CommitOutcome::AlreadyCommitted(_)
+        ));
+        assert!(db.receipt(identity, &undo.command).await?.is_none());
+        let mut replay = Workbook::empty(book.document_id());
+        for event in db
+            .load_events(identity, book.document_id(), DocumentVersion::ZERO, 1000)
+            .await?
+        {
+            replay.apply_event(&event)?;
+        }
+        assert_eq!(replay.hash(), inverse.event.state_hash);
+        assert_eq!(replay.version().get(), 4);
+        Ok(())
     }
     #[sqlx::test(migrations = false)]
     async fn guarded_undo_commits_new_version_and_replays_after_retry(

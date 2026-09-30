@@ -59,15 +59,20 @@ partial ranges сужаются до живых границ. Stale write пол
 rejection, исходный idempotent retry — receipt. Replay проверяет domain hash.
 Структурные inverse ещё не реализованы.
 
-Guarded undo по ADR-028 реализован только для новых одиночных value/clear writes
-с persisted preimage (schema 11). `UndoCell` — отдельное намерение; schema-12
+Guarded undo по ADR-028/076 реализован для новых одиночных value/clear writes
+(schema 11) и formula writes (schema 16) с persisted preimage. `UndoCell` — отдельное намерение; schema-12
 компенсация создаёт новую версию. Actor проверяет candidate, а журнал под
 блокировкой документа сканирует до 10 000 последующих событий на любую запись
 того же stable address перед CAS. Повтор команды возвращает receipt. Старые
-события, batch, формульные записи и структурные операции этим срезом не
+события, batch и структурные операции этим срезом не
 отменяются. ADR-029 разрешает восстановить формульный preimage одиночной
 value/clear записи отдельной persisted schema 13 только если оси не менялись с версии отменяемого события;
 после изменения осей возвращается `NotUndoable`.
+ADR-076 применяет этот guard к formula result и preimage и повторяет его внутри
+транзакции по общему `Operation::changes_axes`. Formula compensation с исторической
+binding version использует projection resync: сохранённый canonical текст может
+отличаться от текущего A1 после структурного изменения до отменяемой записи.
+Многошаговая история и redo остаются отдельными незавершёнными срезами.
 
 ## Command, validation, event, projection
 

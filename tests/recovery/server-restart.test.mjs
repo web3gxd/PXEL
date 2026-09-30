@@ -718,6 +718,57 @@ test(
         assert.equal((await formulaUndoRetry.send(formulaUndo)).case, 'receipt');
         formulaUndoRetry.socket.terminate();
 
+        const authoredWriter = await connect(base, cookie);
+        const authoredFormula = formulaCommand(authoredWriter, formulaUndoRecovered, '=8+9', {
+          sequence: 4,
+        });
+        assert.equal((await authoredWriter.send(authoredFormula)).case, 'committed');
+        authoredWriter.socket.terminate();
+        await kill();
+        await start();
+        const beforeAuthoredUndo = await getDocument(base, cookie, formulaUndoBase.document_id);
+        assert.equal(beforeAuthoredUndo.version, '5');
+        assert.equal(beforeAuthoredUndo.sheets[0].cells[0].value.value.source, '=8+9');
+        const authoredUndoWriter = await connect(base, cookie);
+        const authoredUndo = undoCellCommand(
+          authoredUndoWriter,
+          beforeAuthoredUndo,
+          authoredFormula.operationId,
+          { sequence: 5 },
+        );
+        const authoredUndoAck = await authoredUndoWriter.send(authoredUndo);
+        assert.equal(authoredUndoAck.case, 'committed');
+        const authoredUndoCalculation = await calculation(
+          base,
+          cookie,
+          formulaUndoBase.document_id,
+          6,
+        );
+        authoredUndoWriter.socket.terminate();
+        await kill();
+        await start();
+        const restoredAuthoredUndo = await getDocument(base, cookie, formulaUndoBase.document_id);
+        assert.equal(restoredAuthoredUndo.version, '6');
+        assert.equal(restoredAuthoredUndo.sheets[0].cells[0].value.value.source, '=2+3');
+        assert.equal(
+          restoredAuthoredUndo.state_hash,
+          Buffer.from(authoredUndoAck.value.confirmedStateHash).toString('hex'),
+        );
+        const restoredAuthoredCalculation = await calculation(
+          base,
+          cookie,
+          formulaUndoBase.document_id,
+          6,
+        );
+        assert.deepEqual(restoredAuthoredCalculation.values[0].value, { type: 'number', value: 5 });
+        assert.equal(
+          restoredAuthoredCalculation.calculated_state_hash,
+          authoredUndoCalculation.calculated_state_hash,
+        );
+        const authoredUndoRetry = await connect(base, cookie);
+        assert.equal((await authoredUndoRetry.send(authoredUndo)).case, 'receipt');
+        authoredUndoRetry.socket.terminate();
+
         const { snapshot: rangeBase } = await createDocument(base, cookie);
         const rangeWriter = await connect(base, cookie);
         assert.equal(
