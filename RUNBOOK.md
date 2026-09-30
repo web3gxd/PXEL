@@ -3604,3 +3604,5 @@ No full98browser suite, full100k convergence stress, controlled p95, manual Exce
 Linux/Compose or remoteCI run is claimed for this slice. New saturated100k-cell
 unit fixture is distinct from a100k-command convergence/load run.
 Final hard-restart recovery2/2passed10803.837ms after0.35s build; own launcher restarted, readiness verification follows. ADR078 is a complete candidate correctness fix; persisted range history remains next and the full goal stays active.
+
+Feature commit a8b66c7 saved ADR078. Final hidden launcher17652 built WASM0.16s/backend0.33s; readyz8080 and frontend5173 returned200. Worktree clean before this verification-only entry. PostgreSQL/data retained. Range undo/redo and remaining full MVP gates are open; goal remains active.
