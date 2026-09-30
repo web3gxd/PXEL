@@ -16,6 +16,14 @@ batch ([ADR-078](adr/078-atomic-batch-final-capacity.md)): допустимос�
 сохраняет новые версии, не перечитывает copy source и не отменяет чужую запись.
 Structural/style undo, cut/move и durable discovered history ещё открыты.
 
+Подготовлен pure Rust planner для cut/move ([ADR-080](adr/080-frozen-move-planner.md)):
+frozen overlap, внешние ссылки на всех листах, preimages, budget/cancellation.
+12 native tests прошли; формульный suite и wasm32 build прошли. Планирование
+1000 ячеек с 5000 inbound formulas измерено: 8.4866–8.8520 ms в последнем прогоне,
+без БД/расчёта/сети; вариативность предыдущих прогонов отражена в benchmark report.
+Это компонент следующего среза: durable MoveRange и пользовательский cut/paste
+ещё не реализованы, native/browser relocation parity ещё не проверена.
+
 Локальный функциональный gate фазы 2 по описанному ниже базовому профилю
 пройден 2026-09-29: общий native/browser WASM corpus 99/99, 1000 книг/2000
 patches с одинаковыми normalized hashes; инкрементальность, cycle и parser

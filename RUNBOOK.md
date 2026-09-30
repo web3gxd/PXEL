@@ -3683,3 +3683,57 @@ Excel parity, Linux/Compose/remoteCI orproduction gate claimed. Currentstage
 commands and allactualoutcomes recordedabove; fullall-stages goalactive.
 Ownhidden devlauncher restarted afterterminalrecovery; finalreadycheck/commitfollows.
 ADR079 featurecommit27cea16 saved. Hiddenlauncher24492 rebuilt WASM0.21s/backend0.36s; backendreadyz8080/frontend5173 returned200. Worktree cleanbeforethisverificationentry. PostgreSQL/dataretained. Rangehistory slicecomplete; structural/styleundo, cut/move, durablehistorydiscovery and remainingMVP/deploymentgates stillopen. Fullgoalactive.
+
+## 2026-09-30 — ADR080 pure cut/move planner, integration remains open
+
+Continued authorized phase4 from ADR079 after inspecting current AGENTS/RUNBOOK,
+roadmap and history ADR. Previous status-only user response was not a development
+slice; revalidated worktree and resumed the existing relocation RED tests. Runtime
+24492 retained, backend8080 and frontend5173 both returned200; no restart/DB change.
+
+Added formula::relocation with immutable frozen mapping, same-sheet live geometry,
+blank source targets, both overlap directions, cross-sheet inbound references,
+formula origin relocation with recomputed relative deltas and absolute flags,
+fully contained reversed ranges, partial-range typed refusal, exact preimages and
+input version/domain hash. Independent limits:1000sourcecells/10000writes/1M AST
+nodes. Added cancellation with complete result discard. No new operation/codec/
+wire/migration/UI dependency; this is a planner component, not completed MoveRange.
+
+TDD initial module/API absence failed compile, then3tests passed. Cross-sheet test
+fixture first incorrectly reused globally unique axes across sheets (InvalidAxis);
+fixed fixture with distinct IDs. Its expected formatter text then omitted existing
+canonical sheet quotes; corrected expectation with explicit explanation. Expanded
+suite11/11 passed including random frozen-value rectangles, output-limit admission,
+preimages restoring content, cancellation after first external scan. Full formula
+suite passed before final optimization and wasm32 spreadsheet-wasm build passed.
+
+Read-only review identified clone/discard of unchanged external formulas, fixed
+with charged borrowed inspection before cloning only affected formulas. Afterfix
+11/11passed. Strict clippy identified collapsible match/if; correction/verification
+pending below. No semantic target/overlap bug reported by reviewer. Independent
+formula benchmark beforeoptimization3.5623–4.1173ms central3.8243; first inbound
+7000write planner benchmark8.3701–9.6218ms central8.9449. Bothrelease Criterion10
+samples/warmup1s/measure2s, noDB/calc/network. Finalresultsfollow, notlatencygates.
+
+Changed formula module/tests/bench/Cargo manifest, ADR080/roadmap and benchmark
+report. No full browser relocation parity, servercommit/recovery, controlledp95,
+manualExcel or fullMVP/deployment gate claimed. Nextslice needs distinct persisted
+move/compensation representation, exact-head server command, candidate/CAS/ACK,
+reference-aware undo guards, workerpreview and browser cut/paste.
+Final ADR080 verification:12/12 relocation tests passed0.29s, including exact AST
+relative offsets and untouched independent formula binding epoch. Fullformula
+suite passed after borrowed-scan implementation (before those two final test-only
+assertions/addition); final focused12/clippy passed afterwards. wasm32 build also
+passed after scan change. No claim of browser relocation parity. Strictclippy,
+rustfmt, selecteddoc Prettier and gitdiffcheck passed. No newdependency/lockchange.
+
+Bench repeated because firstpostchange inbound regression needed investigation:
+inbound9.1744–12.493ms then8.4866–8.8520ms central8.6696; uncontrolled variability
+retained in report. Independent formulas before3.5623–4.1173ms; after2.2454–2.3825ms,
+repeat2.3450–2.5138ms central2.4028. All10samples/1s/2s Criterion, optimizednative,
+noDB/calc/network. Notp95 or general controlledspeedup. Runtime endpoints8080/
+5173 returned200, existinglauncher notstopped. Partialrange/crosssheetmove refusal,
+fullserver/wire/worker/UI integration and remainingphasegates explicitlyopen.
+Read-only finalreview confirms clone/discard issue closed and no additional
+concrete semantic defect found. Reviewer did not run tests; actual commandresults
+above are from primaryagent. ADR080 remains acceptedforplanneronly.

@@ -15,6 +15,7 @@ mod lookup;
 mod parser;
 mod power;
 pub mod range_index;
+pub mod relocation;
 mod rounding;
 mod text;
 mod volatile;

@@ -30,3 +30,7 @@ harness = false
 [[bench]]
 name = "calculation"
 harness = false
+
+[[bench]]
+name = "relocation"
+harness = false
