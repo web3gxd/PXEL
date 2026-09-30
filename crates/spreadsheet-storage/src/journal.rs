@@ -6,6 +6,8 @@ use spreadsheet_storage_codec as codec;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 #[cfg(test)]
+mod range_history_tests;
+#[cfg(test)]
 mod timer_admission_benchmark;
 fn uuid(bytes: &[u8; 16]) -> Uuid {
     Uuid::from_bytes(*bytes)
@@ -34,6 +36,8 @@ fn number(n: u64) -> Result<i64, JournalError> {
     i64::try_from(n).map_err(|_| JournalError::Corrupt)
 }
 const UNDO_WINDOW: u64 = 10_000;
+const MAX_UNDO_TAIL_BYTES: usize = 64 * 1024 * 1024;
+const MAX_UNDO_ADDRESS_TOUCHES: usize = 100_000;
 const MAX_IMPORT_CELLS: usize = 1_000;
 const MAX_IMPORT_ENCODED_BYTES: usize = 32 * 1024 * 1024;
 struct StoredEventRow<'a> {
@@ -48,7 +52,7 @@ struct StoredEventRow<'a> {
     canonical_event_hash: &'a [u8],
 }
 fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=16) {
+    if !matches!(row.schema_version, 1..=18) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -76,47 +80,73 @@ fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalErro
     }
     Ok(event)
 }
-fn undo_target_address(
+fn target_writes(
     event: &CommittedEvent,
     actor: ActorId,
-) -> Result<(CellAddress, Option<CellContent>), JournalError> {
-    if event.principal != EventPrincipal::User(actor) || !event.operation.is_cell_inverse_target() {
+) -> Result<Vec<GuardedContentWrite>, JournalError> {
+    if event.principal != EventPrincipal::User(actor) || !event.operation.is_inverse_target() {
         return Err(JournalError::NotUndoable);
     }
     match &event.operation {
         Operation::CellWrite {
-            address, previous, ..
-        } => Ok((*address, previous.clone())),
+            address,
+            content,
+            previous,
+            ..
+        } => Ok(vec![GuardedContentWrite {
+            address: *address,
+            content: content.clone(),
+            previous: previous.clone(),
+        }]),
+        Operation::RangeWrite { writes, .. } => Ok(writes.clone()),
         _ => Err(JournalError::NotUndoable),
     }
 }
-fn touches_address(operation: &Operation, address: CellAddress) -> bool {
+fn touched_addresses(
+    operation: &Operation,
+    targets: &std::collections::BTreeMap<CellAddress, Vec<(OperationId, DocumentVersion)>>,
+) -> Vec<CellAddress> {
     match operation {
-        Operation::SetCellValue {
-            address: target, ..
-        }
-        | Operation::ClearCell { address: target }
-        | Operation::SetCellFormula {
-            address: target, ..
-        }
-        | Operation::CellWrite {
-            address: target, ..
-        } => *target == address,
-        Operation::SetCellValues { writes } => writes.iter().any(|write| write.address == address),
-        Operation::CopyRange { writes } => writes.iter().any(|write| write.address == address),
-        Operation::DeleteRows { sheet, rows } => {
-            *sheet == address.sheet && rows.contains(&address.row)
-        }
-        Operation::DeleteColumns { sheet, columns } => {
-            *sheet == address.sheet && columns.contains(&address.column)
-        }
+        Operation::SetCellValue { address, .. }
+        | Operation::ClearCell { address }
+        | Operation::SetCellFormula { address, .. }
+        | Operation::CellWrite { address, .. } => targets
+            .contains_key(address)
+            .then_some(*address)
+            .into_iter()
+            .collect(),
+        Operation::SetCellValues { writes } => writes
+            .iter()
+            .map(|w| w.address)
+            .filter(|a| targets.contains_key(a))
+            .collect(),
+        Operation::CopyRange { writes } => writes
+            .iter()
+            .map(|w| w.address)
+            .filter(|a| targets.contains_key(a))
+            .collect(),
+        Operation::RangeWrite { writes, .. } => writes
+            .iter()
+            .map(|w| w.address)
+            .filter(|a| targets.contains_key(a))
+            .collect(),
+        Operation::DeleteRows { sheet, rows } => targets
+            .keys()
+            .copied()
+            .filter(|a| a.sheet == *sheet && rows.contains(&a.row))
+            .collect(),
+        Operation::DeleteColumns { sheet, columns } => targets
+            .keys()
+            .copied()
+            .filter(|a| a.sheet == *sheet && columns.contains(&a.column))
+            .collect(),
         Operation::CreateWorkbook { .. }
         | Operation::AddSheet { .. }
         | Operation::ExtendRows { .. }
         | Operation::InsertRows { .. }
         | Operation::InsertRowsRebased { .. }
         | Operation::InsertColumnsRebased { .. }
-        | Operation::AdvanceCalculationEpoch { .. } => false,
+        | Operation::AdvanceCalculationEpoch { .. } => Vec::new(),
     }
 }
 async fn access_locked(
@@ -185,7 +215,7 @@ async fn undo_target_locked(
     target_id: OperationId,
     actor: ActorId,
     head: DocumentVersion,
-) -> Result<(CommittedEvent, CellAddress, Option<CellContent>), JournalError> {
+) -> Result<CommittedEvent, JournalError> {
     let row = sqlx::query!(
         "SELECT committed_version, operation_id, actor_id, principal_kind, schema_version, payload, payload_checksum, canonical_event_hash FROM document_operations WHERE document_id=$1 AND operation_id=$2",
         uuid(document.as_bytes()),
@@ -206,7 +236,7 @@ async fn undo_target_locked(
         payload_checksum: &row.payload_checksum,
         canonical_event_hash: &row.canonical_event_hash,
     })?;
-    let (address, previous) = undo_target_address(&event, actor)?;
+    target_writes(&event, actor)?;
     if head
         .get()
         .checked_sub(event.version.get())
@@ -215,20 +245,29 @@ async fn undo_target_locked(
     {
         return Err(JournalError::UndoWindowExceeded);
     }
-    Ok((event, address, previous))
+    Ok(event)
 }
 async fn guard_undo_tail(
     tx: &mut Transaction<'_, Postgres>,
     document: DocumentId,
     target: &CommittedEvent,
-    address: CellAddress,
     head: DocumentVersion,
 ) -> Result<(), JournalError> {
-    let formula_history = matches!(&target.operation,
-        Operation::CellWrite { content, previous, .. }
-        if content.iter().chain(previous.iter()).any(|cell| matches!(cell, CellContent::Formula(_)))
-    );
-    let mut effective_writes = Vec::<(OperationId, DocumentVersion)>::new();
+    let EventPrincipal::User(actor) = target.principal else {
+        return Err(JournalError::NotUndoable);
+    };
+    let writes = target_writes(target, actor)?;
+    let formula_history = writes.iter().any(|write| {
+        write
+            .content
+            .iter()
+            .chain(write.previous.iter())
+            .any(|c| matches!(c, CellContent::Formula(_)))
+    });
+    let mut effective_writes = writes
+        .iter()
+        .map(|write| (write.address, Vec::<(OperationId, DocumentVersion)>::new()))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let mut rows = sqlx::query!(
         "SELECT committed_version, operation_id, actor_id, principal_kind, schema_version, payload, payload_checksum, canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version>$2 AND committed_version<=$3 ORDER BY committed_version",
         uuid(document.as_bytes()),
@@ -237,7 +276,13 @@ async fn guard_undo_tail(
     )
     .fetch(&mut **tx);
     let mut expected = target.version.get();
+    let mut payload_bytes = 0usize;
+    let mut address_touches = 0usize;
     while let Some(row) = rows.try_next().await.map_err(error)? {
+        payload_bytes = payload_bytes
+            .checked_add(row.payload.len())
+            .filter(|n| *n <= MAX_UNDO_TAIL_BYTES)
+            .ok_or(JournalError::UndoWindowExceeded)?;
         expected = expected.checked_add(1).ok_or(JournalError::Corrupt)?;
         let event = verified_event(StoredEventRow {
             document,
@@ -253,22 +298,34 @@ async fn guard_undo_tail(
         if event.version.get() != expected {
             return Err(JournalError::Corrupt);
         }
-        if touches_address(&event.operation, address) {
-            if event.principal != target.principal || !event.operation.is_cell_inverse_target() {
+        for address in touched_addresses(&event.operation, &effective_writes) {
+            address_touches = address_touches
+                .checked_add(1)
+                .filter(|n| *n <= MAX_UNDO_ADDRESS_TOUCHES)
+                .ok_or(JournalError::UndoWindowExceeded)?;
+            if event.principal != target.principal || !event.operation.is_inverse_target() {
                 return Err(JournalError::UndoConflict);
             }
+            let stack = effective_writes
+                .get_mut(&address)
+                .ok_or(JournalError::Corrupt)?;
             let cancelled = match &event.operation {
                 Operation::CellWrite {
                     undoes: Some(id),
                     undoes_version: Some(version),
                     ..
-                } => effective_writes.last() == Some(&(*id, *version)),
+                }
+                | Operation::RangeWrite {
+                    undoes: Some(id),
+                    undoes_version: Some(version),
+                    ..
+                } => stack.last() == Some(&(*id, *version)),
                 _ => false,
             };
             if cancelled {
-                effective_writes.pop();
+                stack.pop();
             } else {
-                effective_writes.push((event.operation_id, event.version));
+                stack.push((event.operation_id, event.version));
             }
         }
         if formula_history && event.operation.changes_axes() {
@@ -278,7 +335,7 @@ async fn guard_undo_tail(
     if expected != head.get() {
         return Err(JournalError::Corrupt);
     }
-    if !effective_writes.is_empty() {
+    if effective_writes.values().any(|stack| !stack.is_empty()) {
         return Err(JournalError::UndoConflict);
     }
     Ok(())
@@ -492,6 +549,38 @@ impl OperationJournal for PgDatabase {
                 CommandPayload::CopyRange { .. } => c.operation.clone(),
                 _ => return Err(JournalError::Corrupt),
             },
+            Operation::RangeWrite {
+                writes,
+                kind,
+                undoes,
+                undoes_version,
+                ..
+            } => match (kind, undoes, undoes_version) {
+                (Some(RangeWriteKind::SetValues), None, None) => CommandPayload::SetCellValues {
+                    writes: writes
+                        .iter()
+                        .map(|w| {
+                            Ok(CellWrite {
+                                address: w.address,
+                                value: match &w.content {
+                                    Some(CellContent::Value(value)) => value.clone(),
+                                    None => CellValue::Blank,
+                                    _ => return Err(JournalError::Corrupt),
+                                },
+                            })
+                        })
+                        .collect::<Result<_, JournalError>>()?,
+                },
+                (Some(RangeWriteKind::Copy), None, None)
+                    if matches!(c.operation, CommandPayload::CopyRange { .. }) =>
+                {
+                    c.operation.clone()
+                }
+                (None, Some(id), Some(_)) => CommandPayload::UndoCell {
+                    target_operation_id: *id,
+                },
+                _ => return Err(JournalError::Corrupt),
+            },
             Operation::ExtendRows { sheet, rows } => CommandPayload::ExtendRows {
                 sheet: *sheet,
                 rows: rows.clone(),
@@ -617,35 +706,43 @@ impl OperationJournal for PgDatabase {
         {
             return Err(JournalError::Conflict);
         }
-        if let Operation::CellWrite {
-            address,
-            content,
-            previous,
-            kind: None,
-            undoes: Some(target_id),
-            undoes_version: Some(target_version),
-        } = &e.operation
-        {
-            let (target, target_address, target_previous) = undo_target_locked(
+        let inverse_target = match &e.operation {
+            Operation::CellWrite {
+                kind: None,
+                undoes: Some(id),
+                undoes_version: Some(version),
+                ..
+            }
+            | Operation::RangeWrite {
+                kind: None,
+                undoes: Some(id),
+                undoes_version: Some(version),
+                ..
+            } => Some((*id, *version)),
+            _ => None,
+        };
+        if let Some((target_id, target_version)) = inverse_target {
+            let target = undo_target_locked(
                 &mut tx,
                 c.document_id,
-                *target_id,
+                target_id,
                 request.identity.actor_id,
                 access.head,
             )
             .await?;
-            if target.version != *target_version
-                || target_address != *address
-                || target_previous != *content
-                || *previous
-                    != match &target.operation {
-                        Operation::CellWrite { content, .. } => content.clone(),
-                        _ => return Err(JournalError::NotUndoable),
-                    }
+            let original = target_writes(&target, request.identity.actor_id)?;
+            let inverse = target_writes(e, request.identity.actor_id)?;
+            if target.version != target_version
+                || original.len() != inverse.len()
+                || matches!(target.operation, Operation::CellWrite { .. })
+                    != matches!(e.operation, Operation::CellWrite { .. })
+                || original.iter().zip(&inverse).any(|(a, b)| {
+                    a.address != b.address || a.content != b.previous || a.previous != b.content
+                })
             {
                 return Err(JournalError::UndoConflict);
             }
-            guard_undo_tail(&mut tx, c.document_id, &target, *address, access.head).await?;
+            guard_undo_tail(&mut tx, c.document_id, &target, access.head).await?;
         }
         let updated=sqlx::query!("UPDATE documents SET head_version=head_version+1 WHERE document_id=$1 AND head_version=$2 RETURNING head_version",uuid(c.document_id.as_bytes()),number(request.expected_head.get())?).fetch_optional(&mut *tx).await.map_err(error)?;
         if updated.is_none() {
@@ -751,7 +848,7 @@ impl OperationJournal for PgDatabase {
         if !access.can_edit {
             return Err(JournalError::Unauthorized);
         }
-        let (target, _, _) = undo_target_locked(
+        let target = undo_target_locked(
             &mut tx,
             document_id,
             target_operation_id,

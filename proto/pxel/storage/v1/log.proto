@@ -33,6 +33,8 @@ message Operation {
   CellWrite compensating_cell_write = 14;
   CopyRange copy_range = 15;
   CreateWorkbook add_sheet = 16;
+  RangeWrite authored_range_write = 17;
+  RangeWrite compensating_range_write = 18;
  }
 }
 message AdvanceCalculationEpoch {
@@ -74,6 +76,23 @@ message CellContent { oneof kind { CellValue value = 1; BoundFormula formula = 2
 // Schema 14 freezes all destinations. Missing content clears the destination.
 message CopyRange { repeated ContentWrite writes = 1; }
 message ContentWrite { CellAddress address = 1; CellContent content = 2; }
+// Schema 17/18 freeze every destination and its exact preimage.
+message RangeWrite {
+ repeated GuardedContentWrite writes = 1;
+ bytes undoes_operation_id = 2;
+ uint64 undoes_version = 3;
+ AuthoredRangeWriteKind authored_kind = 4;
+}
+message GuardedContentWrite {
+ CellAddress address = 1;
+ CellContent content = 2;
+ CellContent previous = 3;
+}
+enum AuthoredRangeWriteKind {
+ AUTHORED_RANGE_WRITE_KIND_UNSPECIFIED = 0;
+ AUTHORED_RANGE_WRITE_KIND_SET_VALUES = 1;
+ AUTHORED_RANGE_WRITE_KIND_COPY = 2;
+}
 enum AuthoredWriteKind {
  AUTHORED_WRITE_KIND_UNSPECIFIED = 0;
  AUTHORED_WRITE_KIND_SET_VALUE = 1;

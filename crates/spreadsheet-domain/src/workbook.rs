@@ -311,6 +311,17 @@ pub struct ContentWrite {
     pub address: CellAddress,
     pub content: Option<CellContent>,
 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct GuardedContentWrite {
+    pub address: CellAddress,
+    pub content: Option<CellContent>,
+    pub previous: Option<CellContent>,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RangeWriteKind {
+    SetValues,
+    Copy,
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CellWriteKind {
     SetValue,
@@ -365,6 +376,13 @@ pub enum Operation {
     /// Replay never reads the source range again.
     CopyRange {
         writes: Vec<ContentWrite>,
+    },
+    /// Frozen destination contents and exact preimages in one atomic event.
+    RangeWrite {
+        writes: Vec<GuardedContentWrite>,
+        kind: Option<RangeWriteKind>,
+        undoes: Option<OperationId>,
+        undoes_version: Option<DocumentVersion>,
     },
     SetCellFormula {
         address: CellAddress,
@@ -457,6 +475,23 @@ impl Operation {
                 ..
             }
         )
+    }
+    pub const fn is_inverse_target(&self) -> bool {
+        self.is_cell_inverse_target()
+            || matches!(
+                self,
+                Self::RangeWrite {
+                    kind: Some(_),
+                    undoes: None,
+                    undoes_version: None,
+                    ..
+                } | Self::RangeWrite {
+                    kind: None,
+                    undoes: Some(_),
+                    undoes_version: Some(_),
+                    ..
+                }
+            )
     }
     pub const fn changes_axes(&self) -> bool {
         matches!(
@@ -948,6 +983,66 @@ impl Workbook {
         if self.version.get().checked_add(1) != Some(next_version.get()) {
             return Err(DomainError::VersionConflict);
         }
+        if let Operation::RangeWrite {
+            writes,
+            kind,
+            undoes,
+            undoes_version,
+        } = operation
+        {
+            if !operation.is_inverse_target()
+                || undoes_version.is_some_and(|v| v == DocumentVersion::ZERO || v > self.version)
+            {
+                return Err(DomainError::VersionConflict);
+            }
+            if writes.is_empty() || writes.len() > 1_000 {
+                return Err(DomainError::LimitExceeded);
+            }
+            for previous in [false, true] {
+                let bytes = writes
+                    .iter()
+                    .try_fold(0usize, |total, write| {
+                        let content = if previous {
+                            &write.previous
+                        } else {
+                            &write.content
+                        };
+                        total.checked_add(content.as_ref().map_or(0, CellContent::text_bytes))
+                    })
+                    .ok_or(DomainError::LimitExceeded)?;
+                if bytes > MAX_CELL_VALUE_BATCH_TEXT_BYTES {
+                    return Err(DomainError::LimitExceeded);
+                }
+            }
+            let operations = writes
+                .iter()
+                .map(|write| {
+                    if *kind == Some(RangeWriteKind::SetValues)
+                        && matches!(write.content, Some(CellContent::Formula(_)))
+                    {
+                        return Err(DomainError::InvalidValue);
+                    }
+                    let cell_kind = if kind.is_none() {
+                        None
+                    } else {
+                        Some(match write.content {
+                            Some(CellContent::Formula(_)) => CellWriteKind::SetFormula,
+                            Some(CellContent::Value(_)) => CellWriteKind::SetValue,
+                            None => CellWriteKind::Clear,
+                        })
+                    };
+                    Ok(Operation::CellWrite {
+                        address: write.address,
+                        content: write.content.clone(),
+                        previous: write.previous.clone(),
+                        kind: cell_kind,
+                        undoes: *undoes,
+                        undoes_version: *undoes_version,
+                    })
+                })
+                .collect::<Result<Vec<_>, DomainError>>()?;
+            return self.preview_candidate(&operations, next_version);
+        }
         if let Operation::SetCellValues { writes } = operation {
             if writes.is_empty() || writes.len() > 1_000 {
                 return Err(DomainError::LimitExceeded);
@@ -1062,7 +1157,9 @@ impl Workbook {
                 | Operation::ClearCell { address }
                 | Operation::CellWrite { address, .. } => *address,
                 Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
-                Operation::CopyRange { .. } => return Err(DomainError::InvalidAxis),
+                Operation::CopyRange { .. } | Operation::RangeWrite { .. } => {
+                    return Err(DomainError::InvalidAxis);
+                }
             };
             if !seen.insert(address) {
                 return Err(DomainError::InvalidAxis);
@@ -1270,7 +1367,9 @@ impl Workbook {
                 self.updated_budgets(*address, value.text_bytes(), 0)?
             }
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
-            Operation::CopyRange { .. } => return Err(DomainError::InvalidAxis),
+            Operation::CopyRange { .. } | Operation::RangeWrite { .. } => {
+                return Err(DomainError::InvalidAxis);
+            }
             Operation::SetCellFormula { address, formula } => {
                 self.validate_formula(*address, formula)?;
                 self.updated_budgets(*address, formula.text_bytes(), formula.ast_memory_bytes())?
@@ -1499,7 +1598,9 @@ impl Workbook {
                 }
             }
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
-            Operation::CopyRange { .. } => return Err(DomainError::InvalidAxis),
+            Operation::CopyRange { .. } | Operation::RangeWrite { .. } => {
+                return Err(DomainError::InvalidAxis);
+            }
             Operation::SetCellFormula { address, formula } => {
                 let sheet = self
                     .sheets

@@ -2146,7 +2146,11 @@ export class DocumentStore {
         this.projection?.sheets.some((sheet) => sheet.id === completed.sheetId)
       )
         this.selectSheet(completed.sheetId);
-      if (completed?.kind === 'cell') {
+      if (
+        completed?.kind === 'cell' ||
+        completed?.kind === 'batch' ||
+        completed?.kind === 'copyRange'
+      ) {
         this.undoHistory.push(completed.id);
         if (this.undoHistory.length > 100) this.undoHistory.shift();
         this.redoHistory = [];

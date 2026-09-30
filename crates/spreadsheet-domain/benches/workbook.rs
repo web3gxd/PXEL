@@ -288,6 +288,56 @@ fn benches(c: &mut Criterion) {
     c.bench_function("candidate_1000_value_batch", |b| {
         b.iter(|| black_box(batch_book.candidate(black_box(&batch), insertion_version)))
     });
+    let range_fixture = (|| -> Result<_, DomainError> {
+        let authored = Operation::RangeWrite {
+            writes: batch_sheet
+                .rows()
+                .iter()
+                .map(|&row| GuardedContentWrite {
+                    address: CellAddress {
+                        sheet: batch_sheet.id(),
+                        row,
+                        column: batch_sheet.columns()[0],
+                    },
+                    content: Some(CellContent::Value(CellValue::Number(42.0))),
+                    previous: None,
+                })
+                .collect(),
+            kind: Some(RangeWriteKind::SetValues),
+            undoes: None,
+            undoes_version: None,
+        };
+        let book = batch_book.candidate(&authored, DocumentVersion::new(2)?)?;
+        let Operation::RangeWrite { writes, .. } = authored else {
+            return Err(DomainError::InvalidValue);
+        };
+        let inverse = Operation::RangeWrite {
+            writes: writes
+                .into_iter()
+                .map(|w| GuardedContentWrite {
+                    address: w.address,
+                    content: w.previous,
+                    previous: w.content,
+                })
+                .collect(),
+            kind: None,
+            undoes: Some(OperationId::from_bytes([9; 16])?),
+            undoes_version: Some(DocumentVersion::new(2)?),
+        };
+        let version = DocumentVersion::new(3)?;
+        book.candidate(&inverse, version)?;
+        Ok((book, inverse, version))
+    })();
+    let (range_book, range_inverse, range_version) = match range_fixture {
+        Ok(fixture) => fixture,
+        Err(error) => {
+            eprintln!("range fixture invalid: {error}");
+            std::process::exit(1);
+        }
+    };
+    c.bench_function("candidate_1000_range_inverse", |b| {
+        b.iter(|| black_box(range_book.candidate(black_box(&range_inverse), range_version)))
+    });
     for count in [1_000, 100_000] {
         let book = match fixture(count) {
             Ok(book) => book,

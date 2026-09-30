@@ -657,6 +657,14 @@ test('TSV paste commits one durable batch and survives reload', async ({ page })
   );
   expect(state.version).toBe('2');
   expect(state.sheets[0].cells).toHaveLength(4);
+  await page.getByRole('button', { name: 'Отменить последнюю правку' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('');
+  const cleared = await page.request.get(`/api/documents/${id}`);
+  expect((await cleared.json()).sheets[0].cells).toHaveLength(0);
+  await page.getByRole('button', { name: 'Повторить отменённую правку' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('12');
   await page.reload();
   await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('12');
   await grid.focus();
@@ -772,6 +780,15 @@ test('mixed value and formula range copies atomically with shifted references', 
   await second.keyboard.press('ArrowDown');
   await second.keyboard.press('ArrowDown');
   await expect(second.getByTestId('active-cell')).toHaveText('D3: 6');
+  await page.getByRole('button', { name: 'Отменить последнюю правку' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(page.getByTestId('active-cell')).toHaveText('D3: ');
+  await expect(second.getByTestId('active-cell')).toHaveText('D3: ');
+  await page.getByRole('button', { name: 'Повторить отменённую правку' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(page.getByTestId('active-cell')).toHaveText('D3: 6');
+  await expect(second.getByTestId('active-cell')).toHaveText('D3: 6');
+  await expect(bar).toHaveValue('=(C3*2)');
   await second.close();
   await page.reload();
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
@@ -779,7 +796,7 @@ test('mixed value and formula range copies atomically with shifted references', 
     async (documentId) => (await fetch(`/api/documents/${documentId}`)).json(),
     id,
   );
-  expect(state.version).toBe('4');
+  expect(state.version).toBe('6');
   expect(
     state.sheets[0].cells.some(
       (cell: { value: { type: string; value?: { current_text?: string } } }) =>
@@ -1027,8 +1044,8 @@ test('multi-step undo redo of one cell converges in two tabs and new edits clear
     await other.goto(page.url());
     const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
     const remote = other.getByRole('textbox', { name: 'Значение ячейки' });
-    const undo = page.getByRole('button', { name: 'Отменить последнюю правку ячейки' });
-    const redo = page.getByRole('button', { name: 'Повторить отменённую правку ячейки' });
+    const undo = page.getByRole('button', { name: 'Отменить последнюю правку' });
+    const redo = page.getByRole('button', { name: 'Повторить отменённую правку' });
     for (const value of ['11', '22']) {
       await bar.fill(value);
       await bar.press('Enter');
@@ -1087,9 +1104,7 @@ test('one-step undo is a durable compensation broadcast to another browser', asy
     const grid = page.getByRole('region', { name: 'Область таблицы' });
     await grid.focus();
     await page.keyboard.press('ArrowUp');
-    await expect(
-      page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }),
-    ).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Отменить последнюю правку' })).toBeEnabled();
     await page.keyboard.press('Control+z');
     await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
     await expect(firstBar).toHaveValue('');
@@ -1097,9 +1112,7 @@ test('one-step undo is a durable compensation broadcast to another browser', asy
     await page.reload();
     await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
     await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('');
-    await expect(
-      page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }),
-    ).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Отменить последнюю правку' })).toBeDisabled();
   } finally {
     await second.close();
   }
@@ -1126,7 +1139,7 @@ test('undo of an authored formula restores the previous formula and survives rel
   await grid.focus();
   await page.keyboard.press('ArrowUp');
   await expect(bar).toHaveValue('=4+5');
-  await page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }).click();
+  await page.getByRole('button', { name: 'Отменить последнюю правку' }).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(bar).toHaveValue('=2+3');
   await page.reload();
@@ -1156,7 +1169,7 @@ test('formula undo renders a preimage transformed before the overwritten edit', 
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await grid.focus();
   await expect(bar).toHaveValue('=42');
-  await page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }).click();
+  await page.getByRole('button', { name: 'Отменить последнюю правку' }).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(bar).toHaveValue('=(B2+1)');
   await expect(page.getByTestId('active-cell')).toHaveText('A2: 1');
@@ -1180,7 +1193,7 @@ test('undo restores a formula overwritten by a plain value', async ({ page }) =>
   await page.getByRole('region', { name: 'Область таблицы' }).focus();
   await page.keyboard.press('ArrowUp');
   await expect(bar).toHaveValue('42');
-  await page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }).click();
+  await page.getByRole('button', { name: 'Отменить последнюю правку' }).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(bar).toHaveValue('=2+3');
   await page.reload();
@@ -1242,7 +1255,7 @@ test('one-step undo rejects a later edit by another user', async ({ page, browse
     await editorBar.fill('theirs');
     await editorBar.press('Enter');
     await expect(editor.getByTestId('save-status')).toHaveText('Сохранено');
-    await page.getByRole('button', { name: 'Отменить последнюю правку ячейки' }).click();
+    await page.getByRole('button', { name: 'Отменить последнюю правку' }).click();
     await expect(page.getByRole('alert')).toContainText('ячейка была изменена');
     const saved = await (await page.request.get(`/api/documents/${documentId}`)).json();
     expect(saved.sheets[0].cells[0].value).toEqual({ type: 'text', value: 'theirs' });

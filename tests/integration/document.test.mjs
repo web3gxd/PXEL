@@ -923,6 +923,237 @@ test('copy range freezes values and translated formulas in one durable version',
   }
 });
 
+test('range history undoes batches and redoes compensations atomically', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    const first = setCommand(client, snapshot, 7);
+    assert.equal((await client.send(first)).case, 'committed');
+    const batch = batchValuesCommand(
+      client,
+      { ...snapshot, version: '2' },
+      [
+        { row: 0, column: 0, value: 9 },
+        { row: 0, column: 1, value: 11 },
+      ],
+      { sequence: 2 },
+    );
+    assert.equal((await client.send(batch)).case, 'committed');
+    const undo = undoCellCommand(client, { ...snapshot, version: '3' }, batch.operationId, {
+      sequence: 3,
+    });
+    assert.equal((await client.send(undo)).case, 'committed');
+    const restored = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(restored.version, '4');
+    assert.deepEqual(
+      restored.sheets[0].cells.map((c) => c.value),
+      [{ type: 'number', value: 7 }],
+    );
+    const undoFirst = undoCellCommand(client, restored, first.operationId, { sequence: 4 });
+    assert.equal((await client.send(undoFirst)).case, 'committed');
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).sheets[0].cells.length, 0);
+    const redoFirst = undoCellCommand(
+      client,
+      { ...snapshot, version: '5' },
+      undoFirst.operationId,
+      { sequence: 5 },
+    );
+    assert.equal((await client.send(redoFirst)).case, 'committed');
+    const redo = undoCellCommand(client, { ...snapshot, version: '6' }, undo.operationId, {
+      sequence: 6,
+    });
+    assert.equal((await client.send(redo)).case, 'committed');
+    assert.deepEqual(
+      (await getDocument(base, cookie, snapshot.document_id)).sheets[0].cells.map(
+        (c) => c.value.value,
+      ),
+      [9, 11],
+    );
+    assert.equal((await client.send(undo)).case, 'receipt');
+    assert.equal((await client.send(redo)).case, 'receipt');
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).version, '7');
+  } finally {
+    client.socket.terminate();
+  }
+});
+
+test('mixed range inverse restores formula preimages and frozen redo ignores source edits', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    assert.equal((await client.send(setCommand(client, snapshot, 3))).case, 'committed');
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, { ...snapshot, version: '2' }, '=A1*2', {
+            column: 1,
+            sequence: 2,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    assert.equal(
+      (
+        await client.send(
+          formulaCommand(client, { ...snapshot, version: '3' }, '=100', {
+            row: 1,
+            column: 1,
+            sequence: 3,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    const copy = copyRangeCommand(
+      client,
+      { ...snapshot, version: '4' },
+      { destinationRow: 1, destinationColumn: 0, rows: 1, columns: 2 },
+      { sequence: 4 },
+    );
+    assert.equal((await client.send(copy)).case, 'committed');
+    const undo = undoCellCommand(client, { ...snapshot, version: '5' }, copy.operationId, {
+      sequence: 5,
+    });
+    assert.equal((await client.send(undo)).case, 'committed');
+    const restored = await getDocument(base, cookie, snapshot.document_id);
+    const at = (state, row, col) =>
+      state.sheets[0].cells.find(
+        (c) =>
+          c.row_id === snapshot.sheets[0].rows[row] &&
+          c.column_id === snapshot.sheets[0].columns[col],
+      )?.value;
+    assert.equal(at(restored, 1, 0), undefined);
+    assert.equal(at(restored, 1, 1).value.source, '=100');
+    assert.equal(
+      (await client.send(setCommand(client, { ...snapshot, version: '6' }, 20, { sequence: 6 })))
+        .case,
+      'committed',
+    );
+    const redo = undoCellCommand(client, { ...snapshot, version: '7' }, undo.operationId, {
+      sequence: 7,
+    });
+    assert.equal((await client.send(redo)).case, 'committed');
+    const final = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(at(final, 1, 0).value, 3);
+    assert.equal(at(final, 1, 1).value.current_text, '=(A2*2)');
+    const calculated = await calculation(base, cookie, snapshot.document_id, 8);
+    assert.deepEqual(
+      calculated.values.find(
+        (c) =>
+          c.row_id === snapshot.sheets[0].rows[1] && c.column_id === snapshot.sheets[0].columns[1],
+      ).value,
+      { type: 'number', value: 6 },
+    );
+  } finally {
+    client.socket.terminate();
+  }
+});
+
+test('range inverse rejects a foreign equal-value destination even after its own compensation', async () => {
+  const suffix = uuid7().slice(-12);
+  const owner = await login(base, 'range-owner-' + suffix);
+  const otherHome = await login(base, 'range-editor-' + suffix);
+  const ownerId = await (await api(base, owner, '/api/dev/identity')).json();
+  const otherId = await (await api(base, otherHome, '/api/dev/identity')).json();
+  const { snapshot } = await createDocument(base, owner);
+  assert.equal(
+    (
+      await api(base, owner, `/api/documents/${snapshot.document_id}/permissions`, 'POST', {
+        action: 'grant',
+        change_id: uuid7(),
+        target_user_id: otherId.actor_id,
+        role: 'editor',
+      })
+    ).status,
+    200,
+  );
+  const other = await login(base, 'range-editor-' + suffix, ownerId.workspace_id);
+  const writer = await connect(base, owner),
+    editor = await connect(base, other);
+  try {
+    const batch = batchValuesCommand(writer, snapshot, [
+      { row: 0, column: 0, value: 7 },
+      { row: 0, column: 1, value: 11 },
+    ]);
+    assert.equal((await writer.send(batch)).case, 'committed');
+    const foreign = setCommand(editor, { ...snapshot, version: '2' }, 11, { column: 1 });
+    assert.equal((await editor.send(foreign)).case, 'committed');
+    assert.equal(
+      (
+        await editor.send(
+          undoCellCommand(editor, { ...snapshot, version: '3' }, foreign.operationId, {
+            sequence: 2,
+          }),
+        )
+      ).case,
+      'committed',
+    );
+    const before = await getDocument(base, owner, snapshot.document_id);
+    const rejected = await writer.send(
+      undoCellCommand(writer, before, batch.operationId, { sequence: 2 }),
+    );
+    assert.equal(rejected.case, 'rejected');
+    assert.equal(rejected.value.code, 13);
+    const after = await getDocument(base, owner, snapshot.document_id);
+    assert.equal(after.version, before.version);
+    assert.equal(after.state_hash, before.state_hash);
+  } finally {
+    writer.socket.terminate();
+    editor.socket.terminate();
+  }
+});
+
+test('range formula inverse refuses changed axes and prioritizes deleted destinations', async () => {
+  const cookie = await login(base);
+  for (const deleted of [false, true]) {
+    const { snapshot } = await createDocument(base, cookie);
+    const client = await connect(base, cookie);
+    try {
+      assert.equal(
+        (await client.send(formulaCommand(client, snapshot, '=7', { column: 1 }))).case,
+        'committed',
+      );
+      const batch = batchValuesCommand(
+        client,
+        { ...snapshot, version: '2' },
+        [
+          { row: 0, column: 0, value: 3 },
+          { row: 0, column: 1, value: 11 },
+        ],
+        { sequence: 2 },
+      );
+      assert.equal((await client.send(batch)).case, 'committed');
+      const axis = deleted
+        ? deleteRowsCommand(client, { ...snapshot, version: '3' }, [snapshot.sheets[0].rows[0]], {
+            sequence: 3,
+          })
+        : insertRowsCommand(
+            client,
+            { ...snapshot, version: '3' },
+            snapshot.sheets[0].rows[1],
+            [uuid7()],
+            { sequence: 3 },
+          );
+      assert.equal((await client.send(axis)).case, 'committed');
+      const before = await getDocument(base, cookie, snapshot.document_id);
+      const rejected = await client.send(
+        undoCellCommand(client, before, batch.operationId, { sequence: 4 }),
+      );
+      assert.equal(rejected.case, 'rejected');
+      assert.equal(rejected.value.code, deleted ? 13 : 14);
+      assert.equal(
+        (await getDocument(base, cookie, snapshot.document_id)).state_hash,
+        before.state_hash,
+      );
+    } finally {
+      client.socket.terminate();
+    }
+  }
+});
+
 test('value batch commits atomically in one version, replays and deduplicates', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);

@@ -1086,6 +1086,26 @@ fn wire_address(value: CellAddress) -> v1::CellAddress {
 }
 fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
     let kind = match operation {
+        Operation::RangeWrite {
+            writes,
+            kind: Some(spreadsheet_domain::workbook::RangeWriteKind::SetValues),
+            ..
+        } => {
+            let writes = writes
+                .into_iter()
+                .map(|write| {
+                    Some(spreadsheet_domain::workbook::CellWrite {
+                        address: write.address,
+                        value: match write.content {
+                            Some(spreadsheet_domain::workbook::CellContent::Value(value)) => value,
+                            None => CellValue::Blank,
+                            _ => return None,
+                        },
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            return canonical(Operation::SetCellValues { writes });
+        }
         Operation::CellWrite {
             address, content, ..
         } => {
@@ -1208,7 +1228,8 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
         }),
         Operation::CreateWorkbook { .. }
         | Operation::AdvanceCalculationEpoch { .. }
-        | Operation::CopyRange { .. } => {
+        | Operation::CopyRange { .. }
+        | Operation::RangeWrite { .. } => {
             return None;
         }
         Operation::SetCellFormula { address, formula } => {

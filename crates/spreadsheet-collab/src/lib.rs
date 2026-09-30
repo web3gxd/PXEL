@@ -765,47 +765,69 @@ async fn submit<J: OperationJournal>(
                 let target = journal
                     .load_undo_target(identity, command.document_id, *target_operation_id)
                     .await?;
-                if !target.operation.is_cell_inverse_target() {
+                if !target.operation.is_inverse_target() {
                     return Err(JournalError::NotUndoable.into());
                 }
-                let Operation::CellWrite {
-                    address,
-                    content,
-                    previous,
-                    ..
-                } = target.operation
-                else {
-                    return Err(JournalError::NotUndoable.into());
+                let writes = match &target.operation {
+                    Operation::CellWrite {
+                        address,
+                        content,
+                        previous,
+                        ..
+                    } => vec![spreadsheet_domain::workbook::GuardedContentWrite {
+                        address: *address,
+                        content: previous.clone(),
+                        previous: content.clone(),
+                    }],
+                    Operation::RangeWrite { writes, .. } => writes
+                        .iter()
+                        .map(|w| spreadsheet_domain::workbook::GuardedContentWrite {
+                            address: w.address,
+                            content: w.previous.clone(),
+                            previous: w.content.clone(),
+                        })
+                        .collect(),
+                    _ => return Err(JournalError::NotUndoable.into()),
                 };
-                // A removed target address is a conflict, before the more
-                // conservative refusal to restore historical formula axes.
-                match workbook.cell_content(address) {
-                    Err(
-                        DomainError::MissingSheet
-                        | DomainError::MissingRow
-                        | DomainError::MissingColumn,
-                    ) => {
-                        return Err(JournalError::UndoConflict.into());
+                for write in &writes {
+                    match workbook.cell_content(write.address) {
+                        Err(
+                            DomainError::MissingSheet
+                            | DomainError::MissingRow
+                            | DomainError::MissingColumn,
+                        ) => return Err(JournalError::UndoConflict.into()),
+                        Err(error) => return Err(error.into()),
+                        Ok(_) => {}
                     }
-                    Err(error) => return Err(error.into()),
-                    Ok(_) => {}
                 }
-                // Recorded formula content and preimages do not follow later
-                // axis edits. Reject their inverse until historical reference
-                // transformation is supported explicitly.
-                if (matches!(previous, Some(CellContent::Formula(_)))
-                    || matches!(content, Some(CellContent::Formula(_))))
-                    && workbook.last_axis_change_version() > target.version
+                if writes.iter().any(|w| {
+                    w.content
+                        .iter()
+                        .chain(w.previous.iter())
+                        .any(|c| matches!(c, CellContent::Formula(_)))
+                }) && workbook.last_axis_change_version() > target.version
                 {
                     return Err(JournalError::NotUndoable.into());
                 }
-                Operation::CellWrite {
-                    address,
-                    content: previous,
-                    previous: content,
-                    undoes: Some(*target_operation_id),
-                    undoes_version: Some(target.version),
-                    kind: None,
+                match target.operation {
+                    Operation::CellWrite { .. } => {
+                        let write = writes.into_iter().next().ok_or(JournalError::Corrupt)?;
+                        Operation::CellWrite {
+                            address: write.address,
+                            content: write.content,
+                            previous: write.previous,
+                            kind: None,
+                            undoes: Some(*target_operation_id),
+                            undoes_version: Some(target.version),
+                        }
+                    }
+                    Operation::RangeWrite { .. } => Operation::RangeWrite {
+                        writes,
+                        kind: None,
+                        undoes: Some(*target_operation_id),
+                        undoes_version: Some(target.version),
+                    },
+                    _ => return Err(JournalError::NotUndoable.into()),
                 }
             }
             _ => match normalize(&command, workbook, axes) {
@@ -1036,16 +1058,22 @@ fn normalize(
                 kind: Some(CellWriteKind::SetValue),
             })
         }
-        CommandPayload::SetCellValues { writes } => Ok(Operation::SetCellValues {
+        CommandPayload::SetCellValues { writes } => Ok(Operation::RangeWrite {
             writes: writes
                 .iter()
-                .map(|write| {
-                    Ok(spreadsheet_domain::workbook::CellWrite {
-                        address: write.address,
-                        value: write.value.clone().normalized()?,
+                .map(|w| {
+                    let value = w.value.clone().normalized()?;
+                    Ok(spreadsheet_domain::workbook::GuardedContentWrite {
+                        address: w.address,
+                        content: (value != spreadsheet_domain::workbook::CellValue::Blank)
+                            .then_some(CellContent::Value(value)),
+                        previous: workbook.cell_content(w.address)?.cloned(),
                     })
                 })
                 .collect::<Result<_, SessionError>>()?,
+            kind: Some(spreadsheet_domain::workbook::RangeWriteKind::SetValues),
+            undoes: None,
+            undoes_version: None,
         }),
         CommandPayload::CopyRange {
             source,
@@ -1144,7 +1172,21 @@ fn normalize(
                     });
                 }
             }
-            Ok(Operation::CopyRange { writes })
+            Ok(Operation::RangeWrite {
+                writes: writes
+                    .into_iter()
+                    .map(|w| {
+                        Ok(spreadsheet_domain::workbook::GuardedContentWrite {
+                            address: w.address,
+                            content: w.content,
+                            previous: workbook.cell_content(w.address)?.cloned(),
+                        })
+                    })
+                    .collect::<Result<_, SessionError>>()?,
+                kind: Some(spreadsheet_domain::workbook::RangeWriteKind::Copy),
+                undoes: None,
+                undoes_version: None,
+            })
         }
         CommandPayload::ClearCell { address } => Ok(Operation::CellWrite {
             address: *address,

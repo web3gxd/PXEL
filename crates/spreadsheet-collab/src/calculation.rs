@@ -93,6 +93,11 @@ impl CalculationHandle {
                     .changed
                     .extend(writes.iter().map(|write| write.address));
             }
+            Operation::RangeWrite { writes, .. } => {
+                pending
+                    .changed
+                    .extend(writes.iter().map(|write| write.address));
+            }
             Operation::CopyRange { writes } => {
                 pending
                     .changed

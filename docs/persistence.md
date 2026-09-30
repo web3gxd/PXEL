@@ -12,6 +12,16 @@ ADR-077 разрешает inverse own schema12/13 compensation без изме�
 пары по ID/version и отказывает при foreign/legacy/batch/copy barrier. Redo
 сохраняет новую компенсацию обычным CAS/commit/receipt путём; история не удаляется.
 
+ADR-079 добавляет authored RangeWrite schema17 и compensation schema18:
+каждый адрес хранит content и exact preimage; новые hash tags18/19/20 не меняют
+legacy hashes. Principal migration допускает17/18 только для user events.
+Incoming и preimage text имеют независимые512KiB caps, envelope ограничен4MiB.
+Новый интерактивный batch/copy сохраняет preimages; старые schema10/14 остаются
+читаемыми и не становятся отменяемыми задним числом. Проверка полного inverse
+footprint и сокращение own scalar/range pairs выполняются внутри locked CAS;
+foreign/legacy barriers не исчезают после компенсации. Tail budgets:10000versions,
+64MiB payload и100000 matching-address updates. Отказ не создаёт event/receipt.
+
 Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
 operations реализованы локально. `SnapshotImage` и binary codec проверены.
 ADR-033 добавил PostgreSQL snapshot metadata и внутренние publish/read/recover API:

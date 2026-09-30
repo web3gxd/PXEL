@@ -10,8 +10,11 @@
 batch ([ADR-078](adr/078-atomic-batch-final-capacity.md)): допустимость зависит
 от итогового объёма текста, AST и ячеек, а не порядка добавлений и освобождений.
 Регрессионные проверки покрыли заполненные лимиты и исходные preimages;
-серверный журнал и wire format не изменились. Диапазонный undo/redo остаётся
-следующим срезом: нужны persisted preimages и атомарные guards всех адресов.
+серверный журнал и wire format не изменились. Следующий срез
+[ADR-079](adr/079-guarded-range-history.md) добавляет persisted preimages и
+атомарные guards всех адресов для новых интерактивных TSV/copy ranges. Undo/redo
+сохраняет новые версии, не перечитывает copy source и не отменяет чужую запись.
+Structural/style undo, cut/move и durable discovered history ещё открыты.
 
 Локальный функциональный gate фазы 2 по описанному ниже базовому профилю
 пройден 2026-09-29: общий native/browser WASM corpus 99/99, 1000 книг/2000

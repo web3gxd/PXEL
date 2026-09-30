@@ -195,8 +195,8 @@ export function App() {
           <button
             type="button"
             className="tool"
-            aria-label="Отменить последнюю правку ячейки"
-            title="Отменить последнюю сохраненную правку ячейки"
+            aria-label="Отменить последнюю правку"
+            title="Отменить последнюю сохраненную правку"
             disabled={!document.canUndo || state.kind !== 'online'}
             onClick={() => document.undo()}
           >
@@ -207,8 +207,8 @@ export function App() {
           <button
             type="button"
             className="tool"
-            aria-label="Повторить отменённую правку ячейки"
-            title="Повторить отменённую сохранённую правку ячейки"
+            aria-label="Повторить отменённую правку"
+            title="Повторить отменённую сохранённую правку"
             disabled={!document.canRedo || state.kind !== 'online'}
             onClick={() => document.redo()}
           >

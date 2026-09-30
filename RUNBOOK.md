@@ -3606,3 +3606,79 @@ unit fixture is distinct from a100k-command convergence/load run.
 Final hard-restart recovery2/2passed10803.837ms after0.35s build; own launcher restarted, readiness verification follows. ADR078 is a complete candidate correctness fix; persisted range history remains next and the full goal stays active.
 
 Feature commit a8b66c7 saved ADR078. Final hidden launcher17652 built WASM0.16s/backend0.33s; readyz8080 and frontend5173 returned200. Worktree clean before this verification-only entry. PostgreSQL/data retained. Range undo/redo and remaining full MVP gates are open; goal remains active.
+
+## 2026-09-30 — ADR079 atomic range history implementation
+
+Previous turn completed ADR078 candidate capacity fix (a8b66c7/f8bd361), verified
+runtime17652. Read AGENTS/RUNBOOK/roadmap/ADR077/078 and current domain, journal,
+actor, codecs, calculation and wire mapping. Continuing full remaining-MVP goal.
+Agreed shared RangeWrite contract before delegating codec/proto/migration to
+existing volatile_review agent, then separate journal/range_history_tests.rs only.
+Parent owns domain/collab/journal/server/UI/live/browser/recovery/docs and runtime.
+
+New GuardedContentWrite/RangeWriteKind/RangeWrite stores exact per-address preimages.
+Domain test actual RED InvalidAxis after adding unsupported-model match arms;
+GREEN after atomic candidate implementation. UI copy-history assertion actual RED
+false canUndo; GREEN after registering acknowledged batch/copy with existing stack.
+Live range-history test against old running backend actual RED rejected on Undo.
+Own17652 verified/stopped, hidden15184 rebuilding actual new backend/WASM.
+
+Codec agent implemented immutable schemas17/18, hash tags18/19/20, protobuf
+range messages and generated descriptor, principal migration202609300002; old
+schemas retained. Its actual codec29/29, clippy/proto:check/diff checks passed.
+Parent read validator/lib integration; strict metadata/formula age/origin,
+512KiB incoming+preimage and4MiB envelope constraints retained. No wire TS/newdeps.
+Readonly cross-review found ZERO inverse target domain/codec mismatch and a
+multiplicative1000×10000 history-work risk. Parent fixed ZERO guard with test,
+added64MiB tail-byte and100000 matching-address update budgets returning typed
+UndoWindowExceeded beforecommit. Journal now scans one tail and reduces exact
+ID/version own inverse pairs per address; scalar/range mixed, foreign/legacy
+barriers retained. Exact complete inverse footprint+shape checked inside lock/CAS.
+Actor derives inverse, checks all addresses before formula-axis refusal; queues,
+confirmed/pending/calculation separation unchanged. Tests and acceptance pending.
+Live RangeWrite GREEN: multi-step scalar/batch inverse and frozen mixed copy
+2/2passed, then foreign-one-destination equal-value+owncompensation and formula
+axis/deleted-destination2/2passed. Complete HTTP suite68/68passed102184.3525ms
+beforethose2late additions; those2were run separately, notclaimedfull70one-run.
+Domain/storagecodec/collab suites passed (codec29; collab22/two timing ignores),
+fullformula suite and serverdev binary17unit passed. Frontend87unit/typecheck/
+lint/build passed. SQLx preparecheck and strict domain/collab/storage/server-dev
+all-targets clippy passed; defaultserver check and proto generationcheck passed.
+
+Separate-file PG tests actual4/4passed15.32s; exactcomplete footprint rejects
+missing/extra/reordered, bothscalar↔range cancellation+late receipts+replay,
+foreigntouch+owninverse remainsbarrier,100000touch boundary admitted then101st
+1000cellwrite rejectsUndoWindowExceeded unchangedhead/receipt. Firstfixture-only
+failurecamefromreissuingdevelopmentworkspace for foreignactor; testcorrected
+withgenuine user/membership/ACL records. Additional tail-byte PG1/1passed15.86s:
+SQLSUM proves65independent16x32KiB rangeevents cross64MiB,64prefixdoesnot; inverse
+rejectsunchangedhead/no receipt evenwithoutmatchingtailaddresses. No combined5
+run claimed. Storageclippy passed afteraddition. Agenteditonlyownedtestfile.
+
+Focused Chromium TSV/mixedcopy4/4passed11.8s withatomicundo+redo, two-tabmixed
+formula convergence and reload. Full98browser nowrunning; no restartwhilelive.
+Updatedtoolbarlabels to coverranges, collaboration/persistence matrices/roadmap
+andpresentationphase4line. Addedhard-restart undo/redo ofpersistedrangecomp,
+notrunyet. New optimizedCriterion1000-rangeinverse candidate:654.36–693.61us,
+central673.93us,10samples/1s warmup/2s measure, excludesDB/historycalc/browser.
+Fullstagegate/commitpending. No formulaengine version/newdependency/wireschema
+change; persisted storagecodec schemaadds17/18, migration executed bylive startup.
+Final ADR079 checks: complete98Chromium DPR1/2 passed5.4min. Onlyafterterminal
+exit0 own15184wasidentityverified/stopped for Windows-safe recoverybuild.
+Hard-restart2/2passed13906.5711ms after4.73sbuild, nowincluding schema17range
+source + schema18undo and redo ofcompensation acrosshardrestarts, exact content/
+calculated hashes and late receipts. Rebuiltnative/browser corpus554cases and
+1010workbooks/2020patches againconverged. Presentationchecker loadedactualHTML
+inChromium at1440x900/390x844:10slides, Home/End navigation, updatedrangehistory
+text, nohorizontaloverflow/pageerrors. SelectedPrettier/rustfmt/diff passed.
+
+ADR079accepted forguarded interactive rangehistory; nextstructural/style history,
+cut/move anddurablehistorydiscovery remainopen. Storageevent schemas17/18 and
+principal migration areadditive; previous schemas1..16/hashgoldens remainvalid.
+Changed domainrange model/candidate, separatecodec/proto/descriptor/migration,
+actor/journal/incrementalcalculation/wirefallback, localacknowledgedUIhistory,
+toolbarlabels, native/PG/live/browser/recoverytests andbenchmark/docs/presentation.
+No fullstoragealltests, full100k convergence/load, controlledcommitp95, manual
+Excel parity, Linux/Compose/remoteCI orproduction gate claimed. Currentstage
+commands and allactualoutcomes recordedabove; fullall-stages goalactive.
+Ownhidden devlauncher restarted afterterminalrecovery; finalreadycheck/commitfollows.

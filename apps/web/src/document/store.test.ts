@@ -881,6 +881,9 @@ describe('document projection and pending intents', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(store.pending).toHaveLength(0);
     expect(store.projection?.version).toBe('2');
+    expect(store.canUndo).toBe(true);
+    store.undo();
+    expect(store.pending.at(-1)?.kind).toBe('undo');
     store.disconnected();
   });
   it('uses current formula text for copy and refuses a stale clipboard version', async () => {

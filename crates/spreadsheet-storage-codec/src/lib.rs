@@ -1,5 +1,8 @@
 //! Versioned durable envelope. Hashes use explicit semantic encoding, never protobuf bytes.
 mod formula_codec;
+mod range_codec;
+#[cfg(test)]
+mod range_tests;
 mod snapshot_codec;
 use prost::Message;
 use sha2::{Digest, Sha256};
@@ -293,6 +296,14 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                         .collect::<Result<_, CodecError>>()?,
                 })
             }
+            Operation::RangeWrite { undoes, .. } => {
+                let range = range_codec::encode(o)?;
+                if undoes.is_some() {
+                    Kind::CompensatingRangeWrite(range)
+                } else {
+                    Kind::AuthoredRangeWrite(range)
+                }
+            }
             Operation::CopyRange { writes } => {
                 validate_copy_writes(writes)?;
                 Kind::CopyRange(v1::CopyRange {
@@ -358,6 +369,8 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
 fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
     use v1::operation::Kind;
     Ok(match o.kind.ok_or(CodecError::Invalid)? {
+        Kind::AuthoredRangeWrite(range) => range_codec::decode(range, false)?,
+        Kind::CompensatingRangeWrite(range) => range_codec::decode(range, true)?,
         Kind::AdvanceCalculationEpoch(c) => Operation::AdvanceCalculationEpoch {
             context: CalculationContext::new(
                 CalculationContextId::from_bytes(id(&c.context_id)?)
@@ -680,6 +693,10 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::RangeWrite {
+            undoes: Some(_), ..
+        } => 18,
+        Operation::RangeWrite { .. } => 17,
         Operation::CellWrite {
             kind: Some(CellWriteKind::SetFormula),
             ..
@@ -708,6 +725,7 @@ pub fn schema_version(operation: &Operation) -> u32 {
     }
 }
 pub fn encode(event: &CommittedEvent) -> Result<Vec<u8>, CodecError> {
+    range_codec::validate(&event.operation, Some(event.version))?;
     if let Operation::CellWrite {
         kind: Some(CellWriteKind::SetFormula),
         content,
@@ -752,13 +770,17 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=16) {
+    if !matches!(e.schema_version, 1..=18) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
         return Err(CodecError::Invalid);
     }
     let operation = decode_operation(e.operation.ok_or(CodecError::Invalid)?)?;
+    range_codec::validate(
+        &operation,
+        Some(DocumentVersion::new(e.committed_version).map_err(|_| CodecError::Invalid)?),
+    )?;
     if schema_version(&operation) != e.schema_version {
         return Err(CodecError::UnsupportedSchema);
     }
@@ -769,7 +791,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         &operation,
     ) {
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -777,7 +799,12 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
             let _ = actor;
             return Err(CodecError::Invalid);
         }
-        (1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16, 0, actor, _) => {
+        (
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18,
+            0,
+            actor,
+            _,
+        ) => {
             EventPrincipal::User(ActorId::from_bytes(id(actor)?).map_err(|_| CodecError::Invalid)?)
         }
         (3, 2, [], Operation::AdvanceCalculationEpoch { .. }) => EventPrincipal::System,
@@ -977,6 +1004,7 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
                 }
             }
         }
+        Operation::RangeWrite { .. } => range_codec::hash(h, o)?,
         Operation::CopyRange { writes } => {
             validate_copy_writes(writes)?;
             h.update([15]);
@@ -1166,6 +1194,7 @@ pub fn system_trigger_fingerprint(
     h.finalize().into()
 }
 pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
+    range_codec::validate(&e.operation, Some(e.version))?;
     let mut h = Sha256::new();
     match (e.principal, &e.operation) {
         (EventPrincipal::User(_), Operation::AdvanceCalculationEpoch { .. })
@@ -1181,6 +1210,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::DeleteColumns { .. })
         | (EventPrincipal::System, Operation::SetCellValues { .. })
         | (EventPrincipal::System, Operation::CopyRange { .. })
+        | (EventPrincipal::System, Operation::RangeWrite { .. })
         | (EventPrincipal::System, Operation::CellWrite { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),

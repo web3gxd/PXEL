@@ -855,7 +855,46 @@ test(
         );
         const rangeRetry = await connect(base, cookie);
         assert.equal((await rangeRetry.send(rangeCopy)).case, 'receipt');
+        const rangeUndo = undoCellCommand(rangeRetry, rangeRecovered, rangeCopy.operationId, {
+          sequence: 4,
+        });
+        const rangeUndoCommit = await rangeRetry.send(rangeUndo);
+        assert.equal(rangeUndoCommit.case, 'committed');
         rangeRetry.socket.terminate();
+        await kill();
+        await start();
+        const undoneRange = await getDocument(base, cookie, rangeBase.document_id);
+        assert.equal(undoneRange.version, '5');
+        assert.equal(
+          undoneRange.state_hash,
+          Buffer.from(rangeUndoCommit.value.confirmedStateHash).toString('hex'),
+        );
+        assert.equal(undoneRange.sheets[0].cells.length, 2);
+        const rangeRedoWriter = await connect(base, cookie);
+        const rangeRedo = undoCellCommand(rangeRedoWriter, undoneRange, rangeUndo.operationId, {
+          sequence: 5,
+        });
+        const rangeRedoCommit = await rangeRedoWriter.send(rangeRedo);
+        assert.equal(rangeRedoCommit.case, 'committed');
+        const rangeRedoCalculation = await calculation(base, cookie, rangeBase.document_id, 6);
+        rangeRedoWriter.socket.terminate();
+        await kill();
+        await start();
+        const redoneRange = await getDocument(base, cookie, rangeBase.document_id);
+        assert.equal(redoneRange.version, '6');
+        assert.equal(
+          redoneRange.state_hash,
+          Buffer.from(rangeRedoCommit.value.confirmedStateHash).toString('hex'),
+        );
+        assert.equal(
+          (await calculation(base, cookie, rangeBase.document_id, 6)).calculated_state_hash,
+          rangeRedoCalculation.calculated_state_hash,
+        );
+        const rangeFinalRetry = await connect(base, cookie);
+        assert.equal((await rangeFinalRetry.send(rangeUndo)).case, 'receipt');
+        assert.equal((await rangeFinalRetry.send(rangeRedo)).case, 'receipt');
+        assert.equal((await getDocument(base, cookie, rangeBase.document_id)).version, '6');
+        rangeFinalRetry.socket.terminate();
 
         const { snapshot: delayedBase } = await createDocument(base, cookie);
         const delayedWriter = await connect(base, cookie);
