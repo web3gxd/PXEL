@@ -7,6 +7,201 @@ use spreadsheet_formula::{
 
 type ResultTest<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+fn compensation(target: &CommittedEvent) -> ResultTest<Operation> {
+    Ok(match &target.operation {
+        Operation::MoveRange {
+            source,
+            destination,
+            rows,
+            columns,
+            writes,
+        }
+        | Operation::MoveCompensation {
+            source,
+            destination,
+            rows,
+            columns,
+            writes,
+            ..
+        } => Operation::MoveCompensation {
+            source: *source,
+            destination: *destination,
+            rows: *rows,
+            columns: *columns,
+            writes: writes
+                .iter()
+                .map(|w| GuardedContentWrite {
+                    address: w.address,
+                    content: w.previous.clone(),
+                    previous: w.content.clone(),
+                })
+                .collect(),
+            undoes: target.operation_id,
+            undoes_version: target.version,
+        },
+        Operation::CellWrite {
+            address,
+            content,
+            previous,
+            ..
+        } => Operation::CellWrite {
+            address: *address,
+            content: previous.clone(),
+            previous: content.clone(),
+            kind: None,
+            undoes: Some(target.operation_id),
+            undoes_version: Some(target.version),
+        },
+        Operation::RangeWrite { writes, .. } => Operation::RangeWrite {
+            writes: writes
+                .iter()
+                .map(|w| GuardedContentWrite {
+                    address: w.address,
+                    content: w.previous.clone(),
+                    previous: w.content.clone(),
+                })
+                .collect(),
+            kind: None,
+            undoes: Some(target.operation_id),
+            undoes_version: Some(target.version),
+        },
+        _ => return Err("unsupported inverse fixture".into()),
+    })
+}
+
+#[test]
+fn move_compensation_restores_exact_ast_and_is_itself_redoable() -> ResultTest {
+    let (before, mut book, target) = moved()?;
+    let moved_book = book.clone();
+    let inverse = apply(&mut book, compensation(&target)?, 3)?;
+    let redo = plan_move_inverse(&book, &inverse, &[])?;
+    let Operation::MoveRange { writes, .. } = &target.operation else {
+        return Err("move missing".into());
+    };
+    for write in writes {
+        assert_eq!(
+            book.cell_content(write.address)?,
+            before.cell_content(write.address)?
+        );
+    }
+    assert_eq!(redo.target_operation_id, inverse.operation_id);
+    apply(&mut book, compensation(&inverse)?, 3)?;
+    for write in writes {
+        assert_eq!(
+            book.cell_content(write.address)?,
+            moved_book.cell_content(write.address)?
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn own_scalar_and_range_reference_pairs_cancel_but_foreign_pairs_do_not() -> ResultTest {
+    for range in [false, true] {
+        for actor in [3, 4] {
+            let (_, mut book, target) = moved()?;
+            let origin = address(&book, 4, 5);
+            let event = if range {
+                let referencing = bind("=D2", &book, origin)?;
+                apply(
+                    &mut book,
+                    Operation::RangeWrite {
+                        writes: vec![GuardedContentWrite {
+                            address: origin,
+                            content: Some(CellContent::Formula(referencing)),
+                            previous: None,
+                        }],
+                        kind: Some(RangeWriteKind::Copy),
+                        undoes: None,
+                        undoes_version: None,
+                    },
+                    actor,
+                )?
+            } else {
+                formula(&mut book, origin, "=D2", actor)?
+            };
+            let inverse = apply(&mut book, compensation(&event)?, actor)?;
+            let result = plan_move_inverse(&book, &target, &[event, inverse]);
+            if actor == 3 {
+                assert!(result.is_ok());
+            } else {
+                assert!(matches!(result, Err(MoveInverseError::Conflict)));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn own_move_compensation_pair_cancels_global_barrier_and_restored_reference_scan() -> ResultTest {
+    for actor in [3, 4] {
+        let (_, mut book, target) = moved()?;
+        let source = address(&book, 5, 5);
+        let destination = address(&book, 5, 4);
+        let plan = plan_move(
+            &book,
+            MoveRequest {
+                source,
+                destination,
+                rows: 1,
+                columns: 1,
+            },
+        )?;
+        let later = apply(
+            &mut book,
+            Operation::MoveRange {
+                source,
+                destination,
+                rows: 1,
+                columns: 1,
+                writes: plan.writes,
+            },
+            actor,
+        )?;
+        let inverse = apply(&mut book, compensation(&later)?, actor)?;
+        let result = plan_move_inverse(&book, &target, &[later, inverse]);
+        if actor == 3 {
+            assert!(result.is_ok());
+        } else {
+            assert!(matches!(result, Err(MoveInverseError::Conflict)));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn own_footprint_pair_requires_exact_inverse_id_and_version() -> ResultTest {
+    for forged in [false, true] {
+        let (_, mut book, target) = moved()?;
+        let at = address(&book, 1, 3);
+        let previous = book.cell_content(at)?.cloned();
+        let later = apply(
+            &mut book,
+            Operation::CellWrite {
+                address: at,
+                content: Some(CellValue::Number(99.).into()),
+                previous,
+                kind: Some(CellWriteKind::SetValue),
+                undoes: None,
+                undoes_version: None,
+            },
+            3,
+        )?;
+        let mut inverse = compensation(&later)?;
+        if forged && let Operation::CellWrite { undoes_version, .. } = &mut inverse {
+            *undoes_version = Some(target.version);
+        }
+        let inverse = apply(&mut book, inverse, 3)?;
+        let result = plan_move_inverse(&book, &target, &[later, inverse]);
+        if forged {
+            assert!(matches!(result, Err(MoveInverseError::Conflict)));
+        } else {
+            assert!(result.is_ok());
+        }
+    }
+    Ok(())
+}
+
 fn fixture() -> ResultTest<Workbook> {
     Ok(Workbook::hydrate_sheets(
         DocumentId::from_bytes([1; 16])?,

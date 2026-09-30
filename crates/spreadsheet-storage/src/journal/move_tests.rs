@@ -1,5 +1,7 @@
 use super::*;
 use spreadsheet_formula::relocation::{MoveRequest, plan_move};
+use std::sync::Arc;
+mod history_tests;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -11,6 +13,12 @@ async fn prepare(
     operation: Operation,
 ) -> TestResult<CommitRequest> {
     let payload = match &operation {
+        Operation::AddSheet { sheet } => CommandPayload::AddSheet {
+            sheet: sheet.clone(),
+        },
+        Operation::SetCellValues { writes } => CommandPayload::SetCellValues {
+            writes: writes.clone(),
+        },
         Operation::InsertColumnsRebased {
             sheet,
             before,
@@ -36,12 +44,40 @@ async fn prepare(
             rows: *rows,
             columns: *columns,
         },
+        Operation::MoveCompensation { undoes, .. }
+        | Operation::CellWrite {
+            kind: None,
+            undoes: Some(undoes),
+            ..
+        }
+        | Operation::RangeWrite {
+            kind: None,
+            undoes: Some(undoes),
+            ..
+        } => CommandPayload::UndoCell {
+            target_operation_id: *undoes,
+        },
+        Operation::SetCellFormula { address, formula } => CommandPayload::SetCellFormula {
+            address: *address,
+            source: spreadsheet_domain::formula::FormulaSource::new(formula.source().into())?,
+        },
+        Operation::CellWrite {
+            address,
+            content: Some(CellContent::Formula(formula)),
+            kind: Some(CellWriteKind::SetFormula),
+            ..
+        } => CommandPayload::SetCellFormula {
+            address: *address,
+            source: spreadsheet_domain::formula::FormulaSource::new(formula.source().into())?,
+        },
         _ => return Err("unexpected move fixture operation".into()),
     };
     let next = DocumentVersion::new(book.version().get() + 1)?;
     let candidate = book.candidate(&operation, next)?;
     let operation_id = OperationId::from_bytes([identifier; 16])?;
     Ok(CommitRequest {
+        move_inverse_projection: matches!(operation, Operation::MoveCompensation { .. })
+            .then(|| Arc::new(book.clone())),
         identity,
         expected_head: book.version(),
         expected_access: db.access(identity, book.document_id()).await?,

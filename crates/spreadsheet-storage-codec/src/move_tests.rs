@@ -2,7 +2,7 @@ use super::*;
 use spreadsheet_domain::formula::{AST_SCHEMA_VERSION, BinaryOp, BoundAst, Formula, Node, NodeId};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
-fn address(index: u32) -> Result<CellAddress, DomainError> {
+pub(super) fn address(index: u32) -> Result<CellAddress, DomainError> {
     let mut row = [3; 16];
     row[..4].copy_from_slice(&index.to_le_bytes());
     Ok(CellAddress {
@@ -11,7 +11,10 @@ fn address(index: u32) -> Result<CellAddress, DomainError> {
         column: ColumnId::from_bytes([2; 16])?,
     })
 }
-fn formula(address: CellAddress, version: u64) -> Result<CellContent, Box<dyn std::error::Error>> {
+pub(super) fn formula(
+    address: CellAddress,
+    version: u64,
+) -> Result<CellContent, Box<dyn std::error::Error>> {
     Ok(CellContent::Formula(Formula::new(
         "=42".into(),
         "=42".into(),
@@ -20,7 +23,7 @@ fn formula(address: CellAddress, version: u64) -> Result<CellContent, Box<dyn st
         DocumentVersion::new(version)?,
     )?))
 }
-fn fixture() -> Result<CommittedEvent, Box<dyn std::error::Error>> {
+pub(super) fn fixture() -> Result<CommittedEvent, Box<dyn std::error::Error>> {
     let source = address(1)?;
     let destination = address(2)?;
     Ok(CommittedEvent {

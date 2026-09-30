@@ -518,3 +518,17 @@ compilation and strict formula Clippy passed; no inverse runtime parity claim.
 Optimized7000-write/no-tail planner central7.7314ms is a preliminary local metric,
 not end-to-end undo. Next: versioned compensation + transactional reference/history
 admission, then browser undo/redo/worker parity. Wider MVP gates remain open.
+
+ADR083 closes same-sheet content Move undo/redo through a dedicated schema20
+compensation and real PostgreSQL reference/history admission. Source/destination/
+external AST preimages restore exactly; own inverse pairs neutralize, foreign
+same-value/new-reference writes remain barriers. Confirmed projection doc/version/
+hash is independently bound to the locked durable head. UI acknowledged moves
+participate in100-entry own history. Full116Chromium,76HTTP/network/security and
+4hard-restart scenarios passed;6new real-PG move-history cases,40codec and16pure
+history tests passed. Existing5range and6scalar/formula PGguards passed too (timing
+harness ignored). Native/browser554formula fixtures and1010books/2020patches agree
+on current engine0.14.0; this is not Move worker preview/parity, which remains next.
+Structural/style history, durable discovered history, richer styles/merges/XLSX,
+controlledlarge/stress metrics, Linux/Compose/remoteCI and production gates remain
+open. Detailed actual commands, failures and outcomes in RUNBOOK.

@@ -20,16 +20,30 @@ pub(super) fn validate(
     operation: &Operation,
     version: Option<DocumentVersion>,
 ) -> Result<(), CodecError> {
-    let Operation::MoveRange {
-        source,
-        destination,
-        rows,
-        columns,
-        writes,
-    } = operation
-    else {
-        return Ok(());
+    let (source, destination, rows, columns, writes) = match operation {
+        Operation::MoveRange {
+            source,
+            destination,
+            rows,
+            columns,
+            writes,
+        }
+        | Operation::MoveCompensation {
+            source,
+            destination,
+            rows,
+            columns,
+            writes,
+            ..
+        } => (source, destination, rows, columns, writes),
+        _ => return Ok(()),
     };
+    if let Operation::MoveCompensation { undoes_version, .. } = operation
+        && (*undoes_version == DocumentVersion::ZERO
+            || version.is_some_and(|version| *undoes_version >= version))
+    {
+        return Err(CodecError::Invalid);
+    }
     validate_geometry(*source, *destination, *rows, *columns)?;
     if writes.is_empty() || writes.len() > 10_000 || version == Some(DocumentVersion::ZERO) {
         return Err(CodecError::Invalid);
@@ -84,17 +98,22 @@ pub(super) fn encode(operation: &Operation) -> Result<v1::MoveRange, CodecError>
         destination: Some(addr(destination)),
         rows: *rows,
         columns: *columns,
-        writes: writes
-            .iter()
-            .map(|write| {
-                Ok(v1::GuardedContentWrite {
-                    address: Some(addr(&write.address)),
-                    content: encode_optional_content(&write.content)?,
-                    previous: encode_optional_content(&write.previous)?,
-                })
-            })
-            .collect::<Result<_, CodecError>>()?,
+        writes: encode_writes(writes)?,
     })
+}
+pub(super) fn encode_writes(
+    writes: &[GuardedContentWrite],
+) -> Result<Vec<v1::GuardedContentWrite>, CodecError> {
+    writes
+        .iter()
+        .map(|write| {
+            Ok(v1::GuardedContentWrite {
+                address: Some(addr(&write.address)),
+                content: encode_optional_content(&write.content)?,
+                previous: encode_optional_content(&write.previous)?,
+            })
+        })
+        .collect::<Result<_, CodecError>>()
 }
 pub(super) fn decode(moved: v1::MoveRange) -> Result<Operation, CodecError> {
     let source = decode_addr(moved.source.ok_or(CodecError::Invalid)?)?;
@@ -160,6 +179,12 @@ pub(super) fn hash(h: &mut Sha256, operation: &Operation) -> Result<(), CodecErr
     };
     h.update([21]);
     hash_geometry(h, *source, *destination, *rows, *columns);
+    hash_writes(h, writes)
+}
+pub(super) fn hash_writes(
+    h: &mut Sha256,
+    writes: &[GuardedContentWrite],
+) -> Result<(), CodecError> {
     h.update((writes.len() as u64).to_le_bytes());
     for write in writes {
         h.update(write.address.sheet.as_bytes());

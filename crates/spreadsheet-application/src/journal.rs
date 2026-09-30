@@ -1,6 +1,6 @@
 use spreadsheet_domain::workbook::{
     ActorId, CalculationContext, Command, CommittedEvent, DocumentId, DocumentVersion, OperationId,
-    WorkspaceId,
+    Workbook, WorkspaceId,
 };
 use std::future::Future;
 use thiserror::Error;
@@ -24,6 +24,9 @@ pub struct CommitReceipt {
     pub current_head_version: DocumentVersion,
 }
 pub struct CommitRequest {
+    /// Internal confirmed projection used only for move-reference history guards.
+    /// The journal verifies its version/hash against the locked durable head.
+    pub move_inverse_projection: Option<std::sync::Arc<Workbook>>,
     pub identity: AuthenticatedActor,
     pub expected_head: DocumentVersion,
     pub expected_access: DocumentAccess,

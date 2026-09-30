@@ -935,6 +935,7 @@ mod tests {
                     book.candidate(&operation, DocumentVersion::new(u64::from(number))?)?;
                 let operation_id = OperationId::from_bytes([20 + number; 16])?;
                 let request = CommitRequest {
+                    move_inverse_projection: None,
                     identity,
                     expected_head: book.version(),
                     expected_access: db.access(identity, document_id).await?,
@@ -1139,6 +1140,7 @@ mod tests {
         let after_tail = candidate.candidate(&tail, DocumentVersion::new(4)?)?;
         let tail_id = OperationId::from_bytes([76; 16])?;
         let request = CommitRequest {
+            move_inverse_projection: None,
             identity,
             expected_head: candidate.version(),
             expected_access: db.access(identity, document_id).await?,
@@ -1255,6 +1257,7 @@ mod tests {
         let book2 = book1.candidate(&operation, DocumentVersion::new(2)?)?;
         let operation_id = OperationId::from_bytes([9; 16])?;
         let request = CommitRequest {
+            move_inverse_projection: None,
             identity,
             expected_head: book1.version(),
             expected_access: db.access(identity, document_id).await?,
@@ -1409,6 +1412,7 @@ mod tests {
         let book2 = book1.candidate(&operation, DocumentVersion::new(2)?)?;
         let operation_id = OperationId::from_bytes([9; 16])?;
         let request = CommitRequest {
+            move_inverse_projection: None,
             identity,
             expected_head: book1.version(),
             expected_access: db.access(identity, document_id).await?,

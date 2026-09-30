@@ -21,4 +21,5 @@ run(process.execPath, [
   'tests/recovery/server-restart.test.mjs',
   'tests/recovery/convergence-restart.test.mjs',
   'tests/recovery/move-restart.test.mjs',
+  'tests/recovery/move-history-restart.test.mjs',
 ]);

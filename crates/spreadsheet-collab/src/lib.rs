@@ -781,7 +781,9 @@ async fn submit<J: OperationJournal>(
                         content: previous.clone(),
                         previous: content.clone(),
                     }],
-                    Operation::RangeWrite { writes, .. } => writes
+                    Operation::RangeWrite { writes, .. }
+                    | Operation::MoveRange { writes, .. }
+                    | Operation::MoveCompensation { writes, .. } => writes
                         .iter()
                         .map(|w| spreadsheet_domain::workbook::GuardedContentWrite {
                             address: w.address,
@@ -828,6 +830,28 @@ async fn submit<J: OperationJournal>(
                         kind: None,
                         undoes: Some(*target_operation_id),
                         undoes_version: Some(target.version),
+                    },
+                    Operation::MoveRange {
+                        source,
+                        destination,
+                        rows,
+                        columns,
+                        ..
+                    }
+                    | Operation::MoveCompensation {
+                        source,
+                        destination,
+                        rows,
+                        columns,
+                        ..
+                    } => Operation::MoveCompensation {
+                        source,
+                        destination,
+                        rows,
+                        columns,
+                        writes,
+                        undoes: *target_operation_id,
+                        undoes_version: target.version,
                     },
                     _ => return Err(JournalError::NotUndoable.into()),
                 }
@@ -893,6 +917,8 @@ async fn submit<J: OperationJournal>(
             state_hash: candidate.hash(),
         };
         let request = CommitRequest {
+            move_inverse_projection: matches!(event.operation, Operation::MoveCompensation { .. })
+                .then(|| Arc::clone(workbook)),
             identity,
             expected_head: workbook.version(),
             expected_access: access,

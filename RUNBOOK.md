@@ -3871,3 +3871,102 @@ results remain historical, not new inverse evidence. Next required slice remains
 new versioned durable Move compensation, transactional guarded history/reference
 admission + own-pair reduction, then UI undo/redo and worker parity. No full MVP,
 Linux/Compose/remoteCI/production or large-stress gate claimed complete.
+
+2026-09-30 ADR083 durable guarded Move undo/redo. Previous goal turn was concrete
+progress(e224cea pureplanner); current head reread and worktree clean at start.
+Read AGENTS/RUNBOOK/roadmap/architecture/ADR077/079/081/082. Continued authorized
+remaining stages; no scope narrowing or goal completion. Coordinated separate-file
+agents: domainvariant+purehistory; storagecodec/proto/migration; UI/history/browser;
+primary application/journal/actor/recovery/SQLx/docs/runtime. Skills incremental-
+implementation/TDD/documentation-and-adrs and read-only adversarial review used.
+
+New domain Operation::MoveCompensation originalgeometry+complete frozen writes+
+mandatoryundoID/version,1..1000source/1..10000uniquefootprint/two512KiBcaps;
+privatefinalcapacitycandidate exactpreimages/formulaorigin/binding. MoveRange and
+comp nowinverseeligible. Planner migrated to domain (formula reexports existing
+API): no storage->formula/evaluator dependency. Own per-address ID/version/principal/
+exactswappedcontents ledger neutralizes cell/range/move pairs; foreign/legacy
+entries remainbarriers. AST equality charged against1Mwork. New effective refs,
+rangeinteriors/reversed/cross-sheet sparseexternal targets guarded; lateraxes and
+uncanceledmoves remain conservative conflicts. Full domain allfeatures passed
+(one existing100kconvergence stress ignored),16movehistorytests and domainWASM
+check/combineddomain-formula Clippy passed(agent actualcommands).
+
+Dedicated codec schema20/oneof20/eventhash22 +principal allowlist migration;
+wire UndoCell/fingerprints/oldschemas/goldenhashes unchanged. New5codec tests,
+40/40fullcodecpassed0.82s andstrictclippypassed(agent). InitialtestfirstcompileRED
+newvariant/generatedtype; one malformedBlankfixture failed strictencoder before
+its expecteddecode, fixed fixture only. No legacyassertion weakened.
+
+CommitRequest now internaloptionalArcconfirmed Moveinverseprojection; all callsites
+updatedexplicitNone except MoveCompensation. Under ACL/doclock afterreceipt/CAS
+expectedhead, verifycontextdoc/version/hash against independentlyverified durable
+head envelope. Exacttargetownership/family/geometry/ordered swappedpreimages then
+boundedtail reread64MiB/10k anddomainreferenceguard beforeCAS/insertCOMMIT. Generic
+undo touchguard includesComp and formula globalownmovement-pair reduction so
+neutralizedownMove doesn't block earlierformula history. Unknown/forgedcontext,
+foreignsamevalue/newrefs, forgedfamily/geometry produce nohead/event/receipt.
+Actor derivescandidatefirst, COMMIT beforepreparedswap/ACK; incrementalcalculation
+usesallchangedaddresses; canonicalNone authorizedprojectionrefresh; AxisHistory
+relocationfloor nowincludesComp andfreshactor replay. Noack beforedurability.
+
+NewrealPG6movehistorytests passed3.68s after initialcompileerrors fixed: missingArc
+import, then child testmodule path wrongsuper depth. Coverage: schema20undo/redo/
+lateundo receipt afterredo/pagedfullreplay; foreignsamevalue &otherownership;
+newinteriorrange; missing/wrongversion/sameversion-wronghashcontext; forgedfamily/
+geometry; exactownref+inverse neutralization;2000writeMoveinverse from1000cells
+exceeds schema18capacity withoutwideningit. Additionalwrong-document context
+assertion added andfinalrerunbelow. Existingrangehistory5passed12.96s including
+64MiBbyte/100ktouchbudgets; undo_filter7passed/1timingignored2.32s includesnewMove
+case+6oldscalar/formula cases. No mocked productionpersistence.
+
+UI TDD5historyexpectations RED beforemoveeligibilitychange ->13focusedGREEN,
+full100unit/typecheck/lint/build passed(agent). Acknowledgedmovespushboundedown
+history; duplicateACK/receipt once; transient7/8retainoriginalbytes/id; UIinverse
+refresh confirmedprojection, noWASMmoveoptimistic results. New5browsercasesxDPR2
++updated4cutcasesxDPR2focused18/18passed42.2s; full116/116passed6.4min. Equal-value
+foreigndest, newdirect/interiorrange refs conflict13, otheractorownermoveinverse14;
+overlap+externalformulasundo/redo/reload. Canvas accessibilityinstruction updated.
+
+FocusedHTTPMove5passed6713.8122ms; addedownoldformula->Moveundo->formulaUndo/Redo
+->MoveRedo chain then6/6passed8553.7014ms. FullHTTP/network/security76/76passed
+111554.3914ms, includesexisting3x100networkwrites (notfull100kstress). Backend18unit
+passed; fullformula suitepassed with16newhistorytests; collab22passed/2intentional
+benchmarkignores. Sharedstrictalltargetsclippy, SQLxprepare+preparecheck andproto:
+generate/check passed. New .sqlxcheckedmetadatahead-versionquery added. Default
+servercheck andfinalfrontendbuildpassed; no dependency/lock/toolchain change.
+
+Ownedlauncher32120 identityverifiedstoppedfornewruntime7804; initialWASMrelease
+16.38s/serverdev24.01s. Afterfull116terminalexit0 and76HTTPterminalexit0, stopped
+onlyowned7804tree forWindows-safe recoverybuild. Recoveryserverbuilt7.08s;
+complete4/4hardrestart cases passed14854.6383ms. NewMovecompensation case1065.9243ms
+restoresexactauthoredsheets/calculatedhash afterundo andredo through twoSIGKILL
+restarts; delayedformula afterComp/freshactor rejects17; lateundo/redo receipts
+retainversions/headhash. finallyrestoredhiddenlauncher23680, WASMrelease15.05s
+(cargo lockwait), serverdev0.44s;readyz8080/web5173both200. PG18.6/data retained;
+no unrelatedprocess/database stopped. Childrecoveryservers18085/18086 stopped.
+
+Parityfirstattempt racedruntimeWASM regeneration: ENOENT generatedJS during
+startup, process exited1 beforecomparison. Waited for actualgenerationterminal,
+verifiedfilepresence, reran samecorpora:554cases(expected/native/browserhashes),
+1010workbooks/2020patches converged. WASM1026390bytes; initial7.7ms/eval26ms/
+roundtrip185.5291ms; workbookcompute214.2ms/roundtrip1367.2495ms on same developer
+Ultra9185H/Windows26100/Node24.18/Chromium153.0.8010.12. These are sharedcorpus
+measurements, not newMove-worker parity or controlledp95. No inversepreviewAPIyet.
+
+Added ADR083 and synchronizedarchitecture/README/collaboration/formulas/persistence/
+compatibility/roadmap/presentation. Actual10-slide presentation testedChromium
+1440x900/390x844navigation/nooverflow/noerrors withupdatedMoveUndo status. Selected
+Prettier/cargofmt/diffchecks passed. Read-onlyintegrationreview foundno concrete
+criticaldefect, calledfor context/family/geometry PGtests nowpresent; review itself
+didnotruntests. Newformat acceptance scope onlysame-sheetcontentMovehistory.
+Remainingstage4structural/styleundo/discoveredhistory, workerMovepreview/parity,
+fullstyles/merges/XLSX/manualExcel/largecombinedACL/stress/controlledp95, Linux/
+Compose/remoteCI and RussianproductionS3/deploymentgates stillopen. Nextminimal
+slice sharedRustMove planner WASMworker plus optimisticpendingprojection/parity;
+fullgoal staysactive.
+Final ADR083 PG move-history rerun after wrong-document context assertion:
+6/6passed2.81s; final storage alltargets strictClippy passed9.31s. Selecteddocs/
+presentation Prettier andgitdiffcheck passed; runtime remainsown23680, lastreadyz/
+webcheck200. Existing100kdomainconvergence, oldtimingharnesses and controlled
+production/deployment gates were not executed or claimed passed in this stage.

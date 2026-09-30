@@ -1248,7 +1248,8 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
         | Operation::AdvanceCalculationEpoch { .. }
         | Operation::CopyRange { .. }
         | Operation::RangeWrite { .. }
-        | Operation::MoveRange { .. } => {
+        | Operation::MoveRange { .. }
+        | Operation::MoveCompensation { .. } => {
             return None;
         }
         Operation::SetCellFormula { address, formula } => {

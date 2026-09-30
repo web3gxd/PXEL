@@ -32,19 +32,19 @@ preview worker. Предварительные результаты остают
 
 ## Crates и направление зависимостей
 
-| Crate                     | Владелец ответственности                                                    | Workspace dependencies                               | Вводится                            |
-| ------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------- |
-| spreadsheet-domain        | IDs и общие domain values; позже workbook, чистые операции и normalized AST | Нет                                                  | 0, только используемые типы         |
-| spreadsheet-application   | Используемые use cases/ports                                                | domain                                               | 0: BlobStore                        |
-| spreadsheet-wire-protocol | Public protobuf DTO/codecs, без бизнес-модели                               | Нет                                                  | 0                                   |
-| spreadsheet-storage       | PostgreSQL, filesystem/S3 BlobStore и event persistence                     | domain, application, storage-codec; optional AWS SDK | 0, S3 в фазе 5                      |
-| spreadsheet-storage-codec | Versioned durable protobuf envelope и его миграции при чтении               | domain при необходимости conversions                 | 1, когда сохраняется первое событие |
-| spreadsheet-collab        | Actor, command validation/rebase, subscriptions, SessionDirectory           | domain, application; formula с фазы 2                | 1                                   |
-| spreadsheet-formula       | Lexer/parser/binder/evaluator/graph/scheduler/locale/diagnostics            | domain                                               | 2                                   |
-| spreadsheet-wasm          | Тонкий commands/patches adapter                                             | domain, formula, wire-protocol                       | 2                                   |
-| spreadsheet-testkit       | Общие seeded generators, virtual clients, fault injection                   | Используемые domain/application/collab/formula       | При двух реальных потребителях      |
-| spreadsheet-xlsx          | Bounded OOXML reader и отдельная scalar IR; writer позднее                  | Нет; только general-purpose ZIP/XML                  | 6                                   |
-| apps/server               | Composition root, transport/auth/runtime adapters                           | Только используемые crates                           | 0                                   |
+| Crate                     | Владелец ответственности                                          | Workspace dependencies                               | Вводится                            |
+| ------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------- |
+| spreadsheet-domain        | IDs, Workbook, чистые операции, normalized AST и guarded history  | Нет                                                  | Используемые типы и pure invariants |
+| spreadsheet-application   | Используемые use cases/ports                                      | domain                                               | 0: BlobStore                        |
+| spreadsheet-wire-protocol | Public protobuf DTO/codecs, без бизнес-модели                     | Нет                                                  | 0                                   |
+| spreadsheet-storage       | PostgreSQL, filesystem/S3 BlobStore и event persistence           | domain, application, storage-codec; optional AWS SDK | 0, S3 в фазе 5                      |
+| spreadsheet-storage-codec | Versioned durable protobuf envelope и его миграции при чтении     | domain при необходимости conversions                 | 1, когда сохраняется первое событие |
+| spreadsheet-collab        | Actor, command validation/rebase, subscriptions, SessionDirectory | domain, application; formula с фазы 2                | 1                                   |
+| spreadsheet-formula       | Lexer/parser/binder/evaluator/graph/scheduler/locale/diagnostics  | domain                                               | 2                                   |
+| spreadsheet-wasm          | Тонкий commands/patches adapter                                   | domain, formula, wire-protocol                       | 2                                   |
+| spreadsheet-testkit       | Общие seeded generators, virtual clients, fault injection         | Используемые domain/application/collab/formula       | При двух реальных потребителях      |
+| spreadsheet-xlsx          | Bounded OOXML reader и отдельная scalar IR; writer позднее        | Нет; только general-purpose ZIP/XML                  | 6                                   |
+| apps/server               | Composition root, transport/auth/runtime adapters                 | Только используемые crates                           | 0                                   |
 
 `storage` никогда не импортирует `collab`; `collab` никогда не импортирует SQLx/storage types. OperationJournal, AuthorizationRepository, SnapshotRepository и CalculationExecutor вводятся в application только вместе с потребителями. Clock/IdGenerator не создаются ради каталогов интерфейсов. SessionDirectory вводится с actor по прямому требованию масштабирования.
 

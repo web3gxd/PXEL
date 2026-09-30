@@ -35,7 +35,9 @@ offsets пересчитываются. Delayed formula с base до перен�
 ADR-082 adds pure frozen inverse planning with bounded tail/reference guards.
 It restores exact stored ASTs and rejects subsequent footprint or new-reference
 conflicts, including range interiors on other sheets. This API does not yet
-enable durable move undo/redo or worker preview; those remain phase4 work.
+enable worker preview. ADR-083 moves the pure guard to domain and connects it to
+durable move undo/redo; exact own inverse pairs can now neutralize history, while
+foreign/new effective references remain barriers. Worker preview stays open.
 
 ## Числа и порядок
 

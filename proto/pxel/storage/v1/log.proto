@@ -36,6 +36,7 @@ message Operation {
   RangeWrite authored_range_write = 17;
   RangeWrite compensating_range_write = 18;
   MoveRange move_range = 19;
+  MoveCompensation move_compensation = 20;
  }
 }
 message AdvanceCalculationEpoch {
@@ -96,6 +97,16 @@ message MoveRange {
  uint32 rows = 3;
  uint32 columns = 4;
  repeated GuardedContentWrite writes = 5;
+}
+// Schema 20 freezes an inverse move and its mandatory compensated event identity.
+message MoveCompensation {
+ CellAddress source = 1;
+ CellAddress destination = 2;
+ uint32 rows = 3;
+ uint32 columns = 4;
+ repeated GuardedContentWrite writes = 5;
+ bytes undoes_operation_id = 6;
+ uint64 undoes_version = 7;
 }
 enum AuthoredRangeWriteKind {
  AUTHORED_RANGE_WRITE_KIND_UNSPECIFIED = 0;

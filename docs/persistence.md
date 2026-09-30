@@ -27,8 +27,18 @@ source/destination/inbound writes, hash tag21 и отдельным command tag1
 User-only principal migration сохраняет ограничения старых schemas.
 Source area<=1000, writes<=10000, incoming/preimage text отдельно512KiB,
 envelope4MiB. Candidate проверяет точное преобразование AST и полноту внешних
-ссылок до CAS; replay использует frozen contents/preimages. Move пока не inverse
-target; восстановление прежних формул через последующий move отклоняется.
+ссылок до CAS; replay использует frozen contents/preimages. ADR-083 ниже добавляет
+отдельный формат guarded inverse, сохраняя прежние schema19 bytes.
+
+ADR-083 adds user-only MoveCompensation schema20/oneof20/hash22. Mandatory target
+ID/version, original geometry and complete frozen inverse support own undo/redo.
+The actor's internal confirmed projection is checked against verified locked head
+doc/version/hash before bounded reference/history admission. Exact family/geometry
+and ordered swapped preimages are required; missing or forged context rejects.
+Own inverse pairs cancel, foreign same-value writes/new references remain barriers.
+Source<=1000/writes<=10000/two512KiB/envelope4MiB; schema18 caps are unchanged.
+Later axes/effective moves refuse historical restoration; neutralized own moves
+can allow earlier own formula inverses. Receipt lookup remains before guards.
 
 Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
 operations реализованы локально. `SnapshotImage` и binary codec проверены.

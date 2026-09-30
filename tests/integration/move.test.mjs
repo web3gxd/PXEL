@@ -87,11 +87,26 @@ test('move freezes overlapping cells, rewrites inbound formulas, persists and de
     assert.equal(retry.case, 'receipt');
     assert.equal(retry.value.committedVersion, ack.value.committedVersion);
     assert.equal((await getDocument(base, cookie, book.document_id)).state_hash, moved.state_hash);
-    const inverse = await client.send(
-      undoCellCommand(client, moved, command.operationId, { sequence: 5 }),
-    );
-    assert.equal(inverse.case, 'rejected');
-    assert.equal(inverse.value.code, 14);
+    const undoIntent = undoCellCommand(client, moved, command.operationId, { sequence: 5 });
+    const inverse = await client.send(undoIntent);
+    assert.equal(inverse.case, 'committed');
+    const restored = await getDocument(base, cookie, book.document_id);
+    assert.deepEqual(cell(restored, 0, 0)?.value, { type: 'number', value: 7 });
+    assert.equal(cell(restored, 0, 1)?.value.value.current_text, '=A1');
+    assert.equal(cell(restored, 0, 2), undefined);
+    assert.equal(cell(restored, 1, 0)?.value.value.current_text, '=($A$1+$B$1)');
+    const redoIntent = undoCellCommand(client, restored, inverse.value.operationId, {
+      sequence: 6,
+    });
+    const redo = await client.send(redoIntent);
+    assert.equal(redo.case, 'committed');
+    const redone = await getDocument(base, cookie, book.document_id);
+    assert.deepEqual(cell(redone, 0, 1)?.value, { type: 'number', value: 7 });
+    assert.equal(cell(redone, 0, 2)?.value.value.current_text, '=B1');
+    assert.equal(cell(redone, 1, 0)?.value.value.current_text, '=($B$1+$C$1)');
+    const undoRetry = await client.send(undoIntent);
+    assert.equal(undoRetry.case, 'receipt');
+    assert.equal(undoRetry.value.committedVersion, inverse.value.committedVersion);
   } finally {
     client.socket.terminate();
     observer.socket.terminate();
@@ -132,6 +147,45 @@ test('stale source and partial range dependencies reject without a committed ver
     const after = await getDocument(base, cookie, book.document_id);
     assert.equal(after.version, book.version);
     assert.equal(after.state_hash, before);
+  } finally {
+    client.socket.terminate();
+  }
+});
+
+test('own move undo permits older formula history and exact redo after neutralized own edits', async () => {
+  const cookie = await login(base);
+  let { snapshot: book } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    book = await edited(client, cookie, book, setCommand(client, book, 9));
+    const authoredFormula = formulaCommand(client, book, '=A1*2', { column: 1, sequence: 2 });
+    book = await edited(client, cookie, book, authoredFormula);
+    const move = moveRangeCommand(
+      client,
+      book,
+      { destinationRow: 0, destinationColumn: 2, rows: 1, columns: 1 },
+      { sequence: 3 },
+    );
+    book = await edited(client, cookie, book, move);
+    const undoMove = undoCellCommand(client, book, move.operationId, { sequence: 4 });
+    const undoneMove = await client.send(undoMove);
+    assert.equal(undoneMove.case, 'committed');
+    book = await getDocument(base, cookie, book.document_id);
+    const undoFormula = undoCellCommand(client, book, authoredFormula.operationId, { sequence: 5 });
+    book = await edited(client, cookie, book, undoFormula);
+    assert.equal(cell(book, 0, 1), undefined);
+    const redoFormula = undoCellCommand(client, book, undoFormula.operationId, { sequence: 6 });
+    book = await edited(client, cookie, book, redoFormula);
+    assert.equal(cell(book, 0, 1)?.value.value.current_text, '=(A1*2)');
+    book = await edited(
+      client,
+      cookie,
+      book,
+      undoCellCommand(client, book, undoMove.operationId, { sequence: 7 }),
+    );
+    assert.equal(cell(book, 0, 0), undefined);
+    assert.deepEqual(cell(book, 0, 2)?.value, { type: 'number', value: 9 });
+    assert.equal(cell(book, 0, 1)?.value.value.current_text, '=(C1*2)');
   } finally {
     client.socket.terminate();
   }

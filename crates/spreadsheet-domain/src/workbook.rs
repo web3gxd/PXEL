@@ -385,6 +385,16 @@ pub enum Operation {
         columns: u32,
         writes: Vec<GuardedContentWrite>,
     },
+    /// Exact frozen inverse; journal admission verifies provenance and history.
+    MoveCompensation {
+        source: CellAddress,
+        destination: CellAddress,
+        rows: u32,
+        columns: u32,
+        writes: Vec<GuardedContentWrite>,
+        undoes: OperationId,
+        undoes_version: DocumentVersion,
+    },
     /// Frozen destination contents and exact preimages in one atomic event.
     RangeWrite {
         writes: Vec<GuardedContentWrite>,
@@ -492,6 +502,7 @@ impl Operation {
     }
     pub const fn is_inverse_target(&self) -> bool {
         self.is_cell_inverse_target()
+            || matches!(self, Self::MoveRange { .. } | Self::MoveCompensation { .. })
             || matches!(
                 self,
                 Self::RangeWrite {
@@ -997,6 +1008,64 @@ impl Workbook {
         if self.version.get().checked_add(1) != Some(next_version.get()) {
             return Err(DomainError::VersionConflict);
         }
+        if let Operation::MoveCompensation {
+            source,
+            destination,
+            rows,
+            columns,
+            writes,
+            undoes_version,
+            ..
+        } = operation
+        {
+            if *undoes_version == DocumentVersion::ZERO || *undoes_version > self.version {
+                return Err(DomainError::VersionConflict);
+            }
+            if source.sheet != destination.sheet || source == destination {
+                return Err(DomainError::InvalidAxis);
+            }
+            if writes.is_empty() || writes.len() > 10_000 {
+                return Err(DomainError::LimitExceeded);
+            }
+            let required: BTreeSet<_> = self
+                .move_rectangle(*source, *rows, *columns)?
+                .into_iter()
+                .chain(self.move_rectangle(*destination, *rows, *columns)?)
+                .collect();
+            let mut seen = BTreeSet::new();
+            let mut bytes = [0usize; 2];
+            let mut operations = Vec::with_capacity(writes.len());
+            for write in writes {
+                if !seen.insert(write.address) {
+                    return Err(DomainError::InvalidAxis);
+                }
+                for (index, content) in [&write.content, &write.previous].into_iter().enumerate() {
+                    bytes[index] = bytes[index]
+                        .checked_add(content.as_ref().map_or(0, CellContent::text_bytes))
+                        .filter(|n| *n <= MAX_CELL_VALUE_BATCH_TEXT_BYTES)
+                        .ok_or(DomainError::LimitExceeded)?;
+                }
+                let kind = Some(match &write.content {
+                    None => CellWriteKind::Clear,
+                    Some(CellContent::Value(_)) => CellWriteKind::SetValue,
+                    Some(CellContent::Formula(_)) => CellWriteKind::SetFormula,
+                });
+                let cell = Operation::CellWrite {
+                    address: write.address,
+                    content: write.content.clone(),
+                    previous: write.previous.clone(),
+                    kind,
+                    undoes: None,
+                    undoes_version: None,
+                };
+                self.validate_guarded_write(&cell)?;
+                operations.push(cell);
+            }
+            if !required.is_subset(&seen) {
+                return Err(DomainError::InvalidAxis);
+            }
+            return self.preview_candidate(&operations, next_version);
+        }
         if let Operation::MoveRange {
             source,
             destination,
@@ -1190,7 +1259,8 @@ impl Workbook {
                 Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
                 Operation::CopyRange { .. }
                 | Operation::RangeWrite { .. }
-                | Operation::MoveRange { .. } => {
+                | Operation::MoveRange { .. }
+                | Operation::MoveCompensation { .. } => {
                     return Err(DomainError::InvalidAxis);
                 }
             };
@@ -1678,7 +1748,8 @@ impl Workbook {
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
             Operation::CopyRange { .. }
             | Operation::RangeWrite { .. }
-            | Operation::MoveRange { .. } => {
+            | Operation::MoveRange { .. }
+            | Operation::MoveCompensation { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {
@@ -1911,7 +1982,8 @@ impl Workbook {
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
             Operation::CopyRange { .. }
             | Operation::RangeWrite { .. }
-            | Operation::MoveRange { .. } => {
+            | Operation::MoveRange { .. }
+            | Operation::MoveCompensation { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {

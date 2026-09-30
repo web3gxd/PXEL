@@ -73,7 +73,7 @@ test('cut in one tab moves a formula range in another tab and updates inbound re
   await second.keyboard.press('ArrowRight');
   await expect(active(second)).toHaveText('B2: 6');
   await expect(bar(second)).toHaveValue('=(A2*2)');
-  await expect(second.getByRole('button', { name: 'Отменить последнюю правку' })).toBeDisabled();
+  await expect(second.getByRole('button', { name: 'Отменить последнюю правку' })).toBeEnabled();
 
   await page.bringToFront();
   await grid(page).focus();

@@ -75,6 +75,7 @@ async fn run_benchmark(pool: sqlx::PgPool) -> BenchResult<()> {
         let candidate = workbook.candidate(&operation, DocumentVersion::new(number + 1)?)?;
         let operation_id = OperationId::from_bytes(*Uuid::now_v7().as_bytes())?;
         let request = CommitRequest {
+            move_inverse_projection: None,
             identity,
             expected_head: workbook.version(),
             expected_access: access,

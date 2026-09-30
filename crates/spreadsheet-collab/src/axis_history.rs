@@ -116,7 +116,10 @@ impl AxisHistory {
         operation: &Operation,
         checkpoint: Option<Checkpoint>,
     ) {
-        if matches!(operation, Operation::MoveRange { .. }) {
+        if matches!(
+            operation,
+            Operation::MoveRange { .. } | Operation::MoveCompensation { .. }
+        ) {
             self.relocation_floor = book.version();
         }
         if Self::structural(operation) {

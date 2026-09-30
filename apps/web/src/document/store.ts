@@ -188,7 +188,7 @@ const rejectionText: Record<number, string> = {
   8: 'Хранилище временно недоступно.',
   9: 'Строка или столбец уже удалены.',
   12: 'Для вставки строк в таблицу с формулами пока нужен перенос ссылок.',
-  13: 'Отмена невозможна: ячейка была изменена после вашей правки.',
+  13: 'Отмена невозможна: ячейка была изменена после вашей правки или появились новые ссылки.',
   14: 'Эту операцию пока нельзя отменить.',
   15: 'Срок отмены этой операции истек. Последние 10 000 изменений доступны для отмены.',
   16: 'Изменение слишком большое для надежной записи в журнал.',
@@ -2348,7 +2348,8 @@ export class DocumentStore {
       if (
         completed?.kind === 'cell' ||
         completed?.kind === 'batch' ||
-        completed?.kind === 'copyRange'
+        completed?.kind === 'copyRange' ||
+        completed?.kind === 'moveRange'
       ) {
         this.undoHistory.push(completed.id);
         if (this.undoHistory.length > 100) this.undoHistory.shift();

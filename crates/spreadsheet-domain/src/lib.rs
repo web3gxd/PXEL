@@ -1,6 +1,7 @@
 //! Shared domain values. No persistence, transport, or evaluation dependencies.
 
 pub mod formula;
+pub mod move_history;
 pub mod workbook;
 
 use std::fmt;

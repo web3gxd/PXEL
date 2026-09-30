@@ -311,7 +311,7 @@ describe('server-authoritative cut and move', () => {
       await store.receive(receipt);
       expect(store.pending).toHaveLength(0);
       expect(store.cutStatus).toBeUndefined();
-      expect(store.canUndo).toBe(false);
+      expect(store.canUndo).toBe(true);
       expect(store.canRedo).toBe(false);
       expect(store.value({ row: 0, column: 0 })).toBeUndefined();
       expect(store.value({ row: 1, column: 0 })).toEqual({ type: 'text', value: 'source' });
@@ -323,7 +323,7 @@ describe('server-authoritative cut and move', () => {
     },
   );
 
-  it('clears the cut and unsupported history only after committed projection hydration', async () => {
+  it('clears the cut and makes the acknowledged move undoable only after projection hydration', async () => {
     const { store, sent } = await connectedStore();
     store.set({ row: 0, column: 0 }, { type: 'number', value: 7 });
     await acknowledgeCellResult(store, sent, 7);
@@ -369,8 +369,195 @@ describe('server-authoritative cut and move', () => {
     expect(store.pending).toHaveLength(0);
     expect(store.value({ row: 0, column: 0 })).toBeUndefined();
     expect(store.value({ row: 1, column: 0 })).toEqual({ type: 'text', value: 'source' });
-    expect(store.canUndo).toBe(false);
+    expect(store.canUndo).toBe(true);
     expect(store.canRedo).toBe(false);
+    expect(store.undo()).toBe(true);
+    expect(commands(sent).at(-1)?.value.undoCell?.targetOperationId).toEqual(
+      command.value.operationId,
+    );
+    store.dispose();
+  });
+
+  it('deduplicates overlapping move receipts and ACKs and traverses inverse projection refreshes', async () => {
+    const { store, sent } = await connectedStore();
+    const original = cutProjection();
+    store.load(original);
+    const raw = store.cutRangePayload();
+    store.pasteCutRange(raw ?? '', { row: 1, column: 0 });
+    const move = commands(sent).at(-1)?.value;
+    if (!move) throw new Error('Missing move');
+    const moved = structuredClone(original);
+    moved.version = '2';
+    moved.sheets[0]!.cells[0]!.row_id = moved.sheets[0]!.rows[1]!;
+    const receipt = create(ServerEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'receipt',
+        value: {
+          documentId: uuidBytes(documentId),
+          operationId: move.operationId,
+          committedVersion: 2n,
+          currentHeadVersion: 2n,
+          canonicalEventHash: new Uint8Array(32),
+        },
+      },
+    });
+    const ack = create(ServerEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'committed',
+        value: {
+          documentId: uuidBytes(documentId),
+          operationId: move.operationId,
+          committedVersion: 2n,
+          confirmedStateHash: new Uint8Array(32),
+        },
+      },
+    });
+    let release: (() => void) | undefined;
+    let fetches = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        if (++fetches === 1)
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        return { ok: true, json: async () => structuredClone(moved) };
+      }),
+    );
+    const delayedReceipt = store.receive(receipt);
+    await store.receive(ack);
+    release?.();
+    await delayedReceipt;
+    await store.receive(receipt);
+    await store.receive(ack);
+    expect(store.pending).toHaveLength(0);
+    expect(store.undo()).toBe(true);
+    const undo = commands(sent).at(-1)?.value;
+    if (!undo) throw new Error('Missing undo');
+    expect(undo.undoCell?.targetOperationId).toEqual(move.operationId);
+    expect(store.value({ row: 0, column: 0 })).toBeUndefined();
+    expect(store.value({ row: 1, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    const restored = { ...original, version: '3' };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => structuredClone(restored) })),
+    );
+    const undoAck = create(ServerEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'committed',
+        value: {
+          documentId: uuidBytes(documentId),
+          operationId: undo.operationId,
+          committedVersion: 3n,
+          confirmedStateHash: new Uint8Array(32),
+        },
+      },
+    });
+    await store.receive(undoAck);
+    await store.receive(undoAck);
+    expect(store.canUndo).toBe(false);
+    expect(store.canRedo).toBe(true);
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    expect(store.redo()).toBe(true);
+    const redo = commands(sent).at(-1)?.value;
+    if (!redo) throw new Error('Missing redo');
+    expect(redo.undoCell?.targetOperationId).toEqual(undo.operationId);
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ ...moved, version: '4' }) })),
+    );
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'receipt',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: redo.operationId,
+            committedVersion: 4n,
+            currentHeadVersion: 4n,
+            canonicalEventHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    await store.receive(receipt);
+    expect(store.canRedo).toBe(false);
+    expect(store.undo()).toBe(true);
+    expect(commands(sent).at(-1)?.value.undoCell?.targetOperationId).toEqual(redo.operationId);
+    store.dispose();
+  });
+
+  it('bounds mixed move history to 100 entries and branches redo only after a new committed move', async () => {
+    const { store, sent } = await connectedStore();
+    store.load(cutProjection());
+    for (let value = 0; value < 100; value++) {
+      store.set({ row: 0, column: 0 }, { type: 'number', value });
+      await acknowledgeCellResult(store, sent, value);
+    }
+    const moveOnce = async () => {
+      const before = structuredClone(store.projection!);
+      const raw = store.cutRangePayload();
+      expect(store.pasteCutRange(raw ?? '', { row: 1, column: 0 })).toBe(true);
+      const move = commands(sent).at(-1)?.value;
+      if (!move) throw new Error('Missing move');
+      const after = structuredClone(before);
+      after.version = String(BigInt(before.version) + 1n);
+      after.sheets[0]!.cells[0]!.row_id = after.sheets[0]!.rows[1]!;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => after })),
+      );
+      await store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'committed',
+            value: {
+              documentId: uuidBytes(documentId),
+              operationId: move.operationId,
+              committedVersion: BigInt(after.version),
+              confirmedStateHash: new Uint8Array(32),
+            },
+          },
+        }),
+      );
+      expect(store.canRedo).toBe(false);
+      expect(store.undo()).toBe(true);
+      const undo = commands(sent).at(-1)?.value;
+      if (!undo) throw new Error('Missing inverse');
+      before.version = String(BigInt(after.version) + 1n);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => before })),
+      );
+      await store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'committed',
+            value: {
+              documentId: uuidBytes(documentId),
+              operationId: undo.operationId,
+              committedVersion: BigInt(before.version),
+              confirmedStateHash: new Uint8Array(32),
+            },
+          },
+        }),
+      );
+      expect(store.canRedo).toBe(true);
+    };
+    await moveOnce();
+    await moveOnce();
+    for (let value = 98; value >= 0; value--) {
+      expect(store.undo()).toBe(true);
+      await acknowledgeCellResult(store, sent, value);
+    }
+    expect(store.canUndo).toBe(false);
     store.dispose();
   });
 });

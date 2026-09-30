@@ -69,6 +69,7 @@ async fn request(
     };
     let operation_id = OperationId::from_bytes(identifier.to_be_bytes())?;
     Ok(CommitRequest {
+        move_inverse_projection: None,
         identity,
         expected_head: book.version(),
         expected_access: db.access(identity, book.document_id()).await?,

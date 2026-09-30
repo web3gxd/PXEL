@@ -136,7 +136,7 @@ fn overlapping_move_uses_frozen_source_and_one_version() -> Result<(), DomainErr
         state_hash: candidate.hash(),
     })?;
     assert_eq!(replay.hash(), candidate.hash());
-    assert!(!op.is_inverse_target());
+    assert!(op.is_inverse_target());
     assert!(!op.changes_axes());
     assert!(matches!(
         book.preview_candidate(&[op], book.version()),

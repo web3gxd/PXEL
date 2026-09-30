@@ -5,6 +5,7 @@ use spreadsheet_domain::workbook::*;
 use spreadsheet_storage_codec as codec;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
+mod move_guard;
 #[cfg(test)]
 mod move_tests;
 #[cfg(test)]
@@ -54,7 +55,7 @@ struct StoredEventRow<'a> {
     canonical_event_hash: &'a [u8],
 }
 fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=19) {
+    if !matches!(row.schema_version, 1..=20) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -100,7 +101,9 @@ fn target_writes(
             content: content.clone(),
             previous: previous.clone(),
         }]),
-        Operation::RangeWrite { writes, .. } => Ok(writes.clone()),
+        Operation::RangeWrite { writes, .. }
+        | Operation::MoveRange { writes, .. }
+        | Operation::MoveCompensation { writes, .. } => Ok(writes.clone()),
         _ => Err(JournalError::NotUndoable),
     }
 }
@@ -127,7 +130,9 @@ fn touched_addresses(
             .map(|w| w.address)
             .filter(|a| targets.contains_key(a))
             .collect(),
-        Operation::RangeWrite { writes, .. } | Operation::MoveRange { writes, .. } => writes
+        Operation::RangeWrite { writes, .. }
+        | Operation::MoveRange { writes, .. }
+        | Operation::MoveCompensation { writes, .. } => writes
             .iter()
             .map(|w| w.address)
             .filter(|a| targets.contains_key(a))
@@ -149,6 +154,36 @@ fn touched_addresses(
         | Operation::InsertRowsRebased { .. }
         | Operation::InsertColumnsRebased { .. }
         | Operation::AdvanceCalculationEpoch { .. } => Vec::new(),
+    }
+}
+fn inverse_shape_matches(target: &Operation, inverse: &Operation) -> bool {
+    match (target, inverse) {
+        (Operation::CellWrite { .. }, Operation::CellWrite { .. })
+        | (Operation::RangeWrite { .. }, Operation::RangeWrite { .. }) => true,
+        (
+            Operation::MoveRange {
+                source: a,
+                destination: b,
+                rows: r,
+                columns: c,
+                ..
+            }
+            | Operation::MoveCompensation {
+                source: a,
+                destination: b,
+                rows: r,
+                columns: c,
+                ..
+            },
+            Operation::MoveCompensation {
+                source: x,
+                destination: y,
+                rows: s,
+                columns: d,
+                ..
+            },
+        ) => a == x && b == y && r == s && c == d,
+        _ => false,
     }
 }
 async fn access_locked(
@@ -280,6 +315,7 @@ async fn guard_undo_tail(
     let mut expected = target.version.get();
     let mut payload_bytes = 0usize;
     let mut address_touches = 0usize;
+    let mut movement_history = Vec::new();
     while let Some(row) = rows.try_next().await.map_err(error)? {
         payload_bytes = payload_bytes
             .checked_add(row.payload.len())
@@ -321,6 +357,11 @@ async fn guard_undo_tail(
                     undoes: Some(id),
                     undoes_version: Some(version),
                     ..
+                }
+                | Operation::MoveCompensation {
+                    undoes: id,
+                    undoes_version: version,
+                    ..
                 } => stack.last() == Some(&(*id, *version)),
                 _ => false,
             };
@@ -330,11 +371,31 @@ async fn guard_undo_tail(
                 stack.push((event.operation_id, event.version));
             }
         }
-        if formula_history
-            && (event.operation.changes_axes()
-                || matches!(event.operation, Operation::MoveRange { .. }))
-        {
+        if formula_history && event.operation.changes_axes() {
             return Err(JournalError::NotUndoable);
+        }
+        if formula_history
+            && matches!(
+                event.operation,
+                Operation::MoveRange { .. } | Operation::MoveCompensation { .. }
+            )
+        {
+            if event.principal != target.principal {
+                return Err(JournalError::NotUndoable);
+            }
+            let cancelled = match event.operation {
+                Operation::MoveCompensation {
+                    undoes,
+                    undoes_version,
+                    ..
+                } => movement_history.last() == Some(&(undoes, undoes_version)),
+                _ => false,
+            };
+            if cancelled {
+                movement_history.pop();
+            } else {
+                movement_history.push((event.operation_id, event.version));
+            }
         }
     }
     if expected != head.get() {
@@ -342,6 +403,9 @@ async fn guard_undo_tail(
     }
     if effective_writes.values().any(|stack| !stack.is_empty()) {
         return Err(JournalError::UndoConflict);
+    }
+    if !movement_history.is_empty() {
+        return Err(JournalError::NotUndoable);
     }
     Ok(())
 }
@@ -598,6 +662,9 @@ impl OperationJournal for PgDatabase {
                 rows: *rows,
                 columns: *columns,
             },
+            Operation::MoveCompensation { undoes, .. } => CommandPayload::UndoCell {
+                target_operation_id: *undoes,
+            },
             Operation::ExtendRows { sheet, rows } => CommandPayload::ExtendRows {
                 sheet: *sheet,
                 rows: rows.clone(),
@@ -740,6 +807,11 @@ impl OperationJournal for PgDatabase {
                 undoes: Some(id),
                 undoes_version: Some(version),
                 ..
+            }
+            | Operation::MoveCompensation {
+                undoes: id,
+                undoes_version: version,
+                ..
             } => Some((*id, *version)),
             _ => None,
         };
@@ -756,8 +828,7 @@ impl OperationJournal for PgDatabase {
             let inverse = target_writes(e, request.identity.actor_id)?;
             if target.version != target_version
                 || original.len() != inverse.len()
-                || matches!(target.operation, Operation::CellWrite { .. })
-                    != matches!(e.operation, Operation::CellWrite { .. })
+                || !inverse_shape_matches(&target.operation, &e.operation)
                 || original.iter().zip(&inverse).any(|(a, b)| {
                     a.address != b.address || a.content != b.previous || a.previous != b.content
                 })
@@ -765,6 +836,14 @@ impl OperationJournal for PgDatabase {
                 return Err(JournalError::UndoConflict);
             }
             guard_undo_tail(&mut tx, c.document_id, &target, access.head).await?;
+            if matches!(e.operation, Operation::MoveCompensation { .. }) {
+                let projection = request
+                    .move_inverse_projection
+                    .as_deref()
+                    .ok_or(JournalError::Corrupt)?;
+                move_guard::validate(&mut tx, c.document_id, &target, access.head, projection)
+                    .await?;
+            }
         }
         let updated=sqlx::query!("UPDATE documents SET head_version=head_version+1 WHERE document_id=$1 AND head_version=$2 RETURNING head_version",uuid(c.document_id.as_bytes()),number(request.expected_head.get())?).fetch_optional(&mut *tx).await.map_err(error)?;
         if updated.is_none() {
@@ -1341,6 +1420,7 @@ mod tests {
         let candidate = w.candidate(&operation, next)?;
         let operation_id = OperationId::from_bytes([id; 16])?;
         Ok(CommitRequest {
+            move_inverse_projection: None,
             identity,
             expected_head: w.version(),
             expected_access: db.access(identity, w.document_id()).await?,
@@ -1428,6 +1508,7 @@ mod tests {
         let candidate = book.candidate(&operation, next)?;
         let operation_id = OperationId::from_bytes([id; 16])?;
         Ok(CommitRequest {
+            move_inverse_projection: None,
             identity,
             expected_head: book.version(),
             expected_access: db.access(identity, book.document_id()).await?,
@@ -1558,6 +1639,7 @@ mod tests {
         let extended = after.candidate(&operation, next)?;
         let operation_id = OperationId::from_bytes([113; 16])?;
         let extension = CommitRequest {
+            move_inverse_projection: None,
             identity,
             expected_head: after.version(),
             expected_access: db.access(identity, book.document_id()).await?,
@@ -2079,6 +2161,7 @@ mod tests {
             let candidate = book.candidate(&operation, next)?;
             let operation_id = OperationId::from_bytes((20_000 + index).to_be_bytes())?;
             let request = CommitRequest {
+                move_inverse_projection: None,
                 identity,
                 expected_head: book.version(),
                 expected_access: db.access(identity, book.document_id()).await?,
@@ -2432,6 +2515,7 @@ mod tests {
         let candidate = w.candidate(&operation, next)?;
         let operation_id = OperationId::from_bytes([40; 16])?;
         let request = CommitRequest {
+            move_inverse_projection: None,
             identity,
             expected_head: w.version(),
             expected_access: db.access(identity, w.document_id()).await?,

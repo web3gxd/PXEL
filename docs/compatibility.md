@@ -6,8 +6,10 @@ Google Sheets задает пользовательскую модель мгн�
 
 Cut/move content (ADR-081): same-sheet stable rectangle, overlap, scalar inbound
 references across sheets и fully contained ranges поддержаны сервером. Partial
-range intersection получает typed rejection; cross-sheet moves, styles/merges и
-move undo остаются открытыми. Эти правила не заявлены как manual Excel parity.
+range intersection получает typed rejection; cross-sheet moves и перенос
+styles/merges остаются открытыми. ADR-083 adds guarded own move undo/redo
+with exact frozen AST restoration and foreign-reference conflicts. Эти правила
+не заявлены как manual Excel parity.
 
 ## Formula profile
 

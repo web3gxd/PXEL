@@ -1,6 +1,9 @@
 //! Versioned durable envelope. Hashes use explicit semantic encoding, never protobuf bytes.
 mod formula_codec;
 mod move_codec;
+mod move_compensation_codec;
+#[cfg(test)]
+mod move_compensation_tests;
 #[cfg(test)]
 mod move_tests;
 mod range_codec;
@@ -300,6 +303,9 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                 })
             }
             Operation::MoveRange { .. } => Kind::MoveRange(move_codec::encode(o)?),
+            Operation::MoveCompensation { .. } => {
+                Kind::MoveCompensation(move_compensation_codec::encode(o)?)
+            }
             Operation::RangeWrite { undoes, .. } => {
                 let range = range_codec::encode(o)?;
                 if undoes.is_some() {
@@ -374,6 +380,7 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
     use v1::operation::Kind;
     Ok(match o.kind.ok_or(CodecError::Invalid)? {
         Kind::MoveRange(moved) => move_codec::decode(moved)?,
+        Kind::MoveCompensation(comp) => move_compensation_codec::decode(comp)?,
         Kind::AuthoredRangeWrite(range) => range_codec::decode(range, false)?,
         Kind::CompensatingRangeWrite(range) => range_codec::decode(range, true)?,
         Kind::AdvanceCalculationEpoch(c) => Operation::AdvanceCalculationEpoch {
@@ -698,6 +705,7 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::MoveCompensation { .. } => 20,
         Operation::MoveRange { .. } => 19,
         Operation::RangeWrite {
             undoes: Some(_), ..
@@ -777,7 +785,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=19) {
+    if !matches!(e.schema_version, 1..=20) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
@@ -802,7 +810,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         &operation,
     ) {
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -811,7 +819,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
             return Err(CodecError::Invalid);
         }
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20,
             0,
             actor,
             _,
@@ -1016,6 +1024,7 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
             }
         }
         Operation::MoveRange { .. } => move_codec::hash(h, o)?,
+        Operation::MoveCompensation { .. } => move_compensation_codec::hash(h, o)?,
         Operation::RangeWrite { .. } => range_codec::hash(h, o)?,
         Operation::CopyRange { writes } => {
             validate_copy_writes(writes)?;
@@ -1235,6 +1244,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::CopyRange { .. })
         | (EventPrincipal::System, Operation::RangeWrite { .. })
         | (EventPrincipal::System, Operation::MoveRange { .. })
+        | (EventPrincipal::System, Operation::MoveCompensation { .. })
         | (EventPrincipal::System, Operation::CellWrite { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
