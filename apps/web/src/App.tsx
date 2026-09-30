@@ -204,11 +204,18 @@ export function App() {
               <path d="M9 7 5 11l4 4M5 11h9a5 5 0 0 1 5 5" />
             </Icon>
           </button>
-          <Tool label="Повторить">
+          <button
+            type="button"
+            className="tool"
+            aria-label="Повторить отменённую правку ячейки"
+            title="Повторить отменённую сохранённую правку ячейки"
+            disabled={!document.canRedo || state.kind !== 'online'}
+            onClick={() => document.redo()}
+          >
             <Icon>
               <path d="m15 7 4 4-4 4m4-4h-9a5 5 0 0 0-5 5" />
             </Icon>
-          </Tool>
+          </button>
           <Tool label="Печать">
             <Icon>
               <path d="M7 8V3h10v5M7 17H4V9h16v8h-3M7 14h10v7H7zM17 11h.01" />

@@ -108,6 +108,7 @@ type PendingAddSheet = {
 };
 type PendingUndo = {
   kind: 'undo';
+  direction: 'undo' | 'redo';
   id: string;
   target: string;
   bytes: Uint8Array;
@@ -379,7 +380,8 @@ export class DocumentStore {
   activeSheetId: string | undefined;
   confirmed = new Map<string, Value>();
   pending: Pending[] = [];
-  private lastUndoableOperation: string | undefined;
+  private undoHistory: string[] = [];
+  private redoHistory: string[] = [];
   selected: Position = { row: 0, column: 0 };
   selectionAnchor: Position = { row: 0, column: 0 };
   remotePresence: RemotePresence[] = [];
@@ -780,7 +782,8 @@ export class DocumentStore {
       this.headRefreshVersion = 0n;
       this.headRefreshAttempts = 0;
       this.remotePresence = [];
-      this.lastUndoableOperation = undefined;
+      this.undoHistory = [];
+      this.redoHistory = [];
     }
     const remap = (position: Position): Position => {
       if (documentChanged || !previousSheet || !nextSheet) return { row: 0, column: 0 };
@@ -1247,14 +1250,26 @@ export class DocumentStore {
   }
   get canUndo() {
     return Boolean(
-      this.lastUndoableOperation && this.sender && this.pending.length === 0 && !this.editing,
+      this.undoHistory.length && this.sender && this.pending.length === 0 && !this.editing,
+    );
+  }
+  get canRedo() {
+    return Boolean(
+      this.redoHistory.length && this.sender && this.pending.length === 0 && !this.editing,
     );
   }
   undo() {
+    return this.inverse('undo');
+  }
+  redo() {
+    return this.inverse('redo');
+  }
+  private inverse(direction: 'undo' | 'redo') {
     const projection = this.projection,
       actor = this.actor,
-      target = this.lastUndoableOperation;
-    if (!projection || !actor || !target || !this.canUndo) return false;
+      target = (direction === 'undo' ? this.undoHistory : this.redoHistory).at(-1);
+    if (!projection || !actor || !target || !(direction === 'undo' ? this.canUndo : this.canRedo))
+      return false;
     const id = uuidV7();
     const bytes = toBinary(
       ClientEnvelopeSchema,
@@ -1273,7 +1288,7 @@ export class DocumentStore {
         },
       }),
     );
-    this.pending.push({ kind: 'undo', id, target, bytes, attempts: 0 });
+    this.pending.push({ kind: 'undo', direction, id, target, bytes, attempts: 0 });
     this.error = '';
     this.notify();
     this.flush();
@@ -2082,7 +2097,10 @@ export class DocumentStore {
         return;
       }
       this.pending = this.pending.filter((p) => p.id !== id);
-      if (pending?.kind === 'undo' && !rejection.retryable) this.lastUndoableOperation = undefined;
+      if (pending?.kind === 'undo') {
+        const history = pending.direction === 'undo' ? this.undoHistory : this.redoHistory;
+        if (history.at(-1) === pending.target) history.pop();
+      }
       this.error = `Изменение отклонено. ${rejectionText[rejection.code] ?? 'Неизвестная причина; обновите страницу.'}`;
       if (rejection.resyncRequired) await this.refresh();
     } else {
@@ -2119,16 +2137,30 @@ export class DocumentStore {
           return;
         }
       }
+      // A receipt refresh can overlap a canonical ACK for the same command.
+      // Consume history only if this intent is still pending after the await.
+      const completed = this.pending.find((p) => p.id === id);
       this.pending = this.pending.filter((p) => p.id !== id);
       if (
-        pending?.kind === 'addSheet' &&
-        this.projection?.sheets.some((sheet) => sheet.id === pending.sheetId)
+        completed?.kind === 'addSheet' &&
+        this.projection?.sheets.some((sheet) => sheet.id === completed.sheetId)
       )
-        this.selectSheet(pending.sheetId);
-      if (pending?.kind === 'cell') {
-        this.lastUndoableOperation = pending.id;
-      } else if (pending) {
-        this.lastUndoableOperation = undefined;
+        this.selectSheet(completed.sheetId);
+      if (completed?.kind === 'cell') {
+        this.undoHistory.push(completed.id);
+        if (this.undoHistory.length > 100) this.undoHistory.shift();
+        this.redoHistory = [];
+      } else if (completed?.kind === 'undo') {
+        const from = completed.direction === 'undo' ? this.undoHistory : this.redoHistory;
+        const to = completed.direction === 'undo' ? this.redoHistory : this.undoHistory;
+        if (from.at(-1) === completed.target) {
+          from.pop();
+          to.push(completed.id);
+          if (to.length > 100) to.shift();
+        }
+      } else if (completed) {
+        this.undoHistory = [];
+        this.redoHistory = [];
       }
       this.error = '';
     }

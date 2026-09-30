@@ -1015,6 +1015,61 @@ test('two browser tabs see each other’s committed cell after a head hint', asy
   }
 });
 
+test('multi-step undo redo of one cell converges in two tabs and new edits clear redo', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const other = await page.context().newPage();
+  try {
+    await other.goto(page.url());
+    const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+    const remote = other.getByRole('textbox', { name: 'Значение ячейки' });
+    const undo = page.getByRole('button', { name: 'Отменить последнюю правку ячейки' });
+    const redo = page.getByRole('button', { name: 'Повторить отменённую правку ячейки' });
+    for (const value of ['11', '22']) {
+      await bar.fill(value);
+      await bar.press('Enter');
+      await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+      await expect(remote).toHaveValue(value);
+    }
+    for (const value of ['11', '']) {
+      await undo.click();
+      await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+      await expect(bar).toHaveValue(value);
+      await expect(remote).toHaveValue(value);
+    }
+    await expect(undo).toBeDisabled();
+    await redo.click();
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await expect(bar).toHaveValue('11');
+    await page.getByRole('region', { name: 'Область таблицы' }).focus();
+    await page.keyboard.press('Control+Shift+z');
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await expect(bar).toHaveValue('22');
+    await expect(remote).toHaveValue('22');
+    await expect(redo).toBeDisabled();
+    await undo.click();
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await expect(bar).toHaveValue('11');
+    await expect(redo).toBeEnabled();
+    await bar.fill('33');
+    await bar.press('Enter');
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await expect(redo).toBeDisabled();
+    await expect(remote).toHaveValue('33');
+    await page.reload();
+    await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+    await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('33');
+    await expect(undo).toBeDisabled();
+    await expect(redo).toBeDisabled();
+  } finally {
+    await other.close();
+  }
+});
+
 test('one-step undo is a durable compensation broadcast to another browser', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');

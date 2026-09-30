@@ -3470,3 +3470,77 @@ checker at two viewport sizes. No dependencies or engine identity change; no new
 performance benchmark or manual Excel/whole-phase/production claim. Broader
 history/batch/redo, XLSX/recovery/load/production/Linux/Compose/remoteCI remain open.
 Restart local development stack and final format/readiness/commit follow.
+
+## 2026-09-30 — Multi-step single-cell undo and redo, in progress
+
+Previous stage e38870d is verified and local launcher16196 serves it. Read
+AGENTS/RUNBOOK/roadmap/ADR028/029/076 and current journal/actor/frontend contracts.
+ADR077 PROPOSED extends inverse eligibility to own complete compensations and
+reduces exact ID/version pairs in bounded own single-cell history. Foreign,
+legacy/batch/copy writes remain hard barriers. Frontend bounded100-entry history
+will use acknowledged IDs, keeping pending/confirmed state separate. Independent
+read-only contract review found no blocking contradictions and specified tests;
+reviewer ran none. New real-PG same-cell undo/redo chain test added before changes.
+No wire/event-format/engine/dependency change proposed. Full goal remains active.
+
+ADR077 TDD: real-PG chain RED returned UndoConflict before implementation; shared
+inverse eligibility and exact ID/version tail reduction made all eight same-cell
+write/undo/redo actions plus receipt retries/replay GREEN. Frontend existing undo
+spec first failed missing canRedo; after bounded histories/inverse intent changes
+85unit tests passed, typecheck/lint passed. Added100-entry undo/redo traversal and
+new-edit/failed-top regressions. Foreign equal-value regression now includes the
+foreign author's own compensation; owner's earlier inverse must still conflict.
+Added live mixed value/formula multi-step and two-browser history/branching test.
+Live HTTP is RED against previous backend (second undo rejected), rebuild pending.
+No durable schema/engine/dependency change; full MVP goal remains active.
+
+Live mixed value/formula multi-step test and two-tab DPR1/2 chain/branching passed
+on rebuilt hidden9612. Native domain/codec/collab suites passed (codec23, collab22
+with2intentional benchmarks, domain stress intentionally ignored), SQLx/protobuf
+checks passed. PostgreSQL undo6passed/1timing ignore. New inverse-pair timing
+harness executed500pairs/1000events with exact replay; explicit durability settings
+on verified run measured41.066ms debug wall time, single uncontrolled sample,
+notp95. Report docs/benchmarks/2026-09-30-single-cell-history-local.md. Independent
+implementation review found overlapping receipt refresh/canonical ACK could push
+an authored history ID twice. Test first exposed harness selecting a Subscribe
+instead of the last command; corrected harness then RED reproduced remaining
+canUndo after one inverse. Re-read pending after refresh before consuming history;
+87frontend tests, typecheck/lint passed. No assertion weakened. Added hard-restart
+redo of persisted formula compensation test, not run yet. Full regressions pending.
+
+Full final HTTP integration/network/security65/65 passed92153.6855ms;98browser
+cases live session28558. Strict all-targets domain/collab/storage/server-dev
+clippy, server17unit tests and frontend production build passed. Format/diff
+passed. Docs now describe exact inverse-pair reduction, foreign barriers and
+session-local bounded histories. No full-stage/MVP acceptance or new p95 claim.
+Hard-restart redo case is prepared; run after browser terminal state.
+
+Full98browser passed5.2min; verified9612 stopped only after terminal exit0.
+Hard-restart2/2 passed12008.4374ms after3.81s build, including redo targeting a
+persisted formula compensation and exact source/content+calculated hash/receipt
+recovery. Added wrong target-version PG regression; same-cell chain and storage
+all-targets clippy passed. Final contract check exposed pre-existing error-priority
+mismatch: deleting a formula target returned NotUndoable before UndoConflict.
+Live source/compensation deletion test RED observed14 instead of13. Actor now
+checks live address before historical-axis refusal, retaining typed14 for a live
+address with changed axes. Hidden26076 rebuilt previous state for reproduction;
+rebuild/focused/full HTTP validation of priority fix remains pending.
+
+Final error-priority fix: new deleted source/compensation and live-axis refusal
+HTTP2/2 passed, followed by complete66HTTP/network/security suite88936.4796ms.
+Collab22passed/2intentional benchmark ignores and strict collab/server-dev
+all-targets clippy passed. Earlier98browser/87frontend and hard restart2cases
+passed; final recovery/readiness/format/commit follow. ADR077 accepted for bounded
+single-cell history only. No wire/storage schema, engine identity or dependency
+change. Changed shared inverse eligibility, journal exact ID/version tail
+reduction, actor target handling/error priority, bounded UI stacks+ACK guard,
+redo toolbar/keyboard, unit/PG/live/browser/recovery tests and timing harness/docs.
+Presentation/roadmap reflect guarded single-cell undo/redo while whole MVP,
+batch/structural/history-discovery and production/deployment gates remain open.
+
+Final recovery2/2 passed10738.4886ms after0.40s incremental build, including
+persisted formula redo/content+calculated hashes/receipt. Real presentation browser
+checker again passed1440x900/390x844 (10slides/navigation/layout/no errors).
+Final rustfmt/Prettier/diff passed. Hidden development stack will be restarted;
+commit/readiness confirmation follows. Full goal remains active; next batch
+preimages/atomic guarded range inverses are not implemented in this slice.

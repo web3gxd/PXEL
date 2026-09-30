@@ -80,17 +80,12 @@ fn undo_target_address(
     event: &CommittedEvent,
     actor: ActorId,
 ) -> Result<(CellAddress, Option<CellContent>), JournalError> {
-    if event.principal != EventPrincipal::User(actor) {
+    if event.principal != EventPrincipal::User(actor) || !event.operation.is_cell_inverse_target() {
         return Err(JournalError::NotUndoable);
     }
     match &event.operation {
         Operation::CellWrite {
-            address,
-            previous,
-            kind: Some(_),
-            undoes: None,
-            undoes_version: None,
-            ..
+            address, previous, ..
         } => Ok((*address, previous.clone())),
         _ => Err(JournalError::NotUndoable),
     }
@@ -233,6 +228,7 @@ async fn guard_undo_tail(
         Operation::CellWrite { content, previous, .. }
         if content.iter().chain(previous.iter()).any(|cell| matches!(cell, CellContent::Formula(_)))
     );
+    let mut effective_writes = Vec::<(OperationId, DocumentVersion)>::new();
     let mut rows = sqlx::query!(
         "SELECT committed_version, operation_id, actor_id, principal_kind, schema_version, payload, payload_checksum, canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version>$2 AND committed_version<=$3 ORDER BY committed_version",
         uuid(document.as_bytes()),
@@ -258,7 +254,22 @@ async fn guard_undo_tail(
             return Err(JournalError::Corrupt);
         }
         if touches_address(&event.operation, address) {
-            return Err(JournalError::UndoConflict);
+            if event.principal != target.principal || !event.operation.is_cell_inverse_target() {
+                return Err(JournalError::UndoConflict);
+            }
+            let cancelled = match &event.operation {
+                Operation::CellWrite {
+                    undoes: Some(id),
+                    undoes_version: Some(version),
+                    ..
+                } => effective_writes.last() == Some(&(*id, *version)),
+                _ => false,
+            };
+            if cancelled {
+                effective_writes.pop();
+            } else {
+                effective_writes.push((event.operation_id, event.version));
+            }
         }
         if formula_history && event.operation.changes_axes() {
             return Err(JournalError::NotUndoable);
@@ -266,6 +277,9 @@ async fn guard_undo_tail(
     }
     if expected != head.get() {
         return Err(JournalError::Corrupt);
+    }
+    if !effective_writes.is_empty() {
+        return Err(JournalError::UndoConflict);
     }
     Ok(())
 }
@@ -1317,6 +1331,81 @@ mod tests {
         })
     }
     #[sqlx::test(migrations = false)]
+    async fn same_cell_history_undo_redo_chain_replays_exactly(pool: sqlx::PgPool) -> TestResult {
+        let (db, identity, mut book) = fixture(pool).await?;
+        let number = |value| Some(CellContent::Value(CellValue::Number(value)));
+        let actions = [
+            (121, number(1.), None, None),
+            (122, number(2.), number(1.), None),
+            (123, number(1.), number(2.), Some((122, 3))),
+            (124, None, number(1.), Some((121, 2))),
+            (125, number(1.), None, Some((124, 5))),
+            (126, number(2.), number(1.), Some((123, 4))),
+            (127, number(1.), number(2.), Some((126, 7))),
+            (128, None, number(1.), Some((125, 6))),
+        ];
+        for (id, content, previous, target) in actions {
+            let undoes = target
+                .map(|(id, version)| {
+                    Ok::<_, DomainError>((
+                        OperationId::from_bytes([id; 16])?,
+                        DocumentVersion::new(version)?,
+                    ))
+                })
+                .transpose()?;
+            if let Some((target_id, target_version)) = undoes {
+                let loaded = db
+                    .load_undo_target(identity, book.document_id(), target_id)
+                    .await?;
+                assert_eq!(loaded.version, target_version);
+            }
+            let request =
+                guarded_write_request(&db, identity, &book, id, content, previous, undoes).await?;
+            assert!(
+                matches!(db.commit(&request).await?, CommitOutcome::Committed(_)),
+                "action {id}"
+            );
+            book.apply_event(&request.event)?;
+            let hash = book.hash();
+            assert!(matches!(
+                db.commit(&request).await?,
+                CommitOutcome::AlreadyCommitted(_)
+            ));
+            assert_eq!(book.hash(), hash);
+        }
+        let mut replay = Workbook::empty(book.document_id());
+        for event in db
+            .load_events(identity, book.document_id(), DocumentVersion::ZERO, 1000)
+            .await?
+        {
+            replay.apply_event(&event)?;
+        }
+        assert_eq!(replay.hash(), book.hash());
+        assert_eq!(replay.version().get(), 9);
+        let wrong_version = guarded_write_request(
+            &db,
+            identity,
+            &book,
+            129,
+            number(1.),
+            None,
+            Some((
+                OperationId::from_bytes([128; 16])?,
+                DocumentVersion::new(8)?,
+            )),
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&wrong_version).await,
+            Err(JournalError::UndoConflict)
+        ));
+        assert_eq!(
+            db.access(identity, book.document_id()).await?.head,
+            book.version()
+        );
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
     async fn formula_undo_transaction_rejects_axis_changes_without_actor(
         pool: sqlx::PgPool,
     ) -> TestResult {
@@ -1718,6 +1807,24 @@ mod tests {
             CommitOutcome::Committed(_)
         ));
         let after_same = after_original.candidate(&same.event.operation, same.event.version)?;
+        let foreign_inverse = guarded_write_request(
+            &db,
+            other,
+            &after_same,
+            95,
+            Some(CellContent::Value(CellValue::Text("same".into()))),
+            Some(CellContent::Value(CellValue::Text("same".into()))),
+            Some((same.event.operation_id, same.event.version)),
+        )
+        .await?;
+        assert!(matches!(
+            db.commit(&foreign_inverse).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let after_same = after_same.candidate(
+            &foreign_inverse.event.operation,
+            foreign_inverse.event.version,
+        )?;
         let undo = guarded_write_request(
             &db,
             owner,
@@ -1732,6 +1839,93 @@ mod tests {
             db.commit(&undo).await,
             Err(JournalError::UndoConflict)
         ));
+        Ok(())
+    }
+    /// Run with `cargo test -p spreadsheet-storage cancelled_cell_history_scan_timing -- --ignored --nocapture`.
+    /// Real database sample of inverse-pair reduction; not a latency percentile.
+    #[sqlx::test(migrations = false)]
+    #[ignore]
+    async fn cancelled_cell_history_scan_timing(pool: sqlx::PgPool) -> TestResult {
+        let (db, identity, mut book) = fixture(pool).await?;
+        let settings: (String, String, String) = sqlx::query_as(
+            "SELECT current_setting('synchronous_commit'), current_setting('fsync'), current_setting('full_page_writes')",
+        ).fetch_one(&db.pool).await?;
+        assert_eq!(settings, ("on".into(), "on".into(), "on".into()));
+        let value = |n| Some(CellContent::Value(CellValue::Number(n)));
+        let original =
+            guarded_write_request(&db, identity, &book, 131, value(7.), None, None).await?;
+        assert!(matches!(
+            db.commit(&original).await?,
+            CommitOutcome::Committed(_)
+        ));
+        book.apply_event(&original.event)?;
+        const PAIRS: u128 = 500;
+        for index in 0..PAIRS {
+            let mut write =
+                guarded_write_request(&db, identity, &book, 132, value(8.), value(7.), None)
+                    .await?;
+            let operation_id = OperationId::from_bytes((30_000 + index * 2).to_be_bytes())?;
+            write.command.operation_id = operation_id;
+            write.event.operation_id = operation_id;
+            assert!(matches!(
+                db.commit(&write).await?,
+                CommitOutcome::Committed(_)
+            ));
+            book.apply_event(&write.event)?;
+            let mut inverse = guarded_write_request(
+                &db,
+                identity,
+                &book,
+                133,
+                value(7.),
+                value(8.),
+                Some((operation_id, write.event.version)),
+            )
+            .await?;
+            let inverse_id = OperationId::from_bytes((30_001 + index * 2).to_be_bytes())?;
+            inverse.command.operation_id = inverse_id;
+            inverse.event.operation_id = inverse_id;
+            assert!(matches!(
+                db.commit(&inverse).await?,
+                CommitOutcome::Committed(_)
+            ));
+            book.apply_event(&inverse.event)?;
+        }
+        let inverse = guarded_write_request(
+            &db,
+            identity,
+            &book,
+            134,
+            None,
+            value(7.),
+            Some((original.event.operation_id, original.event.version)),
+        )
+        .await?;
+        let started = std::time::Instant::now();
+        assert!(matches!(
+            db.commit(&inverse).await?,
+            CommitOutcome::Committed(_)
+        ));
+        let elapsed = started.elapsed();
+        book.apply_event(&inverse.event)?;
+        let mut replay = Workbook::empty(book.document_id());
+        while replay.version() < book.version() {
+            let events = db
+                .load_events(identity, book.document_id(), replay.version(), 1000)
+                .await?;
+            if events.is_empty() {
+                return Err("history benchmark replay gap".into());
+            }
+            for event in events {
+                replay.apply_event(&event)?;
+            }
+        }
+        assert_eq!(book.hash(), replay.hash());
+        eprintln!(
+            "cancelled_cell_history_scan_timing: pairs={PAIRS}, tail_events={}, commit_wall_ms={:.3}",
+            PAIRS * 2,
+            elapsed.as_secs_f64() * 1000.
+        );
         Ok(())
     }
     /// Run with `cargo test -p spreadsheet-storage undo_tail_scan_timing -- --ignored --nocapture`.

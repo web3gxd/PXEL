@@ -765,17 +765,31 @@ async fn submit<J: OperationJournal>(
                 let target = journal
                     .load_undo_target(identity, command.document_id, *target_operation_id)
                     .await?;
+                if !target.operation.is_cell_inverse_target() {
+                    return Err(JournalError::NotUndoable.into());
+                }
                 let Operation::CellWrite {
                     address,
                     content,
                     previous,
-                    undoes: None,
-                    undoes_version: None,
-                    kind: Some(_),
+                    ..
                 } = target.operation
                 else {
                     return Err(JournalError::NotUndoable.into());
                 };
+                // A removed target address is a conflict, before the more
+                // conservative refusal to restore historical formula axes.
+                match workbook.cell_content(address) {
+                    Err(
+                        DomainError::MissingSheet
+                        | DomainError::MissingRow
+                        | DomainError::MissingColumn,
+                    ) => {
+                        return Err(JournalError::UndoConflict.into());
+                    }
+                    Err(error) => return Err(error.into()),
+                    Ok(_) => {}
+                }
                 // Recorded formula content and preimages do not follow later
                 // axis edits. Reject their inverse until historical reference
                 // transformation is supported explicitly.

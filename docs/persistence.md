@@ -7,6 +7,10 @@ schema12/13. Migration расширяет principal constraint до16. Formula-b
 повторяет проверку axis history внутри CAS transaction; отказ не меняет head и
 не создаёт receipt. Кодек отвергает будущую binding version и при encode, и при
 decode нового формата.
+ADR-077 разрешает inverse own schema12/13 compensation без изменения её bytes
+или hash. Транзакционный scan сокращает только собственные CellWrite inverse
+пары по ID/version и отказывает при foreign/legacy/batch/copy barrier. Redo
+сохраняет новую компенсацию обычным CAS/commit/receipt путём; история не удаляется.
 
 Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
 operations реализованы локально. `SnapshotImage` и binary codec проверены.

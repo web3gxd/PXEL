@@ -442,6 +442,22 @@ pub enum CommandPayload {
     },
 }
 impl Operation {
+    pub const fn is_cell_inverse_target(&self) -> bool {
+        matches!(
+            self,
+            Self::CellWrite {
+                kind: Some(_),
+                undoes: None,
+                undoes_version: None,
+                ..
+            } | Self::CellWrite {
+                kind: None,
+                undoes: Some(_),
+                undoes_version: Some(_),
+                ..
+            }
+        )
+    }
     pub const fn changes_axes(&self) -> bool {
         matches!(
             self,

@@ -211,11 +211,12 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           if (
             (event.ctrlKey || event.metaKey) &&
             !event.altKey &&
-            !event.shiftKey &&
-            event.key.toLowerCase() === 'z'
+            (event.key.toLowerCase() === 'z' ||
+              (event.key.toLowerCase() === 'y' && !event.shiftKey))
           ) {
             event.preventDefault();
-            document.undo();
+            if (event.shiftKey || event.key.toLowerCase() === 'y') document.redo();
+            else document.undo();
             return;
           }
           if (event.ctrlKey || event.metaKey || event.altKey) return;

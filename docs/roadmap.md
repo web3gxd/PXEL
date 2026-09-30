@@ -469,3 +469,16 @@ detailed native/codec/PostgreSQL checks and discovered/fixed regressions are in
 RUNBOOK. This closes authored-formula eligibility only. Multi-step per-user
 history, batch/structural compensation and redo remain required phase4 work;
 full XLSX/recovery/load/production/Linux/Compose/remoteCI gates stay open.
+
+Single-cell multi-step history and redo (ADR077) is locally verified: own
+compensations are eligible inverse targets; bounded history reduces exact own
+ID/version pairs and never ignores a foreign/legacy/batch/copy barrier. UI keeps
+100 acknowledged undo/redo IDs with branching, duplicate ACK and failure guards.
+66final HTTP/network/security,98browser DPR1/2 and87frontend unit tests passed;
+real-PG chains/foreign compensation/wrong versions and a persisted formula redo
+hard restart are covered. The1000-tail-event debug durability-on sample41.066ms
+is notp95 (benchmarks/2026-09-30-single-cell-history-local.md). Session history is
+reset on reload; durable history discovery, atomic range/batch inverses and
+structural compensation remain phase4 work. Full XLSX/recovery/load/production/
+Linux/Compose/remoteCI gates stay open. Next implementation: batch preimages and
+atomic guarded Undo/Redo for TSV and mixed CopyRange operations.

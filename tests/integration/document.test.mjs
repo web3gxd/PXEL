@@ -2308,6 +2308,62 @@ test(
   },
 );
 
+test('same-cell multi-step undo and redo inverse committed compensations without rolling back versions', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  try {
+    const first = setCommand(client, snapshot, 7);
+    assert.equal((await client.send(first)).case, 'committed');
+    const second = formulaCommand(client, { ...snapshot, version: '2' }, '=2+3', { sequence: 2 });
+    assert.equal((await client.send(second)).case, 'committed');
+    const undoSecond = undoCellCommand(client, { ...snapshot, version: '3' }, second.operationId, {
+      sequence: 3,
+    });
+    assert.equal((await client.send(undoSecond)).case, 'committed');
+    assert.equal(
+      (await getDocument(base, cookie, snapshot.document_id)).sheets[0].cells[0].value.value,
+      7,
+    );
+    const double = await client.send(
+      undoCellCommand(client, { ...snapshot, version: '4' }, second.operationId, { sequence: 4 }),
+    );
+    assert.equal(double.case, 'rejected');
+    assert.equal(double.value.code, 13);
+    const undoFirst = undoCellCommand(client, { ...snapshot, version: '4' }, first.operationId, {
+      sequence: 5,
+    });
+    assert.equal((await client.send(undoFirst)).case, 'committed');
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).sheets[0].cells.length, 0);
+    const redoFirst = undoCellCommand(
+      client,
+      { ...snapshot, version: '5' },
+      undoFirst.operationId,
+      { sequence: 6 },
+    );
+    assert.equal((await client.send(redoFirst)).case, 'committed');
+    const redoSecond = undoCellCommand(
+      client,
+      { ...snapshot, version: '6' },
+      undoSecond.operationId,
+      { sequence: 7 },
+    );
+    assert.equal((await client.send(redoSecond)).case, 'committed');
+    const state = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(state.version, '7');
+    assert.equal(state.sheets[0].cells[0].value.value.source, '=2+3');
+    assert.deepEqual((await calculation(base, cookie, snapshot.document_id, 7)).values[0].value, {
+      type: 'number',
+      value: 5,
+    });
+    assert.equal((await client.send(undoFirst)).case, 'receipt');
+    assert.equal((await client.send(redoSecond)).case, 'receipt');
+    assert.equal((await getDocument(base, cookie, snapshot.document_id)).version, '7');
+  } finally {
+    client.socket.terminate();
+  }
+});
+
 test('undo of authored formula restores value formula and blank with dependent recalculation', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);
@@ -2409,6 +2465,56 @@ test('undo of authored formula restores value formula and blank with dependent r
     assert.equal((await client.send(undo)).case, 'receipt');
   } finally {
     client.socket.terminate();
+  }
+});
+
+test('deleted formula source or compensation address returns undo conflict before axis refusal', async () => {
+  for (const compensated of [false, true]) {
+    const cookie = await login(base);
+    const { snapshot } = await createDocument(base, cookie);
+    const client = await connect(base, cookie);
+    try {
+      let target = formulaCommand(client, snapshot, '=1');
+      assert.equal((await client.send(target)).case, 'committed');
+      let version = 2;
+      if (compensated) {
+        target = undoCellCommand(
+          client,
+          { ...snapshot, version: String(version) },
+          target.operationId,
+          { sequence: 2 },
+        );
+        assert.equal((await client.send(target)).case, 'committed');
+        version++;
+      }
+      assert.equal(
+        (
+          await client.send(
+            deleteRowsCommand(
+              client,
+              { ...snapshot, version: String(version) },
+              [snapshot.sheets[0].rows[0]],
+              { sequence: 3 },
+            ),
+          )
+        ).case,
+        'committed',
+      );
+      version++;
+      const rejected = await client.send(
+        undoCellCommand(client, { ...snapshot, version: String(version) }, target.operationId, {
+          sequence: 4,
+        }),
+      );
+      assert.equal(rejected.case, 'rejected');
+      assert.equal(rejected.value.code, 13);
+      assert.equal(
+        (await getDocument(base, cookie, snapshot.document_id)).version,
+        String(version),
+      );
+    } finally {
+      client.socket.terminate();
+    }
   }
 });
 

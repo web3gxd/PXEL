@@ -62,8 +62,8 @@ rejection, исходный idempotent retry — receipt. Replay проверя�
 Guarded undo по ADR-028/076 реализован для новых одиночных value/clear writes
 (schema 11) и formula writes (schema 16) с persisted preimage. `UndoCell` — отдельное намерение; schema-12
 компенсация создаёт новую версию. Actor проверяет candidate, а журнал под
-блокировкой документа сканирует до 10 000 последующих событий на любую запись
-того же stable address перед CAS. Повтор команды возвращает receipt. Старые
+блокировкой документа сканирует до 10 000 последующих событий перед CAS.
+Повтор команды возвращает receipt. Старые
 события, batch и структурные операции этим срезом не
 отменяются. ADR-029 разрешает восстановить формульный preimage одиночной
 value/clear записи отдельной persisted schema 13 только если оси не менялись с версии отменяемого события;
@@ -72,7 +72,15 @@ ADR-076 применяет этот guard к formula result и preimage и по�
 транзакции по общему `Operation::changes_axes`. Formula compensation с исторической
 binding version использует projection resync: сохранённый canonical текст может
 отличаться от текущего A1 после структурного изменения до отменяемой записи.
-Многошаговая история и redo остаются отдельными незавершёнными срезами.
+ADR-077 добавляет inverse собственной полной compensation как redo. Собственные
+CellWrite пары сокращаются только по точному target ID/version вершины стека;
+весь эффективный хвост должен быть пуст. Чужие, legacy, batch и copy записи того
+же stable address остаются конфликтом даже после отмены. UI держит100
+подтверждённых undo/redo IDs, новый edit очищает redo, unsupported own operation
+очищает обе истории; reload/switch начинает новую локальную историю. Браузер
+повторно проверяет наличие pending после receipt refresh, чтобы пересекающиеся
+ACK не продвинули историю дважды. Batch/structural undo и durable history
+discovery остаются отдельными незавершёнными срезами.
 
 ## Command, validation, event, projection
 

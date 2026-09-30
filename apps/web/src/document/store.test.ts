@@ -276,7 +276,179 @@ async function connectedStore() {
   sent.length = 0;
   return { store, sent };
 }
+async function acknowledgeCellResult(
+  store: DocumentStore,
+  sent: Uint8Array[],
+  value: number | undefined,
+) {
+  const commandBytes = [...sent]
+    .reverse()
+    .find((bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload.case === 'command');
+  const command = fromBinary(ClientEnvelopeSchema, commandBytes ?? new Uint8Array()).payload;
+  if (command.case !== 'command') throw new Error('Missing pending command');
+  const address = {
+    sheetId: uuidBytes(sheetId),
+    rowId: uuidBytes(rowId),
+    columnId: uuidBytes(columnId),
+  };
+  const message = create(ServerEnvelopeSchema, {
+    protocolVersion: 1,
+    payload: {
+      case: 'committed',
+      value: {
+        documentId: uuidBytes(documentId),
+        operationId: command.value.operationId,
+        committedVersion: BigInt(store.projection?.version ?? '0') + 1n,
+        canonicalOperation:
+          value === undefined
+            ? { kind: { case: 'clearCell', value: { address } } }
+            : {
+                kind: {
+                  case: 'setCellValue',
+                  value: { address, value: { kind: { case: 'number', value } } },
+                },
+              },
+        confirmedStateHash: new Uint8Array(32),
+      },
+    },
+  });
+  await store.receive(message);
+  return { command: command.value, message };
+}
+
 describe('document projection and pending intents', () => {
+  it('bounds acknowledged history to100 and traverses undo redo without optimistic inverse', async () => {
+    const { store, sent } = await connectedStore();
+    for (let value = 0; value <= 100; value++) {
+      expect(store.set({ row: 0, column: 0 }, { type: 'number', value })).toBe(true);
+      await acknowledgeCellResult(store, sent, value);
+    }
+    for (let value = 99; value >= 0; value--) {
+      expect(store.undo()).toBe(true);
+      expect(store.display({ row: 0, column: 0 })).toBe(String(value + 1));
+      await acknowledgeCellResult(store, sent, value);
+    }
+    expect(store.canUndo).toBe(false);
+    expect(store.canRedo).toBe(true);
+    for (let value = 1; value <= 100; value++) {
+      expect(store.redo()).toBe(true);
+      await acknowledgeCellResult(store, sent, value);
+    }
+    expect(store.canRedo).toBe(false);
+    expect(store.display({ row: 0, column: 0 })).toBe('100');
+    store.disconnected();
+  });
+  it('new acknowledged edits branch history and failed inverse drops only its top', async () => {
+    const { store, sent } = await connectedStore();
+    store.set({ row: 0, column: 0 }, { type: 'number', value: 1 });
+    await acknowledgeCellResult(store, sent, 1);
+    store.set({ row: 0, column: 0 }, { type: 'number', value: 2 });
+    await acknowledgeCellResult(store, sent, 2);
+    store.undo();
+    await acknowledgeCellResult(store, sent, 1);
+    expect(store.canRedo).toBe(true);
+    store.set({ row: 0, column: 0 }, { type: 'number', value: 3 });
+    await acknowledgeCellResult(store, sent, 3);
+    expect(store.canRedo).toBe(false);
+    store.undo();
+    const command = fromBinary(ClientEnvelopeSchema, sent.at(-1) ?? new Uint8Array()).payload;
+    if (command.case !== 'command') throw new Error('Missing inverse');
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'rejected',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: command.value.operationId,
+            code: 13,
+            retryable: false,
+          },
+        },
+      }),
+    );
+    expect(store.canUndo).toBe(true);
+    expect(store.display({ row: 0, column: 0 })).toBe('3');
+    store.disconnected();
+  });
+  it('duplicate inverse receipts never push the same history entry twice', async () => {
+    const { store, sent } = await connectedStore();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => structuredClone(store.projection) })),
+    );
+    store.set({ row: 0, column: 0 }, { type: 'number', value: 1 });
+    await acknowledgeCellResult(store, sent, 1);
+    store.undo();
+    const undone = await acknowledgeCellResult(store, sent, undefined);
+    const duplicate = async (operationId: Uint8Array) =>
+      store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'receipt',
+            value: {
+              documentId: uuidBytes(documentId),
+              operationId,
+              committedVersion: BigInt(store.projection?.version ?? '0'),
+              currentHeadVersion: BigInt(store.projection?.version ?? '0'),
+              canonicalEventHash: new Uint8Array(32),
+            },
+          },
+        }),
+      );
+    await duplicate(undone.command.operationId);
+    expect(store.redo()).toBe(true);
+    const redone = await acknowledgeCellResult(store, sent, 1);
+    await duplicate(redone.command.operationId);
+    expect(store.canRedo).toBe(false);
+    expect(store.undo()).toBe(true);
+    await acknowledgeCellResult(store, sent, undefined);
+    expect(store.canUndo).toBe(false);
+    store.disconnected();
+  });
+  it('overlapping receipt refresh and canonical ACK consume authored history once', async () => {
+    const { store, sent } = await connectedStore();
+    store.set({ row: 0, column: 0 }, { type: 'number', value: 1 });
+    const original = fromBinary(ClientEnvelopeSchema, sent.at(-1) ?? new Uint8Array()).payload;
+    if (original.case !== 'command') throw new Error('Missing authored command');
+    let release: (() => void) | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return structuredClone(store.projection);
+        },
+      })),
+    );
+    const receipt = store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'receipt',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: original.value.operationId,
+            committedVersion: 2n,
+            currentHeadVersion: 2n,
+            canonicalEventHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    await acknowledgeCellResult(store, sent, 1);
+    release?.();
+    await receipt;
+    expect(store.undo()).toBe(true);
+    await acknowledgeCellResult(store, sent, undefined);
+    expect(store.canUndo).toBe(false);
+    store.disconnected();
+  });
   it('retires a committed recalculation ID when a concurrent refresh supersedes hydration', async () => {
     const { store } = await connectedStore();
     const operationIds: string[] = [];
@@ -477,6 +649,31 @@ describe('document projection and pending intents', () => {
     expect(store.display({ row: 0, column: 0 })).toBe('');
     expect(store.pending).toHaveLength(0);
     expect(store.canUndo).toBe(false);
+    expect(store.canRedo).toBe(true);
+    expect(store.redo()).toBe(true);
+    expect(store.display({ row: 0, column: 0 })).toBe('');
+    const redo = fromBinary(ClientEnvelopeSchema, sent[2] ?? new Uint8Array()).payload;
+    if (redo.case !== 'command' || !redo.value.undoCell) throw new Error('Missing redo inverse');
+    expect(redo.value.undoCell.targetOperationId).toEqual(command.value.operationId);
+    expect(redo.value.operationId).not.toEqual(command.value.operationId);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: redo.value.operationId,
+            committedVersion: 4n,
+            canonicalOperation: original.value.operation,
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    expect(store.display({ row: 0, column: 0 })).toBe('42');
+    expect(store.canUndo).toBe(true);
+    expect(store.canRedo).toBe(false);
     store.disconnected();
   });
   it('shows typed undo conflict without applying an inverse locally', async () => {

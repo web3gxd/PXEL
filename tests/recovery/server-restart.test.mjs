@@ -769,6 +769,39 @@ test(
         assert.equal((await authoredUndoRetry.send(authoredUndo)).case, 'receipt');
         authoredUndoRetry.socket.terminate();
 
+        const redoWriter = await connect(base, cookie);
+        const redo = undoCellCommand(redoWriter, restoredAuthoredUndo, authoredUndo.operationId, {
+          sequence: 6,
+        });
+        const redoAck = await redoWriter.send(redo);
+        assert.equal(redoAck.case, 'committed');
+        const redoCalculation = await calculation(base, cookie, formulaUndoBase.document_id, 7);
+        redoWriter.socket.terminate();
+        await kill();
+        await start();
+        const redoRecovered = await getDocument(base, cookie, formulaUndoBase.document_id);
+        assert.equal(redoRecovered.version, '7');
+        assert.equal(redoRecovered.sheets[0].cells[0].value.value.source, '=8+9');
+        assert.equal(
+          redoRecovered.state_hash,
+          Buffer.from(redoAck.value.confirmedStateHash).toString('hex'),
+        );
+        const recoveredRedoCalculation = await calculation(
+          base,
+          cookie,
+          formulaUndoBase.document_id,
+          7,
+        );
+        assert.deepEqual(recoveredRedoCalculation.values[0].value, { type: 'number', value: 17 });
+        assert.equal(
+          recoveredRedoCalculation.calculated_state_hash,
+          redoCalculation.calculated_state_hash,
+        );
+        const redoRetry = await connect(base, cookie);
+        assert.equal((await redoRetry.send(redo)).case, 'receipt');
+        assert.equal((await getDocument(base, cookie, formulaUndoBase.document_id)).version, '7');
+        redoRetry.socket.terminate();
+
         const { snapshot: rangeBase } = await createDocument(base, cookie);
         const rangeWriter = await connect(base, cookie);
         assert.equal(
