@@ -40,6 +40,15 @@ the domain hash and snapshot3. Journal admission independently verifies projecti
 context and currentness after receipt lookup; no actor-only validation assumption
 is sufficient. Integration verification is recorded in RUNBOOK.
 
+[ADR-086](adr/086-durable-author-history.md) добавляет чтение общей истории автора
+в документе после reload/reconnect. Storage проверяет ограниченный непрерывный
+суффикс PostgreSQL log, application восстанавливает два стека из descriptors без
+содержимого, HTTP adapter возвращает до 100 потенциальных целей в каждом стеке.
+Новая таблица истории и новый persisted формат не вводятся. Текущий ACL проверяется
+при чтении; выполнение Undo/Redo по-прежнему проходит собственные command guards.
+Граница чтения — 10 001 запись с учётом цели и 64 MiB payload. Срез локально
+проверен на PostgreSQL, HTTP/WebSocket, в браузере и при аварийных перезапусках.
+
 ## Crates и направление зависимостей
 
 | Crate                     | Владелец ответственности                                          | Workspace dependencies                               | Вводится                            |
@@ -85,6 +94,16 @@ CalculationCommitted существует отдельно от OperationCommitt
 React отвечает за chrome, menus, formula bar, editor overlay и доступность. Canvas рисует viewport плюс overscan, учитывает DPR, планируется через requestAnimationFrame. Cells не лежат по отдельности в React state и не материализуются DOM-таблицей. Caret остается в DOM editor; static/dynamic Canvas layers вводятся только после benchmark.
 
 Модули будущего редактора: viewport, size indexes, selection, input/keyboard controllers, clipboard, renderer, shared editing state machine, confirmed projection, pending queue, collaboration transport, calculation worker и bounded accessibility mirror. Phase 0 дает пустую сетку и handshake, без фиктивного сохранения/редактирования.
+
+Текущий клиент загружает Undo/Redo отдельно от confirmed projection и pending
+intents. Пока история не согласована, её кнопки недоступны; ввод и отправка
+изменений продолжают работать. Отдельная граница обработанных событий истории
+не продвигается от одной лишь HTTP-загрузки projection. Пропуск версий в hint,
+ACK или receipt требует discovery, даже если последнее событие чужое или
+системное. Последовательные известные чужие/системные hints обходятся без полного
+сканирования. Поздние ответы проверяются по document/actor/generation, а ACK,
+уже включённый в загруженную историю, не добавляется повторно. Общая история
+автора не воспроизводит приватный стек каждой вкладки.
 
 ## Развертывание и рост
 

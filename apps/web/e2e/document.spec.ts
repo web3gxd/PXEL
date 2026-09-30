@@ -1080,8 +1080,13 @@ test('multi-step undo redo of one cell converges in two tabs and new edits clear
     await page.reload();
     await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
     await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('33');
-    await expect(undo).toBeDisabled();
+    await expect(undo).toBeEnabled();
     await expect(redo).toBeDisabled();
+    await undo.click();
+    await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+    await expect(bar).toHaveValue('11');
+    await expect(remote).toHaveValue('11');
+    await expect(redo).toBeEnabled();
   } finally {
     await other.close();
   }

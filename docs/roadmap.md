@@ -554,3 +554,15 @@ silently write into revived identities. Native/codec/real-PG checks passed;
 snapshot plus one-event replay preserves floors and rejects stale commands.
 Full phase4 completion is not claimed. Durable history discovery and styles,
 merges, fuller XLSX and the wider deployment/performance gates remain open.
+
+ADR086 bounded author history discovery is locally verified (2026-09-30).
+Undo/Redo reload/reconnect discovery reconstructs shared author/document targets
+from PostgreSQL without a new table or persisted format. Current ACL, corrupt
+payloads, nonlinear inverse pairs, 100-target stacks, inclusive 10001-record
+window and 64MiB suffix budget are checked. History gaps in coalesced hints and
+ACK/receipt catch-up trigger discovery; successive known foreign/system events
+do not rescan. Final80HTTP,139frontendunit,7PGscanner,8reducer and6hardrestart
+checks passed. Full142browser passed before final fallback-envelope adjustment;
+34affected checks then passed and final16history checks passed on updated binary.
+Native/browser parity remains green. RUNBOOK records commands and failures.
+Styles/merges/richerXLSX and deployment/stress/production gates stay open.

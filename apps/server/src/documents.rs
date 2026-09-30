@@ -1,7 +1,7 @@
 use crate::{AppState, auth};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -348,6 +348,88 @@ pub async fn get_document(
         .await
         .map_err(session_api_error)?;
     document_view(id, &workbook)
+}
+
+#[derive(Serialize)]
+pub struct UndoHistoryView {
+    schema_version: u32,
+    document_id: String,
+    actor_id: String,
+    through_version: String,
+    earliest_scanned_version: String,
+    undo: Vec<HistoryTargetView>,
+    redo: Vec<HistoryTargetView>,
+    truncated: bool,
+    truncation_reason: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+struct HistoryTargetView {
+    operation_id: String,
+    committed_version: String,
+}
+
+fn history_target_view(
+    target: spreadsheet_application::history::HistoryTarget,
+) -> HistoryTargetView {
+    HistoryTargetView {
+        operation_id: id_string(target.operation_id.as_bytes()),
+        committed_version: target.committed_version.get().to_string(),
+    }
+}
+
+pub async fn undo_history(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<UndoHistoryView>, ApiError> {
+    if !crate::rate_allowed(&state).await {
+        return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limit"));
+    }
+    if !query.is_empty() {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "unsupported_history_query",
+        ));
+    }
+    let principal = principal(&state, &headers).await?;
+    let document = DocumentId::from_bytes(parse_id(&id)?).map_err(domain_error)?;
+    let _permit = state
+        .history_reads
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError(StatusCode::TOO_MANY_REQUESTS, "history_busy"))?;
+    let history = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        state.database.undo_history(principal.identity, document),
+    )
+    .await
+    .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "history_timeout"))?
+    .map_err(journal_error)?;
+    if !state
+        .auth
+        .active(&principal)
+        .await
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "unavailable"))?
+    {
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "unauthorized"));
+    }
+    use spreadsheet_application::history::HistoryTruncation;
+    Ok(Json(UndoHistoryView {
+        schema_version: 1,
+        document_id: id_string(history.document_id.as_bytes()),
+        actor_id: id_string(history.actor_id.as_bytes()),
+        through_version: history.through_version.get().to_string(),
+        earliest_scanned_version: history.earliest_scanned_version.get().to_string(),
+        undo: history.undo.into_iter().map(history_target_view).collect(),
+        redo: history.redo.into_iter().map(history_target_view).collect(),
+        truncated: history.truncation.is_some(),
+        truncation_reason: history.truncation.map(|reason| match reason {
+            HistoryTruncation::VersionWindow => "version_window",
+            HistoryTruncation::ByteBudget => "byte_budget",
+        }),
+    }))
 }
 
 pub async fn export_xlsx(

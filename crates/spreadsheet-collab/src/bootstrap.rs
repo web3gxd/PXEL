@@ -54,6 +54,11 @@ pub(crate) struct ContextAdvance<'a> {
     pub context: &'a CalculationContext,
     pub admission: Admission,
 }
+pub(crate) struct ContextAdvanceOutcome {
+    pub receipt: Option<CommitReceipt>,
+    /// Only a newly committed event has provenance available at this boundary.
+    pub event: Option<Arc<CommittedEvent>>,
+}
 
 pub(crate) type Sampler = Arc<
     dyn Fn(CalculationReason) -> Result<(OperationId, CalculationContext), SessionError>
@@ -67,6 +72,7 @@ pub(crate) struct Bootstrap {
     required_edit: Option<DocumentVersion>,
     pending_timer: Option<(OperationId, CalculationContext, Admission)>,
     pending_open: Option<(OperationId, CalculationContext, Admission)>,
+    head_event: Option<Arc<CommittedEvent>>,
 }
 impl Bootstrap {
     pub fn new(sampler: Option<Sampler>) -> Self {
@@ -77,7 +83,17 @@ impl Bootstrap {
             required_edit: None,
             pending_timer: None,
             pending_open: None,
+            head_event: None,
         }
+    }
+    pub fn take_head_event(&mut self) -> Option<Arc<CommittedEvent>> {
+        self.head_event.take()
+    }
+    fn record_advance(&mut self, outcome: ContextAdvanceOutcome) -> Option<CommitReceipt> {
+        if outcome.event.is_some() {
+            self.head_event = outcome.event;
+        }
+        outcome.receipt
     }
     pub fn edited(&mut self, book: &Workbook, operation: &Operation) {
         if affects_calculation(operation) && (self.pending.is_some() || has_volatile(book)) {
@@ -123,7 +139,7 @@ impl Bootstrap {
         let Some((id, context, admission)) = &self.pending_open else {
             return Err(SessionError::InvalidCommand);
         };
-        advance_context(
+        let outcome = advance_context(
             journal,
             identity,
             workbook,
@@ -136,6 +152,7 @@ impl Bootstrap {
             axes,
         )
         .await?;
+        self.record_advance(outcome);
         self.ensure(journal, identity, workbook, calculation, axes)
             .await?;
         self.pending_open = None;
@@ -187,7 +204,7 @@ impl Bootstrap {
         let Some((id, context, admission)) = &self.pending_timer else {
             return Err(SessionError::InvalidCommand);
         };
-        advance_context(
+        let outcome = advance_context(
             journal,
             identity,
             workbook,
@@ -200,6 +217,7 @@ impl Bootstrap {
             axes,
         )
         .await?;
+        self.record_advance(outcome);
         self.pending_timer = None;
         // A refreshed external epoch may be followed by a newer content edit.
         // Resolve its durable ordering before declaring this head inspected.
@@ -214,7 +232,7 @@ impl Bootstrap {
         calculation: &CalculationHandle,
         axes: &mut axis_history::AxisHistory,
     ) -> Result<(), SessionError> {
-        let Some(sampler) = &self.sampler else {
+        let Some(sampler) = self.sampler.clone() else {
             return Ok(());
         };
         // Recover admission intent from durable input history after an actor restart.
@@ -270,7 +288,7 @@ impl Bootstrap {
             };
             let admission = *admission;
             let prepared_head = workbook.version();
-            let receipt = advance_context(
+            let outcome = advance_context(
                 journal,
                 identity,
                 workbook,
@@ -283,6 +301,7 @@ impl Bootstrap {
                 axes,
             )
             .await?;
+            let receipt = self.record_advance(outcome);
             if workbook.version() != prepared_head {
                 // Refresh/receipt/CAS retry may discover an epoch followed by a
                 // newer edit. Resolve that ordering before caching this head.

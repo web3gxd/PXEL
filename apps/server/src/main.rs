@@ -4,6 +4,8 @@ mod calculation_stream;
 mod config;
 mod delivery;
 mod documents;
+#[cfg(test)]
+mod head_history_tests;
 mod outbound;
 mod presence;
 #[cfg(feature = "dev-auth")]
@@ -211,7 +213,7 @@ async fn send_replay(
 ) -> Result<bool, ()> {
     let gap = barrier.get().checked_sub(after.get()).ok_or(())?;
     if gap > MAX_REPLAY_EVENTS {
-        return send_replay_fallback(outbound, principal, session, delivery, barrier).await;
+        return send_replay_fallback(outbound, principal, session, delivery, barrier, None).await;
     }
     let mut cursor = after.get();
     let mut sent_bytes = 0usize;
@@ -238,7 +240,11 @@ async fn send_replay(
             if documents::committed_message(&event)
                 .is_none_or(|message| message.canonical_operation.is_none())
             {
-                return send_replay_fallback(outbound, principal, session, delivery, barrier).await;
+                let exact_head = (event.version == barrier).then(|| Arc::new(event));
+                return send_replay_fallback(
+                    outbound, principal, session, delivery, barrier, exact_head,
+                )
+                .await;
             }
             let payload = head_hint(
                 delivery.document,
@@ -250,7 +256,8 @@ async fn send_replay(
             // Bound encoded bytes in addition to each journal read batch.
             sent_bytes = sent_bytes.checked_add(payload.len()).ok_or(())?;
             if sent_bytes > MAX_REPLAY_BYTES {
-                return send_replay_fallback(outbound, principal, session, delivery, barrier).await;
+                return send_replay_fallback(outbound, principal, session, delivery, barrier, None)
+                    .await;
             }
             if !matches!(session.head(principal.identity).await, Ok(head) if head >= barrier)
                 || !send_document_payload(outbound, delivery, payload)
@@ -268,17 +275,19 @@ async fn send_replay_fallback(
     session: &DocumentSession,
     delivery: &DocumentDelivery,
     barrier: DocumentVersion,
+    exact_head: Option<Arc<spreadsheet_domain::workbook::CommittedEvent>>,
 ) -> Result<bool, ()> {
     if !matches!(session.head(principal.identity).await, Ok(head) if head >= barrier)
         || !send_document_payload(
             outbound,
             delivery,
-            head_hint(
+            head_hint_with_operation(
                 delivery.document,
                 &HeadUpdate {
                     version: barrier,
-                    event: None,
+                    event: exact_head,
                 },
+                false,
             ),
         )
     {
@@ -316,11 +325,30 @@ async fn send_replay_complete(
 }
 
 fn head_hint(document: DocumentId, update: &HeadUpdate) -> Vec<u8> {
-    let latest_operation = update
+    head_hint_with_operation(document, update, true)
+}
+
+fn head_hint_with_operation(
+    document: DocumentId,
+    update: &HeadUpdate,
+    include_operation: bool,
+) -> Vec<u8> {
+    let event = update
         .event
         .as_ref()
-        .filter(|event| event.document_id == document && event.version == update.version)
+        .filter(|event| event.document_id == document && event.version == update.version);
+    let latest_operation = event
+        .filter(|_| include_operation)
         .and_then(|event| documents::committed_message(event));
+    let (head_event_kind, head_actor_id) = match event.map(|event| event.principal) {
+        Some(spreadsheet_domain::workbook::EventPrincipal::User(actor)) => {
+            (v1::HeadEventKind::User as i32, actor.as_bytes().to_vec())
+        }
+        Some(spreadsheet_domain::workbook::EventPrincipal::System) => {
+            (v1::HeadEventKind::System as i32, Vec::new())
+        }
+        None => (v1::HeadEventKind::Unspecified as i32, Vec::new()),
+    };
     v1::ServerEnvelope {
         protocol_version: wire::PROTOCOL_VERSION,
         payload: Some(v1::server_envelope::Payload::DocumentHeadChanged(
@@ -328,6 +356,8 @@ fn head_hint(document: DocumentId, update: &HeadUpdate) -> Vec<u8> {
                 document_id: document.as_bytes().to_vec(),
                 head_version: update.version.get(),
                 latest_operation,
+                head_event_kind,
+                head_actor_id,
             },
         )),
     }
@@ -559,6 +589,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/dev/identity", get(dev_identity))
         .route("/api/documents", post(documents::create))
         .route("/api/documents/{id}", get(documents::get_document))
+        .route(
+            "/api/documents/{id}/undo-history",
+            get(documents::undo_history),
+        )
         .route(
             "/api/documents/{id}/export.xlsx",
             get(documents::export_xlsx),

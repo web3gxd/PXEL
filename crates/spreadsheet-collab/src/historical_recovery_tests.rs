@@ -15,6 +15,7 @@ macro_rules! reject {
     };
 }
 impl OperationJournal for RejectJournal {
+    reject!(undo_history(_identity: AuthenticatedActor, _document: DocumentId) -> spreadsheet_application::history::UndoHistory);
     async fn calculation_epoch_version(
         &self,
         _: AuthenticatedActor,

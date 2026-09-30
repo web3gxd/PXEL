@@ -1,0 +1,115 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT committed_version,operation_id,actor_id,principal_kind,schema_version,payload,payload_checksum,canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version<=$2 AND committed_version>=$3 ORDER BY committed_version DESC LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "committed_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "document_operations",
+            "name": "committed_version"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "operation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_operations",
+            "name": "operation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "actor_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_operations",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "principal_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_operations",
+            "name": "principal_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "schema_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "document_operations",
+            "name": "schema_version"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "payload",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "document_operations",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "payload_checksum",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "document_operations",
+            "name": "payload_checksum"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "canonical_event_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "document_operations",
+            "name": "canonical_event_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e15d0a82e43ec3b3492e745cbf7f6094c8568f563636a9585955e0920ab0affa"
+}

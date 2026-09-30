@@ -268,6 +268,16 @@ message DocumentHeadChanged {
   // The canonical user event for this exact version, when representable.
   // Clients still require sequential application.
   OperationCommitted latest_operation = 3;
+  // Scheduling hints only: no document contents or history eligibility proof.
+  // Zero retains compatibility with older servers and coalesced updates.
+  HeadEventKind head_event_kind = 4;
+  bytes head_actor_id = 5;
+}
+
+enum HeadEventKind {
+  HEAD_EVENT_KIND_UNSPECIFIED = 0;
+  HEAD_EVENT_KIND_USER = 1;
+  HEAD_EVENT_KIND_SYSTEM = 2;
 }
 
 // Marks the captured subscribe barrier. A resync flag means the bounded

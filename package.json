@@ -16,7 +16,7 @@
     "format:check": "prettier --check .",
     "proto:generate": "node scripts/proto.mjs",
     "proto:check": "node scripts/proto.mjs --check",
-    "test:integration": "node --test --test-concurrency=1 tests/integration/server.test.mjs tests/integration/document.test.mjs tests/integration/move.test.mjs tests/integration/network-convergence.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/server.test.mjs tests/integration/document.test.mjs tests/integration/history.test.mjs tests/integration/move.test.mjs tests/integration/network-convergence.test.mjs",
     "test:network-convergence": "node --test tests/integration/network-convergence.test.mjs",
     "test:recovery": "node scripts/recovery.mjs"
   },

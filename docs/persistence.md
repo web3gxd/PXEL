@@ -13,6 +13,32 @@ Independent canonical inverse derivation, candidate hash, own history reduction
 and bounded reference checks precede locked CAS. See ADR085 for exact limits and
 RUNBOOK for integration status; no existing events are rewritten.
 
+[ADR-086](adr/086-durable-author-history.md) реализует восстановление общей
+истории автора из существующего immutable operation log. Новая таблица истории,
+изменение persisted event/snapshot schemas и переписывание старых событий не
+требуются. Локальные проверки HTTP/recovery и delivery на обновлённом runtime
+прошли; это не закрывает gate всей фазы 4 или production.
+
+Reader фиксирует head H и читает непрерывный самый новый суффикс от H до
+`max(1, H - 10000)` включительно: максимум 10 001 запись с учётом самой цели.
+Внутренние страницы по 128 событий обрабатываются потоково с общим пределом
+64 MiB payload и существующим пределом 4 MiB на envelope. Чужие и системные
+события входят в эти бюджеты. Storage проверяет checksum, schema, principal,
+identity, semantic hash и непрерывность; повреждение или неизвестная схема не
+превращаются в успешную пустую историю. При ограничении bytes/versions возвращается
+явная граница выбранного суффикса. Snapshot не подменяет этот журнал и не содержит
+готового пользовательского стека Undo/Redo.
+
+Application reducer получает descriptors без содержимого и строит не более 100
+целей в каждом стеке общего автора/документа. HTTP schema 1 возвращает только
+IDs/версии и metadata усечения, без значений, формул и preimages. Текущий ACL и
+access epochs проверяются между страницами и после восстановления истории перед
+ответом; требуется owner/editor. Чтение не удерживает document lock на весь
+scan и использует общий лимит двух history readers с timeout 30 секунд.
+Возвращённая цель не гарантирует успешную отмену: последующая команда повторяет
+ownership, inverse и conflict guards в своей commit transaction. Терминальный
+отказ не добавляется в основной журнал и после reload не скрывает цель навсегда.
+
 ADR-076 добавляет schema16 authored formula write: source, normalized bound AST,
 exact preimage и authored_kind3. Старые schema2/11 bytes и hash tags неизменны;
 новый semantic hash tag17 независим от protobuf bytes. Компенсации остаются

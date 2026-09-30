@@ -7,6 +7,7 @@ import {
   ServerEnvelopeSchema,
 } from '../generated/pxel/wire/v1/session_pb';
 import type { FormulaError } from '../generated/pxel/wire/v1/session_pb';
+import { decodeHistory, readHistory } from './history';
 import {
   DocumentStore,
   bytesUuid,
@@ -1246,12 +1247,34 @@ describe('isolated pending move preview', () => {
   });
 });
 
-async function connectedStore() {
+const historyResponse = (overrides: Record<string, unknown> = {}) => ({
+  schema_version: 1,
+  document_id: documentId,
+  actor_id: documentId,
+  through_version: '1',
+  earliest_scanned_version: '1',
+  undo: [],
+  redo: [],
+  truncated: false,
+  truncation_reason: null,
+  ...overrides,
+});
+async function connectedStore(discoveredHistory = historyResponse()) {
   vi.useFakeTimers();
   vi.stubGlobal('location', { href: 'http://localhost/' });
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => ({ ok: true, json: async () => projection() })),
+    vi.fn(async (url: string) =>
+      url.endsWith('/undo-history')
+        ? Response.json(discoveredHistory)
+        : {
+            ok: true,
+            json: async () => ({
+              ...projection(),
+              version: String(discoveredHistory.through_version),
+            }),
+          },
+    ),
   );
   const store = new DocumentStore();
   store.load(projection());
@@ -1263,6 +1286,537 @@ async function connectedStore() {
   sent.length = 0;
   return { store, sent };
 }
+
+describe('durable history discovery', () => {
+  const hint = (version: bigint, kind = 0, actor?: string) =>
+    create(ServerEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'documentHeadChanged',
+        value: {
+          documentId: uuidBytes(documentId),
+          headVersion: version,
+          headEventKind: kind,
+          headActorId: actor ? uuidBytes(actor) : new Uint8Array(),
+        },
+      },
+    });
+  it('rejects malformed, excessive and cross-stack duplicate history references', () => {
+    const a = { operation_id: uuidV7(), committed_version: '1' };
+    const b = { operation_id: uuidV7(), committed_version: '2' };
+    const good = historyResponse({ through_version: '2', undo: [a], redo: [b] });
+    expect(decodeHistory(good)).toEqual(good);
+    for (const bad of [
+      { schema_version: 2 },
+      { actor_id: documentId.replace('-7000-', '-4000-') },
+      { through_version: '02' },
+      { through_version: '9223372036854775808' },
+      { earliest_scanned_version: '3' },
+      { undo: [b, a] },
+      { redo: [a] },
+      { redo: [{ ...b, committed_version: '1' }] },
+      { undo: [{ ...a, content: 'secret' }] },
+      {
+        undo: Array.from({ length: 101 }, (_, i) => ({
+          operation_id: uuidV7(),
+          committed_version: String(i + 1),
+        })),
+      },
+      { truncated: true },
+      { truncation_reason: 'unknown' },
+      { content: 'secret' },
+    ])
+      expect(() => decodeHistory({ ...good, ...bad })).toThrow();
+    expect(
+      decodeHistory(historyResponse({ through_version: '0', earliest_scanned_version: '0' })).undo,
+    ).toEqual([]);
+  });
+  it('caps actual streamed history bytes without trusting Content-Length', async () => {
+    expect(await readHistory(Response.json(historyResponse()))).toEqual(historyResponse());
+    await expect(readHistory(new Response(' '.repeat(65537)))).rejects.toThrow();
+    await expect(
+      readHistory(new Response('{}', { headers: { 'content-length': '65537' } })),
+    ).rejects.toThrow();
+  });
+  it('loads persisted own history on connection and submits only its target identity', async () => {
+    const original = uuidV7();
+    const { store, sent } = await connectedStore(
+      historyResponse({
+        undo: [{ operation_id: original, committed_version: '1' }],
+      }),
+    );
+    expect(store.canUndo).toBe(true);
+    expect(store.canRedo).toBe(false);
+    expect(store.undo()).toBe(true);
+    const command = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (command.case !== 'command') throw new Error('Missing inverse command');
+    expect(bytesUuid(command.value.undoCell!.targetOperationId)).toBe(original);
+    expect(command.value.operation).toBeUndefined();
+    store.dispose();
+  });
+  it('restores redo without inventing an ordinary edit', async () => {
+    const compensation = uuidV7();
+    const { store, sent } = await connectedStore(
+      historyResponse({
+        redo: [{ operation_id: compensation, committed_version: '1' }],
+      }),
+    );
+    expect(store.canRedo).toBe(true);
+    expect(store.redo()).toBe(true);
+    const command = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (command.case !== 'command') throw new Error('Missing redo command');
+    expect(bytesUuid(command.value.undoCell!.targetOperationId)).toBe(compensation);
+    store.dispose();
+  });
+  it('discovers other-tab own heads but never scans for foreign or system heads', async () => {
+    const { store, sent } = await connectedStore();
+    const original = uuidV7();
+    let version = '2';
+    const fetcher = vi.fn(async (url: string) =>
+      url.endsWith('/undo-history')
+        ? Response.json(
+            historyResponse({
+              through_version: version,
+              undo: [{ operation_id: original, committed_version: '2' }],
+            }),
+          )
+        : Response.json({ ...projection(), version }),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    await store.receive(hint(2n, 1, documentId));
+    expect(store.canUndo).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.canUndo).toBe(true);
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/undo-history'))).toHaveLength(1);
+    version = '3';
+    await store.receive(hint(3n, 1, uuidV7()));
+    version = '4';
+    await store.receive(hint(4n, 2));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/undo-history'))).toHaveLength(1);
+    expect(store.undo()).toBe(true);
+    const command = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (command.case !== 'command') throw new Error('Missing inverse');
+    expect(bytesUuid(command.value.undoCell!.targetOperationId)).toBe(original);
+    store.dispose();
+  });
+  for (const kind of [1, 2]) {
+    for (const projectionAhead of [false, true]) {
+      it(`discovers skipped own history before a ${kind === 1 ? 'foreign' : 'system'} head even when projection ahead=${projectionAhead}`, async () => {
+        const older = uuidV7(),
+          missed = uuidV7();
+        const { store, sent } = await connectedStore(
+          historyResponse({
+            through_version: '9',
+            undo: [{ operation_id: older, committed_version: '9' }],
+          }),
+        );
+        let historyCalls = 0;
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (url: string) => {
+            if (!url.endsWith('/undo-history'))
+              return Response.json({ ...projection(), version: '11' });
+            historyCalls++;
+            return Response.json(
+              historyResponse({
+                through_version: '11',
+                undo: [
+                  { operation_id: older, committed_version: '9' },
+                  { operation_id: missed, committed_version: '10' },
+                ],
+              }),
+            );
+          }),
+        );
+        if (projectionAhead) store.load({ ...projection(), version: '11' });
+        await store.receive(hint(11n, kind, kind === 1 ? uuidV7() : undefined));
+        expect(store.canUndo).toBe(false);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(historyCalls).toBe(1);
+        expect(store.undo()).toBe(true);
+        const command = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+        if (command.case !== 'command') throw new Error('Missing inverse');
+        expect(bytesUuid(command.value.undoCell!.targetOperationId)).toBe(missed);
+        store.dispose();
+      });
+    }
+  }
+  it('discovers an unseen own event skipped by a later local receipt instead of treating projection refresh as history coverage', async () => {
+    const missed = uuidV7();
+    const { store, sent } = await connectedStore(historyResponse({ through_version: '9' }));
+    store.set({ row: 0, column: 0 }, { type: 'number', value: 7 });
+    const own = store.pending[0]!;
+    let historyCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (!url.endsWith('/undo-history'))
+          return Response.json({ ...projection(), version: '11' });
+        historyCalls++;
+        return Response.json(
+          historyResponse({
+            through_version: '11',
+            undo: [
+              { operation_id: missed, committed_version: '10' },
+              { operation_id: own.id, committed_version: '11' },
+            ],
+          }),
+        );
+      }),
+    );
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'receipt',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: uuidBytes(own.id),
+            committedVersion: 11n,
+            currentHeadVersion: 11n,
+          },
+        },
+      }),
+    );
+    expect(store.canUndo).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls).toBe(1);
+    expect(store.undo()).toBe(true);
+    await acknowledgeCellResult(store, sent, undefined);
+    expect(store.undo()).toBe(true);
+    const command = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (command.case !== 'command') throw new Error('Missing earlier inverse');
+    expect(bytesUuid(command.value.undoCell!.targetOperationId)).toBe(missed);
+    store.dispose();
+  });
+  it('does not rescan immediate foreign and system successors of a known local ACK', async () => {
+    const { store, sent } = await connectedStore(historyResponse({ through_version: '9' }));
+    store.set({ row: 0, column: 0 }, { type: 'number', value: 7 });
+    await acknowledgeCellResult(store, sent, 7);
+    let version = '11';
+    const fetcher = vi.fn(async (url: string) =>
+      url.endsWith('/undo-history')
+        ? Response.json(historyResponse({ through_version: version }))
+        : Response.json({ ...projection(), version }),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    await store.receive(hint(11n, 1, uuidV7()));
+    version = '12';
+    await store.receive(hint(12n, 2));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/undo-history'))).toHaveLength(0);
+    expect(store.canUndo).toBe(true);
+    store.dispose();
+  });
+  it('prunes expired targets on foreign heads and rejects unknown head classifications', async () => {
+    const { store } = await connectedStore(
+      historyResponse({ undo: [{ operation_id: uuidV7(), committed_version: '1' }] }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ ...projection(), version: '10002' })),
+    );
+    await store.receive(hint(10002n, 1, uuidV7()));
+    expect(store.canUndo).toBe(false);
+    await expect(store.receive(hint(10003n, 99))).rejects.toThrow();
+    await expect(store.receive(hint(10003n, 1))).rejects.toThrow();
+    await expect(store.receive(hint(10003n, 2, documentId))).rejects.toThrow();
+    store.dispose();
+  });
+  it('does not repeatedly request denied history on foreign or system heads while confirmed reading continues', async () => {
+    const { store } = await connectedStore();
+    let version = '2',
+      historyCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (!url.endsWith('/undo-history')) return Response.json({ ...projection(), version });
+        historyCalls++;
+        return new Response(null, { status: 403 });
+      }),
+    );
+    await store.receive(hint(2n));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls).toBe(1);
+    version = '3';
+    await store.receive(hint(3n, 1, uuidV7()));
+    version = '4';
+    await store.receive(hint(4n, 2));
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(store.projection?.version).toBe('4');
+    expect(store.canUndo).toBe(false);
+    expect(historyCalls).toBe(1);
+    store.dispose();
+  });
+  it('does not let a delayed discovery replace a newer acknowledged edit, and editing never waits for history', async () => {
+    const { store, sent } = await connectedStore();
+    let resolve!: (response: Response) => void;
+    const oldHistory = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    let historyCalls = 0;
+    let newest = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (!url.endsWith('/undo-history')) return Response.json({ ...projection(), version: '2' });
+        historyCalls++;
+        return historyCalls === 1
+          ? oldHistory
+          : Response.json(
+              historyResponse({
+                through_version: '3',
+                undo: [{ operation_id: newest, committed_version: '3' }],
+              }),
+            );
+      }),
+    );
+    await store.receive(hint(2n));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls).toBe(1);
+    store.begin('7');
+    store.commit();
+    expect(store.pending).toHaveLength(1);
+    expect(sent.map((bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload.case)).toContain(
+      'command',
+    );
+    newest = store.pending[0]!.id;
+    await acknowledgeCellResult(store, sent, 7);
+    resolve(
+      Response.json(
+        historyResponse({
+          through_version: '2',
+          redo: [{ operation_id: uuidV7(), committed_version: '2' }],
+        }),
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(1);
+    expect(store.canUndo).toBe(true);
+    expect(store.canRedo).toBe(false);
+    expect(store.undo()).toBe(true);
+    const command = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (command.case !== 'command') throw new Error('Missing inverse');
+    expect(bytesUuid(command.value.undoCell!.targetOperationId)).toBe(newest);
+    store.dispose();
+  });
+  it('resolves uncertain reconnect commands by their original bytes before installing history, then ignores late ACK', async () => {
+    const { store, sent } = await connectedStore();
+    store.begin('7');
+    store.commit();
+    const original = store.pending[0]!;
+    store.disconnected();
+    let historyCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (!url.endsWith('/undo-history')) return Response.json({ ...projection(), version: '2' });
+        historyCalls++;
+        return Response.json(
+          historyResponse({
+            through_version: '2',
+            undo: [{ operation_id: original.id, committed_version: '2' }],
+          }),
+        );
+      }),
+    );
+    await store.connected(uuidBytes(documentId), (bytes) => {
+      sent.push(bytes);
+      return true;
+    });
+    expect(historyCalls).toBe(0);
+    expect(sent.at(-1)).toEqual(original.bytes);
+    const receipt = create(ServerEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'receipt',
+        value: {
+          documentId: uuidBytes(documentId),
+          operationId: uuidBytes(original.id),
+          committedVersion: 2n,
+          currentHeadVersion: 2n,
+        },
+      },
+    });
+    await store.receive(receipt);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(historyCalls).toBe(1);
+    expect(store.canUndo).toBe(true);
+    await store.receive(receipt);
+    expect(store.undo()).toBe(true);
+    await acknowledgeCellResult(store, sent, undefined);
+    expect(store.canUndo).toBe(false);
+    expect(store.canRedo).toBe(true);
+    store.dispose();
+  });
+  it('never installs history for another principal or document and keeps normal edits available', async () => {
+    for (const bad of [{ actor_id: uuidV7() }, { document_id: uuidV7() }]) {
+      const { store } = await connectedStore(
+        historyResponse({ ...bad, undo: [{ operation_id: uuidV7(), committed_version: '1' }] }),
+      );
+      expect(store.canUndo).toBe(false);
+      expect(store.error).toContain('другой таблице');
+      store.begin('8');
+      store.commit();
+      expect(store.pending).toHaveLength(1);
+      store.dispose();
+    }
+  });
+  it('ignores a stale denied response after switching document and still discovers the new document', async () => {
+    const { store } = await connectedStore();
+    let resolve!: (response: Response) => void;
+    const first = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    const otherDocument = uuidV7(),
+      original = uuidV7();
+    let nextCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/undo-history')) {
+          if (!url.includes(otherDocument)) return first;
+          nextCalls++;
+          return Response.json(
+            historyResponse({
+              document_id: otherDocument,
+              undo: [{ operation_id: original, committed_version: '1' }],
+            }),
+          );
+        }
+        return Response.json({ ...projection(), version: '2' });
+      }),
+    );
+    await store.receive(hint(2n));
+    await vi.advanceTimersByTimeAsync(0);
+    store.load({ ...projection(), document_id: otherDocument });
+    resolve(new Response(null, { status: 403 }));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(nextCalls).toBe(1);
+    expect(store.canUndo).toBe(true);
+    expect(store.error).toBe('');
+    store.dispose();
+  });
+  it('quarantines an uncertain old actor and restores only its original bytes on A to B to A', async () => {
+    const { store, sent } = await connectedStore();
+    store.begin('7');
+    store.commit();
+    const a = store.pending[0]!;
+    const bActor = uuidV7();
+    let selectedActor = bActor;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.endsWith('/undo-history')
+          ? Response.json(historyResponse({ actor_id: selectedActor }))
+          : Response.json(projection()),
+      ),
+    );
+    sent.length = 0;
+    await store.connected(uuidBytes(bActor), (bytes) => {
+      sent.push(bytes);
+      return true;
+    });
+    expect(store.pending).toHaveLength(0);
+    expect(
+      sent.every((bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload.case !== 'command'),
+    ).toBe(true);
+    store.begin('9');
+    store.commit();
+    const b = store.pending[0]!;
+    selectedActor = documentId;
+    await store.connected(uuidBytes(documentId), (bytes) => {
+      sent.push(bytes);
+      return true;
+    });
+    expect(store.pending[0]?.id).toBe(a.id);
+    expect(sent.at(-1)).toEqual(a.bytes);
+    selectedActor = bActor;
+    await store.connected(uuidBytes(bActor), (bytes) => {
+      sent.push(bytes);
+      return true;
+    });
+    expect(store.pending[0]?.id).toBe(b.id);
+    expect(sent.at(-1)).toEqual(b.bytes);
+    store.dispose();
+  });
+  it('refuses a third actor rather than overwriting an unresolved identity quarantine', async () => {
+    const { store, sent } = await connectedStore();
+    store.begin('7');
+    store.commit();
+    const bActor = uuidV7();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.endsWith('/undo-history')
+          ? Response.json(historyResponse({ actor_id: bActor }))
+          : Response.json(projection()),
+      ),
+    );
+    await store.connected(uuidBytes(bActor), (bytes) => {
+      sent.push(bytes);
+      return true;
+    });
+    store.begin('9');
+    store.commit();
+    const b = store.pending[0]!;
+    const thirdSender = vi.fn(() => true);
+    expect(await store.connected(uuidBytes(uuidV7()), thirdSender)).toBe(false);
+    expect(thirdSender).not.toHaveBeenCalled();
+    expect(store.pending[0]?.bytes).toEqual(b.bytes);
+    expect(store.error).toContain('Смена аккаунта приостановлена');
+    store.dispose();
+  });
+  it('counts quarantined intents against every active enqueue budget', async () => {
+    const { store } = await connectedStore();
+    for (let i = 0; i < 128; i++)
+      expect(store.set({ row: 0, column: 0 }, { type: 'number', value: i })).toBe(true);
+    const actor = uuidV7();
+    const state = projection();
+    state.sheets[0]!.rows.push(uuidV7());
+    state.sheets[0]!.columns.push(uuidV7());
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.endsWith('/undo-history')
+          ? Response.json(
+              historyResponse({
+                actor_id: actor,
+                undo: [{ operation_id: uuidV7(), committed_version: '1' }],
+              }),
+            )
+          : Response.json(state),
+      ),
+    );
+    await store.connected(uuidBytes(actor), () => true);
+    store.load(state);
+    expect(store.pending).toHaveLength(0);
+    expect(store.set({ row: 0, column: 0 }, { type: 'number', value: 1000 })).toBe(false);
+    expect(store.pasteTsv('1')).toBe(false);
+    expect(store.insertRowBeforeSelection()).toBe(false);
+    expect(store.insertColumnBeforeSelection()).toBe(false);
+    expect(store.deleteSelectedRow()).toBe(false);
+    expect(store.deleteSelectedColumn()).toBe(false);
+    expect(store.extendRows()).toBe(false);
+    expect(store.addSheet()).toBe(false);
+    expect(store.cutRangePayload()).toBeUndefined();
+    const rich = JSON.stringify({
+      schema_version: 1,
+      document_id: documentId,
+      version: '1',
+      sheet_id: sheetId,
+      row_id: rowId,
+      column_id: columnId,
+      rows: 1,
+      columns: 2,
+    });
+    expect(store.pasteRangeCopy(rich)).toBe(false);
+    expect(store.canUndo).toBe(false);
+    expect(store.undo()).toBe(false);
+    expect(store.pending).toHaveLength(0);
+    store.dispose();
+  });
+});
 async function acknowledgeCellResult(
   store: DocumentStore,
   sent: Uint8Array[],
@@ -2354,7 +2908,9 @@ describe('document projection and pending intents', () => {
     let calls = 0;
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => {
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/undo-history'))
+          return Response.json(historyResponse({ through_version: '2' }));
         calls++;
         if (calls === 1) throw new Error('Temporary network loss');
         return { ok: true, json: async () => next };

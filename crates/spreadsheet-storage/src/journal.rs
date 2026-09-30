@@ -8,6 +8,9 @@ use uuid::Uuid;
 mod axis_guard;
 #[cfg(test)]
 mod axis_tests;
+mod discovery;
+#[cfg(test)]
+mod discovery_tests;
 mod move_guard;
 #[cfg(test)]
 mod move_tests;
@@ -470,6 +473,18 @@ async fn insert(
     })
 }
 impl OperationJournal for PgDatabase {
+    async fn undo_history(
+        &self,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+    ) -> Result<spreadsheet_application::history::UndoHistory, JournalError> {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            discovery::discover(self, identity, document_id),
+        )
+        .await
+        .map_err(|_| JournalError::Unavailable)?
+    }
     async fn calculation_epoch_version(
         &self,
         identity: AuthenticatedActor,
@@ -1273,6 +1288,7 @@ mod tests {
         }
         delegate_journal!(quarantine(document:DocumentId) -> ());
         delegate_journal!(access(identity:AuthenticatedActor,document:DocumentId) -> DocumentAccess);
+        delegate_journal!(undo_history(identity:AuthenticatedActor,document:DocumentId) -> spreadsheet_application::history::UndoHistory);
         delegate_journal!(create(identity:AuthenticatedActor,event:CommittedEvent) -> CommitReceipt);
         delegate_journal!(load_events(identity:AuthenticatedActor,document:DocumentId,after:DocumentVersion,limit:u32) -> Vec<CommittedEvent>);
         delegate_journal!(load_undo_target(identity:AuthenticatedActor,document:DocumentId,target:OperationId) -> CommittedEvent);
@@ -3140,6 +3156,7 @@ mod tests {
         }
         delegate_journal!(quarantine(document:DocumentId) -> ());
         delegate_journal!(access(identity:AuthenticatedActor,document:DocumentId) -> DocumentAccess);
+        delegate_journal!(undo_history(identity:AuthenticatedActor,document:DocumentId) -> spreadsheet_application::history::UndoHistory);
         delegate_journal!(create(identity:AuthenticatedActor,event:CommittedEvent) -> CommitReceipt);
         delegate_journal!(load_events(identity:AuthenticatedActor,document:DocumentId,after:DocumentVersion,limit:u32) -> Vec<CommittedEvent>);
         delegate_journal!(load_undo_target(identity:AuthenticatedActor,document:DocumentId,target:OperationId) -> CommittedEvent);

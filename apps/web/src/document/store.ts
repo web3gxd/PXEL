@@ -1,6 +1,7 @@
 import { create, toBinary } from '@bufbuild/protobuf';
 import { PreviewClient, type PreviewStatus } from '../calculation/client';
 import { copyFormulaInWorker } from '../calculation/formula-copy';
+import { readHistory } from './history';
 import type {
   Stamp,
   PreviewCell,
@@ -409,8 +410,26 @@ export class DocumentStore {
   activeSheetId: string | undefined;
   confirmed = new Map<string, Value>();
   pending: Pending[] = [];
+  private quarantinedPending: { actor: string; document: string; intents: Pending[] } | undefined;
+  private get pendingCount() {
+    return this.pending.length + (this.quarantinedPending?.intents.length ?? 0);
+  }
   private undoHistory: string[] = [];
   private redoHistory: string[] = [];
+  private historyVersions = new Map<string, bigint>();
+  private historyThrough = 0n;
+  // Only classified events or discovered history advance this watermark.
+  // HTTP projection refresh does not reveal authorship of skipped versions.
+  private historyObservedThrough = 0n;
+  private historyRequiredThrough = 0n;
+  private historyDirty = true;
+  private historyDenied = false;
+  private historyLoading = false;
+  private historyGeneration = 0;
+  private historyAttempts = 0;
+  private historyError = '';
+  private historyAbort: AbortController | undefined;
+  private historyTimer: ReturnType<typeof setTimeout> | undefined;
   selected: Position = { row: 0, column: 0 };
   selectionAnchor: Position = { row: 0, column: 0 };
   remotePresence: RemotePresence[] = [];
@@ -460,6 +479,130 @@ export class DocumentStore {
       this.projection?.sheets.find((sheet) => sheet.id === this.activeSheetId) ??
       this.projection?.sheets[0]
     );
+  }
+  private pruneHistory() {
+    const head = BigInt(this.projection?.version ?? '0');
+    const keep = (id: string) => {
+      const version = this.historyVersions.get(id);
+      return version !== undefined && head - version <= 10000n;
+    };
+    this.undoHistory = this.undoHistory.filter(keep);
+    this.redoHistory = this.redoHistory.filter(keep);
+    const retained = new Set([...this.undoHistory, ...this.redoHistory]);
+    for (const id of this.historyVersions.keys())
+      if (!retained.has(id)) this.historyVersions.delete(id);
+  }
+  private scheduleHistory(delay = 0) {
+    clearTimeout(this.historyTimer);
+    if (
+      !this.historyDirty ||
+      this.historyDenied ||
+      !this.sender ||
+      this.pending.length ||
+      this.historyLoading ||
+      this.syncing ||
+      this.headRefreshVersion > BigInt(this.projection?.version ?? '0')
+    )
+      return;
+    this.historyTimer = setTimeout(() => void this.discoverHistory(), delay);
+  }
+  private dirtyHistory(through = BigInt(this.projection?.version ?? '0')) {
+    this.historyDenied = false;
+    if (this.historyDirty && through <= this.historyRequiredThrough) {
+      this.scheduleHistory();
+      return;
+    }
+    this.historyDirty = true;
+    this.historyRequiredThrough =
+      this.historyRequiredThrough > through ? this.historyRequiredThrough : through;
+    this.historyGeneration++;
+    this.historyAbort?.abort();
+    this.scheduleHistory();
+  }
+  private observeHistoryVersion(version: bigint) {
+    if (version > this.historyObservedThrough + 1n) this.dirtyHistory(version);
+    if (version > this.historyObservedThrough) this.historyObservedThrough = version;
+  }
+  private async discoverHistory() {
+    clearTimeout(this.historyTimer);
+    const document = this.projection?.document_id;
+    const actor = this.actor && bytesUuid(this.actor);
+    if (
+      !this.historyDirty ||
+      this.historyDenied ||
+      this.historyLoading ||
+      !document ||
+      !actor ||
+      !this.sender ||
+      this.pending.length ||
+      this.syncing ||
+      this.headRefreshVersion > BigInt(this.projection?.version ?? '0')
+    )
+      return;
+    const generation = this.historyGeneration,
+      connection = this.connectionGeneration,
+      sequence = this.sequence;
+    const current = () =>
+      generation === this.historyGeneration &&
+      connection === this.connectionGeneration &&
+      document === this.projection?.document_id &&
+      actor === (this.actor && bytesUuid(this.actor));
+    this.historyLoading = true;
+    const abort = new AbortController();
+    this.historyAbort = abort;
+    this.notify();
+    let retry = 0;
+    let denied = false;
+    try {
+      const response = await fetch(`/api/documents/${encodeURIComponent(document)}/undo-history`, {
+        signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]),
+      });
+      if (!response.ok) {
+        denied = response.status === 401 || response.status === 403;
+        throw new Error(
+          denied ? 'Нет права на историю правок.' : 'Не удалось загрузить историю правок.',
+        );
+      }
+      const history = await readHistory(response);
+      if (!current()) return;
+      if (history.document_id !== document || history.actor_id !== actor)
+        throw new Error('История относится к другой таблице или пользователю.');
+      if (sequence !== this.sequence || this.pending.length) return;
+      const through = BigInt(history.through_version);
+      if (through < this.historyRequiredThrough || through < this.historyThrough)
+        throw new Error('История правок ещё не обновилась.');
+      if (through > BigInt(this.projection?.version ?? '0') && !(await this.refresh(through)))
+        throw new Error('Не удалось согласовать историю с таблицей.');
+      if (!current() || sequence !== this.sequence || this.pending.length) return;
+      this.undoHistory = history.undo.map((entry) => entry.operation_id);
+      this.redoHistory = history.redo.map((entry) => entry.operation_id);
+      this.historyVersions = new Map(
+        [...history.undo, ...history.redo].map((entry) => [
+          entry.operation_id,
+          BigInt(entry.committed_version),
+        ]),
+      );
+      this.historyThrough = through;
+      if (through > this.historyObservedThrough) this.historyObservedThrough = through;
+      this.historyDirty = false;
+      this.historyAttempts = 0;
+      if (this.error === this.historyError) this.error = '';
+      this.historyError = '';
+      this.pruneHistory();
+    } catch (error) {
+      if (current()) {
+        this.historyDenied = denied;
+        this.historyError =
+          error instanceof Error ? error.message : 'Не удалось загрузить историю правок.';
+        this.error = this.historyError;
+        retry = Math.min(30000, 1000 * 2 ** Math.min(this.historyAttempts++, 5));
+      }
+    } finally {
+      this.historyLoading = false;
+      if (this.historyAbort === abort) this.historyAbort = undefined;
+      if (!denied || !current()) this.scheduleHistory(retry);
+      this.notify();
+    }
   }
   selectSheet(sheetId: string) {
     if (this.sheet?.id === sheetId) return true;
@@ -858,6 +1001,11 @@ export class DocumentStore {
       this.remotePresence = [];
       this.undoHistory = [];
       this.redoHistory = [];
+      this.historyVersions.clear();
+      this.historyThrough = 0n;
+      this.historyObservedThrough = 0n;
+      this.historyRequiredThrough = 0n;
+      this.dirtyHistory(BigInt(projection.version));
       this.cutIntent = undefined;
     }
     const remap = (position: Position): Position => {
@@ -878,6 +1026,7 @@ export class DocumentStore {
     const nextSelected = remap(this.selected);
     const nextAnchor = remap(this.selectionAnchor);
     this.projection = projection;
+    this.pruneHistory();
     this.activeSheetId = nextSheet?.id;
     this.selected = nextSelected;
     this.selectionAnchor = nextAnchor;
@@ -889,6 +1038,7 @@ export class DocumentStore {
     this.restartCalculation();
     this.syncPreview(true);
     this.subscribeToHead();
+    this.scheduleHistory();
     this.notify();
   }
   private subscribeToHead() {
@@ -1002,6 +1152,7 @@ export class DocumentStore {
       if (generation === this.syncGeneration) {
         this.loading = false;
         this.syncing = false;
+        this.scheduleHistory();
         this.notify();
       }
     }
@@ -1115,6 +1266,38 @@ export class DocumentStore {
   }
   async connected(actor: Uint8Array, sender: (bytes: Uint8Array) => boolean) {
     const generation = ++this.connectionGeneration;
+    const previousActor = this.actor && bytesUuid(this.actor),
+      nextActor = bytesUuid(actor);
+    const document = this.projection?.document_id;
+    if (previousActor && previousActor !== nextActor) {
+      const restore =
+        this.quarantinedPending?.actor === nextActor &&
+        this.quarantinedPending.document === document
+          ? this.quarantinedPending
+          : undefined;
+      if (this.pending.length && this.quarantinedPending && !restore) {
+        this.disconnected();
+        this.error =
+          'Сначала подтвердите правки предыдущих аккаунтов. Смена аккаунта приостановлена.';
+        this.notify();
+        return false;
+      }
+      const quarantine =
+        this.pending.length && document
+          ? { actor: previousActor, document, intents: this.pending }
+          : undefined;
+      this.pending = restore?.intents ?? [];
+      this.quarantinedPending = quarantine ?? (restore ? undefined : this.quarantinedPending);
+      this.undoHistory = [];
+      this.redoHistory = [];
+      this.historyVersions.clear();
+      this.historyThrough = 0n;
+      this.historyObservedThrough = 0n;
+      this.historyRequiredThrough = 0n;
+      this.editing = undefined;
+      this.cutIntent = undefined;
+      this.syncPreview(true);
+    }
     this.pending.forEach((op) => {
       op.attempts = 0;
     });
@@ -1125,10 +1308,12 @@ export class DocumentStore {
     if (generation !== this.connectionGeneration) return;
     if (!synced) return false;
     this.sender = sender;
+    this.dirtyHistory();
     this.subscribeToHead();
     if (this.previewStatus === 'idle' && this.projection) this.syncPreview(true);
     this.restartCalculation();
     this.flush();
+    await this.discoverHistory();
     return true;
   }
   disconnected() {
@@ -1137,6 +1322,10 @@ export class DocumentStore {
     this.calculationAssembly = undefined;
     clearTimeout(this.calculationTimer);
     this.connectionGeneration++;
+    this.historyGeneration++;
+    this.historyDirty = true;
+    this.historyAbort?.abort();
+    clearTimeout(this.historyTimer);
     this.syncGeneration++;
     this.syncing = false;
     this.sender = undefined;
@@ -1260,7 +1449,7 @@ export class DocumentStore {
       this.notify();
       return false;
     }
-    if (this.pending.length >= 128) {
+    if (this.pendingCount >= 128) {
       this.error = 'Слишком много неподтвержденных изменений. Дождитесь соединения.';
       this.notify();
       return false;
@@ -1327,12 +1516,24 @@ export class DocumentStore {
   }
   get canUndo() {
     return Boolean(
-      this.undoHistory.length && this.sender && this.pending.length === 0 && !this.editing,
+      this.undoHistory.length &&
+      this.pendingCount < 128 &&
+      !this.historyDirty &&
+      !this.historyLoading &&
+      this.sender &&
+      this.pending.length === 0 &&
+      !this.editing,
     );
   }
   get canRedo() {
     return Boolean(
-      this.redoHistory.length && this.sender && this.pending.length === 0 && !this.editing,
+      this.redoHistory.length &&
+      this.pendingCount < 128 &&
+      !this.historyDirty &&
+      !this.historyLoading &&
+      this.sender &&
+      this.pending.length === 0 &&
+      !this.editing,
     );
   }
   undo() {
@@ -1345,7 +1546,13 @@ export class DocumentStore {
     const projection = this.projection,
       actor = this.actor,
       target = (direction === 'undo' ? this.undoHistory : this.redoHistory).at(-1);
-    if (!projection || !actor || !target || !(direction === 'undo' ? this.canUndo : this.canRedo))
+    if (
+      !projection ||
+      !actor ||
+      !target ||
+      this.pendingCount >= 128 ||
+      !(direction === 'undo' ? this.canUndo : this.canRedo)
+    )
       return false;
     const id = uuidV7();
     const bytes = toBinary(
@@ -1418,6 +1625,7 @@ export class DocumentStore {
     if (
       this.editing ||
       this.pending.length ||
+      this.pendingCount >= 128 ||
       this.syncing ||
       this.loading ||
       this.formulaCopyInFlight
@@ -1598,7 +1806,14 @@ export class DocumentStore {
     const projection = this.projection,
       sheet = this.sheet,
       actor = this.actor;
-    if (!projection || !sheet || !actor || byteLength(raw) > 16 * 1024 || this.pending.length)
+    if (
+      !projection ||
+      !sheet ||
+      !actor ||
+      byteLength(raw) > 16 * 1024 ||
+      this.pending.length ||
+      this.pendingCount >= 128
+    )
       return false;
     let payload: unknown;
     try {
@@ -1756,7 +1971,7 @@ export class DocumentStore {
     if (
       count < 1 ||
       count > 1000 ||
-      this.pending.length >= 128 ||
+      this.pendingCount >= 128 ||
       rows.some(
         (row, rowIndex) =>
           position.row + rowIndex >= sheet.rows.length ||
@@ -1848,7 +2063,7 @@ export class DocumentStore {
   addSheet() {
     const projection = this.projection,
       actor = this.actor;
-    if (!projection || !actor || projection.sheets.length >= 64 || this.pending.length >= 128)
+    if (!projection || !actor || projection.sheets.length >= 64 || this.pendingCount >= 128)
       return false;
     const names = new Set(projection.sheets.map((sheet) => sheet.name.toLowerCase()));
     let number = 1;
@@ -1897,7 +2112,7 @@ export class DocumentStore {
       !actor ||
       sheet.rows.length >= 100_000 ||
       this.pending.some((pending) => pending.kind === 'extendRows') ||
-      this.pending.length >= 128
+      this.pendingCount >= 128
     )
       return false;
     const rows = Array.from({ length: Math.min(1_000, 100_000 - sheet.rows.length) }, uuidV7);
@@ -1940,7 +2155,7 @@ export class DocumentStore {
       !before ||
       sheet.rows.length >= 100_000 ||
       this.pending.some((pending) => pending.kind === 'insertRows') ||
-      this.pending.length >= 128
+      this.pendingCount >= 128
     )
       return false;
     const id = uuidV7();
@@ -1986,7 +2201,7 @@ export class DocumentStore {
       !before ||
       sheet.columns.length >= 1_000 ||
       this.pending.some((pending) => pending.kind === 'insertColumns') ||
-      this.pending.length >= 128
+      this.pendingCount >= 128
     )
       return false;
     const id = uuidV7();
@@ -2032,7 +2247,7 @@ export class DocumentStore {
       !column ||
       sheet.columns.length <= 1 ||
       this.pending.some((pending) => pending.kind === 'deleteColumns') ||
-      this.pending.length >= 128
+      this.pendingCount >= 128
     )
       return false;
     const id = uuidV7();
@@ -2074,7 +2289,7 @@ export class DocumentStore {
       !row ||
       sheet.rows.length <= 1 ||
       this.pending.some((pending) => pending.kind === 'deleteRows') ||
-      this.pending.length >= 128
+      this.pendingCount >= 128
     )
       return false;
     const id = uuidV7();
@@ -2256,6 +2471,8 @@ export class DocumentStore {
       if (marker.documentId.length !== 16 || marker.barrierVersion > 9223372036854775807n)
         throw new Error('Invalid replay barrier');
       if (bytesUuid(marker.documentId) !== this.projection?.document_id) return;
+      if (marker.barrierVersion > this.historyThrough) this.dirtyHistory(marker.barrierVersion);
+      this.observeHistoryVersion(marker.barrierVersion);
       if (marker.barrierVersion > BigInt(this.projection.version)) {
         if (marker.barrierVersion > this.headRefreshVersion)
           this.headRefreshVersion = marker.barrierVersion;
@@ -2268,10 +2485,27 @@ export class DocumentStore {
       if (
         hint.documentId.length !== 16 ||
         hint.headVersion === 0n ||
-        hint.headVersion > 9223372036854775807n
+        hint.headVersion > 9223372036854775807n ||
+        ![0, 1, 2].includes(hint.headEventKind) ||
+        (hint.headEventKind === 1 ? hint.headActorId.length !== 16 : hint.headActorId.length !== 0)
       )
         throw new Error('Invalid document head hint');
       if (bytesUuid(hint.documentId) !== this.projection?.document_id) return;
+      this.observeHistoryVersion(hint.headVersion);
+      const localEvent =
+        hint.latestOperation &&
+        (this.pending.some(
+          (pending) => pending.id === bytesUuid(hint.latestOperation!.operationId),
+        ) ||
+          this.historyVersions.has(bytesUuid(hint.latestOperation.operationId)));
+      if (
+        hint.headVersion > this.historyThrough &&
+        (hint.headEventKind === 0 ||
+          (hint.headEventKind === 1 &&
+            !localEvent &&
+            bytesUuid(hint.headActorId) === (this.actor && bytesUuid(this.actor))))
+      )
+        this.dirtyHistory(hint.headVersion);
       if (hint.headVersion > BigInt(this.projection.version)) {
         const event = hint.latestOperation;
         if (
@@ -2302,6 +2536,7 @@ export class DocumentStore {
               .map((byte) => byte.toString(16).padStart(2, '0'))
               .join(''),
           };
+          this.pruneHistory();
           this.restartCalculation();
           this.syncPreview();
           this.notify();
@@ -2374,6 +2609,14 @@ export class DocumentStore {
       this.error = `Изменение отклонено. ${rejectionText[rejection.code] ?? 'Неизвестная причина; обновите страницу.'}`;
       if (rejection.resyncRequired) await this.refresh();
     } else {
+      this.observeHistoryVersion(payload.value.committedVersion);
+      if (
+        payload.case === 'receipt' &&
+        payload.value.currentHeadVersion > this.historyObservedThrough
+      ) {
+        // A receipt identifies its target, not the authors of the following tail.
+        this.dirtyHistory(payload.value.currentHeadVersion);
+      }
       if (
         payload.case === 'committed' &&
         payload.value.committedVersion === BigInt(this.projection.version) + 1n &&
@@ -2418,35 +2661,49 @@ export class DocumentStore {
         this.projection?.sheets.some((sheet) => sheet.id === completed.sheetId)
       )
         this.selectSheet(completed.sheetId);
-      if (
-        completed?.kind === 'cell' ||
-        completed?.kind === 'batch' ||
-        completed?.kind === 'copyRange' ||
-        completed?.kind === 'moveRange' ||
-        completed?.kind === 'insertRows' ||
-        completed?.kind === 'deleteRows' ||
-        completed?.kind === 'insertColumns' ||
-        completed?.kind === 'deleteColumns'
-      ) {
-        this.undoHistory.push(completed.id);
-        if (this.undoHistory.length > 100) this.undoHistory.shift();
-        this.redoHistory = [];
-      } else if (completed?.kind === 'undo') {
-        const from = completed.direction === 'undo' ? this.undoHistory : this.redoHistory;
-        const to = completed.direction === 'undo' ? this.redoHistory : this.undoHistory;
-        if (from.at(-1) === completed.target) {
-          from.pop();
-          to.push(completed.id);
-          if (to.length > 100) to.shift();
-        }
-      } else if (completed) {
-        this.undoHistory = [];
-        this.redoHistory = [];
+      const committedVersion = payload.value.committedVersion;
+      if (completed) {
+        this.historyGeneration++;
+        this.historyAbort?.abort();
+        this.historyRequiredThrough =
+          this.historyRequiredThrough > committedVersion
+            ? this.historyRequiredThrough
+            : committedVersion;
       }
+      if (completed && committedVersion > this.historyThrough) {
+        this.historyVersions.set(completed.id, committedVersion);
+        if (
+          completed?.kind === 'cell' ||
+          completed?.kind === 'batch' ||
+          completed?.kind === 'copyRange' ||
+          completed?.kind === 'moveRange' ||
+          completed?.kind === 'insertRows' ||
+          completed?.kind === 'deleteRows' ||
+          completed?.kind === 'insertColumns' ||
+          completed?.kind === 'deleteColumns'
+        ) {
+          this.undoHistory.push(completed.id);
+          if (this.undoHistory.length > 100) this.undoHistory.shift();
+          this.redoHistory = [];
+        } else if (completed?.kind === 'undo') {
+          const from = completed.direction === 'undo' ? this.undoHistory : this.redoHistory;
+          const to = completed.direction === 'undo' ? this.redoHistory : this.undoHistory;
+          if (from.at(-1) === completed.target) {
+            from.pop();
+            to.push(completed.id);
+            if (to.length > 100) to.shift();
+          }
+        } else if (completed) {
+          this.undoHistory = [];
+          this.redoHistory = [];
+        }
+      }
+      this.pruneHistory();
       this.error = '';
     }
     this.syncPreview();
     this.notify();
     this.flush();
+    this.scheduleHistory();
   }
 }

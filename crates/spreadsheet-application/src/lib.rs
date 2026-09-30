@@ -66,4 +66,5 @@ pub trait BlobStore: Send + Sync {
     fn delete(&self, key: &BlobKey) -> impl Future<Output = Result<(), BlobStoreError>> + Send;
 }
 
+pub mod history;
 pub mod journal;

@@ -1,5 +1,15 @@
 # Проверки и доказательства
 
+ADR086 adds application history reduction, a paged real-PostgreSQL discovery
+suite, metadata-only HTTP/ACL tests, browser reload/multi-tab tests and a
+two-hard-kill recovery test. Version-window and payload-budget boundaries are
+tested with actual persisted events. Frontend regressions cover stale responses,
+uncertain receipts and unseen own edits hidden by coalesced foreign/system heads
+or local ACKs. System-event provenance must be verified through the live actor,
+not solely by constructing a HeadUpdate in an adapter unit test. Final stage
+acceptance is limited to this locally verified history slice; RUNBOOK records
+the commands, intermediate failures and final regression scope.
+
 ADR085 coverage: domain axis_edit/lifecycle and storage-codec axis_tests exercise
 exact restoration, malformed envelopes, snapshot3/legacy readers and activation
 floors. Real PostgreSQL journal axis_tests cover own/foreign history, restored

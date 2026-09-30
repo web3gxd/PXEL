@@ -3,6 +3,8 @@ mod axis_history;
 mod bootstrap;
 pub mod calculation;
 #[cfg(test)]
+mod context_head_tests;
+#[cfg(test)]
 mod historical_recovery_tests;
 #[cfg(test)]
 mod watch_tests;
@@ -465,6 +467,7 @@ async fn run<J: OperationJournal>(
     while let Ok(Some(request)) =
         tokio::time::timeout(Duration::from_secs(60), receiver.recv()).await
     {
+        let mut context_event = None;
         match request {
             Request::Open { identity, reply } => {
                 let before = workbook.version();
@@ -596,17 +599,24 @@ async fn run<J: OperationJournal>(
                     &mut axes,
                 )
                 .await
-                .and_then(|receipt| receipt.ok_or(SessionError::InvalidCommand));
+                .and_then(|outcome| {
+                    context_event = outcome.event;
+                    outcome.receipt.ok_or(SessionError::InvalidCommand)
+                });
                 if result.is_ok() && workbook.version() > before {
                     maybe_snapshot(snapshots.as_ref(), &workbook);
                 }
                 let _ = reply.send(result);
             }
         }
+        let event = bootstrap.take_head_event().or(context_event);
         if head_sender.borrow().version != workbook.version() {
             head_sender.send_replace(HeadUpdate {
                 version: workbook.version(),
-                event: None,
+                event: event.filter(|event| {
+                    event.document_id == workbook.document_id()
+                        && event.version == workbook.version()
+                }),
             });
         }
     }
@@ -979,7 +989,7 @@ async fn advance_context<J: OperationJournal>(
     trigger: bootstrap::ContextAdvance<'_>,
     calculation: &CalculationHandle,
     axes: &mut axis_history::AxisHistory,
-) -> Result<Option<CommitReceipt>, SessionError> {
+) -> Result<bootstrap::ContextAdvanceOutcome, SessionError> {
     let bootstrap::ContextAdvance {
         operation_id,
         context: sampled_context,
@@ -1004,10 +1014,16 @@ async fn advance_context<J: OperationJournal>(
             if receipt.current_head_version > workbook.version() {
                 refresh(journal, identity, workbook, calculation, axes).await?;
             }
-            return Ok(Some(receipt));
+            return Ok(bootstrap::ContextAdvanceOutcome {
+                receipt: Some(receipt),
+                event: None,
+            });
         }
         if !admission.permits(workbook) {
-            return Ok(None);
+            return Ok(bootstrap::ContextAdvanceOutcome {
+                receipt: None,
+                event: None,
+            });
         }
         let next = DocumentVersion::new(
             workbook
@@ -1044,11 +1060,17 @@ async fn advance_context<J: OperationJournal>(
                 axes.publish(workbook, &event.operation, None);
                 calculation.publish(workbook.clone(), &event.operation);
                 tracing::info!(event = "calculation_epoch_advanced", version = next.get());
-                return Ok(Some(receipt));
+                return Ok(bootstrap::ContextAdvanceOutcome {
+                    receipt: Some(receipt),
+                    event: Some(Arc::new(event)),
+                });
             }
             Ok(CommitOutcome::AlreadyCommitted(receipt)) => {
                 refresh(journal, identity, workbook, calculation, axes).await?;
-                return Ok(Some(receipt));
+                return Ok(bootstrap::ContextAdvanceOutcome {
+                    receipt: Some(receipt),
+                    event: None,
+                });
             }
             Err(JournalError::Conflict) if attempt < 2 => continue,
             Err(error) => return Err(error.into()),

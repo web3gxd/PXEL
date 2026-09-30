@@ -72,6 +72,14 @@ pub enum JournalError {
     UndoWindowExceeded,
 }
 pub trait OperationJournal: Send + Sync {
+    /// Bounded verified per-author history through a frozen durable head.
+    /// Entries are potential inverse targets; execution must reauthorize and
+    /// validate the existing transactional inverse guards.
+    fn undo_history(
+        &self,
+        identity: AuthenticatedActor,
+        document_id: DocumentId,
+    ) -> impl Future<Output = Result<crate::history::UndoHistory, JournalError>> + Send;
     /// Last calculation system event through a recovered projection's head.
     fn calculation_epoch_version(
         &self,

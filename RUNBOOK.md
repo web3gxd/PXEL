@@ -4184,3 +4184,208 @@ or combined100kformula/ACL/restartload. Ignored harnesses remain ignored; no
 productionp95 claims. Nextminimalstage is durable per-actor/document history
 discovery after UIreload; then richerstyles/merges and fullerXLSX, with all wider
 acceptance/deployment gates retained. Fullgoal staysactive.
+
+## ADR086 — durable author history discovery (in progress)
+
+2026-09-30. Previous goal turn committedverifiedADR085 aeed0d6 withcleanworktree;
+classifiedprogress, fullgoalactive. ReadAGENTS/roadmap/RUNBOOK/ADR085/currentactor,
+journal/store beforethisstage. API/interface skillguidescontract. Nextvertical
+slice: content-free ownhistory fromverifiedPGlog throughfrozenhead, HTTPendpoint,
+clientreload/reconnect integration, genuinebrowser andPGtests. Risks are stale
+history response racing ACK, nonlinear multi-tab compensations, authorization
+revocation duringpagedread, boundedtail and uncertainactor changes.
+
+Agreed application types/reducer+OperationJournal.undo_history port; rootadded
+server GET /api/documents/{id}/undo-history withexisting2-reader gate/30stimeout,
+currentauth+postreadsessioncheck and noactorselectionquery. Additive headhint
+headEventKind0/1/2 +headActorId scheduleownhistoryrefresh withoutsystemtimerloops.
+Wire/storagelifecycles remainseparate; persistedformats unchanged. NewADR086
+records nonlinear preservation,100targets/stack,10001inclusivewindow,64MiBscan,
+4MiBenvelope caps, stampedclientinstallation and singleboundedquarantinepolicy.
+Applicationagent ownsnewhistory.rs/tests pluslibexport; storageagent ownsjournal
+scanner/macros/PGtests; frontendagent ownsstore/decoder/unit/browser. Rootowns
+HTTP/proto/adaptertests/docs and integration. No newdependencies or migrations.
+
+Actualcheckssofar: application8testsPASS +strictClippyPASS. Visibleversion identity
+regression RED→GREEN: reject future-ID/past-version and unknownIDclaimingvisible
+version; outside-windowunknowncompensation remainsdefined. InitialprotobufBuf
+lint RED dueenumnameprefix/zero-suffix; fixednames toHEAD_EVENT_KIND_* and
+pnpmproto:generatePASS, lintunchanged. RootworkspaceallfeaturecompilePASS11.74s.
+Initial2frontendTDDtestsRED because discoverymissing; implementationinprogress.
+No updatedruntime/reload/browser/PGdiscovery acceptance claimyet. Ownedlauncher
+27828 stillservespreviousverifiedADR085 whilecoding proceeds.
+
+ADR086 continuation verification (2026-09-30): previous status-only turn classified
+no-progress; revalidated live55945 and continued safe work. That HTTP run ended
+3PASS/1FAIL: fixture used read-only RequestCalculation and waited for a head
+change that it does not create. Corrected fixture to durable POST /recalculate;
+rerun3PASS/1FAIL exposed actual system head hint Unknown0 instead System2.
+Actor AdvanceContext currently publishes eventNone; fixing exact event provenance,
+not weakening assertion. Fresh frontend review also found coalesced foreign/system
+head could hide an unseen own operation; version-gap discovery fix underway.
+
+Verified frontend targeted reload/history14/14 browser PASS40.4s DPR1/2; frontend
+133/133 unit PASS3.41s; proto:check PASS. Seven genuine PostgreSQL scanner tests
+PASS72.32s including post-reconstruction authorization. New recovery test PASS
+1/1 with two hard kills, unobserved ACK, exact discovery and executable inverses.
+SQLx prepare workspace/all-targets/all-features PASS16.82s; server head adapter
+unit PASS after correcting test assumption: user envelope exists even when its
+canonical operation has no live wire representation. Initial Windows running
+binary build lock resolved by stopping only verified own launcher27828 tree.
+Updated launcher27728 serves backend8080/frontend5173 (both200), PG retained.
+Full142 browser and workspace Rust test handles live; no full acceptance claim.
+
+ADR086 regression progress: fullworkspace Rust tests running85759; strictall-target
+all-feature Clippy PASS42.20s before actorprovenance fix. Format check found
+unformatted rootserver/test andapplicationlib files; cargo fmt applied to only
+those packages. Prettier newHTTP fixture PASS. Fresh review found historygap both
+coalesced foreign/system hints AND localACK catch-up, shared watermark fix with
+REDtests underway. No successful finalgeneralregression claim yet.
+
+Fresh review followup: observed-history watermark must be separate from HTTP
+projection and installedhistory head. Missing own events can be hidden by a
+coalesced foreign/system hint or localACK11 after unseenown10. Frontend five
+newtests genuineRED→GREEN, immediate knownACK/foreign/system scan avoidance
+staysGREEN (fullverificationpending). SQLxcheck12196 started whilecollabediting
+and endedE0502samplerborrow; agentnotified, compilegate rerunafterfilesfrozen.
+
+Workspace Rust unit/integration run85759 terminal PASS (compiled before final
+system-provenance edits). PostgreSQL storage90PASS/4ignored116.89s; codec49PASS;
+server19PASS/CLI3PASS, blob11PASS, WASM4+7+9PASS, wire6PASS, XLSX12PASS and all
+other emitted suites green. This is not verification of later actor changes.
+StrictworkspaceClippy earlierPASS42.20s. Frontend updatedgapfix139/139PASS plus
+typecheck/lint/build/Prettier PASS; five newcases hadactualRED→GREEN. Full142
+browser stilllive72483, Vitechanged at14:26:19MSK; rerunaffectedearliercases after
+actor finalbuild. ADR086 scheduling documentation updated for watermark/gaps.
+
+CurrentruntimeWASM1355725bytes native/browser parity PASS:554formula fixtures,
+1010books/2020patches,209books/418moves. Sequential developercorpus run during
+browserregression, notbenchmarkthreshold/p95. ActualmachineWin11build26100,
+CoreUltra9 185H,Node24.18.0,Chromium153.0.8010.12; engine0.14.0 unchanged.
+
+Secondfreshread-onlyreview ofwatermarkfinalstore foundoriginalhead/ACKgapclosed,
+no additionalconcretedefect: resetsdocument/actor, stampedhistory-aheadprojection
+and unknownreceipt tail reviewed. No testsrunbyreviewagent. docs/testing adds
+ADR086coverage includingrealactorprovenancegate; allchangesinprogress recorded.
+
+Fullbrowser72483 exposed one old assertion atdocument.spec.ts1082: Undo expected
+disabledafterreload, contradicting newlyrequired durablehistory. DPR2 failed
+withenabledbutton (DPR1 earlier transientlypassedbeforeload). Updated expectation
+toEnabled and strengthened test byactuallyUndo33afterreload, assertown/remote11
+andRedoEnabled. No testdeleted or weakerassertion; finaltargetedrerunpending.
+
+Fullbrowser72483 terminal141PASS/1FAIL9.3min. SolefailureoldexpectedlostUndoafter
+reload revisedwithactualpostreloadcompensationcheck; focused16cases(DPR1/2)
+startedonupdatedfrontend. Full142notclaimedgreen. First20casesprecededwatermark
+change; finalgeneralrun required afterfinalactorbuild.
+
+Finalgapfrontend16targetedbrowser PASS49.0s DPR1/2, includesactualpostreloadUndo
+andremoteconvergence. Corrected SQLxprepare--check workspace/all-targets/all-
+features PASS18.67s aftercollabfilesfrozen; rustfmtallcheck andownedPrettierPASS.
+Actorprivatecontextoutcome preservesfreshdurableSystemevent, neverinventsproof
+forreceipt/externalrefresh. Three newactorprovenancetestsPASS (fixtureepoch0
+initiallyinvalid; fixed1). Ownverifiedlauncher27728 tree stoppedafterbrowser
+terminal; rebuild28817live, PostgreSQL untouched. Fullgeneral finalregression
+stillrequired. NoMVPcompletionclaim.
+
+FinalbackendbuildPASS37.40s; hiddenlauncher22224 ready/webboth200. GenuineHTTP
+systemhintstill0afteractorfix: tracedWSdelivery send_replay deliberatelyfallsback
+onunrepresentableSystemevent anddiscardsexactprovenance. Keepactorfix (actual
+actorproof), rootnowpreservesverifiedevent ONLY whenitisthebarrierhead; earlier
+unrepresentabletail/budget/windowfallbackremainUnknown. StrengthenedHTTPchecks
+ReplayComplete andexactheadversion confirmsnotastaleinitialframe. Freshfull142
+browser74093live(onbeforefinaldeliveryfix); not finalacceptance.
+
+Rootlatestdeliveryfix cargo check server/dev-auth PASS12.15s. Runtime22224 still
+servesbeforethislastWSfix; final142browser74093 live, observed36green. No terminal
+claim, do notrestartwhilebrowserlive. Next: pollsame74093, rebuildownruntimeafter
+terminal, rerunactualHTTP4/80 andfinalaffectedbrowserchecks + sixrecoverytests,
+thenupdateADR086/readme/roadmap/presentationandcommitonlyverifiedslice. Strict
+fullClippy/SQLxcache finaldeliverycheck required. Fullobjectiveactive/incomplete.
+
+Continuation2026-09-30: previousgoalturnclassifiedprogress (watermark/code/review,
+actualtests andWSdeliveryfix); revalidatedlive74093, no restartonobservation.
+FinalstrictworkspaceClippy86039 PASS15.86s andSQLxpreparecheck93499 PASS19.73s.
+FreshreviewWSfallback foundexactbarrier metadata safe: earlierunrepresentable,
+byte/windowcuts remainUnknown; prefixcontiguous, ReplayComplete resyncrequired
+preserved, domain/versionfilter andACL preserved. No edits/testsbyreviewagent.
+Full142browserstilllive, first80green oncurrentruntime22224 (beforelastdelivery
+build). Fullobjectiveactive; no acceptance statuschange orcommityet.
+
+Beforefinalruntimebuild: nextreadonlyinventory requestedforstyles/merges extension
+points only, not implementation or acceptingphase87. Documentationagent owns
+README/architecture/collaboration/persistence sync andkeepsfinalgatepending.
+Rootownsroadmap/ADR/RUNBOOK/presentation. No overwriting sharedfiles orsecrets.
+
+Browser74093 terminal142/142PASS7.4min DPR1/2, correctedUndoafterreload included.
+Compiledactorprovenancewasactive; lastrootWSfallbackdeliveryfixnotyetbinary.
+Onlyafterterminal ownverifiedlauncher22224 tree stopped; build63358 live. PG
+untouched. NextactualHTTPmetadataregression mustverifythatfinaldeliveryfix.
+
+Finalruntimebuild63358PASS18.27s; hiddenlauncher28904 servescurrentWSdelivery.
+GenuineHTTP history4/4PASS6.715s: exactSystemhead3 typed2/emptyactor, ReplayComplete
+proven andownhistoryretained. Originalactual0→2regression closedbyactor+WSfix.
+Full80HTTP77778, sixrealhardrestart39976,34affectedfinalbrowser27248 started.
+These sharePG/runtime andarenot latencybenchmarks. Docagentupdatedexactfourfiles
+README/architecture/collaboration/persistence; finalgatespending, historical
+limitationspreservedasoldrecords. Docs diffcheck/linkresolutionPASS, nottests.
+
+Finalsixrecovery39976PASS6/6 24.917s; finalserver19unitPASS0.53s.
+Full80HTTP foundrealcompatibilityregression: exactuserfallbacknowincluded
+latestOperationwrapper althoughpreviouspublicfallbackomitsit. ExistingCopytest
+keptassertion. Rootfallbacknowpreservesexactauthor/Systemmetadatawhileomitting
+latestOperation viahelper include_operationfalse. Addedunitchecksuserhintactor
+retainedandlatestNone. No assertionweakened. Runtime28904 beforethissmallfix;
+34browser27248 and80HTTP77778 stilllive; rebuildonlyafterterminal.
+
+80HTTP77778terminal79PASS/1FAIL134.085s, onlycopyfallbacklatestOperation regression
+above (fixnotyetinruntime). Newunitfilteredcargo testwithout--bin attemptedCLI
+binaryrelink whilecurrentserverrunningandhitWindowsAccessDenied; rerunexplicit
+--bin pxel-server avoidsCLIrelink, not permissionorPGfailure. Final34browser27248
+live22green; don'tstopruntimeuntilterminal. No fullHTTPgreen claimyet.
+
+34affectedbrowser27248 terminal34PASS4.1min(currentactor+exactbarrierfix).
+FinalcopywrapperfixunitPASS; strictserverClippy+fmtallPASS18.27s. Verifiedown
+launcher28904stoppedonlyafterterminal; buildPASS6.53s, hidden25768nowcurrent.
+TargetedgenuinePGHTTPcopy+System2/2PASS2.319s witholdcontractassertionsintact.
+Full80HTTP15989 andfinal16browser26875 live. Updatedpresentation closingfeature
+text withreload/sharedhistory/twohardkills; broaderstyles/merges/crash/S3/XLSX
+remainopen. No newperformanceclaim, no wholeMVPcompletion.
+
+PresentationcheckPASS10slidesnavigation/layout at1440x900and390x844. Targeted
+Prettier foundonlychangedclosingparagraph formatting; fixedHTMLwithPrettier,
+diffcheckPASS. No render/presentationbenchmarkchange. Nextstyleinventory:
+currentCellContent/contenthash/snapshot3 lackstyles; styledblanks needseparate
+sparseproperty, copy/moveoldschemas retaincontent-onlysemantics. Axisdelete/inverse
+preimages andXLSXIR/export currentlynostyles/merges. This is inventoryonly, no
+ADR087acceptance orstylecodeclaim. Rawdetailsfromreadonlyagent retainedinthread.
+
+## ADR086 — locally verified completion of bounded author history slice
+
+Finalfull80HTTP15989PASS136.785s oncurrentbinary; final16browser26875PASS1.2min
+DPR1/2; final6hardrestart29671PASS26.540s. Earlierfull142browserPASS7.4min,
+34affectedbrowserPASS4.1min beforelastfallbackwrapperomissionfix; final16covers
+thatupdateddelivery. Frontend139unitPASS,8applicationreducerPASS,7genuinePG
+scannerPASS, collab28PASS/2ignored, fullworkspaceRustpre-provenancePASS, final
+actorunit/strictClippyPASS andserverunit19PASS +newfallbackunit1PASS. Strict
+workspaceClippy/SQLxpreparecheck/proto:check/rustfmt recordedabove. CurrentWASM
+1355725bytes native/browser554formulas/1010books2020patches/209books418movesPASS.
+
+Implementedapplicationcontent-free reducer andboundedPGscanner; strictauthenticated
+GET undo-history; additivewireheadmetadata separatefrompersistedcodecs; observed
+history watermark/gap handling, stampedreload/reconnect installation, receipt
+andboundedactorquarantine; exactSystem provenanceinactor andverifiedbarrier
+metadataonlyfallback. No newtables/dependencies/enginenumericidentitychanges.
+UpdatedREADME/architecture/collaboration/persistence/testing/roadmap/ADR086 and
+10-slidepresentation. Exactcodefileslistedbygitdiff; no unrelateduserfiles.
+
+Limits:100Undo+100Redo potentialtargets sharedauthor/document, notprivate-tab
+stack;10001-record/64MiB suffix,100-targetcap, corruptiontypederror; execution
+reauthorizesandcanrefuseforeignconflict. Rejectedtargets canreappearafterreload.
+Singlepreviousactorquarantine ismemoryonly, combinedpending128, furtheroverwriting
+uncertaintyrefused. AutomaticExtendRows/AddSheetremainhistorybarriers. No new
+productionlatencyclaim. Notrun: Linux/Compose/remoteCI, RussianS3contract,
+OSXLSXworkerisolation, new100kcombinedstress/fuzz/manualExcelgoldens. FullMVPgoal
+active/incomplete; nextminimalstage independentstyles inclstyledblanks anddurable
+stylewrites, thenrangeformatting/history/merges/fullXLSXprofile. Localruntime25768
+retained; PG55432 preserved. ADR086acceptedonlythislocallyverifiedslice.

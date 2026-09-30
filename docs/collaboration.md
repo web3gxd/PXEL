@@ -16,6 +16,11 @@ process-local payload send gate (ADR-016). Два разных dev-пользо�
 остаются открытыми.
 Подробные результаты находятся в RUNBOOK.
 
+Ниже сохранено развитие контрактов отдельных ADR. Явные структурные inverses
+добавлены ADR-085; восстановление общей истории автора реализовано в ADR-086.
+Локальные проверки интеграции ADR-086 на обновлённом runtime, HTTP и recovery
+прошли. Это не закрывает весь gate фазы 4 или production-развёртывания.
+
 Первый структурный срез `ExtendRows` принят по ADR-019: actor добавляет
 ограниченный batch стабильных row IDs только в конец оси, сериализует
 конкурентные запросы через CAS, а WebSocket-клиент обновляет авторизованную
@@ -42,22 +47,24 @@ stable IDs должны быть живыми и уникальными; пос�
 диапазон сужается к живой границе. Stale edit по удалённому ID отклоняется,
 оригинальный idempotent retry возвращает receipt. Replay проверяет тот же
 domain hash. Матрица ниже задаёт целевой контракт полного набора операций;
-inverse/undo для `DeleteRows` в текущем срезе ещё нет.
+в исходном срезе ADR-022 inverse/undo для `DeleteRows` ещё не было. Новые
+отменяемые axis events и восстановление IDs описаны в ADR-085 ниже.
 
 `InsertColumns` (ADR-023) использует stable column anchor и отдельное
 schema-8 событие. Конкурентные вставки перед одним anchor следуют server
 commit order; target IDs формул не меняются. Relative column offsets и
 отображаемый A1-текст пересчитываются в candidate до CAS. Stale new formula
 после изменения оси использует bounded history ADR-057 или требует resync,
-если history недоступна. Inverse этой операции
-остаётся планом из матрицы.
+если history недоступна. В исходном срезе ADR-023 inverse оставался планом;
+ADR-085 добавляет его для новых frozen axis events.
 
 `DeleteColumns` (ADR-024) является отдельным schema-9 event. Все IDs должны
 быть живыми и уникальными, последняя колонка остаётся; retired IDs не
 используются повторно. Scalar references на удалённую колонку дают `#REF!`,
 partial ranges сужаются до живых границ. Stale write получает typed
 rejection, исходный idempotent retry — receipt. Replay проверяет domain hash.
-Структурные inverse ещё не реализованы.
+На этапе ADR-024 структурные inverse ещё не были реализованы; новые операции
+используют контракт ADR-085.
 
 Guarded undo по ADR-028/076 реализован для новых одиночных value/clear writes
 (schema 11) и formula writes (schema 16) с persisted preimage. `UndoCell` — отдельное намерение; schema-12
@@ -75,17 +82,55 @@ binding version использует projection resync: сохранённый c
 ADR-077 добавляет inverse собственной полной compensation как redo. Собственные
 CellWrite пары сокращаются только по точному target ID/version вершины стека;
 весь эффективный хвост должен быть пуст. Чужие, legacy, batch и copy записи того
-же stable address остаются конфликтом даже после отмены. UI держит100
-подтверждённых undo/redo IDs, новый edit очищает redo, unsupported own operation
-очищает обе истории; reload/switch начинает новую локальную историю. Браузер
+же stable address остаются конфликтом даже после отмены. Исходный UI ADR-077 держал
+до 100 подтверждённых IDs в каждом стеке. Новая правка очищала Redo, неподдерживаемая
+собственная операция — оба стека; reload/switch начинал новую локальную историю. ADR-086
+заменяет это ограничение восстановлением общей истории автора из журнала. Браузер
 повторно проверяет наличие pending после receipt refresh, чтобы пересекающиеся
 ACK не продвинули историю дважды. ADR-079 расширяет историю на новые интерактивные
 RangeWrite: TSV и смешанные копии сохраняют точные preimages, а inverse отменяет
 весь footprint либо отклоняется целиком. Scalar и range пары сокращаются по
 ID/version отдельно для каждого адреса; чужие и старые schema10/14 записи остаются
 барьерами. Скан ограничен 10000 версиями,64MiB payload и100000 matching-address
-updates; превышение возвращает UndoWindowExceeded без нового commit. Структурный
-undo и durable history discovery остаются отдельными незавершёнными срезами.
+updates; превышение возвращает UndoWindowExceeded без нового commit. Позднейшие
+ADR-085 и ADR-086 добавляют структурный undo и durable history discovery;
+финальная проверка последнего ещё не завершена.
+
+## История автора после reload (ADR-086)
+
+По [ADR-086](adr/086-durable-author-history.md)
+`GET /api/documents/{id}/undo-history` возвращает общую историю authenticated
+автора в документе, включая предыдущие сессии и другие вкладки. Текущие права
+owner/editor проверяются сервером; клиент не выбирает автора запроса. Ответ
+schema 1 содержит document/actor IDs, `through_version`, нижнюю границу чтения,
+Undo/Redo refs и явное усечение. Содержимое ячеек, формулы и preimages в ответ
+не входят. Каждый стек ограничен 100 целями; клиент проверяет UUIDv7, порядок и
+уникальность версий/IDs и не принимает тело больше 64 KiB.
+
+Поддерживаемая собственная правка добавляется в Undo и очищает Redo. Собственная
+компенсация удаляет точную пару target ID/version из соответствующего стека и
+добавляется в противоположный, сохраняя независимые действия других вкладок
+того же автора. Цель за пределами восстановленной/ограниченной/оставленной ветки
+считается новой обратимой правкой в Undo и очищает Redo. Собственные
+неподдерживаемые действия, включая текущие AddSheet и ExtendRows, очищают оба
+стека. Чужие и системные события не меняют стеки автора, но участвуют в проверке
+непрерывности и бюджете чтения: до 10 001 записи и 64 MiB payload.
+
+Эти refs — потенциальные цели. При `UndoCell` сервер заново проверяет доступ,
+владение, точный inverse и конфликтный хвост перед CAS. Discovery не разрешает
+отменить чужую или перекрытую правку. Терминальный отказ может убрать локальную
+вершину, но не записывается в журнал; после reload такая цель может появиться
+снова. Это также не восстановление прежнего приватного стека вкладки.
+
+Initial load/reconnect, собственный remote event и неизвестный resync запускают
+discovery. История имеет отдельную границу обработанных версий: HTTP projection
+сама её не продвигает. Пропуск в head hint или локальном ACK/receipt требует
+повторного чтения даже при чужом/системном последнем событии, поскольку внутри
+разрыва могла быть собственная правка. Последовательные известные чужие и
+системные hints только продвигают наблюдаемую границу; calculation patches не
+сканируют историю. Undo/Redo ждут согласования, обычные edits не блокируются.
+Устаревший ответ не заменяет более новые pending/ACK; неопределённые команды
+сохраняют bytes/ID до receipt, уже учтённый ACK не двигает стеки повторно.
 
 ## Command, validation, event, projection
 
@@ -140,6 +185,16 @@ SetCellFormula: server parse source → bind A1/quoted sheet names относи�
 
 Клиент меняет режим после ReplayComplete, но сохраняет общую sequential-version проверку. При слишком большом replay actor фиксирует checkpoint на V, регистрирует buffer до отправки checkpoint и затем шлет >V. До phase 5 это transient projection checkpoint, не durable snapshot. Buffer overflow/timeout прекращают подписку и требуют resubscribe; slow client не блокирует actor. Presence может coalesce/drop и не входит в replay.
 
+ADR-086 добавляет классификацию head hint: Unknown, User с opaque actor ID или
+System. Если непредставимое в wire событие совпадает точно с barrier head,
+сервер сохраняет подтверждённую журналом классификацию при projection resync.
+Непредставимый более ранний event, отсечение по bytes/versions и неизвестный
+refresh остаются Unknown. Metadata не заменяет доставку содержимого:
+`ReplayComplete` и требование resync сохраняются. Даже точная классификация
+последнего события не доказывает отсутствие собственных событий в пропущенных
+версиях; клиент проверяет отдельную границу истории. Этот delivery path локально
+проверен в HTTP/WebSocket и браузерных сценариях ADR-086.
+
 ## Access epoch и контроль отправки
 
 Document access_epoch и membership access_epoch образуют server-issued authorization ticket вместе с principal/tenant. Каждая команда, replay/history и export проверяют права. Проверка ACL при commit не заменяет проверку подписок.
@@ -188,8 +243,8 @@ ADR-081: MoveRange требует exact head, фиксирует все source/d
 и затронутые inbound formulas до CAS; stale/partial-range refusal не создаёт version.
 После content move delayed formula binding со старого base получает code17;
 новый actor восстанавливает эту границу по bounded history даже без axis changes.
-Transient admission failures сохраняют ID/bytes для receipt retry. Move пока
-history barrier; undo historical formula через последующий move запрещён.
+Transient admission failures сохраняют ID/bytes для receipt retry. На этапе
+ADR-081 Move был history barrier; ADR-083 ниже добавляет guarded move inverse.
 
 ## Матрица операций
 
@@ -235,9 +290,11 @@ bounded tail references before CAS/COMMIT. Own exact inverse pairs neutralize;
 foreign/legacy equal-value writes and new effective references remain barriers.
 Compensation updates the relocation floor on recovery too. Delivery uses existing
 authorized projection resync; moves enter acknowledged100-entry local history.
-Cross-sheet/partial-range/style/merge moves, axis/style compensation, discovered
-history remain open. ADR084 adds geometry-only shared Rust Worker preview, kept
-in a private pending overlay until server confirmation. Worker failure never
+Cross-sheet/partial-range/style/merge moves and style compensation remain open.
+Axis compensation follows in ADR085; author history discovery is implemented in
+ADR086 with local integration verification recorded in RUNBOOK. ADR084 adds geometry-only
+shared Rust Worker preview, kept in a private pending overlay until server
+confirmation. Worker failure never
 blocks durable command submission. A newer head, terminal rejection, refresh or
 ordinary edit discards the private moved projection; retryable uncertainty keeps
 the original operation bytes/ID. See ADR083/084 and RUNBOOK.
@@ -250,5 +307,6 @@ new reference writes remain barriers. Restored IDs carry durable activation floo
 that reject stale origin/target/range-interior intents, including restore/redelete
 paths. Copy and move require exact current source versions after late-retry receipt
 resolution. Structural canonical delivery uses authorized projection refresh.
-Snapshot3 and replay retain floors; durable history discovery remains separate.
+Snapshot3 and replay retain floors; ADR086 separately implements author history
+discovery with local integration verification recorded in RUNBOOK.
 See ADR085 and RUNBOOK for verification status and all inspection/size limits.
