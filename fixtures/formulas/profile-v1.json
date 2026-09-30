@@ -195,6 +195,16 @@
       "url": "https://support.microsoft.com/en-gb/excel/get-started/use-the-countif-function-in-microsoft-excel?nochrome=true",
       "title": "COUNTIF function",
       "retrieved_at": "2026-09-30"
+    },
+    "sumifs": {
+      "url": "https://support.microsoft.com/en-gb/excel/functions/sumifs-function",
+      "title": "SUMIFS function",
+      "retrieved_at": "2026-09-30"
+    },
+    "countifs": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/countifs-function",
+      "title": "COUNTIFS function",
+      "retrieved_at": "2026-09-30"
     }
   },
   "cases": [
@@ -12879,6 +12889,1686 @@
       "provenance": {
         "sources": ["sumif", "countif"],
         "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-count->5",
+      "formula": "=COUNTIFS(A1:A3,\">5\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-sum->5",
+      "formula": "=SUMIFS(C1:C3,A1:A3,\">5\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-count->=25",
+      "formula": "=COUNTIFS(A1:A3,\">=25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-sum->=25",
+      "formula": "=SUMIFS(C1:C3,A1:A3,\">=25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-count-<25",
+      "formula": "=COUNTIFS(A1:A3,\"<25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-sum-<25",
+      "formula": "=SUMIFS(C1:C3,A1:A3,\"<25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 10
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-count-<=25",
+      "formula": "=COUNTIFS(A1:A3,\"<=25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-sum-<=25",
+      "formula": "=SUMIFS(C1:C3,A1:A3,\"<=25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-count-=25",
+      "formula": "=COUNTIFS(A1:A3,\"=25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-sum-=25",
+      "formula": "=SUMIFS(C1:C3,A1:A3,\"=25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-count-<>25",
+      "formula": "=COUNTIFS(A1:A3,\"<>25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-sum-<>25",
+      "formula": "=SUMIFS(C1:C3,A1:A3,\"<>25\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 10
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-reversed",
+      "formula": "=SUMIFS(C3:C1,A3:A1,\">5\",B3:B1,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-dynamic-sum",
+      "formula": "=SUMIFS(INDEX(C1:C3,0),A1:A3,\">5\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 50
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-dynamic-keys",
+      "formula": "=COUNTIFS(INDEX(A1:A3,0),\">5\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-one-pair-count",
+      "formula": "=COUNTIFS(A1:A3,\">5\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-one-pair-sum",
+      "formula": "=SUMIFS(C1:C3,A1:A3,\">5\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 50
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-no-match",
+      "formula": "=SUMIFS(C1:C3,A1:A3,99,B1:B3,\"*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-sum-shape-mismatch",
+      "formula": "=SUMIFS(C1,A1:A3,\">5\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-criteria-shape-mismatch",
+      "formula": "=COUNTIFS(A1:A3,\">5\",B1,\"*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-equal-area-different-shape",
+      "formula": "=COUNTIFS(A1:A2,\">0\",A1:B1,\">0\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-wrong-arity-count",
+      "formula": "=COUNTIFS(A1:A3)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-wrong-arity-sum",
+      "formula": "=SUMIFS(C1:C3,A1:A3)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-empty-arity",
+      "formula": "=COUNTIFS()",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-boolean-sums",
+      "formula": "=SUMIFS(B1:B3,A1:A3,\"<3\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B1": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!B2": {
+          "type": "boolean",
+          "value": false
+        },
+        "Sheet1!B3": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-selected-error",
+      "formula": "=SUMIFS(B1:B3,A1:A3,3)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B1": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!B2": {
+          "type": "boolean",
+          "value": false
+        },
+        "Sheet1!B3": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-unselected-error",
+      "formula": "=SUMIFS(B1:B3,A1:A3,99)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B1": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!B2": {
+          "type": "boolean",
+          "value": false
+        },
+        "Sheet1!B3": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-error-string",
+      "formula": "=COUNTIFS(A1:A3,\">0\",B1:B3,\"#DIV/0!\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B1": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!B2": {
+          "type": "boolean",
+          "value": false
+        },
+        "Sheet1!B3": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-error-criterion",
+      "formula": "=COUNTIFS(A1:A3,99,B1:B3,1/0)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B1": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!B2": {
+          "type": "boolean",
+          "value": false
+        },
+        "Sheet1!B3": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-blank-criterion",
+      "formula": "=COUNTIFS(A1:A3,C1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B1": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!B2": {
+          "type": "boolean",
+          "value": false
+        },
+        "Sheet1!B3": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-rectangle",
+      "formula": "=SUMIFS(C1:D2,A1:B2,\">2\",C1:D2,\"<40\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 4
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!D1": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!D2": {
+          "type": "number",
+          "value": 40
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-rectangle-reversed",
+      "formula": "=COUNTIFS(B2:A1,\">2\",D2:C1,\"<40\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 4
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!D1": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!D2": {
+          "type": "number",
+          "value": 40
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-cross-sheet",
+      "formula": "=SUMIFS('Other sheet'!C1:C3,A1:A3,\">5\",B1:B3,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "text",
+          "value": "Pear"
+        },
+        "Sheet1!C3": {
+          "type": "number",
+          "value": 30
+        },
+        "Other sheet!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Other sheet!C2": {
+          "type": "number",
+          "value": 20
+        },
+        "Other sheet!C3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 20
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "multi-criteria-overflow",
+      "formula": "=SUMIFS(B1:B2,A1:A2,\">0\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 1e308
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 1e308
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#NUM!"
+      },
+      "provenance": {
+        "sources": ["sumifs", "countifs"],
+        "basis": "Derived ADR075 bounded multi-criteria profile; shared coercion/blank/error/collation provisional, no manual Excel verification.",
         "verified_in_excel": false
       }
     }

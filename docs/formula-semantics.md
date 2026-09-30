@@ -231,3 +231,13 @@ Literal expanded sum rectangles contribute reverse dependencies without rewritin
 persisted AST/text. Structural changes rebuild those rectangles from current bound
 targets. Dynamic references may shrink but unsupported expansion is rejected.
 Full-source dependencies remain conservative, including unselected source cycles.
+
+ADR075 adds SUMIFS and COUNTIFS, engine0.14.0. All normalized rectangles have equal
+row AND column counts.1..127 pairs reuse ADR074 criteria and intersect a bounded
+mask in row-major order. Each range is traversed and checked even if earlier
+criteria already excluded every cell. SUMIFS then reads the sum range, includes
+selected booleans as1/0, and adds selected finite numbers/date serials; text/blank
+are ignored. Selected spreadsheet errors/overflow propagate; typed boundary and
+budget failures remain outside IFERROR. Full source/criterion AST dependencies
+cover actual rectangles, including INDEX/XLOOKUP conservative sources. SUMIFS
+does not inherit SUMIF top-left expansion.

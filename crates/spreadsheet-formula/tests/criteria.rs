@@ -2,6 +2,223 @@ use proptest::prelude::*;
 use spreadsheet_formula::*;
 use std::collections::BTreeMap;
 struct Cells(BTreeMap<(u32, u32), Value>);
+
+#[test]
+fn multiple_criteria_boolean_sums_errors_and_pair_limit() -> Result<(), Box<dyn std::error::Error>>
+{
+    let cells = Cells(BTreeMap::from([
+        ((0, 0), Value::Number(1.)),
+        ((1, 0), Value::Number(2.)),
+        ((2, 0), Value::Number(3.)),
+        ((0, 1), Value::Boolean(true)),
+        ((1, 1), Value::Boolean(false)),
+        ((2, 1), Value::Error(FormulaError::Div0)),
+    ]));
+    for (source, expected) in [
+        ("=SUMIFS(B1:B3,A1:A3,\"<3\")", Value::Number(1.)),
+        ("=SUMIFS(B1:B3,A1:A3,3)", Value::Error(FormulaError::Div0)),
+        ("=SUMIFS(B1:B3,A1:A3,99)", Value::Number(0.)),
+        ("=SUMIF(A1:A3,\"<3\",B1)", Value::Number(0.)),
+        (
+            "=COUNTIFS(A1:A3,\">0\",B1:B3,\"#DIV/0!\")",
+            Value::Number(1.),
+        ),
+        (
+            "=COUNTIFS(A1:A3,99,B1:B3,1/0)",
+            Value::Error(FormulaError::Div0),
+        ),
+        ("=COUNTIFS(A1:A3,C1)", Value::Number(0.)),
+    ] {
+        assert_eq!(
+            evaluate(
+                &parse(source)?.ast,
+                &cells,
+                &mut EvaluationBudget::default()
+            ),
+            Ok(expected),
+            "{source}"
+        );
+    }
+    for function in ["COUNTIFS", "SUMIFS"] {
+        let prefix = if function == "SUMIFS" { "A1," } else { "" };
+        let source = format!("={function}({prefix}{})", vec!["A1,1"; 127].join(","));
+        assert_eq!(
+            evaluate(
+                &parse(&source)?.ast,
+                &cells,
+                &mut EvaluationBudget::default()
+            )?,
+            Value::Number(1.)
+        );
+        let source = format!("={function}({prefix}{})", vec!["A1,1"; 128].join(","));
+        assert!(parse(&source).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn multiple_criteria_never_skip_typed_boundaries_after_no_match()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (value, expected) in [
+        (
+            Value::Text("x".repeat(40000)),
+            EvaluationError::CalculationLimitExceeded,
+        ),
+        (
+            Value::Array {
+                rows: 1,
+                columns: 1,
+                values: vec![Value::Number(1.)],
+            },
+            EvaluationError::UnsupportedCompatibilityFeature,
+        ),
+    ] {
+        let cells = Cells(BTreeMap::from([
+            ((0, 0), Value::Number(1.)),
+            ((0, 1), value),
+        ]));
+        for source in [
+            "=IFERROR(COUNTIFS(A1,99,B1,1),42)",
+            "=IFERROR(SUMIFS(B1,A1,99),42)",
+        ] {
+            assert_eq!(
+                evaluate(
+                    &parse(source)?.ast,
+                    &cells,
+                    &mut EvaluationBudget::default()
+                ),
+                Err(expected),
+                "{source}"
+            );
+        }
+    }
+    struct BrokenColumn {
+        column: u32,
+        count: usize,
+    }
+    impl ReferenceResolver for BrokenColumn {
+        fn resolve_cell(&self, _: &CellReference) -> Value {
+            Value::Number(1.)
+        }
+        fn visit_range(
+            &self,
+            range: &RangeReference,
+            visitor: &mut dyn FnMut(Value) -> Result<(), EvaluationError>,
+        ) -> Result<(), EvaluationError> {
+            let count = if range.start.column == self.column {
+                self.count
+            } else {
+                2
+            };
+            for _ in 0..count {
+                visitor(Value::Number(1.))?;
+            }
+            Ok(())
+        }
+    }
+    for (source, column) in [
+        ("=COUNTIFS(A1:A2,99,B1:B2,1)", 1),
+        ("=SUMIFS(C1:C2,A1:A2,99,B1:B2,1)", 2),
+    ] {
+        let ast = parse(source)?.ast;
+        for count in [1, 3] {
+            assert_eq!(
+                evaluate(
+                    &ast,
+                    &BrokenColumn { column, count },
+                    &mut EvaluationBudget::default()
+                ),
+                Err(EvaluationError::InvalidResolverResult)
+            );
+        }
+        assert_eq!(
+            evaluate(
+                &ast,
+                &BrokenColumn { column, count: 2 },
+                &mut EvaluationBudget::new(10)
+            ),
+            Err(EvaluationError::CalculationLimitExceeded)
+        );
+        let mut cancelled = EvaluationBudget::default();
+        cancelled.cancel();
+        assert_eq!(
+            evaluate(&ast, &BrokenColumn { column, count: 2 }, &mut cancelled),
+            Err(EvaluationError::Cancelled)
+        );
+    }
+    Ok(())
+}
+
+proptest! {
+    #[test]
+    fn multiple_criteria_match_independent_intersection_oracle(values in prop::collection::vec((-100i16..100,-100i16..100),1..30), threshold in -100i16..100) {
+        let mut map=BTreeMap::new();
+        for (row,(a,b)) in values.iter().enumerate(){ map.insert((row as u32,0),Value::Number(f64::from(*a))); map.insert((row as u32,1),Value::Number(f64::from(*b))); }
+        let cells=Cells(map);
+        for (source,expected) in [
+            (format!("=COUNTIFS(A1:A{},\">{threshold}\",B1:B{},\"<0\")",values.len(),values.len()),values.iter().filter(|(a,b)|*a>threshold&&*b<0).count() as f64),
+            (format!("=SUMIFS(B1:B{},A1:A{},\">{threshold}\",B1:B{},\"<0\")",values.len(),values.len(),values.len()),values.iter().filter(|(a,b)|*a>threshold&&*b<0).map(|(_,b)|f64::from(*b)).sum()),
+        ] {
+            let ast=parse(&source).map_err(|e|TestCaseError::fail(e.to_string()))?.ast;
+            let actual=evaluate(&ast,&cells,&mut EvaluationBudget::default()).map_err(|e|TestCaseError::fail(e.to_string()))?;
+            prop_assert_eq!(actual,Value::Number(expected));
+        }
+    }
+}
+
+#[test]
+fn multiple_criteria_intersect_and_require_identical_shape()
+-> Result<(), Box<dyn std::error::Error>> {
+    let cells = Cells(BTreeMap::from([
+        ((0, 0), Value::Number(5.)),
+        ((1, 0), Value::Number(25.)),
+        ((2, 0), Value::Number(38.)),
+        ((0, 1), Value::Text("Apple".into())),
+        ((1, 1), Value::Text("apple*".into())),
+        ((2, 1), Value::Text("Pear".into())),
+        ((0, 2), Value::Number(10.)),
+        ((1, 2), Value::Number(20.)),
+        ((2, 2), Value::Number(30.)),
+    ]));
+    for (source, expected) in [
+        (
+            "=COUNTIFS(A1:A3,\">5\",B1:B3,\"apple*\")",
+            Value::Number(1.),
+        ),
+        (
+            "=SUMIFS(C1:C3,A1:A3,\">5\",B1:B3,\"apple*\")",
+            Value::Number(20.),
+        ),
+        ("=COUNTIFS(A1:A3,\">5\",A3:A1,\"<30\")", Value::Number(1.)),
+        ("=SUMIFS(INDEX(C1:C3,0),A1:A3,\">5\")", Value::Number(50.)),
+        (
+            "=COUNTIFS(A1:A3,\">5\",B1,\"*\")",
+            Value::Error(FormulaError::Value),
+        ),
+        (
+            "=COUNTIFS(A1:A2,\">0\",A1:B1,\">0\")",
+            Value::Error(FormulaError::Value),
+        ),
+        (
+            "=SUMIFS(C1,A1:A3,\">5\")",
+            Value::Error(FormulaError::Value),
+        ),
+        ("=COUNTIFS()", Value::Error(FormulaError::Value)),
+        ("=COUNTIFS(A1:A3)", Value::Error(FormulaError::Value)),
+        ("=SUMIFS(C1:C3,A1:A3)", Value::Error(FormulaError::Value)),
+    ] {
+        assert_eq!(
+            evaluate(
+                &parse(source)?.ast,
+                &cells,
+                &mut EvaluationBudget::default()
+            ),
+            Ok(expected),
+            "{source}"
+        );
+    }
+    Ok(())
+}
 impl ReferenceResolver for Cells {
     fn resolve_cell(&self, cell: &CellReference) -> Value {
         self.0

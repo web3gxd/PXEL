@@ -276,6 +276,74 @@ test(
         } finally {
           xEditor.socket.terminate();
         }
+        const multiSource =
+          '=SUMIFS(B1:B2,A1:A2,">5",B1:B2,">20")+COUNTIFS(A1:A2,">5",B1:B2,">20")';
+        const { snapshot: multiBook } = await createDocument(base, cookie);
+        const multiWriter = await connect(base, cookie);
+        for (const [index, [row, column, value]] of [
+          [0, 0, 7],
+          [1, 0, 13],
+          [0, 1, 21],
+          [1, 1, 29],
+        ].entries()) {
+          assert.equal(
+            (
+              await multiWriter.send(
+                setCommand(multiWriter, { ...multiBook, version: String(index + 1) }, value, {
+                  row,
+                  column,
+                  sequence: index + 1,
+                }),
+              )
+            ).case,
+            'committed',
+          );
+        }
+        const multiCommand = formulaCommand(
+          multiWriter,
+          { ...multiBook, version: '5' },
+          multiSource,
+          { column: 2, sequence: 5 },
+        );
+        const multiAck = await multiWriter.send(multiCommand);
+        assert.equal(multiAck.case, 'committed');
+        const multiBefore = await calculation(base, cookie, multiBook.document_id, 6);
+        assert.deepEqual(multiBefore.values[0].value, { type: 'number', value: 52 });
+        multiWriter.socket.terminate();
+        await kill();
+        await start();
+        const multiRestored = await getDocument(base, cookie, multiBook.document_id);
+        assert.equal(multiRestored.version, '6');
+        assert.equal(
+          multiRestored.state_hash,
+          Buffer.from(multiAck.value.confirmedStateHash).toString('hex'),
+        );
+        assert.equal(
+          multiRestored.sheets[0].cells.find((cell) => cell.value.type === 'formula').value.value
+            .source,
+          multiSource,
+        );
+        const multiAfter = await calculation(base, cookie, multiBook.document_id, 6);
+        assert.equal(multiAfter.calculated_state_hash, multiBefore.calculated_state_hash);
+        assert.deepEqual(multiAfter.values, multiBefore.values);
+        const multiEditor = await connect(base, cookie);
+        try {
+          assert.equal((await multiEditor.send(multiCommand)).case, 'receipt');
+          assert.equal(
+            (
+              await multiEditor.send(
+                setCommand(multiEditor, multiRestored, 19, { row: 1, column: 1, sequence: 6 }),
+              )
+            ).case,
+            'committed',
+          );
+          assert.deepEqual(
+            (await calculation(base, cookie, multiBook.document_id, 7)).values[0].value,
+            { type: 'number', value: 22 },
+          );
+        } finally {
+          multiEditor.socket.terminate();
+        }
         const criteriaSource = '=SUMIF(A1:A2,">0",B1)+COUNTIF(A1:A2,">0")';
         const { snapshot: criteriaBook } = await createDocument(base, cookie);
         const criteriaWriter = await connect(base, cookie);

@@ -26,8 +26,9 @@ flowchart LR
 Canvas editing, durable CAS journal, bounded actor, filesystem BlobStore и
 optional S3 adapter. Moto 5.2.3 contract и server restart проверены;
 Garage/российский S3 ещё не проверены.
-Формульное ядро/bound AST и отдельный WASM parity harness реализованы;
-calculation executor и stateful preview worker приложения еще не подключены.
+Формульное ядро/bound AST и native/browser parity harness реализованы.
+Сервер использует bounded calculation executor, а приложение — stateful WASM
+preview worker. Предварительные результаты остаются отдельно от серверного расчёта.
 
 ## Crates и направление зависимостей
 

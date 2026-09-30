@@ -447,3 +447,13 @@ rules remain provisional pending manual Excel goldens. Preliminary100k bound
 measurements are in benchmarks/2026-09-30-criteria-local.md. Next functional slice
 SUMIFS/COUNTIFS; the broader XLSX/structure/recovery/load/production and deployment
 gates remain open.
+
+SUMIFS/COUNTIFS (ADR075) is locally verified:554shared fixtures and1010books/2020patches
+native/browser parity,4new native criteria tests (11total) and3dependency/structural
+tests. Real PostgreSQL53HTTP,92browser,83frontend unit and2hard-restart tests passed.
+1..127criteria pairs require equal row AND column counts, with bounded mask
+intersection and selected SUMIFS boolean1/0 sums. Provisional compatibility rules
+and manual Excel goldens remain open. Preliminary100k measurements are in
+benchmarks/2026-09-30-multi-criteria-local.md. Next functional work returns to phase4
+undo coverage: authored formula writes, then broader history/batch/redo semantics.
+The wider XLSX/structure/recovery/load/production and deployment gates stay open.

@@ -8,6 +8,165 @@ use std::{collections::BTreeSet, sync::atomic::AtomicBool};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
+fn multiple_criteria_dependencies_follow_sources_and_threshold() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(7.))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(13.))),
+            (address(0, 1)?, CellContent::Value(CellValue::Number(21.))),
+            (address(1, 1)?, CellContent::Value(CellValue::Number(29.))),
+            (address(0, 3)?, CellContent::Value(CellValue::Number(5.))),
+        ],
+        2,
+        5,
+    )?;
+    for (column, source) in [
+        (
+            2,
+            "=SUMIFS(B1:B2,A1:A2,\">\"&D1,B1:B2,\">20\")+COUNTIFS(A1:A2,\">\"&D1,B1:B2,\">20\")",
+        ),
+        (4, "=1+2"),
+    ] {
+        let operation = formula(&book, address(0, column)?, source)?;
+        book = book.candidate(&operation, DocumentVersion::new(book.version().get() + 1)?)?;
+    }
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(52.))
+    );
+    for (row, column, value, expected) in [
+        (1, 1, 39., 62.),
+        (1, 0, 3., 22.),
+        (0, 3, 0., 62.),
+        (0, 1, 19., 40.),
+    ] {
+        edit(
+            &mut book,
+            &mut projection,
+            Operation::SetCellValue {
+                address: address(row, column)?,
+                value: CellValue::Number(value),
+            },
+        )?;
+        let patch =
+            projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+        assert_eq!(patch.evaluated_cells, 1);
+        assert_eq!(
+            projection.results().get(&address(0, 2)?),
+            Some(&Value::Number(expected))
+        );
+        assert_eq!(
+            projection.results().get(&address(0, 4)?),
+            Some(&Value::Number(3.))
+        );
+    }
+    let operation = formula(&book, address(1, 1)?, "=A2*10")?;
+    edit(&mut book, &mut projection, operation)?;
+    let patch =
+        projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(patch.evaluated_cells, 2);
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(31.))
+    );
+    let operation = formula(&book, address(1, 1)?, "=SUMIFS(B1:B2,A1:A2,\">0\")")?;
+    edit(&mut book, &mut projection, operation)?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&address(1, 1)?),
+        Some(&Value::Error(FormulaError::Cycle))
+    );
+    Ok(())
+}
+
+#[test]
+fn multiple_criteria_ranges_stay_aligned_through_insert_and_delete() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(7.))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(13.))),
+            (address(0, 1)?, CellContent::Value(CellValue::Number(21.))),
+            (address(1, 1)?, CellContent::Value(CellValue::Number(29.))),
+        ],
+        3,
+        3,
+    )?;
+    let at = address(0, 2)?;
+    let operation = formula(
+        &book,
+        at,
+        "=SUMIFS(B1:B2,A1:A2,\">5\")+COUNTIFS(A1:A2,\">5\",B1:B2,\">0\")",
+    )?;
+    book = book.candidate(&operation, DocumentVersion::new(2)?)?;
+    let inserted = address(20, 0)?.row;
+    for (operation, expected) in [
+        (None, 52.),
+        (
+            Some(Operation::InsertRowsRebased {
+                sheet: at.sheet,
+                before: address(1, 0)?.row,
+                rows: vec![inserted],
+            }),
+            52.,
+        ),
+        (
+            Some(Operation::DeleteRows {
+                sheet: at.sheet,
+                rows: vec![address(1, 0)?.row],
+            }),
+            22.,
+        ),
+    ] {
+        if let Some(operation) = operation {
+            book = book.candidate(&operation, DocumentVersion::new(book.version().get() + 1)?)?;
+        }
+        let mut projection =
+            CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+        projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+        assert_eq!(
+            projection.results().get(&at),
+            Some(&Value::Number(expected))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn multiple_criteria_deletion_in_only_one_range_produces_shape_error() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(1, 0)?, CellContent::Value(CellValue::Number(13.))),
+            (address(0, 1)?, CellContent::Value(CellValue::Number(21.))),
+            (address(1, 1)?, CellContent::Value(CellValue::Number(29.))),
+        ],
+        3,
+        3,
+    )?;
+    let at = address(0, 2)?;
+    let operation = formula(&book, at, "=SUMIFS(B1:B2,A2:A3,\">0\")")?;
+    book = book.candidate(&operation, DocumentVersion::new(2)?)?;
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(projection.results().get(&at), Some(&Value::Number(21.)));
+    book = book.candidate(
+        &Operation::DeleteRows {
+            sheet: at.sheet,
+            rows: vec![address(2, 0)?.row],
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&at),
+        Some(&Value::Error(FormulaError::Value))
+    );
+    Ok(())
+}
+
+#[test]
 fn sumif_implicit_range_is_a_real_reverse_dependency() -> TestResult {
     let mut book = fixture(
         vec![

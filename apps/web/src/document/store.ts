@@ -659,7 +659,7 @@ export class DocumentStore {
         bytesUuid(message.contextId) !==
           (this.projection.calculation_context?.context_id ?? this.projection.document_id) ||
         message.calculationEpoch !== BigInt(this.projection.calculation_context?.epoch ?? '0') ||
-        message.formulaEngineVersion !== 'pxel-formula-0.13.0' ||
+        message.formulaEngineVersion !== 'pxel-formula-0.14.0' ||
         message.compatibilityProfile !== formulaProfile ||
         !message.fullSnapshot ||
         bytes > 256 * 1024 ||

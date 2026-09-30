@@ -261,6 +261,118 @@ fn add_sum(value: &Value, total: &mut f64, error: &mut Option<FormulaError>) {
         _ => {}
     }
 }
+pub(crate) fn multi_call(
+    ast: &Ast,
+    args: &[NodeId],
+    sum: bool,
+    resolver: &impl ReferenceResolver,
+    budget: &mut EvaluationBudget,
+    depth: usize,
+) -> Result<Value, EvaluationError> {
+    budget.charge()?;
+    if depth > MAX_DEPTH {
+        return Err(EvaluationError::CalculationLimitExceeded);
+    }
+    let offset = usize::from(sum);
+    if args.len() < offset + 2
+        || !(args.len() - offset).is_multiple_of(2)
+        || (args.len() - offset) / 2 > 127
+    {
+        return Ok(Value::Error(FormulaError::Value));
+    }
+    let sums = if sum {
+        match reference(ast, args[0], resolver, budget, depth + 1)? {
+            Ok(range) => Some(range),
+            Err(code) => return Ok(Value::Error(code)),
+        }
+    } else {
+        None
+    };
+    let dimensions = |range: &RangeReference| {
+        (
+            range.end.row - range.start.row,
+            range.end.column - range.start.column,
+        )
+    };
+    let mut shape = sums.as_ref().map(dimensions);
+    let mut pairs = Vec::new();
+    for pair in args[offset..].as_chunks::<2>().0 {
+        let range = match reference(ast, pair[0], resolver, budget, depth + 1)? {
+            Ok(range) => range,
+            Err(code) => return Ok(Value::Error(code)),
+        };
+        let current = dimensions(&range);
+        if let Some(shape) = shape {
+            if shape != current {
+                return Ok(Value::Error(FormulaError::Value));
+            }
+        } else {
+            shape = Some(current);
+        }
+        let criterion = match compile(eval(ast, pair[1], resolver, budget, depth + 1)?, budget)? {
+            Ok(criterion) => criterion,
+            Err(code) => return Ok(Value::Error(code)),
+        };
+        pairs.push((range, criterion));
+    }
+    let mut matched = Vec::new();
+    for (index, (range, criterion)) in pairs.iter().enumerate() {
+        let mut visits = 0usize;
+        resolver.visit_range(range, &mut |value| {
+            budget.charge()?;
+            if visits as u64 >= range.cell_count() {
+                return Err(EvaluationError::InvalidResolverResult);
+            }
+            let value = checked_reference(value, budget)?;
+            let selected = criterion.matches(&value, budget)?;
+            if index == 0 {
+                matched.push(selected);
+            } else {
+                let entry = matched
+                    .get_mut(visits)
+                    .ok_or(EvaluationError::InvalidResolverResult)?;
+                *entry &= selected;
+            }
+            visits += 1;
+            Ok(())
+        })?;
+        if visits as u64 != range.cell_count() {
+            return Err(EvaluationError::InvalidResolverResult);
+        }
+    }
+    if let Some(sums) = sums {
+        let mut total = 0.;
+        let mut error = None;
+        let mut visits = 0usize;
+        resolver.visit_range(&sums, &mut |value| {
+            budget.charge()?;
+            let selected = *matched
+                .get(visits)
+                .ok_or(EvaluationError::InvalidResolverResult)?;
+            visits += 1;
+            let value = checked_reference(value, budget)?;
+            if selected {
+                if let Value::Boolean(value) = value {
+                    add_sum(&Value::Number(f64::from(value)), &mut total, &mut error);
+                } else {
+                    add_sum(&value, &mut total, &mut error);
+                }
+            }
+            Ok(())
+        })?;
+        if visits != matched.len() {
+            return Err(EvaluationError::InvalidResolverResult);
+        }
+        Ok(error.map_or_else(|| number(total), Value::Error))
+    } else {
+        let mut count = 0usize;
+        for selected in matched {
+            budget.charge()?;
+            count += usize::from(selected);
+        }
+        Ok(Value::Number(count as f64))
+    }
+}
 pub(crate) fn call(
     ast: &Ast,
     args: &[NodeId],

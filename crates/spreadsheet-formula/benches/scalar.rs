@@ -353,6 +353,16 @@ fn index_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>>
         ),
         ("SUMIF_bound_100k", "=SUMIF(A1:A100000,\">0\")", 100000.0),
         (
+            "COUNTIFS_bound_100k",
+            "=COUNTIFS(A1:A100000,\">0\",A1:A100000,\"<2\")",
+            100000.0,
+        ),
+        (
+            "SUMIFS_bound_100k",
+            "=SUMIFS(A1:A100000,A1:A100000,\">0\",A1:A100000,\"<2\")",
+            100000.0,
+        ),
+        (
             "SUMIF_bound_anchor_100k",
             "=SUMIF(A1:A100000,\">0\",A1)",
             100000.0,

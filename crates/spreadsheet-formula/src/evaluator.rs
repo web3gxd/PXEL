@@ -195,7 +195,16 @@ pub(crate) fn eval(
             binary(*op, left, right, budget)?
         }
         Node::Call { name, arguments } => {
-            if name == "SUMIF" || name == "COUNTIF" {
+            if name == "SUMIFS" || name == "COUNTIFS" {
+                crate::criteria::multi_call(
+                    ast,
+                    arguments,
+                    name == "SUMIFS",
+                    resolver,
+                    budget,
+                    depth + 1,
+                )?
+            } else if name == "SUMIF" || name == "COUNTIF" {
                 crate::criteria::call(ast, arguments, name == "SUMIF", resolver, budget, depth + 1)?
             } else if name == "XLOOKUP" {
                 crate::lookup::xcall(ast, arguments, resolver, budget, depth)?

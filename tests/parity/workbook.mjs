@@ -72,6 +72,9 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=XLOOKUP(A1,A1:B1,A1:B1,,0,2)',
     '=INDEX(A1:B1,1,MATCH(B1,A1:B1,0))',
     '=COUNTIF(A1:B1,">0")',
+    '=COUNTIFS(A1:B1,">0",A1:B1,"<50")',
+    '=SUMIFS(A1:B1,A1:B1,">0",A1:B1,"<50")',
+    '=SUMIFS(INDEX(A1:B1,1,0),A1:B1,">0")',
     '=SUMIF(A1:B1,">0")',
     '=SUMIF(A1:B1,">0",A1)',
     '=SUMIF(A1:B1,">0",INDEX(A1:B1,1,0))',
@@ -167,7 +170,7 @@ const contextTemplate = {
   utc_offset_minutes: 180,
   civil_day_since_unix_epoch: 1,
   random_seed: '01'.repeat(32),
-  engine_version: 'pxel-formula-0.13.0',
+  engine_version: 'pxel-formula-0.14.0',
   compatibility_profile: 'pxel-excel-subset-v1',
   reason: 'explicit',
 };

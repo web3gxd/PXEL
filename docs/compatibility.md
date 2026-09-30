@@ -130,4 +130,15 @@ dimensions; literal expansion is included in reverse dependencies. INDEX/XLOOKUP
 selections support shrinkage within their resolved rectangle; dynamic expansion
 outside that rectangle is typed unsupported. Numeric-text, blank/boolean/error,
 Unicode collation and255-character criteria rules are provisional PXEL semantics.
-Derived fixtures do not claim manual Excel validation. SUMIFS/COUNTIFS are next.
+Derived fixtures do not claim manual Excel validation. SUMIFS/COUNTIFS extend
+this profile in ADR075 below.
+
+## Multiple-criteria aggregate profile (ADR-075)
+
+Engine0.14.0: partially supported. SUMIFS/COUNTIFS accept up to127 range/criterion
+pairs, intersect corresponding cells, and require identical normalized row AND
+column counts. SUMIFS does not expand a short sum range. Contiguous INDEX/XLOOKUP
+selections are supported. Selected sum booleans become1/0; selected errors propagate,
+unselected errors do not. All visited boundaries and calculation budgets stay active.
+Shared blank/numeric-text/error/collation semantics remain provisional; manual Excel,
+locale and arrays remain open. No persisted schema change.

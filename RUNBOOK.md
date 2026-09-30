@@ -3317,3 +3317,62 @@ stateful parity, HTTP/browser/recovery, benchmarks and docs; no new dependencies
 or schemas. Next SUMIFS/COUNTIFS; original full MVP goal remains active and wider
 manual Excel/full XLSX/structure/recovery/load/production/Linux/Compose/remote CI
 gates remain open. Final formatting/readiness and commit follow.
+
+## 2026-09-30 — SUMIFS/COUNTIFS multiple-criteria slice, in progress
+
+Previous turn made verified progress, SUMIF/COUNTIF commit8c24066. Read AGENTS,
+RUNBOOK/roadmap/ADR074 and current criteria/parser contracts; continued incremental
+implementation and TDD skills. Official COUNTIFS and alternate en-gb SUMIFS pages
+read (canonical en-us SUMIFS fetch failed). ADR075 PROPOSED specifies1..127 pairs,
+equal normalized row AND column counts, shared provisional criteria, bounded mask
+intersection and separate SUMIFS boolean-sum1/0 rule. Added native specification
+test before dispatch/implementation. Current running engine remains verified0.13.
+Full original MVP goal remains active.
+
+Native RED observed missing function NAME on first COUNTIFS case; implementation
+adds bounded pair admission/equal shape and mask intersection plus fixed-order
+SUMIFS traversal. Specification now passes. Clippy found manual modulo/chunks_exact
+warnings; fixed via stable is_multiple_of/as_chunks, no suppressions. Four new
+native unit/property/resource tests (11criteria total) and two dependency/structural
+tests pass; shared34fixtures added,554total native corpus passes. Full formula/WASM
+native suites passed before identity bump. Read-only review found no concrete
+defects and ran no tests. Verified launcher25956 and stopped its tree, preserving
+PG/data; current guards advanced0.14.0. Stateful corpus pool/new HTTP/browser and
+100k benchmark cases prepared; combined parity/live/restart/build still pending.
+
+Engine0.14 hidden launcher18192 rebuilt backend/WASM successfully.554shared
+expected/native/browser cases and1010books/2020patches parity passed.83frontend
+unit tests, typecheck/lint/build passed. All-targets formula/WASM/collab/storage/
+server-dev clippy, SQLx prepare check, default server check and post-bump WASM4unit/
+9stateful tests passed. Real HTTP new criterion-range edit test passed52->22->0;
+full53HTTP/browser92 suite still live55356. Additive hard-restart source/hash/
+receipt/second-criterion edit case prepared, not run yet. Native100k release
+benchmark passed: COUNTIFS36.439ms/SUMIFS44.664ms estimates under concurrent load,
+notp95; report docs/benchmarks/2026-09-30-multi-criteria-local.md. Docs updated for
+partial profile, corrected stale architecture claim that executor/worker were
+unconnected using existing runtime/parity evidence. No schema/dependency change.
+ADR075 remains PROPOSED until full browser/restart and final checks.
+
+Full53HTTP passed81794.4486ms; browser92 live55356, new DPR1 multi-criteria
+edit/reload passed. Added third graph regression: deleting only criteria-range
+end changes shape and yields VALUE rather than summing misaligned data; all3graph
+tests and final formula all-targets clippy passed. Production implementation
+unchanged by this added test. Collab22passed/2intentional benchmark ignores,
+real-PG volatile_edit3/Open11/Timer6 passed, timer benchmark intentionally ignored.
+Format:check/rustfmt/diff and readiness/web200 passed. Recovery remains pending
+browser terminal state; no full-MVP/manualExcel/Linux/Compose/remoteCI gate closed.
+
+Final SUMIFS/COUNTIFS: full92Playwright tests passed4.9min (55356terminalexit0),
+including new dependent edit/reload at DPR1/2. Verified launcher18192 and stopped
+only its tree after browser completion. Hard-restart2/2 passed10878.3049ms after
+4.66s server build: new SUMIFS/COUNTIFS source/content and calculated hashes restore
+exactly, receipt retry stays idempotent, second-criterion edit52->22 recalculates.
+Finally restarted hidden26420, retaining PG/data. ADR075 accepted only for bounded
+multi-criteria slice. Changed criteria.rs/evaluator dispatch/0.14current guards,
+native criteria/calculation tests, shared corpus/stateful parity, HTTP/browser/
+recovery and scalar benchmark, plus README/compatibility/semantics/roadmap/ADR075/
+benchmark report and corrected stale architecture worker wording. No new dependency
+or schema. Next phase4 gap: authored formula write undo, then broader history/
+batch/redo. Manual Excel/full XLSX/structure/recovery/load/production/Linux/Compose/
+remoteCI gates remain open and original full goal active. Final readiness/format/
+diff check and commit follow.

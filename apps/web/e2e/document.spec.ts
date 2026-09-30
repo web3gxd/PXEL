@@ -188,6 +188,14 @@ test('opening a second tab publishes the same renewed RAND to both clients', asy
 
 for (const scenario of [
   {
+    name: 'SUMIFS and COUNTIFS multiple criteria',
+    source: '=SUMIFS(A1:A2,A1:A2,">5",A1:A2,"<10")+COUNTIFS(A1:A2,">5",A1:A2,"<10")',
+    input: '7',
+    edit: '13',
+    before: '8',
+    after: '0',
+  },
+  {
     name: 'SUMIF and COUNTIF conditional aggregates',
     source: '=SUMIF(A1:A2,">5")+COUNTIF(A1:A2,">5")',
     input: '7',
