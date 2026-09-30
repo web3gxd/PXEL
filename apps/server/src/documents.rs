@@ -1249,7 +1249,9 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
         | Operation::CopyRange { .. }
         | Operation::RangeWrite { .. }
         | Operation::MoveRange { .. }
-        | Operation::MoveCompensation { .. } => {
+        | Operation::MoveCompensation { .. }
+        | Operation::AxisEdit { .. }
+        | Operation::AxisCompensation { .. } => {
             return None;
         }
         Operation::SetCellFormula { address, formula } => {

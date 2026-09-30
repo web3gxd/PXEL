@@ -4049,3 +4049,138 @@ justbench-move-preview exposeslargeharness. Current sharedformula554 andworkbook
 Structural/styleundo, discoveredhistory, richerstyles/merges/XLSX/manualExcel,
 combinedlargeACL/stress, Linux/Compose/remoteCI/RussianS3/OSisolation gates remain
 open. Fullgoal staysactive; nextminimalstage guardedaxisinverse/history.
+
+## ADR085 — guarded structural history (integration in progress)
+
+2026-09-30. Previous goal turn made concrete domain/lifecycle/codec/journal
+changes and ran tests; classified as progress. Continued phase4, not a completed
+MVP claim. Read AGENTS, roadmap, prior ADR and current source. API/interface skill
+was applied to the shared contracts. Separate agents owned domain/binding,
+storage codec and transactional history; root integrated ports and adapters.
+
+Added AxisEdit/AxisCompensation, exact preimages, surviving anchor placements,
+candidate hashes, server-side canonical rederivation and bounded own-history
+reduction. Retired IDs stay retired for ordinary creation; compensations revive
+them with durable per-ID activation floors. New shared lifecycle guards cover
+commands, formula origins and range interiors, including restore/redelete paths.
+Journal verifies head projection and requires it after the document activation
+marker becomes nonzero. Rename CommitRequest.move_inverse_projection to
+inverse_projection; actor supplies a shared Arc for all commits. New persisted
+schemas21/22, semantic tags23/24 and snapshot3 retain old readers/hash goldens.
+No wire command, dependency or evaluator0.14.0 identity change.
+
+Affected domain axis_edit/axis_history/lifecycle/workbook, collab axis_history/
+calculation/actor normalization, application journal port, formula calculation
+structural rebuild, server canonical refresh, storage journal/axis_guard/tests,
+storage codec/protos/snapshot writer, new migration and offline SQLx metadata.
+ADR085 records contracts and explicit limits. Automatic ExtendRows remains
+nonundoable. Frontend integration is still in progress.
+
+Actual checks so far: agent domain7focused tests/full domain regression, strict
+Clippy and wasm32 compilation PASS; storage codec49tests/strictClippy PASS;
+collab historical binding7tests plus25libtests PASS (benchmarks ignored).
+Root lifecycle2tests PASS; server/collab compile PASS. Agent new11genuinePG
+axis-history tests PASS21.11s; existing journal45passed/2ignored83.82s; exact
+100000-touch boundary native test PASS1.35s; strictstorageClippy PASS3.98s.
+Migration202609300005 applied311.6662ms and frozen. pnpm proto:generate PASS.
+Root cargo sqlx prepare --workspace -- --all-targets --all-features PASS19.18s;
+cargo fmt --all and workspace/alltargets/allfeatures check PASS16.05s.
+
+Genuine RED findings: persisted verifier allowed only schemas1..20; corrected
+to1..22. Reversed noncontiguous removal prevented own-pair reduction; compare
+unique removal membership while retaining ordered restoration placements. Tests
+preserved. Parallel initial compile errors were missing new exhaustive arms;
+added structural rebuild paths. Root review extended formula rendering checks
+to new axis variants and changed current snapshot writer assertion from2 to3,
+keeping legacy readers. Full workspace tests/Clippy currently running; updated
+backend, browser, recovery and parity not yet verified. No new benchmark claims.
+
+ADR085 integration follow-up: full workspace/allfeatures tests PASS, followed
+by strictworkspace/alltargets/allfeatures Clippy PASS21.62s. Root review caught
+newaxis variants omitted from authored-formula rendering checks; added them.
+Independent read-only adversarial review found two journal-boundary holes that
+the actor happened to block. First, last_axis_change_version is not hash-covered:
+forged lowered snapshot metadata could skip reference admission. New regression
+actually RED, then snapshotmetadata>=maxactivation validation and lifecycle
+shortcut based on hash-covered floors made3/3lifecycle tests PASS. Second, stale
+Copy could cross a revived interior through direct CommitRequest. New genuinePG
+regression RED, then receipt-first Copy/Move exact-head guard GREEN1.53s. Neither
+assertion was weakened. Retargeted full domain/codec/collab suites PASS after
+metadatafix; strictworkspaceClippy PASS9.01s. SQLxprepare--check PASS21.91s.
+
+Frontend explicit four structural operations now enter acknowledged100-entry
+user history; automaticExtendRows unchanged. Agent4TDD tests RED→GREEN; root
+full119frontendunit/typecheck/lint/build PASS. New8genuineChromiumDPR1/2 cases
+PASS51.4s with updated runtime, exactformula/axisrestore, stable selection,
+independentforeignedit retained, undo/redo and reload. Full browser and new
+hardrestart still pending. ReleaseWASM rebuilt33.38s, artifact1353682bytes
+(previous1233905), sharedcandidate axis paths increased binary size; no numeric
+identity bump or optimization claim. Native/browser554formulas,1010books/2020
+patches and209books/418moves PASS freshartifact; times underdeveloperload are not
+newbenchmarks. Presentation10slides/1440&390/navigation/layout PASS; stale
+cut/move remaining-work text corrected, structuralUndo still marked checking.
+
+First server rebuild genuinely failed Windows linker PermissionDenied because
+owned dev binary was running. Verified launcherPID23680 identity and stopped
+only its tree, rebuilt and startedhiddenlauncher31976; web/readyz200. PostgreSQL
+retained. AfterCopyfix and targetedbrowserterminal, coordinated second owned
+restart is in progress before full regression. No unrelated process stopped.
+
+FinalCopyfix backendbuild PASS41.22s; hiddenownedlauncher23716 web5173/ready8080
+both200. Root current12axisPG PASS4.08s, strictworkspacealltarget/allfeature
+Clippy PASS7.51s andrustfmtcheckPASS. New dedicatedport18087 structuralrecovery
+PASS1/1 2.0397s, two genuinehardkills: exactsource+inboundformula restoration,
+content/calculated hashes and values, oldformula/value typed17 refusal,
+redo andoriginal/undo/redo late receipts. Test initially assumed calculation
+endpoint also lists scalar4; corrected formula-only expected[7,8] in fixture,
+production unchanged. This test proves log recovery, not snapshot-path use.
+Root previous4hardrestart scenarios PASS34.62s. Full128browser currentlylive;
+no finalpass claim yet. SQLxofflinecache, snapshotwriter3 andproto regeneration
+have been checked; sharedPGdata/runtime remain available.
+
+FullliveHTTP regression genuinely RED74/76 (138.29s). Missing-row secondDelete
+returnedgenericInvalidAxis/code3 instead of MissingRow/code9: native regression
+RED, production axis planner now validates removed IDs and anchors with typed
+MissingRow/MissingColumn before generic duplicate validation; native8axis tests
+and strictdomainClippy PASS. Runtime rebuild awaits current fullbrowser terminal,
+so HTTPtypedfix is not yet claimed passed. Replay fixture also timed out because
+it assumed original axis events were wire-known; ADR085 intentionally uses
+projection refresh for frozen axis events. Updated exact frame contract: preserve
+knownscalar versions2/3, head9 resync/barrier9, and for latebase7 head9/barrier9
+plus exactauthorizedprojection/hash/contentcomparison. This is an intentional
+transport contract change, not an assertion weakened to conceal data loss.
+Allother74HTTP/network/security cases passed, including300networkwrites; final
+fullHTTP rerun remains required. No test removed. NewAPIshape/versionunchanged.
+
+Full128/128ChromiumDPR1/2 terminalPASS9.1min. Productiontypedmissingaxis fix
+was made in source during this run but not served until its terminal completion;
+valid-path browser contract unchanged. Root replay-focused newexactresync
+fixture PASS1/1 10.57s after updating both early andlateaxis barriers. A final
+ownedlauncher23716 restart/build now incorporates missing-axis errors; will
+rerunfull76HTTP +focused8axisbrowser againstthatbinary. This sequencing avoids
+interrupting an active browser suite and keeps evidence scope explicit.
+
+ADR085 final verified state: ownedhiddenlauncher27828 rebuilt17.37s and serves
+web5173/backend8080 (both200); only verified own launcher trees restarted,
+PostgreSQLdata retained. Finalfull76HTTP/network/security PASS135.46s with typed
+missing-row regression and exact early/late replayresync assertions. Freshbinary
+8axisbrowser DPR1/2 PASS56.4s; precedingfull128PASS9.1min. Finalcombined13genuinePG
+axis tests PASS3.62s, including actual filesystemobject snapshot recovery:
+selectedrestoredsnapshotversion +one tail event, exacthash/content/floors,
+stalerefusal and currentcommandacceptance. StrictworkspaceClippy PASS23.82s;
+rustfmt anddiffcheck PASS. Finalfivehardrestart scenarios PASS25.61s.
+
+FinalfreshWASM1355725bytes,554formula fixtures/1010books2020patches/209books418moves
+exactnative/browser parity PASS; Viteproductionbuild PASS391ms. Artifact grew
+121820bytes fromADR084; tagged structuralcandidatecode now reachable, no size
+optimization or latency claim. Snapshotwriter3/oldreaders, schemas21/22, semantic
+tags23/24, proto generation/check andSQLxofflineprepare/check are synchronized.
+Presentation10slides/1440&390/navigation/layout PASS and now lists structuralUndo
+as verified. ADR085 accepted only explicitaxisUndo/Redo, not wholephase4/MVP.
+
+Not run in this slice: new100kstructuralrelease benchmarks, expandedfuzzcorpus,
+Linux/Compose/remoteCI, RussianS3contract, OSworkerisolation, manualExcelgoldens
+or combined100kformula/ACL/restartload. Ignored harnesses remain ignored; no
+productionp95 claims. Nextminimalstage is durable per-actor/document history
+discovery after UIreload; then richerstyles/merges and fullerXLSX, with all wider
+acceptance/deployment gates retained. Fullgoal staysactive.

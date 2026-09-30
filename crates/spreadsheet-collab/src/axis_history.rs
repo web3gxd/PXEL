@@ -6,10 +6,83 @@ use std::collections::{BTreeSet, VecDeque};
 pub(crate) const MAX_VERSIONS: u64 = 10_000;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 
+// No cell values, formula sources, or frozen preimages enter checkpoints.
+enum AxisTransition {
+    Passive,
+    Change { sheet: SheetId, delta: AxisDelta },
+}
+impl AxisTransition {
+    fn from_operation(operation: &Operation) -> Option<Self> {
+        let (sheet, delta) = match operation {
+            Operation::AxisEdit { change } | Operation::AxisCompensation { change, .. } => {
+                (change.sheet, change.delta.clone())
+            }
+            Operation::InsertRows {
+                sheet,
+                before,
+                rows,
+            }
+            | Operation::InsertRowsRebased {
+                sheet,
+                before,
+                rows,
+            } => (
+                *sheet,
+                AxisDelta::Rows {
+                    removed: vec![],
+                    inserted: rows
+                        .iter()
+                        .map(|row| RowPlacement {
+                            row: *row,
+                            before: Some(*before),
+                        })
+                        .collect(),
+                },
+            ),
+            Operation::DeleteRows { sheet, rows } => (
+                *sheet,
+                AxisDelta::Rows {
+                    removed: rows.clone(),
+                    inserted: vec![],
+                },
+            ),
+            Operation::InsertColumnsRebased {
+                sheet,
+                before,
+                columns,
+            } => (
+                *sheet,
+                AxisDelta::Columns {
+                    removed: vec![],
+                    inserted: columns
+                        .iter()
+                        .map(|column| ColumnPlacement {
+                            column: *column,
+                            before: Some(*before),
+                        })
+                        .collect(),
+                },
+            ),
+            Operation::DeleteColumns { sheet, columns } => (
+                *sheet,
+                AxisDelta::Columns {
+                    removed: columns.clone(),
+                    inserted: vec![],
+                },
+            ),
+            Operation::CreateWorkbook { .. }
+            | Operation::AddSheet { .. }
+            | Operation::ExtendRows { .. } => return Some(Self::Passive),
+            _ => return None,
+        };
+        Some(Self::Change { sheet, delta })
+    }
+}
+
 pub(crate) struct Checkpoint {
     version: DocumentVersion,
     seeds: Vec<SheetSeed>,
-    transition: Option<Operation>,
+    transition: Option<AxisTransition>,
     bytes: usize,
 }
 pub(crate) struct AxisHistory {
@@ -37,7 +110,7 @@ impl AxisHistory {
         }
         history
     }
-    fn checkpoint(book: &Workbook, transition: Option<Operation>) -> Option<Checkpoint> {
+    fn checkpoint(book: &Workbook, transition: Option<AxisTransition>) -> Option<Checkpoint> {
         if book.version() == DocumentVersion::ZERO {
             return None;
         }
@@ -55,20 +128,23 @@ impl AxisHistory {
                         .checked_mul(32)?,
                 )?;
         }
-        if let Some(operation) = &transition {
-            bytes = bytes.checked_add(match operation {
-                Operation::CreateWorkbook { sheet } | Operation::AddSheet { sheet } => {
-                    (sheet.rows.len() + sheet.columns.len())
-                        .checked_mul(32)?
-                        .checked_add(sheet.name.len())?
-                }
-                Operation::ExtendRows { rows, .. }
-                | Operation::InsertRows { rows, .. }
-                | Operation::InsertRowsRebased { rows, .. }
-                | Operation::DeleteRows { rows, .. } => rows.len().checked_mul(32)?,
-                Operation::InsertColumnsRebased { columns, .. }
-                | Operation::DeleteColumns { columns, .. } => columns.len().checked_mul(32)?,
-                _ => return None,
+        if let Some(transition) = &transition {
+            bytes = bytes.checked_add(match transition {
+                AxisTransition::Passive => 0,
+                AxisTransition::Change {
+                    delta: AxisDelta::Rows { removed, inserted },
+                    ..
+                } => removed
+                    .len()
+                    .checked_mul(32)?
+                    .checked_add(inserted.len().checked_mul(64)?)?,
+                AxisTransition::Change {
+                    delta: AxisDelta::Columns { removed, inserted },
+                    ..
+                } => removed
+                    .len()
+                    .checked_mul(32)?
+                    .checked_add(inserted.len().checked_mul(64)?)?,
             })?;
         }
         if bytes > MAX_BYTES {
@@ -101,6 +177,8 @@ impl AxisHistory {
                 | Operation::DeleteRows { .. }
                 | Operation::InsertColumnsRebased { .. }
                 | Operation::DeleteColumns { .. }
+                | Operation::AxisEdit { .. }
+                | Operation::AxisCompensation { .. }
         )
     }
     /// Prepare allocations before COMMIT; publication only moves prepared buffers.
@@ -108,7 +186,7 @@ impl AxisHistory {
         if self.checkpoints.try_reserve(1).is_err() {
             return None;
         }
-        Self::checkpoint(book, Some(operation.clone()))
+        Self::checkpoint(book, Some(AxisTransition::from_operation(operation)?))
     }
     pub(crate) fn publish(
         &mut self,
@@ -152,6 +230,9 @@ impl AxisHistory {
         base: DocumentVersion,
     ) -> Result<Formula, SessionError> {
         head.cell_content(address)?; // Deleted origins have typed domain errors.
+        if head.address_admission_floor(address)? > base {
+            return Err(SessionError::SourceVersionChanged);
+        }
         if base < self.relocation_floor {
             return Err(SessionError::SourceVersionChanged);
         }
@@ -168,6 +249,7 @@ impl AxisHistory {
         if base >= head.last_axis_change_version() {
             let bound = spreadsheet_formula::binder::bind(source, head, address)
                 .map_err(|_| SessionError::InvalidFormula)?;
+            check_activation(head, head, &bound, base)?;
             return Formula::new(
                 bound.source().to_owned(),
                 bound.canonical().to_owned(),
@@ -187,10 +269,16 @@ impl AxisHistory {
             .get(index)
             .ok_or(SessionError::RebaseWindowExceeded)?;
         let mut work = 1_000_000usize;
+        let activation_count = head
+            .row_activation_floors()
+            .count()
+            .saturating_add(head.column_activation_floors().count());
+        charge(&mut work, activation_count)?;
         charge(&mut work, axis_count(entry).saturating_mul(2))?;
         let mut axes = Workbook::hydrate_sheets(head.document_id(), base, entry.seeds.clone(), [])?;
         let mut formula = spreadsheet_formula::binder::bind(source, &axes, address)
             .map_err(|_| SessionError::InvalidFormula)?;
+        check_activation(head, &axes, &formula, base)?;
         for entry in self.checkpoints.iter().skip(index + 1) {
             let ranges = formula
                 .ast()
@@ -198,13 +286,24 @@ impl AxisHistory {
                 .iter()
                 .filter(|node| matches!(node, spreadsheet_domain::formula::Node::Range(_)))
                 .count();
+            // A restore can add a retired ID inside a range, and a later delete
+            // can erase it again. Check every intermediate axis image before
+            // the next lossy transform, not just initial and final endpoints.
+            charge(&mut work, ranges.saturating_mul(activation_count))?;
+            check_activation(head, &axes, &formula, base)?;
             let deletion_axis = match entry.transition.as_ref() {
-                Some(Operation::DeleteRows { sheet, .. }) => axes
+                Some(AxisTransition::Change {
+                    sheet,
+                    delta: AxisDelta::Rows { removed, .. },
+                }) if !removed.is_empty() => axes
                     .sheets()
                     .iter()
                     .find(|current| current.id() == *sheet)
                     .map_or(0, |sheet| sheet.rows().len()),
-                Some(Operation::DeleteColumns { sheet, .. }) => axes
+                Some(AxisTransition::Change {
+                    sheet,
+                    delta: AxisDelta::Columns { removed, .. },
+                }) if !removed.is_empty() => axes
                     .sheets()
                     .iter()
                     .find(|current| current.id() == *sheet)
@@ -254,15 +353,22 @@ impl AxisHistory {
                 .as_ref()
                 .ok_or(SessionError::RebaseWindowExceeded)?
             {
-                Operation::InsertRows { .. } | Operation::InsertRowsRebased { .. } => {
-                    formula.rebase_row_offsets(entry.version, row, rows)
-                }
-                Operation::InsertColumnsRebased { .. } => {
+                AxisTransition::Change {
+                    delta: AxisDelta::Rows { removed, .. },
+                    ..
+                } if removed.is_empty() => formula.rebase_row_offsets(entry.version, row, rows),
+                AxisTransition::Change {
+                    delta: AxisDelta::Columns { removed, .. },
+                    ..
+                } if removed.is_empty() => {
                     formula.rebase_column_offsets(entry.version, column, columns)
                 }
-                Operation::DeleteRows {
+                AxisTransition::Change {
                     sheet,
-                    rows: deleted,
+                    delta:
+                        AxisDelta::Rows {
+                            removed: deleted, ..
+                        },
                 } => {
                     let old = axes
                         .sheets()
@@ -279,9 +385,12 @@ impl AxisHistory {
                         |start, end| survivors(old.rows(), start, end, |id| !deleted.contains(&id)),
                     )
                 }
-                Operation::DeleteColumns {
+                AxisTransition::Change {
                     sheet,
-                    columns: deleted,
+                    delta:
+                        AxisDelta::Columns {
+                            removed: deleted, ..
+                        },
                 } => {
                     let old = axes
                         .sheets()
@@ -300,14 +409,12 @@ impl AxisHistory {
                         },
                     )
                 }
-                Operation::CreateWorkbook { .. }
-                | Operation::AddSheet { .. }
-                | Operation::ExtendRows { .. } => Ok(formula),
-                _ => return Err(SessionError::RebaseWindowExceeded),
+                AxisTransition::Passive => Ok(formula),
             }
             .map_err(|_| SessionError::InvalidFormula)?;
             axes = next;
         }
+        check_activation(head, head, &formula, base)?;
         Formula::new(
             formula.source().to_owned(),
             formula.canonical().to_owned(),
@@ -317,6 +424,19 @@ impl AxisHistory {
         )
         .map_err(|_| SessionError::InvalidFormula)
     }
+}
+fn check_activation(
+    head: &Workbook,
+    axes: &Workbook,
+    formula: &Formula,
+    base: DocumentVersion,
+) -> Result<(), SessionError> {
+    spreadsheet_domain::lifecycle::check_formula_activation(head, axes, formula, base).map_err(
+        |error| match error {
+            DomainError::VersionConflict => SessionError::SourceVersionChanged,
+            other => SessionError::Domain(other),
+        },
+    )
 }
 fn axis_count(entry: &Checkpoint) -> usize {
     entry.seeds.iter().fold(0usize, |total, sheet| {
@@ -389,6 +509,188 @@ mod tests {
         let prepared = history.prepare(&candidate, &operation);
         history.publish(&candidate, &operation, prepared);
         *book = candidate;
+        Ok(())
+    }
+    fn axis_edit(
+        book: &mut Workbook,
+        history: &mut AxisHistory,
+        legacy: Operation,
+    ) -> Result<CommittedEvent, Box<dyn std::error::Error>> {
+        let version = DocumentVersion::new(book.version().get() + 1)?;
+        let operation = spreadsheet_domain::axis_edit::prepare_axis_edit(book, &legacy, version)?;
+        edit(book, history, operation.clone())?;
+        Ok(CommittedEvent {
+            document_id: book.document_id(),
+            operation_id: OperationId::from_bytes([version.get() as u8 + 80; 16])?,
+            principal: EventPrincipal::User(ActorId::from_bytes([79; 16])?),
+            version,
+            operation,
+            state_hash: book.hash(),
+        })
+    }
+    #[test]
+    fn frozen_transitions_bind_delayed_targets_and_never_retain_cell_payloads() -> ResultTest {
+        let (mut book, mut history, origin) = fixture()?;
+        axis_edit(
+            &mut book,
+            &mut history,
+            Operation::InsertRowsRebased {
+                sheet: origin.sheet,
+                before: seed()?.rows[0],
+                rows: vec![RowId::from_bytes([40; 16])?],
+            },
+        )?;
+        let bound = history.bind("=A2", &book, origin, DocumentVersion::new(1)?)?;
+        assert_eq!(
+            spreadsheet_formula::bound::render_current(&bound, &book)?,
+            "=A3"
+        );
+        let value_address = CellAddress {
+            sheet: origin.sheet,
+            row: seed()?.rows[0],
+            column: seed()?.columns[0],
+        };
+        edit(
+            &mut book,
+            &mut history,
+            Operation::SetCellValue {
+                address: value_address,
+                value: CellValue::Text("x".repeat(32768)),
+            },
+        )?;
+        let target = axis_edit(
+            &mut book,
+            &mut history,
+            Operation::DeleteRows {
+                sheet: origin.sheet,
+                rows: vec![seed()?.rows[0]],
+            },
+        )?;
+        let bound = history.bind("=A1", &book, origin, DocumentVersion::new(1)?)?;
+        assert_eq!(
+            spreadsheet_formula::bound::render_current(&bound, &book)?,
+            "=#REF!"
+        );
+        let Some(checkpoint) = history.checkpoints.back() else {
+            return Err("missing checkpoint".into());
+        };
+        assert!(checkpoint.bytes < 32768);
+        assert!(matches!(
+            checkpoint.transition,
+            Some(AxisTransition::Change {
+                delta: AxisDelta::Rows { .. },
+                ..
+            })
+        ));
+        let mut altered = target.operation.clone();
+        if let Operation::AxisEdit { change } = &mut altered {
+            change.writes.clear();
+        }
+        let Some(empty_payload) = history.prepare(&book, &altered) else {
+            return Err("missing prepared".into());
+        };
+        assert_eq!(
+            empty_payload.bytes,
+            history
+                .checkpoints
+                .back()
+                .ok_or("missing checkpoint")?
+                .bytes
+        );
+        Ok(())
+    }
+    #[test]
+    fn revived_origins_targets_and_range_interiors_reject_old_base_after_reconstruction()
+    -> ResultTest {
+        let (mut book, mut history, origin) = fixture()?;
+        let target = axis_edit(
+            &mut book,
+            &mut history,
+            Operation::DeleteRows {
+                sheet: origin.sheet,
+                rows: vec![seed()?.rows[1]],
+            },
+        )?;
+        let inverse = spreadsheet_domain::axis_edit::prepare_axis_inverse(
+            &book,
+            &target,
+            DocumentVersion::new(3)?,
+        )?;
+        edit(&mut book, &mut history, inverse.clone())?;
+        let assert_rejections = |head: &Workbook, history: &AxisHistory| -> ResultTest {
+            let revived = CellAddress {
+                sheet: origin.sheet,
+                row: seed()?.rows[1],
+                column: origin.column,
+            };
+            for (source, at) in [("=A2", origin), ("=SUM(A1:A3)", origin), ("=A1", revived)] {
+                assert!(matches!(
+                    history.bind(source, head, at, DocumentVersion::new(1)?),
+                    Err(SessionError::SourceVersionChanged)
+                ));
+            }
+            let unchanged = history.bind("=A1", head, origin, DocumentVersion::new(1)?)?;
+            assert_eq!(
+                spreadsheet_formula::bound::render_current(&unchanged, head)?,
+                "=A1"
+            );
+            // Bound while deleted: the old A1:A2 now spans restored interior A2.
+            assert!(matches!(
+                history.bind("=SUM(A1:A2)", head, origin, DocumentVersion::new(2)?),
+                Err(SessionError::SourceVersionChanged)
+            ));
+            Ok(())
+        };
+        assert_rejections(&book, &history)?;
+        let (mut restored, mut fresh, _) = fixture()?;
+        edit(&mut restored, &mut fresh, target.operation)?;
+        edit(&mut restored, &mut fresh, inverse)?;
+        assert_eq!(restored.hash(), book.hash());
+        assert_rejections(&restored, &fresh)?;
+        axis_edit(
+            &mut book,
+            &mut history,
+            Operation::DeleteRows {
+                sheet: origin.sheet,
+                rows: vec![seed()?.rows[1]],
+            },
+        )?;
+        assert!(matches!(
+            history.bind("=SUM(A1:A2)", &book, origin, DocumentVersion::new(2)?),
+            Err(SessionError::SourceVersionChanged)
+        ));
+        Ok(())
+    }
+    #[test]
+    fn column_reactivation_is_checked_before_deleted_reference_identity_is_lost() -> ResultTest {
+        let (mut book, mut history, origin) = fixture()?;
+        let target = axis_edit(
+            &mut book,
+            &mut history,
+            Operation::DeleteColumns {
+                sheet: origin.sheet,
+                columns: vec![seed()?.columns[1]],
+            },
+        )?;
+        let inverse = spreadsheet_domain::axis_edit::prepare_axis_inverse(
+            &book,
+            &target,
+            DocumentVersion::new(3)?,
+        )?;
+        edit(&mut book, &mut history, inverse)?;
+        assert!(matches!(
+            history.bind("=$B$1", &book, origin, DocumentVersion::new(1)?),
+            Err(SessionError::SourceVersionChanged)
+        ));
+        assert!(matches!(
+            history.bind("=SUM(A1:C1)", &book, origin, DocumentVersion::new(1)?),
+            Err(SessionError::SourceVersionChanged)
+        ));
+        assert!(
+            history
+                .bind("=$A$1", &book, origin, DocumentVersion::new(1)?)
+                .is_ok()
+        );
         Ok(())
     }
     #[test]

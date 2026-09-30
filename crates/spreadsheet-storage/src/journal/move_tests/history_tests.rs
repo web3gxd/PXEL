@@ -162,7 +162,7 @@ async fn move_history_new_range_reference_and_wrong_projection_are_guarded(
     let other = foreign(&db, owner, &book).await?;
     let target = authored_move(&db, owner, &mut book, a).await?;
     let mut missing = prepare(&db, owner, &book, 45, inverse(&target.event)?).await?;
-    missing.move_inverse_projection = None;
+    missing.inverse_projection = None;
     assert!(matches!(
         db.commit(&missing).await,
         Err(JournalError::Corrupt)
@@ -175,7 +175,7 @@ async fn move_history_new_range_reference_and_wrong_projection_are_guarded(
         },
         DocumentVersion::new(book.version().get() + 1)?,
     )?;
-    wrong.move_inverse_projection = Some(Arc::new(bad));
+    wrong.inverse_projection = Some(Arc::new(bad));
     assert!(matches!(
         db.commit(&wrong).await,
         Err(JournalError::UndoConflict)
@@ -192,7 +192,7 @@ async fn move_history_new_range_reference_and_wrong_projection_are_guarded(
         }],
         [(a[2], CellContent::Value(CellValue::Number(99.0)))],
     )?;
-    wrong.move_inverse_projection = Some(Arc::new(corrupt_projection));
+    wrong.inverse_projection = Some(Arc::new(corrupt_projection));
     assert!(matches!(
         db.commit(&wrong).await,
         Err(JournalError::UndoConflict)
@@ -211,7 +211,7 @@ async fn move_history_new_range_reference_and_wrong_projection_are_guarded(
             .iter()
             .map(|(&address, content)| (address, content.clone())),
     )?;
-    wrong.move_inverse_projection = Some(Arc::new(wrong_document));
+    wrong.inverse_projection = Some(Arc::new(wrong_document));
     assert!(matches!(
         db.commit(&wrong).await,
         Err(JournalError::UndoConflict)

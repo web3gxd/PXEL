@@ -34,6 +34,12 @@ preview worker. Предварительные результаты остают
 и calculation cache публикуются локально только после успешного расчёта и
 сериализации; confirmed content/hash никогда не меняются от preview (ADR084).
 
+Structural history (ADR085) uses frozen axis edits and own compensations with
+exact preimages. Revived stable IDs have durable activation floors, included in
+the domain hash and snapshot3. Journal admission independently verifies projection
+context and currentness after receipt lookup; no actor-only validation assumption
+is sufficient. Integration verification is recorded in RUNBOOK.
+
 ## Crates и направление зависимостей
 
 | Crate                     | Владелец ответственности                                          | Workspace dependencies                               | Вводится                            |

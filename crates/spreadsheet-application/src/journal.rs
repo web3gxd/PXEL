@@ -24,9 +24,9 @@ pub struct CommitReceipt {
     pub current_head_version: DocumentVersion,
 }
 pub struct CommitRequest {
-    /// Internal confirmed projection used only for move-reference history guards.
-    /// The journal verifies its version/hash against the locked durable head.
-    pub move_inverse_projection: Option<std::sync::Arc<Workbook>>,
+    /// Internal confirmed projection for structural/move history and lifecycle
+    /// guards. The journal verifies its version/hash against the locked durable head.
+    pub inverse_projection: Option<std::sync::Arc<Workbook>>,
     pub identity: AuthenticatedActor,
     pub expected_head: DocumentVersion,
     pub expected_access: DocumentAccess,

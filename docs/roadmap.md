@@ -545,3 +545,12 @@ are20-samplebulkmeasurements, not16msedit orcontrolledproductiongate. Benchmark
 and limitations are recorded. Next phase4 work: guarded structural history and
 durable history discovery, followed by styles/merges and fuller XLSX. Wider
 combinedstress/Linux/Compose/remoteCI/production gates remain open.
+
+ADR085 explicit structural history is locally verified.
+Explicit row/column insert/delete have guarded inverse/redo, preserved stable IDs,
+exact formula preimages and durable activation floors. Old-base commands cannot
+silently write into revived identities. Native/codec/real-PG checks passed;
+128browser,76HTTP,119frontendunit and hard-restart checks passed. Actual filesystem
+snapshot plus one-event replay preserves floors and rejects stale commands.
+Full phase4 completion is not claimed. Durable history discovery and styles,
+merges, fuller XLSX and the wider deployment/performance gates remain open.

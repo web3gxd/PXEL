@@ -19,7 +19,12 @@ message SnapshotEnvelope {
   string writer_compatibility_profile = 12;
   // Schema 2 stores every sheet in visible order. Schema 1 keeps fields 5/6.
   repeated SnapshotSheet sheets = 13;
+  // Schema 3 retains the latest activation floor even after a revived axis is deleted again.
+  repeated RowActivationFloor row_activation_floors = 14;
+  repeated ColumnActivationFloor column_activation_floors = 15;
 }
+message RowActivationFloor { bytes row_id = 1; uint64 document_version = 2; }
+message ColumnActivationFloor { bytes column_id = 1; uint64 document_version = 2; }
 
 message SnapshotCell {
   CellAddress address = 1;

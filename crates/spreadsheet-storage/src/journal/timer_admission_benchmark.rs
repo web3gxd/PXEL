@@ -87,7 +87,7 @@ async fn populated_book(
         assert!(matches!(
             database
                 .commit(&CommitRequest {
-                    move_inverse_projection: None,
+                    inverse_projection: None,
                     identity,
                     expected_head: book.version(),
                     expected_access: database.access(identity, document).await?,

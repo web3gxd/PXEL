@@ -1,6 +1,9 @@
 //! Shared domain values. No persistence, transport, or evaluation dependencies.
 
+pub mod axis_edit;
+pub mod axis_history;
 pub mod formula;
+pub mod lifecycle;
 pub mod move_history;
 pub mod workbook;
 

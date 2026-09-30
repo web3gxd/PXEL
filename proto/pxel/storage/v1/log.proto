@@ -37,6 +37,8 @@ message Operation {
   RangeWrite compensating_range_write = 18;
   MoveRange move_range = 19;
   MoveCompensation move_compensation = 20;
+  AxisChange axis_edit = 21;
+  AxisCompensation axis_compensation = 22;
  }
 }
 message AdvanceCalculationEpoch {
@@ -107,6 +109,31 @@ message MoveCompensation {
  repeated GuardedContentWrite writes = 5;
  bytes undoes_operation_id = 6;
  uint64 undoes_version = 7;
+}
+// Schema 21 freezes a single-axis edit and its exact inverse and cell preimages.
+message AxisChange {
+ bytes sheet_id = 1;
+ AxisDelta delta = 2;
+ AxisDelta inverse_delta = 3;
+ repeated GuardedContentWrite writes = 4;
+ bytes before_order_hash = 5;
+ bytes after_order_hash = 6;
+}
+message AxisDelta {
+ oneof kind {
+  RowDelta rows = 1;
+  ColumnDelta columns = 2;
+ }
+}
+message RowDelta { repeated bytes removed = 1; repeated RowPlacement inserted = 2; }
+message ColumnDelta { repeated bytes removed = 1; repeated ColumnPlacement inserted = 2; }
+message RowPlacement { bytes row_id = 1; bytes before_row_id = 2; }
+message ColumnPlacement { bytes column_id = 1; bytes before_column_id = 2; }
+// Schema 22 revives retired identities only as a provenance-checked compensation.
+message AxisCompensation {
+ AxisChange change = 1;
+ bytes undoes_operation_id = 2;
+ uint64 undoes_version = 3;
 }
 enum AuthoredRangeWriteKind {
  AUTHORED_RANGE_WRITE_KIND_UNSPECIFIED = 0;

@@ -1,4 +1,5 @@
 //! Pure, bounded sparse projection. Canonical hash format is `PXEL-DOMAIN-1`.
+pub use crate::axis_edit::{AxisChange, AxisDelta, ColumnPlacement, RowPlacement};
 pub use crate::formula::FormulaSource;
 use crate::formula::{AxisReferenceMode, BoundCellReference, Formula, Node};
 use sha2::{Digest, Sha256};
@@ -330,6 +331,14 @@ pub enum CellWriteKind {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
+    AxisEdit {
+        change: AxisChange,
+    },
+    AxisCompensation {
+        change: AxisChange,
+        undoes: OperationId,
+        undoes_version: DocumentVersion,
+    },
     CreateWorkbook {
         sheet: SheetSeed,
     },
@@ -502,7 +511,13 @@ impl Operation {
     }
     pub const fn is_inverse_target(&self) -> bool {
         self.is_cell_inverse_target()
-            || matches!(self, Self::MoveRange { .. } | Self::MoveCompensation { .. })
+            || matches!(
+                self,
+                Self::MoveRange { .. }
+                    | Self::MoveCompensation { .. }
+                    | Self::AxisEdit { .. }
+                    | Self::AxisCompensation { .. }
+            )
             || matches!(
                 self,
                 Self::RangeWrite {
@@ -529,6 +544,8 @@ impl Operation {
                 | Self::DeleteRows { .. }
                 | Self::InsertColumnsRebased { .. }
                 | Self::DeleteColumns { .. }
+                | Self::AxisEdit { .. }
+                | Self::AxisCompensation { .. }
         )
     }
 }
@@ -558,13 +575,13 @@ pub struct CommittedEvent {
 
 #[derive(Clone)]
 pub struct Sheet {
-    id: SheetId,
-    name: String,
-    rows: Vec<RowId>,
-    columns: Vec<ColumnId>,
-    row_positions: HashMap<RowId, u32>,
-    column_positions: HashMap<ColumnId, u32>,
-    cells: BTreeMap<CellAddress, CellContent>,
+    pub(crate) id: SheetId,
+    pub(crate) name: String,
+    pub(crate) rows: Vec<RowId>,
+    pub(crate) columns: Vec<ColumnId>,
+    pub(crate) row_positions: HashMap<RowId, u32>,
+    pub(crate) column_positions: HashMap<ColumnId, u32>,
+    pub(crate) cells: BTreeMap<CellAddress, CellContent>,
 }
 
 /// Versioned storage codecs encode this authored image; calculated values are absent.
@@ -577,6 +594,8 @@ pub struct SnapshotImage {
     pub sheets: Vec<SnapshotSheetImage>,
     pub retired_rows: Vec<RowId>,
     pub retired_columns: Vec<ColumnId>,
+    pub row_activation_floors: Vec<(RowId, DocumentVersion)>,
+    pub column_activation_floors: Vec<(ColumnId, DocumentVersion)>,
     pub calculation_context: Option<CalculationContext>,
 }
 
@@ -649,7 +668,7 @@ impl Sheet {
             cells: BTreeMap::new(),
         })
     }
-    fn validate_address(&self, address: CellAddress) -> Result<(), DomainError> {
+    pub(crate) fn validate_address(&self, address: CellAddress) -> Result<(), DomainError> {
         if !self.row_positions.contains_key(&address.row) {
             return Err(DomainError::MissingRow);
         }
@@ -733,17 +752,19 @@ impl Sheet {
 
 #[derive(Clone)]
 pub struct Workbook {
-    document_id: DocumentId,
-    version: DocumentVersion,
+    pub(crate) document_id: DocumentId,
+    pub(crate) version: DocumentVersion,
     // Derived by replay; not part of the canonical authored hash.
-    last_axis_change_version: DocumentVersion,
-    sheets: Vec<Sheet>,
-    retired_row_ids: BTreeSet<RowId>,
-    retired_column_ids: BTreeSet<ColumnId>,
-    calculation_context: Option<CalculationContext>,
+    pub(crate) last_axis_change_version: DocumentVersion,
+    pub(crate) sheets: Vec<Sheet>,
+    pub(crate) retired_row_ids: BTreeSet<RowId>,
+    pub(crate) retired_column_ids: BTreeSet<ColumnId>,
+    pub(crate) row_activation_floors: BTreeMap<RowId, DocumentVersion>,
+    pub(crate) column_activation_floors: BTreeMap<ColumnId, DocumentVersion>,
+    pub(crate) calculation_context: Option<CalculationContext>,
     // Derived from cell contents; never persisted or included in canonical hashes.
-    text_bytes: usize,
-    ast_memory_bytes: usize,
+    pub(crate) text_bytes: usize,
+    pub(crate) ast_memory_bytes: usize,
 }
 impl Workbook {
     pub fn empty(document_id: DocumentId) -> Self {
@@ -754,6 +775,8 @@ impl Workbook {
             sheets: Vec::new(),
             retired_row_ids: BTreeSet::new(),
             retired_column_ids: BTreeSet::new(),
+            row_activation_floors: BTreeMap::new(),
+            column_activation_floors: BTreeMap::new(),
             calculation_context: None,
             text_bytes: 0,
             ast_memory_bytes: 0,
@@ -779,6 +802,46 @@ impl Workbook {
             .ok_or(DomainError::MissingSheet)?;
         sheet.validate_address(address)?;
         Ok(sheet.cells.get(&address))
+    }
+    pub fn row_activation_floor(&self, row: RowId) -> DocumentVersion {
+        self.row_activation_floors
+            .get(&row)
+            .copied()
+            .unwrap_or(DocumentVersion::ZERO)
+    }
+    pub fn column_activation_floor(&self, column: ColumnId) -> DocumentVersion {
+        self.column_activation_floors
+            .get(&column)
+            .copied()
+            .unwrap_or(DocumentVersion::ZERO)
+    }
+    pub fn row_activation_floors(&self) -> impl Iterator<Item = (RowId, DocumentVersion)> + '_ {
+        self.row_activation_floors.iter().map(|(id, v)| (*id, *v))
+    }
+    pub fn column_activation_floors(
+        &self,
+    ) -> impl Iterator<Item = (ColumnId, DocumentVersion)> + '_ {
+        self.column_activation_floors
+            .iter()
+            .map(|(id, v)| (*id, *v))
+    }
+    /// Minimum command base allowed to address the current activation of an ID.
+    pub fn address_admission_floor(
+        &self,
+        address: CellAddress,
+    ) -> Result<DocumentVersion, DomainError> {
+        self.cell_content(address)?;
+        Ok(self
+            .row_activation_floors
+            .get(&address.row)
+            .copied()
+            .unwrap_or(DocumentVersion::ZERO)
+            .max(
+                self.column_activation_floors
+                    .get(&address.column)
+                    .copied()
+                    .unwrap_or(DocumentVersion::ZERO),
+            ))
     }
     pub fn calculation_context(&self) -> Option<&CalculationContext> {
         self.calculation_context.as_ref()
@@ -813,6 +876,16 @@ impl Workbook {
                 .collect(),
             retired_rows: self.retired_row_ids.iter().copied().collect(),
             retired_columns: self.retired_column_ids.iter().copied().collect(),
+            row_activation_floors: self
+                .row_activation_floors
+                .iter()
+                .map(|(id, v)| (*id, *v))
+                .collect(),
+            column_activation_floors: self
+                .column_activation_floors
+                .iter()
+                .map(|(id, v)| (*id, *v))
+                .collect(),
             calculation_context: self.calculation_context.clone(),
         })
     }
@@ -838,23 +911,60 @@ impl Workbook {
             seeds,
             image.sheets.into_iter().flat_map(|sheet| sheet.cells),
         )?;
+        if image.row_activation_floors.len() > MAX_RETIRED_ROWS
+            || image.column_activation_floors.len() > MAX_RETIRED_COLUMNS
+        {
+            return Err(DomainError::LimitExceeded);
+        }
+        for (id, version) in image.row_activation_floors {
+            if version == DocumentVersion::ZERO
+                || version > image.version
+                || workbook.row_activation_floors.insert(id, version).is_some()
+            {
+                return Err(DomainError::InvalidAxis);
+            }
+        }
+        for (id, version) in image.column_activation_floors {
+            if version == DocumentVersion::ZERO
+                || version > image.version
+                || workbook
+                    .column_activation_floors
+                    .insert(id, version)
+                    .is_some()
+            {
+                return Err(DomainError::InvalidAxis);
+            }
+        }
+        if crate::lifecycle::max_activation_version(&workbook) > image.last_axis_change_version {
+            return Err(DomainError::InvalidAxis);
+        }
         let retired_row_count = image.retired_rows.len();
         let retired_column_count = image.retired_columns.len();
         let retired_rows: BTreeSet<_> = image.retired_rows.into_iter().collect();
         let retired_columns: BTreeSet<_> = image.retired_columns.into_iter().collect();
         if retired_rows.len() > MAX_RETIRED_ROWS
             || retired_columns.len() > MAX_RETIRED_COLUMNS
+            || workbook
+                .row_activation_floors
+                .keys()
+                .any(|id| !retired_rows.contains(id))
+            || workbook
+                .column_activation_floors
+                .keys()
+                .any(|id| !retired_columns.contains(id))
             || retired_rows.iter().any(|id| {
-                workbook
-                    .sheets
-                    .iter()
-                    .any(|sheet| sheet.row_positions.contains_key(id))
+                !workbook.row_activation_floors.contains_key(id)
+                    && workbook
+                        .sheets
+                        .iter()
+                        .any(|sheet| sheet.row_positions.contains_key(id))
             })
             || retired_columns.iter().any(|id| {
-                workbook
-                    .sheets
-                    .iter()
-                    .any(|sheet| sheet.column_positions.contains_key(id))
+                !workbook.column_activation_floors.contains_key(id)
+                    && workbook
+                        .sheets
+                        .iter()
+                        .any(|sheet| sheet.column_positions.contains_key(id))
             })
         {
             return Err(DomainError::InvalidAxis);
@@ -948,6 +1058,8 @@ impl Workbook {
             sheets,
             retired_row_ids: BTreeSet::new(),
             retired_column_ids: BTreeSet::new(),
+            row_activation_floors: BTreeMap::new(),
+            column_activation_floors: BTreeMap::new(),
             calculation_context: None,
             text_bytes: 0,
             ast_memory_bytes: 0,
@@ -1007,6 +1119,20 @@ impl Workbook {
     ) -> Result<Self, DomainError> {
         if self.version.get().checked_add(1) != Some(next_version.get()) {
             return Err(DomainError::VersionConflict);
+        }
+        if let Operation::AxisEdit { change } = operation {
+            return crate::axis_edit::candidate(self, change, next_version, false);
+        }
+        if let Operation::AxisCompensation {
+            change,
+            undoes_version,
+            ..
+        } = operation
+        {
+            if *undoes_version == DocumentVersion::ZERO || *undoes_version >= next_version {
+                return Err(DomainError::VersionConflict);
+            }
+            return crate::axis_edit::candidate(self, change, next_version, true);
         }
         if let Operation::MoveCompensation {
             source,
@@ -1276,7 +1402,9 @@ impl Workbook {
                 Operation::CopyRange { .. }
                 | Operation::RangeWrite { .. }
                 | Operation::MoveRange { .. }
-                | Operation::MoveCompensation { .. } => {
+                | Operation::MoveCompensation { .. }
+                | Operation::AxisEdit { .. }
+                | Operation::AxisCompensation { .. } => {
                     return Err(DomainError::InvalidAxis);
                 }
             };
@@ -1765,7 +1893,9 @@ impl Workbook {
             Operation::CopyRange { .. }
             | Operation::RangeWrite { .. }
             | Operation::MoveRange { .. }
-            | Operation::MoveCompensation { .. } => {
+            | Operation::MoveCompensation { .. }
+            | Operation::AxisEdit { .. }
+            | Operation::AxisCompensation { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {
@@ -1999,7 +2129,9 @@ impl Workbook {
             Operation::CopyRange { .. }
             | Operation::RangeWrite { .. }
             | Operation::MoveRange { .. }
-            | Operation::MoveCompensation { .. } => {
+            | Operation::MoveCompensation { .. }
+            | Operation::AxisEdit { .. }
+            | Operation::AxisCompensation { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {
@@ -2356,7 +2488,11 @@ impl Workbook {
                 .ok_or(DomainError::MissingColumn)?,
         ))
     }
-    fn validate_formula(&self, address: CellAddress, formula: &Formula) -> Result<(), DomainError> {
+    pub(crate) fn validate_formula(
+        &self,
+        address: CellAddress,
+        formula: &Formula,
+    ) -> Result<(), DomainError> {
         if formula.origin() != address || formula.bound_at_version() > self.version {
             return Err(DomainError::InvalidFormula);
         }
@@ -2467,6 +2603,22 @@ impl Workbook {
             hash.update((self.retired_column_ids.len() as u64).to_be_bytes());
             for id in &self.retired_column_ids {
                 hash.update(id.as_bytes());
+            }
+        }
+        if !self.row_activation_floors.is_empty() {
+            hash.update(b"PXEL-ROW-ACTIVATIONS-1\0");
+            hash.update((self.row_activation_floors.len() as u64).to_be_bytes());
+            for (id, version) in &self.row_activation_floors {
+                hash.update(id.as_bytes());
+                hash.update(version.get().to_be_bytes());
+            }
+        }
+        if !self.column_activation_floors.is_empty() {
+            hash.update(b"PXEL-COLUMN-ACTIVATIONS-1\0");
+            hash.update((self.column_activation_floors.len() as u64).to_be_bytes());
+            for (id, version) in &self.column_activation_floors {
+                hash.update(id.as_bytes());
+                hash.update(version.get().to_be_bytes());
             }
         }
         hash.finalize().into()

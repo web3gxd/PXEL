@@ -1,5 +1,16 @@
 # Проверки и доказательства
 
+ADR085 coverage: domain axis_edit/lifecycle and storage-codec axis_tests exercise
+exact restoration, malformed envelopes, snapshot3/legacy readers and activation
+floors. Real PostgreSQL journal axis_tests cover own/foreign history, restored
+range interiors, missing/forged context, stale Copy, size and touch budgets.
+Browser axis-history.spec.ts covers four explicit axis actions at DPR1/2 with
+foreign independent writes and Undo/Redo/reload. Recovery axis-history-restart
+uses two genuine process kills on a dedicated port and compares content,
+calculation hashes/results, stale rejection and late receipts. It exercises log
+replay; it does not by itself prove snapshot recovery. Actual outcomes are in
+RUNBOOK; ignored release harnesses are not automatically passed.
+
 Этот документ задает проверки. Что действительно запускалось и с каким результатом, фиксируется в RUNBOOK; описание test suite не является свидетельством его прохождения.
 
 ## Phase 0

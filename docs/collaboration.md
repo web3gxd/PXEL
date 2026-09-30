@@ -241,3 +241,14 @@ in a private pending overlay until server confirmation. Worker failure never
 blocks durable command submission. A newer head, terminal rejection, refresh or
 ordinary edit discards the private moved projection; retryable uncertainty keeps
 the original operation bytes/ID. See ADR083/084 and RUNBOOK.
+
+ADR085 extends acknowledged user history to explicit row/column insert/delete;
+automatic ExtendRows remains outside user Undo. Frozen axis events preserve
+original contents/formulas, stable identity and deterministic surviving anchors.
+Own inverse pairs neutralize only verified own history; foreign equal-value and
+new reference writes remain barriers. Restored IDs carry durable activation floors
+that reject stale origin/target/range-interior intents, including restore/redelete
+paths. Copy and move require exact current source versions after late-retry receipt
+resolution. Structural canonical delivery uses authorized projection refresh.
+Snapshot3 and replay retain floors; durable history discovery remains separate.
+See ADR085 and RUNBOOK for verification status and all inspection/size limits.

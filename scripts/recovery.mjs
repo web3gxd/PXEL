@@ -22,4 +22,5 @@ run(process.execPath, [
   'tests/recovery/convergence-restart.test.mjs',
   'tests/recovery/move-restart.test.mjs',
   'tests/recovery/move-history-restart.test.mjs',
+  'tests/recovery/axis-history-restart.test.mjs',
 ]);

@@ -770,90 +770,112 @@ async fn submit<J: OperationJournal>(
                 if !target.operation.is_inverse_target() {
                     return Err(JournalError::NotUndoable.into());
                 }
-                let writes = match &target.operation {
-                    Operation::CellWrite {
-                        address,
-                        content,
-                        previous,
-                        ..
-                    } => vec![spreadsheet_domain::workbook::GuardedContentWrite {
-                        address: *address,
-                        content: previous.clone(),
-                        previous: content.clone(),
-                    }],
-                    Operation::RangeWrite { writes, .. }
-                    | Operation::MoveRange { writes, .. }
-                    | Operation::MoveCompensation { writes, .. } => writes
-                        .iter()
-                        .map(|w| spreadsheet_domain::workbook::GuardedContentWrite {
-                            address: w.address,
-                            content: w.previous.clone(),
-                            previous: w.content.clone(),
-                        })
-                        .collect(),
-                    _ => return Err(JournalError::NotUndoable.into()),
-                };
-                for write in &writes {
-                    match workbook.cell_content(write.address) {
-                        Err(
-                            DomainError::MissingSheet
-                            | DomainError::MissingRow
-                            | DomainError::MissingColumn,
-                        ) => return Err(JournalError::UndoConflict.into()),
-                        Err(error) => return Err(error.into()),
-                        Ok(_) => {}
-                    }
-                }
-                if writes.iter().any(|w| {
-                    w.content
-                        .iter()
-                        .chain(w.previous.iter())
-                        .any(|c| matches!(c, CellContent::Formula(_)))
-                }) && workbook.last_axis_change_version() > target.version
-                {
-                    return Err(JournalError::NotUndoable.into());
-                }
-                match target.operation {
-                    Operation::CellWrite { .. } => {
-                        let write = writes.into_iter().next().ok_or(JournalError::Corrupt)?;
+                if matches!(
+                    target.operation,
+                    Operation::AxisEdit { .. } | Operation::AxisCompensation { .. }
+                ) {
+                    spreadsheet_domain::axis_edit::prepare_axis_inverse(workbook, &target, next)
+                        .map_err(|error| match error {
+                            spreadsheet_domain::axis_edit::AxisEditError::NotUndoable => {
+                                SessionError::Journal(JournalError::NotUndoable)
+                            }
+                            spreadsheet_domain::axis_edit::AxisEditError::Domain(
+                                DomainError::PreimageConflict
+                                | DomainError::MissingRow
+                                | DomainError::MissingColumn
+                                | DomainError::MissingSheet
+                                | DomainError::InvalidAxis,
+                            ) => SessionError::Journal(JournalError::UndoConflict),
+                            spreadsheet_domain::axis_edit::AxisEditError::Domain(error) => {
+                                SessionError::Domain(error)
+                            }
+                        })?
+                } else {
+                    let writes = match &target.operation {
                         Operation::CellWrite {
-                            address: write.address,
-                            content: write.content,
-                            previous: write.previous,
+                            address,
+                            content,
+                            previous,
+                            ..
+                        } => vec![spreadsheet_domain::workbook::GuardedContentWrite {
+                            address: *address,
+                            content: previous.clone(),
+                            previous: content.clone(),
+                        }],
+                        Operation::RangeWrite { writes, .. }
+                        | Operation::MoveRange { writes, .. }
+                        | Operation::MoveCompensation { writes, .. } => writes
+                            .iter()
+                            .map(|w| spreadsheet_domain::workbook::GuardedContentWrite {
+                                address: w.address,
+                                content: w.previous.clone(),
+                                previous: w.content.clone(),
+                            })
+                            .collect(),
+                        _ => return Err(JournalError::NotUndoable.into()),
+                    };
+                    for write in &writes {
+                        match workbook.cell_content(write.address) {
+                            Err(
+                                DomainError::MissingSheet
+                                | DomainError::MissingRow
+                                | DomainError::MissingColumn,
+                            ) => return Err(JournalError::UndoConflict.into()),
+                            Err(error) => return Err(error.into()),
+                            Ok(_) => {}
+                        }
+                    }
+                    if writes.iter().any(|w| {
+                        w.content
+                            .iter()
+                            .chain(w.previous.iter())
+                            .any(|c| matches!(c, CellContent::Formula(_)))
+                    }) && workbook.last_axis_change_version() > target.version
+                    {
+                        return Err(JournalError::NotUndoable.into());
+                    }
+                    match target.operation {
+                        Operation::CellWrite { .. } => {
+                            let write = writes.into_iter().next().ok_or(JournalError::Corrupt)?;
+                            Operation::CellWrite {
+                                address: write.address,
+                                content: write.content,
+                                previous: write.previous,
+                                kind: None,
+                                undoes: Some(*target_operation_id),
+                                undoes_version: Some(target.version),
+                            }
+                        }
+                        Operation::RangeWrite { .. } => Operation::RangeWrite {
+                            writes,
                             kind: None,
                             undoes: Some(*target_operation_id),
                             undoes_version: Some(target.version),
+                        },
+                        Operation::MoveRange {
+                            source,
+                            destination,
+                            rows,
+                            columns,
+                            ..
                         }
+                        | Operation::MoveCompensation {
+                            source,
+                            destination,
+                            rows,
+                            columns,
+                            ..
+                        } => Operation::MoveCompensation {
+                            source,
+                            destination,
+                            rows,
+                            columns,
+                            writes,
+                            undoes: *target_operation_id,
+                            undoes_version: target.version,
+                        },
+                        _ => return Err(JournalError::NotUndoable.into()),
                     }
-                    Operation::RangeWrite { .. } => Operation::RangeWrite {
-                        writes,
-                        kind: None,
-                        undoes: Some(*target_operation_id),
-                        undoes_version: Some(target.version),
-                    },
-                    Operation::MoveRange {
-                        source,
-                        destination,
-                        rows,
-                        columns,
-                        ..
-                    }
-                    | Operation::MoveCompensation {
-                        source,
-                        destination,
-                        rows,
-                        columns,
-                        ..
-                    } => Operation::MoveCompensation {
-                        source,
-                        destination,
-                        rows,
-                        columns,
-                        writes,
-                        undoes: *target_operation_id,
-                        undoes_version: target.version,
-                    },
-                    _ => return Err(JournalError::NotUndoable.into()),
                 }
             }
             _ => match normalize(&command, workbook, axes) {
@@ -893,6 +915,8 @@ async fn submit<J: OperationJournal>(
                 | Operation::DeleteRows { .. }
                 | Operation::InsertColumnsRebased { .. }
                 | Operation::DeleteColumns { .. }
+                | Operation::AxisEdit { .. }
+                | Operation::AxisCompensation { .. }
         ) {
             for sheet in candidate.sheets() {
                 for content in sheet.cells().values() {
@@ -917,8 +941,7 @@ async fn submit<J: OperationJournal>(
             state_hash: candidate.hash(),
         };
         let request = CommitRequest {
-            move_inverse_projection: matches!(event.operation, Operation::MoveCompensation { .. })
-                .then(|| Arc::clone(workbook)),
+            inverse_projection: Some(Arc::clone(workbook)),
             identity,
             expected_head: workbook.version(),
             expected_access: access,
@@ -1040,7 +1063,13 @@ fn normalize(
     workbook: &Workbook,
     axes: &axis_history::AxisHistory,
 ) -> Result<Operation, SessionError> {
-    match &command.operation {
+    spreadsheet_domain::lifecycle::check_command_activation(workbook, command).map_err(
+        |error| match error {
+            DomainError::VersionConflict => SessionError::SourceVersionChanged,
+            other => SessionError::Domain(other),
+        },
+    )?;
+    let normalized = match &command.operation {
         CommandPayload::AddSheet { sheet } => Ok(Operation::AddSheet {
             sheet: sheet.clone(),
         }),
@@ -1278,5 +1307,32 @@ fn normalize(
         CommandPayload::CreateWorkbook { .. } | CommandPayload::UndoCell { .. } => {
             Err(SessionError::InvalidCommand)
         }
+    }?;
+    if matches!(
+        normalized,
+        Operation::InsertRowsRebased { .. }
+            | Operation::DeleteRows { .. }
+            | Operation::InsertColumnsRebased { .. }
+            | Operation::DeleteColumns { .. }
+    ) {
+        let next = DocumentVersion::new(
+            workbook
+                .version()
+                .get()
+                .checked_add(1)
+                .ok_or(SessionError::InvalidCommand)?,
+        )?;
+        spreadsheet_domain::axis_edit::prepare_axis_edit(workbook, &normalized, next).map_err(
+            |error| match error {
+                spreadsheet_domain::axis_edit::AxisEditError::NotUndoable => {
+                    SessionError::InvalidCommand
+                }
+                spreadsheet_domain::axis_edit::AxisEditError::Domain(error) => {
+                    SessionError::Domain(error)
+                }
+            },
+        )
+    } else {
+        Ok(normalized)
     }
 }

@@ -1,5 +1,18 @@
 # Persistence и recovery
 
+ADR085 introduces frozen AxisEdit/AxisCompensation schemas21/22 with semantic
+hash tags23/24. Explicit insert/delete operations store stable placements and
+content/formula preimages; automatic ExtendRows remains legacy/nonundoable.
+Snapshot writer3 persists per-ID activation floors; readers1/2 remain supported.
+`documents.axis_activation_version` is a transactional derived marker: after
+restoration every new command requires hash-verified current projection context.
+Reference admission uses hash-covered floors, and snapshot restore rejects an
+axis metadata version below those floors. Currentness checks for copy/move follow
+receipt lookup, so late identical retries still resolve without touching contents.
+Independent canonical inverse derivation, candidate hash, own history reduction
+and bounded reference checks precede locked CAS. See ADR085 for exact limits and
+RUNBOOK for integration status; no existing events are rewritten.
+
 ADR-076 добавляет schema16 authored formula write: source, normalized bound AST,
 exact preimage и authored_kind3. Старые schema2/11 bytes и hash tags неизменны;
 новый semantic hash tag17 независим от protobuf bytes. Компенсации остаются

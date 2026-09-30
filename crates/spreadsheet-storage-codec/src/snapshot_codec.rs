@@ -11,7 +11,7 @@ use spreadsheet_domain::workbook::{
 /// The first reader is deliberately bounded; a larger snapshot needs a new
 /// streaming decoder or a measured increase to this cap before activation.
 pub const MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 2;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 
 fn encode_cells(
     cells: &[(
@@ -119,6 +119,22 @@ pub fn encode_snapshot(
             .iter()
             .map(|id| id.as_bytes().to_vec())
             .collect(),
+        row_activation_floors: image
+            .row_activation_floors
+            .iter()
+            .map(|(row, version)| v1::RowActivationFloor {
+                row_id: row.as_bytes().to_vec(),
+                document_version: version.get(),
+            })
+            .collect(),
+        column_activation_floors: image
+            .column_activation_floors
+            .iter()
+            .map(|(column, version)| v1::ColumnActivationFloor {
+                column_id: column.as_bytes().to_vec(),
+                document_version: version.get(),
+            })
+            .collect(),
         calculation_context: image
             .calculation_context
             .as_ref()
@@ -152,7 +168,7 @@ pub fn decode_snapshot(
     let envelope = v1::SnapshotEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
     if !matches!(
         envelope.snapshot_schema_version,
-        1 | SNAPSHOT_SCHEMA_VERSION
+        1 | 2 | SNAPSHOT_SCHEMA_VERSION
     ) {
         return Err(CodecError::UnsupportedSchema);
     }
@@ -167,6 +183,11 @@ pub fn decode_snapshot(
         || envelope.cells.len() > MAX_CELLS
         || envelope.retired_rows.len() > MAX_RETIRED_ROWS
         || envelope.retired_columns.len() > MAX_RETIRED_COLUMNS
+        || envelope.row_activation_floors.len() > MAX_RETIRED_ROWS
+        || envelope.column_activation_floors.len() > MAX_RETIRED_COLUMNS
+        || (envelope.snapshot_schema_version < 3
+            && (!envelope.row_activation_floors.is_empty()
+                || !envelope.column_activation_floors.is_empty()))
     {
         return Err(CodecError::Invalid);
     }
@@ -216,6 +237,28 @@ pub fn decode_snapshot(
             .iter()
             .map(|value| ColumnId::from_bytes(id(value)?).map_err(|_| CodecError::Invalid))
             .collect::<Result<_, _>>()?,
+        row_activation_floors: envelope
+            .row_activation_floors
+            .iter()
+            .map(|floor| {
+                Ok((
+                    RowId::from_bytes(id(&floor.row_id)?).map_err(|_| CodecError::Invalid)?,
+                    DocumentVersion::new(floor.document_version)
+                        .map_err(|_| CodecError::Invalid)?,
+                ))
+            })
+            .collect::<Result<_, CodecError>>()?,
+        column_activation_floors: envelope
+            .column_activation_floors
+            .iter()
+            .map(|floor| {
+                Ok((
+                    ColumnId::from_bytes(id(&floor.column_id)?).map_err(|_| CodecError::Invalid)?,
+                    DocumentVersion::new(floor.document_version)
+                        .map_err(|_| CodecError::Invalid)?,
+                ))
+            })
+            .collect::<Result<_, CodecError>>()?,
         calculation_context: envelope
             .calculation_context
             .map(decode_context)
@@ -290,7 +333,7 @@ mod tests {
         )?;
         let bytes = encode_snapshot(&book, "engine-v1", "pxel-excel-subset-v1")?;
         let encoded = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-        assert_eq!(encoded.snapshot_schema_version, 2);
+        assert_eq!(encoded.snapshot_schema_version, 3);
         assert_eq!(encoded.sheets.len(), 2);
         let restored = decode_snapshot(
             &bytes,
@@ -450,7 +493,7 @@ mod tests {
             .hash(),
             expected_hash
         );
-        envelope.snapshot_schema_version = 3;
+        envelope.snapshot_schema_version = 4;
         assert!(matches!(
             decode_snapshot(
                 &envelope.encode_to_vec(),

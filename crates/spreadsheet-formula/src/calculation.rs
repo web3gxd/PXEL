@@ -329,7 +329,9 @@ impl CalculationProjection {
             | Operation::InsertColumnsRebased { .. } => {
                 return Err(CalculationError::InvalidProjection);
             }
-            Operation::DeleteColumns { .. } => {
+            Operation::DeleteColumns { .. }
+            | Operation::AxisEdit { .. }
+            | Operation::AxisCompensation { .. } => {
                 return Err(CalculationError::InvalidProjection);
             }
             Operation::AdvanceCalculationEpoch { .. } => {

@@ -362,7 +362,9 @@ fn visit_writes<'a>(
         | Operation::DeleteRows { .. }
         | Operation::InsertColumnsRebased { .. }
         | Operation::DeleteColumns { .. }
-        | Operation::AdvanceCalculationEpoch { .. } => {}
+        | Operation::AdvanceCalculationEpoch { .. }
+        | Operation::AxisEdit { .. }
+        | Operation::AxisCompensation { .. } => {}
     }
     Ok(())
 }

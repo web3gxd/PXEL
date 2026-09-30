@@ -259,7 +259,7 @@ impl PgDatabase {
         let key_uuid = uuid(snapshot_id.as_bytes());
         let key = BlobKey::parse(&key_uuid.to_string()).map_err(|_| SnapshotError::Corrupt)?;
         sqlx::query!(
-            "INSERT INTO document_snapshots (snapshot_id, document_id, snapshot_version, last_axis_change_version, snapshot_schema_version, object_key, byte_length, payload_checksum, state_hash, writer_engine_version, writer_compatibility_profile) VALUES ($1,$2,$3,$4,2,$5,$6,$7,$8,$9,$10)",
+            "INSERT INTO document_snapshots (snapshot_id, document_id, snapshot_version, last_axis_change_version, snapshot_schema_version, object_key, byte_length, payload_checksum, state_hash, writer_engine_version, writer_compatibility_profile) VALUES ($1,$2,$3,$4,3,$5,$6,$7,$8,$9,$10)",
             key_uuid, uuid(document_id.as_bytes()), sql_number(workbook.version().get())?,
             sql_number(workbook.last_axis_change_version().get())?, key_uuid,
             sql_number(body.len() as u64)?, &checksum[..], &workbook.hash()[..], engine_version, compatibility_profile
@@ -935,7 +935,7 @@ mod tests {
                     book.candidate(&operation, DocumentVersion::new(u64::from(number))?)?;
                 let operation_id = OperationId::from_bytes([20 + number; 16])?;
                 let request = CommitRequest {
-                    move_inverse_projection: None,
+                    inverse_projection: None,
                     identity,
                     expected_head: book.version(),
                     expected_access: db.access(identity, document_id).await?,
@@ -1132,7 +1132,7 @@ mod tests {
         )
         .fetch_one(&db.pool)
         .await?;
-        assert_eq!(schema, 2);
+        assert_eq!(schema, 3);
         let tail = Operation::SetCellValue {
             address: second_address,
             value: CellValue::Number(9.0),
@@ -1140,7 +1140,7 @@ mod tests {
         let after_tail = candidate.candidate(&tail, DocumentVersion::new(4)?)?;
         let tail_id = OperationId::from_bytes([76; 16])?;
         let request = CommitRequest {
-            move_inverse_projection: None,
+            inverse_projection: None,
             identity,
             expected_head: candidate.version(),
             expected_access: db.access(identity, document_id).await?,
@@ -1257,7 +1257,7 @@ mod tests {
         let book2 = book1.candidate(&operation, DocumentVersion::new(2)?)?;
         let operation_id = OperationId::from_bytes([9; 16])?;
         let request = CommitRequest {
-            move_inverse_projection: None,
+            inverse_projection: None,
             identity,
             expected_head: book1.version(),
             expected_access: db.access(identity, document_id).await?,
@@ -1412,7 +1412,7 @@ mod tests {
         let book2 = book1.candidate(&operation, DocumentVersion::new(2)?)?;
         let operation_id = OperationId::from_bytes([9; 16])?;
         let request = CommitRequest {
-            move_inverse_projection: None,
+            inverse_projection: None,
             identity,
             expected_head: book1.version(),
             expected_access: db.access(identity, document_id).await?,

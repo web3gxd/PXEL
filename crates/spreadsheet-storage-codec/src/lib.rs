@@ -1,4 +1,7 @@
 //! Versioned durable envelope. Hashes use explicit semantic encoding, never protobuf bytes.
+mod axis_codec;
+#[cfg(test)]
+mod axis_tests;
 mod formula_codec;
 mod move_codec;
 mod move_compensation_codec;
@@ -180,6 +183,22 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
     use v1::operation::Kind;
     Ok(v1::Operation {
         kind: Some(match o {
+            Operation::AxisEdit { change } => {
+                axis_codec::validate(o, None)?;
+                Kind::AxisEdit(axis_codec::encode_change(change)?)
+            }
+            Operation::AxisCompensation {
+                change,
+                undoes,
+                undoes_version,
+            } => {
+                axis_codec::validate(o, None)?;
+                Kind::AxisCompensation(v1::AxisCompensation {
+                    change: Some(axis_codec::encode_change(change)?),
+                    undoes_operation_id: undoes.as_bytes().to_vec(),
+                    undoes_version: undoes_version.get(),
+                })
+            }
             Operation::CreateWorkbook { sheet } => Kind::CreateWorkbook(encode_sheet(sheet)),
             Operation::AddSheet { sheet } => Kind::AddSheet(encode_sheet(sheet)),
             Operation::ExtendRows { sheet, rows } => Kind::ExtendRows(v1::ExtendRows {
@@ -379,6 +398,16 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
 fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
     use v1::operation::Kind;
     Ok(match o.kind.ok_or(CodecError::Invalid)? {
+        Kind::AxisEdit(change) => Operation::AxisEdit {
+            change: axis_codec::decode_change(change)?,
+        },
+        Kind::AxisCompensation(compensation) => Operation::AxisCompensation {
+            change: axis_codec::decode_change(compensation.change.ok_or(CodecError::Invalid)?)?,
+            undoes: OperationId::from_bytes(id(&compensation.undoes_operation_id)?)
+                .map_err(|_| CodecError::Invalid)?,
+            undoes_version: DocumentVersion::new(compensation.undoes_version)
+                .map_err(|_| CodecError::Invalid)?,
+        },
         Kind::MoveRange(moved) => move_codec::decode(moved)?,
         Kind::MoveCompensation(comp) => move_compensation_codec::decode(comp)?,
         Kind::AuthoredRangeWrite(range) => range_codec::decode(range, false)?,
@@ -705,6 +734,8 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::AxisEdit { .. } => 21,
+        Operation::AxisCompensation { .. } => 22,
         Operation::MoveCompensation { .. } => 20,
         Operation::MoveRange { .. } => 19,
         Operation::RangeWrite {
@@ -739,6 +770,7 @@ pub fn schema_version(operation: &Operation) -> u32 {
     }
 }
 pub fn encode(event: &CommittedEvent) -> Result<Vec<u8>, CodecError> {
+    axis_codec::validate(&event.operation, Some(event.version))?;
     move_codec::validate(&event.operation, Some(event.version))?;
     range_codec::validate(&event.operation, Some(event.version))?;
     if let Operation::CellWrite {
@@ -785,13 +817,17 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=20) {
+    if !matches!(e.schema_version, 1..=22) {
         return Err(CodecError::UnsupportedSchema);
     }
     if e.committed_version == 0 {
         return Err(CodecError::Invalid);
     }
     let operation = decode_operation(e.operation.ok_or(CodecError::Invalid)?)?;
+    axis_codec::validate(
+        &operation,
+        Some(DocumentVersion::new(e.committed_version).map_err(|_| CodecError::Invalid)?),
+    )?;
     move_codec::validate(
         &operation,
         Some(DocumentVersion::new(e.committed_version).map_err(|_| CodecError::Invalid)?),
@@ -810,7 +846,8 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         &operation,
     ) {
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
+            | 21 | 22,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -819,7 +856,8 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
             return Err(CodecError::Invalid);
         }
         (
-            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20,
+            1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
+            | 21 | 22,
             0,
             actor,
             _,
@@ -1023,6 +1061,7 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
                 }
             }
         }
+        Operation::AxisEdit { .. } | Operation::AxisCompensation { .. } => axis_codec::hash(h, o)?,
         Operation::MoveRange { .. } => move_codec::hash(h, o)?,
         Operation::MoveCompensation { .. } => move_compensation_codec::hash(h, o)?,
         Operation::RangeWrite { .. } => range_codec::hash(h, o)?,
@@ -1225,6 +1264,7 @@ pub fn system_trigger_fingerprint(
     h.finalize().into()
 }
 pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
+    axis_codec::validate(&e.operation, Some(e.version))?;
     move_codec::validate(&e.operation, Some(e.version))?;
     range_codec::validate(&e.operation, Some(e.version))?;
     let mut h = Sha256::new();
@@ -1245,6 +1285,8 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::RangeWrite { .. })
         | (EventPrincipal::System, Operation::MoveRange { .. })
         | (EventPrincipal::System, Operation::MoveCompensation { .. })
+        | (EventPrincipal::System, Operation::AxisEdit { .. })
+        | (EventPrincipal::System, Operation::AxisCompensation { .. })
         | (EventPrincipal::System, Operation::CellWrite { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),

@@ -2422,7 +2422,11 @@ export class DocumentStore {
         completed?.kind === 'cell' ||
         completed?.kind === 'batch' ||
         completed?.kind === 'copyRange' ||
-        completed?.kind === 'moveRange'
+        completed?.kind === 'moveRange' ||
+        completed?.kind === 'insertRows' ||
+        completed?.kind === 'deleteRows' ||
+        completed?.kind === 'insertColumns' ||
+        completed?.kind === 'deleteColumns'
       ) {
         this.undoHistory.push(completed.id);
         if (this.undoHistory.length > 100) this.undoHistory.shift();

@@ -76,7 +76,7 @@ async fn prepare(
     let candidate = book.candidate(&operation, next)?;
     let operation_id = OperationId::from_bytes([identifier; 16])?;
     Ok(CommitRequest {
-        move_inverse_projection: matches!(operation, Operation::MoveCompensation { .. })
+        inverse_projection: matches!(operation, Operation::MoveCompensation { .. })
             .then(|| Arc::new(book.clone())),
         identity,
         expected_head: book.version(),

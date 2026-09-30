@@ -803,6 +803,143 @@ it('initializes every sheet once and addresses preview patches by the owning she
   ]);
   store.dispose();
 });
+describe('acknowledged own axis history', () => {
+  it.each(['insertRows', 'deleteRows', 'insertColumns', 'deleteColumns'] as const)(
+    'undoes and redoes %s after canonical hydration while following stable selection',
+    async (kind) => {
+      const { store, sent } = await connectedStore();
+      const before = projection();
+      const otherRow = uuidV7(),
+        otherColumn = uuidV7();
+      before.sheets[0]!.rows.push(otherRow);
+      before.sheets[0]!.columns.push(otherColumn);
+      before.sheets[0]!.cells.push({
+        row_id: otherRow,
+        column_id: otherColumn,
+        value: { type: 'number', value: 7 },
+      });
+      store.load(before);
+      const submit = {
+        insertRows: () => store.insertRowBeforeSelection(),
+        deleteRows: () => store.deleteSelectedRow(),
+        insertColumns: () => store.insertColumnBeforeSelection(),
+        deleteColumns: () => store.deleteSelectedColumn(),
+      }[kind];
+      expect(submit()).toBe(true);
+      const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+      if (payload.case !== 'command' || !payload.value.operation)
+        throw new Error('Missing axis command');
+      const change = payload.value.operation.kind;
+      expect(change.case).toBe(kind);
+      const after = structuredClone(before);
+      after.version = '2';
+      if (change.case === 'insertRows')
+        after.sheets[0]!.rows.unshift(bytesUuid(change.value.rows[0]!));
+      if (change.case === 'deleteRows') after.sheets[0]!.rows.shift();
+      if (change.case === 'insertColumns')
+        after.sheets[0]!.columns.unshift(bytesUuid(change.value.columns[0]!));
+      if (change.case === 'deleteColumns') after.sheets[0]!.columns.shift();
+      store.select({ row: 1, column: 1 });
+      let finish: ((result: unknown) => void) | undefined;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          () =>
+            new Promise((resolve) => {
+              finish = resolve;
+            }),
+        ),
+      );
+      const committed = create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: payload.value.operationId,
+            committedVersion: 2n,
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      });
+      const hydration = store.receive(committed);
+      expect(store.canUndo).toBe(false);
+      expect(store.projection).toEqual(before);
+      finish?.({ ok: true, json: async () => after });
+      await hydration;
+      expect(store.canUndo).toBe(true);
+      expect(store.sheet?.rows[store.selected.row]).toBe(otherRow);
+      expect(store.sheet?.columns[store.selected.column]).toBe(otherColumn);
+      expect(store.undo()).toBe(true);
+      const inverse = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+      if (inverse.case !== 'command' || !inverse.value.undoCell) throw new Error('Missing inverse');
+      expect(inverse.value.undoCell.targetOperationId).toEqual(payload.value.operationId);
+      expect(store.projection).toEqual(after);
+      const restored = structuredClone(before);
+      restored.version = '3';
+      // A canonical projection may include an unrelated retained edit; the
+      // client must not restore a local copy of the old whole workbook.
+      restored.sheets[0]!.cells[0]!.value = { type: 'number', value: 99 };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => restored })),
+      );
+      await store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'committed',
+            value: {
+              documentId: uuidBytes(documentId),
+              operationId: inverse.value.operationId,
+              committedVersion: 3n,
+              confirmedStateHash: new Uint8Array(32),
+            },
+          },
+        }),
+      );
+      expect(store.projection).toEqual(restored);
+      expect(store.value(store.selected)).toEqual({ type: 'number', value: 99 });
+      expect(store.selected).toEqual({ row: 1, column: 1 });
+      expect(store.canUndo).toBe(false);
+      expect(store.canRedo).toBe(true);
+      await store.receive(committed);
+      expect(store.canUndo).toBe(false);
+      expect(store.redo()).toBe(true);
+      const redo = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+      if (redo.case !== 'command' || !redo.value.undoCell) throw new Error('Missing redo');
+      expect(redo.value.undoCell.targetOperationId).toEqual(inverse.value.operationId);
+      const redone = structuredClone(after);
+      redone.version = '4';
+      redone.sheets[0]!.cells[0]!.value = { type: 'number', value: 99 };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => redone })),
+      );
+      await store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'committed',
+            value: {
+              documentId: uuidBytes(documentId),
+              operationId: redo.value.operationId,
+              committedVersion: 4n,
+              confirmedStateHash: new Uint8Array(32),
+            },
+          },
+        }),
+      );
+      expect(store.projection).toEqual(redone);
+      expect(store.canUndo).toBe(true);
+      expect(store.canRedo).toBe(false);
+      expect(store.sheet?.rows[store.selected.row]).toBe(otherRow);
+      expect(store.sheet?.columns[store.selected.column]).toBe(otherColumn);
+      store.dispose();
+    },
+  );
+});
+
 describe('isolated pending move preview', () => {
   function workerFixture() {
     const requests: { request: Request; worker: PreviewWorker }[] = [];
@@ -1926,6 +2063,7 @@ describe('document projection and pending intents', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(store.sheet?.rows).toHaveLength(1001);
     expect(store.pending).toHaveLength(0);
+    expect(store.canUndo).toBe(false);
     store.disconnected();
   });
   it('applies an immediately next canonical head event without downloading the workbook', async () => {

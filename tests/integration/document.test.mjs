@@ -1932,37 +1932,40 @@ test('reconnect crosses structural events and a frozen copy without losing the b
 
       const early = await connect(base, cookie);
       try {
-        const frames = await receiveFrames(early, 7, () =>
+        // Frozen axis events intentionally require an authorized projection
+        // refresh (ADR085). Only the two earlier scalar events are wire-known.
+        const frames = await receiveFrames(early, 4, () =>
           subscribeDocument(early, snapshot.document_id, 1),
         );
         assert.deepEqual(
-          frames.slice(0, 5).map((frame) => frame.value.headVersion),
-          [2n, 3n, 4n, 5n, 6n],
+          frames.slice(0, 2).map((frame) => frame.value.headVersion),
+          [2n, 3n],
         );
-        assert.equal(frames[5].case, 'documentHeadChanged');
-        assert.equal(frames[5].value.headVersion, 9n);
-        assert.equal(frames[5].value.latestOperation, undefined);
-        assert.equal(frames[6].case, 'replayComplete');
-        assert.equal(frames[6].value.barrierVersion, 9n);
-        assert.equal(frames[6].value.resyncRequired, true);
+        assert.equal(frames[2].case, 'documentHeadChanged');
+        assert.equal(frames[2].value.headVersion, 9n);
+        assert.equal(frames[2].value.latestOperation, undefined);
+        assert.equal(frames[3].case, 'replayComplete');
+        assert.equal(frames[3].value.barrierVersion, 9n);
+        assert.equal(frames[3].value.resyncRequired, true);
       } finally {
         early.socket.terminate();
       }
 
       const late = await connect(base, cookie);
       try {
-        const frames = await receiveFrames(late, 3, () =>
+        const frames = await receiveFrames(late, 2, () =>
           subscribeDocument(late, snapshot.document_id, 7),
         );
-        assert.deepEqual(
-          frames.slice(0, 2).map((frame) => frame.value.headVersion),
-          [8n, 9n],
-        );
-        assert.equal(frames[2].value.resyncRequired, false);
-        assert.equal(
-          Buffer.from(frames[1].value.latestOperation.confirmedStateHash).toString('hex'),
-          canonical.state_hash,
-        );
+        assert.equal(frames[0].case, 'documentHeadChanged');
+        assert.equal(frames[0].value.headVersion, 9n);
+        assert.equal(frames[0].value.latestOperation, undefined);
+        assert.equal(frames[1].case, 'replayComplete');
+        assert.equal(frames[1].value.barrierVersion, 9n);
+        assert.equal(frames[1].value.resyncRequired, true);
+        const refreshed = await getDocument(base, cookie, snapshot.document_id);
+        assert.equal(refreshed.version, '9');
+        assert.equal(refreshed.state_hash, canonical.state_hash);
+        assert.deepEqual(refreshed.sheets, canonical.sheets);
       } finally {
         late.socket.terminate();
       }
