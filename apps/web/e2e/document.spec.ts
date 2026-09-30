@@ -188,6 +188,14 @@ test('opening a second tab publishes the same renewed RAND to both clients', asy
 
 for (const scenario of [
   {
+    name: 'MATCH lookup modes',
+    source: '=MATCH(A1+1,A1:A2,1)+IFERROR(MATCH(7,A1:A2,0),9)',
+    input: '7',
+    edit: '13',
+    before: '2',
+    after: '10',
+  },
+  {
     name: 'INDEX reference selection',
     source: '=SUM(INDEX(A1:A2,0))+INDEX(A1:A2,1)',
     input: '7',

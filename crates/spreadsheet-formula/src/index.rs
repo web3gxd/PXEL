@@ -4,7 +4,7 @@ use crate::{
     ReferenceResolver, Value,
     evaluator::{EvaluationBudget, EvaluationError, eval, number, numeric},
 };
-enum Selection {
+pub(crate) enum Selection {
     Reference(RangeReference),
     Value(Value),
 }
@@ -32,7 +32,7 @@ fn selector(
         }
     }))
 }
-fn select(
+pub(crate) fn select(
     ast: &Ast,
     args: &[NodeId],
     resolver: &impl ReferenceResolver,

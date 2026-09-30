@@ -165,6 +165,11 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/index-function",
       "title": "INDEX function",
       "retrieved_at": "2026-09-30"
+    },
+    "match": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/match-function",
+      "title": "MATCH function",
+      "retrieved_at": "2026-09-30"
     }
   },
   "cases": [
@@ -6595,6 +6600,1085 @@
       "provenance": {
         "sources": ["index"],
         "basis": "derived PXEL contiguous-reference profile; selector coercion provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_exact",
+      "formula": "=MATCH(25,A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_default",
+      "formula": "=MATCH(26,A1:A3)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_descending",
+      "formula": "=MATCH(26,A1:A3,-1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 5
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_exact_duplicate",
+      "formula": "=MATCH(25,A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_ascending_duplicate",
+      "formula": "=MATCH(25,A1:A3,1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_descending_duplicate",
+      "formula": "=MATCH(25,A1:A3,-1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 25
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_no_exact",
+      "formula": "=MATCH(7,A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_ascending_low",
+      "formula": "=MATCH(4,A1:A3,1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_ascending_high",
+      "formula": "=MATCH(50,A1:A3,1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_descending_high",
+      "formula": "=MATCH(50,A1:A3,-1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 5
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_descending_low",
+      "formula": "=MATCH(4,A1:A3,-1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 5
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_unsorted",
+      "formula": "=MATCH(25,A1:A3,1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 5
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_wrong_direction",
+      "formula": "=MATCH(25,A1:A3,-1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_nested_source",
+      "formula": "=MATCH(25,INDEX(A1:B3,0,1),0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_index_position",
+      "formula": "=INDEX(A1:A3,MATCH(25,A1:A3,0))",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 25
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_reversed",
+      "formula": "=MATCH(25,A3:A1,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_blank_position",
+      "formula": "=MATCH(0,A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 0
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_text_numeric",
+      "formula": "=MATCH(\"0\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 0
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_boolean",
+      "formula": "=MATCH(TRUE,A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "TRUE"
+        },
+        "Sheet1!A3": {
+          "type": "boolean",
+          "value": true
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_star_question",
+      "formula": "=MATCH(\"a*?\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "a"
+        },
+        "Sheet1!A3": {
+          "type": "text",
+          "value": "AB"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_star_escape",
+      "formula": "=MATCH(\"~*\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "ab"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "*"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_question_unicode",
+      "formula": "=MATCH(\"a?\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "a😀"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "ab"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_question_escape",
+      "formula": "=MATCH(\"~?\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "?"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "a"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_tilde_escape",
+      "formula": "=MATCH(\"~~\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "a"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "~"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_tilde_literal",
+      "formula": "=MATCH(\"~x\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "x"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "~x"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_trailing_tilde",
+      "formula": "=MATCH(\"x~\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "x"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "x~"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_case_unicode",
+      "formula": "=MATCH(\"ПРИВЕТ\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "привет"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "ДРУГ"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_case_expansion",
+      "formula": "=MATCH(\"İ\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "i"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "i̇"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_empty_text",
+      "formula": "=MATCH(\"\",A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A2": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 0
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_error_after",
+      "formula": "=MATCH(7,A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 7
+        },
+        "Sheet1!A2": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_error_before",
+      "formula": "=MATCH(7,A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 7
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_approx_error",
+      "formula": "=MATCH(7,A1:A3,1)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 7
+        },
+        "Sheet1!A2": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 9
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_blanks_only",
+      "formula": "=MATCH(0,A1:A3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {},
+      "expected": {
+        "type": "error",
+        "value": "#N/A"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_two_dimensional",
+      "formula": "=MATCH(7,A1:B3,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 7
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_scalar_source",
+      "formula": "=MATCH(7,7,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 7
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_invalid_mode",
+      "formula": "=MATCH(7,A1:A3,2)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 7
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_fraction_mode",
+      "formula": "=MATCH(7,A1:A3,0.5)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 7
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_numeric_mode",
+      "formula": "=MATCH(25,A1:A3,\"0\")",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_iferror",
+      "formula": "=IFERROR(MATCH(7,A1:A3,0),99)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 99
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_arity",
+      "formula": "=MATCH(7)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#VALUE!"
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_horizontal",
+      "formula": "=MATCH(25,A1:C1,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "match_single_cell",
+      "formula": "=MATCH(5,A1,0)",
+      "origin": "Sheet1!D1",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["match"],
+        "basis": "derived PXEL MATCH profile; blank/error/coercion/collation edge cases provisional",
         "verified_in_excel": false
       }
     }

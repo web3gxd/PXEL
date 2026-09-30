@@ -407,3 +407,14 @@ functions are the next functional work, alongside the existing production gates.
 Final regression:48 HTTP,82 browser,83 frontend unit tests and2 hard-restart
 recovery cases passed, including durable INDEX/result reconstruction. Full MVP
 is still incomplete; these counts do not close the broader production gates.
+
+MATCH lookup slice (ADR071) is locally verified:409 shared fixtures and
+1010books/2020patches converge native/browser. Exact/wildcard and both sorted
+approximate modes have unit/property/resource tests, with provisional mixed-type,
+blank/error/collation semantics recorded. Live PostgreSQL and dependent-edit/reload
+DPR1/2 passed; full49 HTTP/84 browser/83 frontend unit/2 hard-restart cases
+passed. Structural insert/delete tests retain stable targets while changing
+one-based positions; detailed outcomes are recorded in RUNBOOK.
+Preliminary100k bound evaluator measurements are in benchmarks/2026-09-30-match-local.md;
+controlled-runner attribution is still needed. VLOOKUP/HLOOKUP and XLOOKUP plus
+conditional aggregates remain next functional work; general MVP gates stay open.

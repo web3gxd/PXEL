@@ -239,6 +239,16 @@ fn index_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>>
             "=SUM(INDEX(A1:A100000,0))",
             100000.0,
         ),
+        (
+            "MATCH_bound_exact_first_100k",
+            "=MATCH(1,A1:A100000,0)",
+            1.0,
+        ),
+        (
+            "MATCH_bound_approx_last_100k",
+            "=MATCH(1,A1:A100000,1)",
+            100000.0,
+        ),
     ] {
         let formula = binder::bind(source, &book, origin)?;
         if bound::evaluate_bound(&formula, &book, &cache, &mut EvaluationBudget::default())?

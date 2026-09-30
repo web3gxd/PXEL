@@ -184,3 +184,13 @@ does not bypass the 100,000-cell source admission cap. Unsupported array values,
 invalid resolver cardinality, cancellation and exhausted budgets remain typed
 evaluator errors, including through IFERROR. ADR070 defines omitted-axis handling,
 negative/fractional selectors and remaining manual compatibility gates.
+
+## MATCH lookup (engine0.10.0)
+
+Single-row/column references retain one-based positions including skipped blanks.
+Exact lookup selects the first hit; sorted approximate lookup selects the last
+eligible item. Wildcards are charged nonrecursive matching on normalized Unicode
+scalars, with bounded scratch storage. Entire-source boundary validation remains
+active after a hit. AST/wire/storage formats are unchanged; engine context identity
+changes and old contexts require the existing authorized upgrade epoch. ADR071
+specifies provisional blank/error/type/coercion rules and manual Excel gaps.

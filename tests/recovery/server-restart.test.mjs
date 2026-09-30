@@ -173,6 +173,55 @@ test(
         } finally {
           indexEditor.socket.terminate();
         }
+        const matchSource = '=MATCH(A1+1,A1:A2,1)+IFERROR(MATCH(7,A1:A2,0),9)';
+        const { snapshot: matchBook } = await createDocument(base, cookie);
+        const matchWriter = await connect(base, cookie);
+        assert.equal(
+          (await matchWriter.send(setCommand(matchWriter, matchBook, 7))).case,
+          'committed',
+        );
+        const matchCommand = formulaCommand(
+          matchWriter,
+          { ...matchBook, version: '2' },
+          matchSource,
+          { column: 1, sequence: 2 },
+        );
+        const matchAck = await matchWriter.send(matchCommand);
+        assert.equal(matchAck.case, 'committed');
+        const matchBefore = await calculation(base, cookie, matchBook.document_id, 3);
+        assert.deepEqual(matchBefore.values[0].value, { type: 'number', value: 2 });
+        matchWriter.socket.terminate();
+        await kill();
+        await start();
+        const matchRestored = await getDocument(base, cookie, matchBook.document_id);
+        assert.equal(matchRestored.version, '3');
+        assert.equal(
+          matchRestored.state_hash,
+          Buffer.from(matchAck.value.confirmedStateHash).toString('hex'),
+        );
+        assert.equal(
+          matchRestored.sheets[0].cells.find((cell) => cell.value.type === 'formula').value.value
+            .source,
+          matchSource,
+        );
+        const matchAfter = await calculation(base, cookie, matchBook.document_id, 3);
+        assert.equal(matchAfter.calculated_state_hash, matchBefore.calculated_state_hash);
+        assert.deepEqual(matchAfter.values, matchBefore.values);
+        const matchEditor = await connect(base, cookie);
+        try {
+          assert.equal((await matchEditor.send(matchCommand)).case, 'receipt');
+          assert.equal(
+            (await matchEditor.send(setCommand(matchEditor, matchRestored, 13, { sequence: 3 })))
+              .case,
+            'committed',
+          );
+          assert.deepEqual(
+            (await calculation(base, cookie, matchBook.document_id, 4)).values[0].value,
+            { type: 'number', value: 10 },
+          );
+        } finally {
+          matchEditor.socket.terminate();
+        }
         assert.equal((await getDocument(base, recipient, snapshot.document_id)).version, '3');
         const revoked = await api(base, cookie, aclPath, 'POST', {
           action: 'revoke',

@@ -86,3 +86,14 @@ manually verified Excel goldens. The conservative dependency graph tracks the
 whole source and can report a cycle through an unselected source cell.
 Reference-valued colon operands, multi-area and dynamic dependency tracking remain
 open. See ADR070 for resource limits and the provisional selector profile.
+
+## MATCH lookup profile (ADR-071)
+
+Engine0.10.0: partially supported. Exact and ascending/descending approximate
+lookup work on contiguous rows/columns, cells and INDEX reference selections.
+Exact text lookup supports case-insensitive * / ? / tilde patterns. Approximate
+mode checks monotonic order and treats wildcard characters literally. Blank,
+source error precedence, mode coercion and Unicode lowercase/scalar collation
+are explicit provisional PXEL rules; derived fixtures are not Excel goldens.
+Array literals and locale collation remain open. Cardinality, source/text size
+and work/cancellation checks remain active after a first exact match.

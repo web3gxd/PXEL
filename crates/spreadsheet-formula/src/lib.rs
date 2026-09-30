@@ -10,6 +10,7 @@ mod evaluator;
 mod formatter;
 mod index;
 mod lexer;
+mod lookup;
 mod parser;
 mod power;
 pub mod range_index;

@@ -195,7 +195,9 @@ pub(crate) fn eval(
             binary(*op, left, right, budget)?
         }
         Node::Call { name, arguments } => {
-            if name == "INDEX" {
+            if name == "MATCH" {
+                crate::lookup::call(ast, arguments, resolver, budget, depth + 1)?
+            } else if name == "INDEX" {
                 crate::index::call(ast, arguments, resolver, budget, depth + 1)?
             } else if matches!(
                 name.as_str(),

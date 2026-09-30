@@ -201,6 +201,95 @@ fn index_conservative_source_cycle_is_reported_without_hanging() -> TestResult {
 }
 
 #[test]
+fn match_lookup_and_source_edits_recalculate_without_touching_independent_cache() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(7.0))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(13.0))),
+            (address(2, 0)?, CellContent::Value(CellValue::Number(21.0))),
+            (address(0, 3)?, CellContent::Value(CellValue::Number(13.0))),
+        ],
+        3,
+        5,
+    )?;
+    for (column, source) in [(2, "=MATCH(D1,A1:A3,0)"), (4, "=1+2")] {
+        let op = formula(&book, address(0, column)?, source)?;
+        book = book.candidate(&op, DocumentVersion::new(book.version().get() + 1)?)?;
+    }
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    let cancelled = AtomicBool::new(false);
+    projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(2.0))
+    );
+    for (target, value, expected) in [
+        (address(0, 3)?, 21.0, Value::Number(3.0)),
+        (address(2, 0)?, 9.0, Value::Error(FormulaError::Na)),
+    ] {
+        edit(
+            &mut book,
+            &mut projection,
+            Operation::SetCellValue {
+                address: target,
+                value: CellValue::Number(value),
+            },
+        )?;
+        let patch = projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+        assert_eq!(patch.evaluated_cells, 1);
+        assert_eq!(projection.results().get(&address(0, 2)?), Some(&expected));
+        assert_eq!(
+            projection.results().get(&address(0, 4)?),
+            Some(&Value::Number(3.0))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn match_position_follows_inserted_and_deleted_blank_row_with_stable_targets() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(7.0))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(13.0))),
+        ],
+        2,
+        2,
+    )?;
+    let at = address(0, 1)?;
+    let op = formula(&book, at, "=MATCH(13,A1:A2,0)")?;
+    book = book.candidate(&op, DocumentVersion::new(2)?)?;
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    let cancelled = AtomicBool::new(false);
+    projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+    assert_eq!(projection.results().get(&at), Some(&Value::Number(2.0)));
+    let inserted = address(20, 0)?.row;
+    // Structural operations use the same full graph rebuild as the calculation lane.
+    book = book.candidate(
+        &Operation::InsertRowsRebased {
+            sheet: at.sheet,
+            before: address(1, 0)?.row,
+            rows: vec![inserted],
+        },
+        DocumentVersion::new(book.version().get() + 1)?,
+    )?;
+    projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+    assert_eq!(projection.results().get(&at), Some(&Value::Number(3.0)));
+    book = book.candidate(
+        &Operation::DeleteRows {
+            sheet: at.sheet,
+            rows: vec![inserted],
+        },
+        DocumentVersion::new(book.version().get() + 1)?,
+    )?;
+    projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+    assert_eq!(projection.results().get(&at), Some(&Value::Number(2.0)));
+    Ok(())
+}
+
+#[test]
 fn index_selector_changes_between_calculated_source_cells_in_dependency_order() -> TestResult {
     let mut book = fixture(
         vec![
