@@ -172,3 +172,15 @@ ADR-067: content edits, copy/undo и explicit insert/delete в volatile книг
 ADR-068: heartbeat открытой WebSocket-подписки запрашивает timer epoch. NOW требует минимум60s от сохранённого timestamp, TODAY-only — смены civil day при той же offset policy. RAND-only/static книги не создают timer event. Неполученный receipt разрешается по прежнему ID до проверки необходимости; следующий heartbeat не дублирует durable epoch. Server timezone policy пока UTC0; mismatch не исправляется незаметно. Open-renewal и нагрузочные замеры ещё впереди.
 
 ADR-069: actual WS subscription transition создаёт Open context для compatible volatile книги. First bootstrap/recovered edit context этого admission переиспользуется. Повтор Subscribe того же active document, HTTP reads, head checks и replay не являются открытием. Новая вкладка/reconnect обновляет shared RAND у всех подключённых клиентов; replay сохранённых событий сам не пересэмплирует. Pending ID сохраняется до успешного post-commit recovery. Будущая версия replay cursor проверяется до Open. Многоподписочная нагрузка и timezone settings остаются gates.
+
+## INDEX selection (engine0.9.0)
+
+Private intermediate references survive nested INDEX and aggregate arguments;
+they are never persisted as cached values. Scalar reads resolve only the selected
+cell; aggregate reads visit the selected rectangle in row-major order. Graph
+dependencies conservatively retain the full source plus selector dependencies.
+Source size and selected traversal are bounded separately: selecting one cell
+does not bypass the 100,000-cell source admission cap. Unsupported array values,
+invalid resolver cardinality, cancellation and exhausted budgets remain typed
+evaluator errors, including through IFERROR. ADR070 defines omitted-axis handling,
+negative/fractional selectors and remaining manual compatibility gates.

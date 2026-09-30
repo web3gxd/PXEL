@@ -18,6 +18,10 @@ impl ReferenceResolver for Range {
     }
 }
 fn benchmarks(c: &mut Criterion) {
+    if index_benchmarks(c).is_err() {
+        eprintln!("invalid INDEX benchmark fixture");
+        std::process::exit(1);
+    }
     if volatile_benchmarks(c).is_err() {
         eprintln!("invalid volatile benchmark fixture");
         std::process::exit(1);
@@ -185,3 +189,73 @@ fn volatile_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Erro
 }
 criterion_group!(scalar, benchmarks);
 criterion_main!(scalar);
+
+fn index_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>> {
+    use spreadsheet_domain::workbook::*;
+    use std::collections::BTreeMap;
+    let sheet = SheetId::from_bytes([1; 16])?;
+    let column = ColumnId::from_bytes([2; 16])?;
+    let rows = (1..=100000u128)
+        .map(|n| RowId::from_bytes(n.to_be_bytes()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let origin = CellAddress {
+        sheet,
+        row: rows[0],
+        column,
+    };
+    let cells = rows
+        .iter()
+        .map(|row| {
+            (
+                CellAddress {
+                    sheet,
+                    row: *row,
+                    column,
+                },
+                CellContent::Value(CellValue::Number(1.0)),
+            )
+        })
+        .collect::<Vec<_>>();
+    let book = Workbook::from_content_fixture(
+        DocumentId::from_bytes([3; 16])?,
+        DocumentVersion::new(1)?,
+        SheetSeed {
+            id: sheet,
+            name: "Sheet1".into(),
+            rows,
+            columns: vec![column],
+        },
+        cells,
+    )?;
+    let cache = BTreeMap::new();
+    for (name, source, expected) in [
+        (
+            "INDEX_bound_select_from_100k",
+            "=INDEX(A1:A100000,100000)",
+            1.0,
+        ),
+        (
+            "INDEX_bound_SUM_100k",
+            "=SUM(INDEX(A1:A100000,0))",
+            100000.0,
+        ),
+    ] {
+        let formula = binder::bind(source, &book, origin)?;
+        if bound::evaluate_bound(&formula, &book, &cache, &mut EvaluationBudget::default())?
+            != Value::Number(expected)
+        {
+            return Err("invalid INDEX result".into());
+        }
+        c.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(bound::evaluate_bound(
+                    black_box(&formula),
+                    &book,
+                    &cache,
+                    &mut EvaluationBudget::default(),
+                ))
+            })
+        });
+    }
+    Ok(())
+}

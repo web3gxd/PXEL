@@ -34,6 +34,13 @@ as aggregate arguments; implicit intersection and dynamic arrays are excluded.
 
 ## Semantic contract
 
+INDEX selects contiguous references with one-based selectors; zero selects an
+axis for aggregate consumption. Nested INDEX preserves reference coercion.
+Scalar blank becomes zero, but COUNT of a selected blank remains zero entries.
+The graph conservatively tracks the whole source, including unselected cycles.
+Compact horizontal/2D omission, dynamic spill and multi-area references are not
+implemented. Selector coercion is a provisional profile; see ADR-070.
+
 All fixture expectations in `fixtures/formulas/profile-v1.json` are documented,
 derived or explicit project contracts, **not manually verified Excel results**.
 Source provenance and documentation conflicts are retained in the corpus.
@@ -69,7 +76,7 @@ Source provenance and documentation conflicts are retained in the corpus.
   conditions, preserving later errors even after a decisive boolean; range
   traversal is budgeted and checked. NOT takes one scalar and inverts the same
   scalar coercion as IF. Arrays/implicit intersection remain unsupported.
-  Engine identity is `pxel-formula-0.8.0`; old persisted contexts require a new
+  Engine identity is `pxel-formula-0.9.0`; old persisted contexts require a new
   authorized calculation epoch. See ADR-055 and the common fixture corpus.
 
 - ABS takes one scalar; MOD takes two and follows the divisor sign. Blank is

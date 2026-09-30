@@ -16,7 +16,7 @@ use std::{
 };
 use thiserror::Error;
 
-pub const ENGINE_VERSION: &str = "pxel-formula-0.8.0";
+pub const ENGINE_VERSION: &str = "pxel-formula-0.9.0";
 pub const COMPATIBILITY_PROFILE: &str = "pxel-excel-subset-v1";
 
 #[derive(Clone, Copy, Debug)]

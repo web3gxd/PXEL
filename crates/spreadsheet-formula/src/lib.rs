@@ -8,6 +8,7 @@ pub mod copy;
 pub mod dependency;
 mod evaluator;
 mod formatter;
+mod index;
 mod lexer;
 mod parser;
 mod power;

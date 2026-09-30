@@ -71,7 +71,9 @@ PXEL_DEV_AUTH=1 cargo run --locked -q -p pxel-server --features dev-auth -- xlsx
 
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Поддержаны AND/OR/NOT с диапазонами и typed resource limits. Текущий engine
-identity — `pxel-formula-0.8.0`; доступны DATE/YEAR/MONTH/DAY в календарном
+identity — `pxel-formula-0.9.0`; INDEX поддерживает выбор из contiguous range
+и ссылочные аргументы агрегатов (ADR-070). Dynamic spill и multi-area ещё
+не поддержаны. Доступны DATE/YEAR/MONTH/DAY в календарном
 профиле ADR-063 (книги редактора используют 1900; чистый evaluator проверен также
 для 1904; выбор системы книги ещё впереди). NOW/TODAY/RAND работают в явно
 сохранённом epoch по ADR-065; ADR-066 добавляет автоматический первый контекст.

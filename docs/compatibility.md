@@ -73,3 +73,16 @@ ADR-067 добавляет automatic edit epochs, в том числе посл�
 ADR-068 добавляет active NOW/TODAY timer через durable context, проверенный на реальном heartbeat. Partially supported остаётся до open-renewal, timezone/date formatting и manual Excel verification; fixed interval не обещает realtime deadline при backpressure.
 
 ADR-069 включает open-renewal: новая WS-подписка/switch/reconnect меняет общий context и RAND для всех клиентов. Duplicate active Subscribe и HTTP reads не меняют epoch. Replay воспроизводит сохранённый context; новое открытие намеренно создаёт следующий. Partially supported сохраняется до timezone/date formatting и manual Excel goldens; Excel RNG sequence parity не обещается.
+
+## INDEX contiguous-reference profile (ADR-070)
+
+Engine0.9.0 adds one-cell selection, zero-axis rectangle selection inside
+SUM/AVERAGE/MIN/MAX/COUNT/COUNTA/AND/OR, and nested INDEX references. Only one
+contiguous area is supported. Scalar blank becomes zero; aggregate reference
+coercion preserves blank/text/boolean distinctions. Two-argument vertical
+references are supported; compact horizontal/2D omission and dynamic spill remain
+unsupported. Selector coercion fixtures are derived PXEL expectations, not
+manually verified Excel goldens. The conservative dependency graph tracks the
+whole source and can report a cycle through an unselected source cell.
+Reference-valued colon operands, multi-area and dynamic dependency tracking remain
+open. See ADR070 for resource limits and the provisional selector profile.

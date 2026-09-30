@@ -188,6 +188,14 @@ test('opening a second tab publishes the same renewed RAND to both clients', asy
 
 for (const scenario of [
   {
+    name: 'INDEX reference selection',
+    source: '=SUM(INDEX(A1:A2,0))+INDEX(A1:A2,1)',
+    input: '7',
+    edit: '13',
+    before: '14',
+    after: '26',
+  },
+  {
     name: 'calendar date functions',
     source: '=YEAR(DATE(A1,2,29))*10000+MONTH(DATE(A1,2,29))*100+DAY(DATE(A1,2,29))',
     input: '2000',

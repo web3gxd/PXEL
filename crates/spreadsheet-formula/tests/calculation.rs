@@ -127,6 +127,137 @@ fn engine_upgrade_requires_a_new_persisted_context() -> TestResult {
 }
 
 #[test]
+fn index_tracks_source_and_selector_but_leaves_independent_formula_cached() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(7.0))),
+            (address(2, 1)?, CellContent::Value(CellValue::Number(13.0))),
+            (address(0, 3)?, CellContent::Value(CellValue::Number(3.0))),
+        ],
+        3,
+        5,
+    )?;
+    for (column, source) in [(2, "=INDEX(A1:B3,D1,2)"), (4, "=1+2")] {
+        let op = formula(&book, address(0, column)?, source)?;
+        book = book.candidate(&op, DocumentVersion::new(book.version().get() + 1)?)?;
+    }
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    let cancelled = AtomicBool::new(false);
+    let first = projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+    assert_eq!(first.evaluated_cells, 2);
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(13.0))
+    );
+    for (target, value, expected) in [
+        (address(2, 1)?, 21.0, 21.0),
+        (address(0, 3)?, 1.0, 0.0),
+        (address(0, 1)?, 8.0, 8.0),
+        // Conservative source dependency: an unselected source also dirties INDEX.
+        (address(0, 0)?, 99.0, 8.0),
+    ] {
+        edit(
+            &mut book,
+            &mut projection,
+            Operation::SetCellValue {
+                address: target,
+                value: CellValue::Number(value),
+            },
+        )?;
+        let patch = projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+        assert_eq!(patch.evaluated_cells, 1);
+        assert_eq!(
+            projection.results().get(&address(0, 2)?),
+            Some(&Value::Number(expected))
+        );
+        assert_eq!(
+            projection.results().get(&address(0, 4)?),
+            Some(&Value::Number(3.0))
+        );
+    }
+    let replay = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    let mut replay = replay;
+    replay.calculate(&book, CalculationLimits::default(), &cancelled)?;
+    assert_eq!(replay.results(), projection.results());
+    Ok(())
+}
+
+#[test]
+fn index_conservative_source_cycle_is_reported_without_hanging() -> TestResult {
+    let mut book = fixture(
+        vec![(address(1, 0)?, CellContent::Value(CellValue::Number(7.0)))],
+        2,
+        1,
+    )?;
+    let op = formula(&book, address(0, 0)?, "=INDEX(A1:A2,2)")?;
+    book = book.candidate(&op, DocumentVersion::new(2)?)?;
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&address(0, 0)?),
+        Some(&Value::Error(FormulaError::Cycle))
+    );
+    Ok(())
+}
+
+#[test]
+fn index_selector_changes_between_calculated_source_cells_in_dependency_order() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(4.0))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(9.0))),
+            (address(0, 3)?, CellContent::Value(CellValue::Number(1.0))),
+        ],
+        2,
+        4,
+    )?;
+    for (at, source) in [
+        (address(0, 1)?, "=A1*2"),
+        (address(1, 1)?, "=A2*3"),
+        (address(0, 2)?, "=INDEX(B1:B2,D1)"),
+    ] {
+        let op = formula(&book, at, source)?;
+        book = book.candidate(&op, DocumentVersion::new(book.version().get() + 1)?)?;
+    }
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    let cancelled = AtomicBool::new(false);
+    projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(8.0))
+    );
+    edit(
+        &mut book,
+        &mut projection,
+        Operation::SetCellValue {
+            address: address(0, 3)?,
+            value: CellValue::Number(2.0),
+        },
+    )?;
+    let patch = projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+    assert_eq!(patch.evaluated_cells, 1);
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(27.0))
+    );
+    edit(
+        &mut book,
+        &mut projection,
+        Operation::SetCellValue {
+            address: address(1, 0)?,
+            value: CellValue::Number(10.0),
+        },
+    )?;
+    let patch = projection.calculate(&book, CalculationLimits::default(), &cancelled)?;
+    assert_eq!(patch.evaluated_cells, 2);
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(30.0))
+    );
+    Ok(())
+}
+
+#[test]
 fn volatile_epoch_is_replayable_and_recalculates_all_formulas() -> TestResult {
     use spreadsheet_formula::calculation::{COMPATIBILITY_PROFILE, ENGINE_VERSION};
     let mut book = fixture(vec![], 1, 2)?;

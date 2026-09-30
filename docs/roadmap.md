@@ -397,3 +397,13 @@ ADR-068 добавляет active timer NOW/TODAY: bounded heartbeat admission, 
 ADR-069 добавляет volatile Open renewal на новую WS-подписку/switch/reconnect, включая shared RAND. Duplicate Subscribe текущей книги и HTTP reads не пересэмплируют. Первый/recovered edit context переиспользуется, malformed future replay cursor отклоняется до durable trigger. Функциональные проверки записываются в RUNBOOK; subscriber load, timezone/manual Excel и остальные gates остаются открыты.
 
 Timer admission измерен на реальном PostgreSQL18.6 с durability on:12 controlled queue burst cases,1000cells,1/8/32 producers, due/non-due, coalescing и QueueFull checks. [Условия и результаты](benchmarks/2026-09-30-timer-admission-local.md). Formula-heavy32-producer due case имеет initial drain p95 111.679ms/max186.800ms; нужно stage-level profiling на controlled runner. Это не user-command commit/WS delivery p95 и не закрытие полного performance gate. Следующий функциональный профиль — lookup/reference functions; измеренное performance follow-up сохраняется.
+INDEX contiguous reference slice (ADR070) is locally verified:367 shared
+fixtures and1010books/2020patches agree native/browser. Source/selector dependency
+and selected-array typed-error regressions pass; live PostgreSQL and dependent
+edit/reload DPR1/2 pass. Preliminary bound evaluator results are recorded in
+benchmarks/2026-09-30-index-local.md. Compact forms/dynamic arrays/manual Excel
+and dynamic selected dependencies remain open. MATCH and remaining lookup/criteria
+functions are the next functional work, alongside the existing production gates.
+Final regression:48 HTTP,82 browser,83 frontend unit tests and2 hard-restart
+recovery cases passed, including durable INDEX/result reconstruction. Full MVP
+is still incomplete; these counts do not close the broader production gates.

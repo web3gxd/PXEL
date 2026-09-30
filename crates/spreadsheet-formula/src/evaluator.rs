@@ -195,7 +195,9 @@ pub(crate) fn eval(
             binary(*op, left, right, budget)?
         }
         Node::Call { name, arguments } => {
-            if matches!(
+            if name == "INDEX" {
+                crate::index::call(ast, arguments, resolver, budget, depth + 1)?
+            } else if matches!(
                 name.as_str(),
                 "CONCAT" | "LEFT" | "RIGHT" | "MID" | "LEN" | "TRIM" | "LOWER" | "UPPER"
             ) {
@@ -333,6 +335,9 @@ fn logical_aggregate(
         Ok(())
     };
     for arg in args {
+        if crate::index::visit(ast, *arg, resolver, budget, depth, &mut add)? {
+            continue;
+        }
         match ast.nodes.get(arg.0).ok_or(EvaluationError::InvalidAst)? {
             Node::Range(range) => {
                 budget.charge()?;
@@ -434,6 +439,21 @@ fn count(
     }
     let mut total = 0u64;
     for arg in args {
+        if crate::index::visit(
+            ast,
+            *arg,
+            resolver,
+            budget,
+            depth,
+            &mut |value, reference| {
+                if countable(&value, counta, reference)? {
+                    total += 1;
+                }
+                Ok(())
+            },
+        )? {
+            continue;
+        }
         match ast.nodes.get(arg.0).ok_or(EvaluationError::InvalidAst)? {
             Node::InvalidReference => return Ok(Value::Error(FormulaError::Ref)),
             Node::Range(range) => {
@@ -534,6 +554,22 @@ fn aggregate(
         error: None,
     };
     for arg in args {
+        if crate::index::visit(
+            ast,
+            *arg,
+            resolver,
+            budget,
+            depth,
+            &mut |value, reference| {
+                state.add(value, reference, name);
+                Ok(())
+            },
+        )? {
+            if let Some(error) = state.error {
+                return Ok(Value::Error(error));
+            }
+            continue;
+        }
         match ast.nodes.get(arg.0).ok_or(EvaluationError::InvalidAst)? {
             Node::Range(range) => {
                 budget.charge()?;

@@ -124,6 +124,55 @@ test(
         assert.equal(after.status, 'complete');
         assert.equal(after.calculated_state_hash, before.calculated_state_hash);
         assert.deepEqual(after.values, before.values);
+        const indexSource = '=SUM(INDEX(A1:A2,0))+INDEX(A1:A2,1)';
+        const { snapshot: indexBook } = await createDocument(base, cookie);
+        const indexWriter = await connect(base, cookie);
+        assert.equal(
+          (await indexWriter.send(setCommand(indexWriter, indexBook, 7))).case,
+          'committed',
+        );
+        const indexCommand = formulaCommand(
+          indexWriter,
+          { ...indexBook, version: '2' },
+          indexSource,
+          { column: 1, sequence: 2 },
+        );
+        const indexAck = await indexWriter.send(indexCommand);
+        assert.equal(indexAck.case, 'committed');
+        const indexBefore = await calculation(base, cookie, indexBook.document_id, 3);
+        assert.deepEqual(indexBefore.values[0].value, { type: 'number', value: 14 });
+        indexWriter.socket.terminate();
+        await kill();
+        await start();
+        const indexRestored = await getDocument(base, cookie, indexBook.document_id);
+        assert.equal(indexRestored.version, '3');
+        assert.equal(
+          indexRestored.state_hash,
+          Buffer.from(indexAck.value.confirmedStateHash).toString('hex'),
+        );
+        assert.equal(
+          indexRestored.sheets[0].cells.find((cell) => cell.value.type === 'formula').value.value
+            .source,
+          indexSource,
+        );
+        const indexAfter = await calculation(base, cookie, indexBook.document_id, 3);
+        assert.equal(indexAfter.calculated_state_hash, indexBefore.calculated_state_hash);
+        assert.deepEqual(indexAfter.values, indexBefore.values);
+        const indexEditor = await connect(base, cookie);
+        try {
+          assert.equal((await indexEditor.send(indexCommand)).case, 'receipt');
+          assert.equal(
+            (await indexEditor.send(setCommand(indexEditor, indexRestored, 13, { sequence: 3 })))
+              .case,
+            'committed',
+          );
+          assert.deepEqual(
+            (await calculation(base, cookie, indexBook.document_id, 4)).values[0].value,
+            { type: 'number', value: 26 },
+          );
+        } finally {
+          indexEditor.socket.terminate();
+        }
         assert.equal((await getDocument(base, recipient, snapshot.document_id)).version, '3');
         const revoked = await api(base, cookie, aclPath, 'POST', {
           action: 'revoke',

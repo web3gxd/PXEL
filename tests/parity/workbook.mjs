@@ -60,6 +60,9 @@ const requests = Array.from({ length: 1000 }, (_, index) => {
     '=YEAR(DATE(2000+ABS(A1),2,29))',
     '=MONTH(DATE(2000+ABS(A1),2,29))',
     '=DAY(DATE(2000+ABS(A1),2,29))',
+    '=INDEX(A1:B1,1,2)',
+    '=SUM(INDEX(A1:B1,1,0))',
+    '=INDEX(INDEX(A1:B1,1,0),1,1)',
   ];
   const source = sources[next() % sources.length];
   const primitive = (value) => ({ type: 'number', value });
@@ -152,7 +155,7 @@ const contextTemplate = {
   utc_offset_minutes: 180,
   civil_day_since_unix_epoch: 1,
   random_seed: '01'.repeat(32),
-  engine_version: 'pxel-formula-0.8.0',
+  engine_version: 'pxel-formula-0.9.0',
   compatibility_profile: 'pxel-excel-subset-v1',
   reason: 'explicit',
 };
