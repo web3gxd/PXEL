@@ -5,6 +5,8 @@ use spreadsheet_domain::workbook::*;
 use spreadsheet_storage_codec as codec;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
+#[cfg(test)]
+mod timer_admission_benchmark;
 fn uuid(bytes: &[u8; 16]) -> Uuid {
     Uuid::from_bytes(*bytes)
 }
@@ -1129,7 +1131,7 @@ mod tests {
         assert_eq!(count, 0);
         Ok(())
     }
-    async fn fixture(
+    pub(super) async fn fixture(
         pool: sqlx::PgPool,
     ) -> Result<(PgDatabase, AuthenticatedActor, Workbook), Box<dyn std::error::Error>> {
         let db = PgDatabase { pool };

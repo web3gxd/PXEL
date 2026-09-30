@@ -40,8 +40,10 @@ the resulting server epoch/value arrives by subscription. This is functional evi
 not a timer-load benchmark or a hard realtime guarantee.
 
 Initial classification-only [measurement](../benchmarks/2026-09-30-timer-classification-local.md)
-covers warm scalar-heavy books through100k cells; whole-admission/subscriber load
-is not measured. Compatible open-renewal including RAND, admission load profiling,
+covers warm scalar-heavy books through100k cells. Initial real-PG actor queue
+[burst measurement](../benchmarks/2026-09-30-timer-admission-local.md) covers two
+1000-cell profiles and bounded admission; real subscriber traffic is not measured.
+ADR-069 implements compatible open-renewal including RAND. Further load profiling,
 timezone settings, manual Excel corpus and full production gates remain open.
 Normal cadence can be delayed by bounded queue/backpressure and actual DB commit;
 missed periods are not replayed as a burst of artificial epochs.
