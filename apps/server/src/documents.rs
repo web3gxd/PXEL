@@ -826,6 +826,7 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
         + usize::from(input.formula_command.is_some())
         + usize::from(input.undo_cell.is_some())
         + usize::from(input.copy_range.is_some())
+        + usize::from(input.move_range.is_some())
         != 1
     {
         return Err(SessionError::InvalidCommand);
@@ -845,6 +846,23 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
             destination: address(copy.destination)?,
             rows: copy.rows,
             columns: copy.columns,
+        }
+    } else if let Some(moved) = input.move_range {
+        let source = address(moved.source)?;
+        let destination = address(moved.destination)?;
+        if source.sheet != destination.sheet
+            || source == destination
+            || moved.rows == 0
+            || moved.columns == 0
+            || u64::from(moved.rows) * u64::from(moved.columns) > 1000
+        {
+            return Err(SessionError::InvalidCommand);
+        }
+        CommandPayload::MoveRange {
+            source,
+            destination,
+            rows: moved.rows,
+            columns: moved.columns,
         }
     } else {
         match input
@@ -1229,7 +1247,8 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
         Operation::CreateWorkbook { .. }
         | Operation::AdvanceCalculationEpoch { .. }
         | Operation::CopyRange { .. }
-        | Operation::RangeWrite { .. } => {
+        | Operation::RangeWrite { .. }
+        | Operation::MoveRange { .. } => {
             return None;
         }
         Operation::SetCellFormula { address, formula } => {
@@ -1317,6 +1336,9 @@ pub async fn handle_command(
                 SessionError::BaseVersionAhead => v1::RejectionCode::BaseVersionAhead,
                 SessionError::RebaseWindowExceeded => v1::RejectionCode::RebaseWindowExceeded,
                 SessionError::SourceVersionChanged => v1::RejectionCode::SourceVersionChanged,
+                SessionError::UnsupportedMoveDependency => {
+                    v1::RejectionCode::UnsupportedMoveDependency
+                }
                 SessionError::InvalidFormula => v1::RejectionCode::InvalidFormula,
                 SessionError::Journal(JournalError::NotFound) => v1::RejectionCode::NotFound,
                 SessionError::Journal(JournalError::IdempotencyConflict) => {
@@ -1438,6 +1460,57 @@ mod undo_wire_tests {
             target_operation_id: id(),
         });
         assert!(matches!(command(copy), Err(SessionError::InvalidCommand)));
+        Ok(())
+    }
+
+    #[test]
+    fn move_wire_rejects_bad_geometry_and_multiple_payloads() -> Result<(), SessionError> {
+        let source = v1::CellAddress {
+            sheet_id: id(),
+            row_id: id(),
+            column_id: id(),
+        };
+        let destination = v1::CellAddress {
+            column_id: id(),
+            ..source.clone()
+        };
+        let mut request = envelope();
+        request.move_range = Some(v1::MoveRangeCommand {
+            source: Some(source.clone()),
+            destination: Some(destination.clone()),
+            rows: 1,
+            columns: 1,
+        });
+        assert!(matches!(
+            command(request.clone())?.operation,
+            CommandPayload::MoveRange { .. }
+        ));
+        for (rows, columns) in [(0, 1), (1, 0), (1001, 1), (u32::MAX, u32::MAX)] {
+            let mut malformed = request.clone();
+            if let Some(moved) = &mut malformed.move_range {
+                moved.rows = rows;
+                moved.columns = columns;
+            }
+            assert!(matches!(
+                command(malformed),
+                Err(SessionError::InvalidCommand)
+            ));
+        }
+        let mut same = request.clone();
+        if let Some(moved) = &mut same.move_range {
+            moved.destination = Some(source.clone());
+        }
+        assert!(matches!(command(same), Err(SessionError::InvalidCommand)));
+        request.copy_range = Some(v1::CopyRangeCommand {
+            source: Some(source),
+            destination: Some(destination),
+            rows: 1,
+            columns: 1,
+        });
+        assert!(matches!(
+            command(request),
+            Err(SessionError::InvalidCommand)
+        ));
         Ok(())
     }
 

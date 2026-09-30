@@ -307,7 +307,7 @@ impl CalculationProjection {
                 let changed = writes.iter().map(|write| write.address).collect();
                 return self.prepare_reconcile(book, &changed, limits);
             }
-            Operation::RangeWrite { writes, .. } => {
+            Operation::RangeWrite { writes, .. } | Operation::MoveRange { writes, .. } => {
                 let changed = writes.iter().map(|write| write.address).collect();
                 return self.prepare_reconcile(book, &changed, limits);
             }

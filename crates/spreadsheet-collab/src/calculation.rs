@@ -93,7 +93,7 @@ impl CalculationHandle {
                     .changed
                     .extend(writes.iter().map(|write| write.address));
             }
-            Operation::RangeWrite { writes, .. } => {
+            Operation::RangeWrite { writes, .. } | Operation::MoveRange { writes, .. } => {
                 pending
                     .changed
                     .extend(writes.iter().map(|write| write.address));

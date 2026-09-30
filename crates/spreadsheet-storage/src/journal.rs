@@ -6,6 +6,8 @@ use spreadsheet_storage_codec as codec;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 #[cfg(test)]
+mod move_tests;
+#[cfg(test)]
 mod range_history_tests;
 #[cfg(test)]
 mod timer_admission_benchmark;
@@ -52,7 +54,7 @@ struct StoredEventRow<'a> {
     canonical_event_hash: &'a [u8],
 }
 fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=18) {
+    if !matches!(row.schema_version, 1..=19) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -125,7 +127,7 @@ fn touched_addresses(
             .map(|w| w.address)
             .filter(|a| targets.contains_key(a))
             .collect(),
-        Operation::RangeWrite { writes, .. } => writes
+        Operation::RangeWrite { writes, .. } | Operation::MoveRange { writes, .. } => writes
             .iter()
             .map(|w| w.address)
             .filter(|a| targets.contains_key(a))
@@ -328,7 +330,10 @@ async fn guard_undo_tail(
                 stack.push((event.operation_id, event.version));
             }
         }
-        if formula_history && event.operation.changes_axes() {
+        if formula_history
+            && (event.operation.changes_axes()
+                || matches!(event.operation, Operation::MoveRange { .. }))
+        {
             return Err(JournalError::NotUndoable);
         }
     }
@@ -581,6 +586,18 @@ impl OperationJournal for PgDatabase {
                 },
                 _ => return Err(JournalError::Corrupt),
             },
+            Operation::MoveRange {
+                source,
+                destination,
+                rows,
+                columns,
+                ..
+            } => CommandPayload::MoveRange {
+                source: *source,
+                destination: *destination,
+                rows: *rows,
+                columns: *columns,
+            },
             Operation::ExtendRows { sheet, rows } => CommandPayload::ExtendRows {
                 sheet: *sheet,
                 rows: rows.clone(),
@@ -704,6 +721,11 @@ impl OperationJournal for PgDatabase {
             || access.document_access_epoch != request.expected_access.document_access_epoch
             || access.membership_access_epoch != request.expected_access.membership_access_epoch
         {
+            return Err(JournalError::Conflict);
+        }
+        // Resolve an already durable identity before enforcing a new cut's
+        // exact source version. Late retries do not reread or move sources.
+        if matches!(e.operation, Operation::MoveRange { .. }) && c.base_version != access.head {
             return Err(JournalError::Conflict);
         }
         let inverse_target = match &e.operation {

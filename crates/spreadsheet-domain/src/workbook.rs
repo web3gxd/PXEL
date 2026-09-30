@@ -1,6 +1,6 @@
 //! Pure, bounded sparse projection. Canonical hash format is `PXEL-DOMAIN-1`.
 pub use crate::formula::FormulaSource;
-use crate::formula::{BoundCellReference, Formula, Node};
+use crate::formula::{AxisReferenceMode, BoundCellReference, Formula, Node};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -377,6 +377,14 @@ pub enum Operation {
     CopyRange {
         writes: Vec<ContentWrite>,
     },
+    /// Frozen move footprint and exact preimages. Not an undo target in this schema.
+    MoveRange {
+        source: CellAddress,
+        destination: CellAddress,
+        rows: u32,
+        columns: u32,
+        writes: Vec<GuardedContentWrite>,
+    },
     /// Frozen destination contents and exact preimages in one atomic event.
     RangeWrite {
         writes: Vec<GuardedContentWrite>,
@@ -443,6 +451,12 @@ pub enum CommandPayload {
         writes: Vec<CellWrite>,
     },
     CopyRange {
+        source: CellAddress,
+        destination: CellAddress,
+        rows: u32,
+        columns: u32,
+    },
+    MoveRange {
         source: CellAddress,
         destination: CellAddress,
         rows: u32,
@@ -983,6 +997,23 @@ impl Workbook {
         if self.version.get().checked_add(1) != Some(next_version.get()) {
             return Err(DomainError::VersionConflict);
         }
+        if let Operation::MoveRange {
+            source,
+            destination,
+            rows,
+            columns,
+            writes,
+        } = operation
+        {
+            return self.move_candidate(
+                *source,
+                *destination,
+                *rows,
+                *columns,
+                writes,
+                next_version,
+            );
+        }
         if let Operation::RangeWrite {
             writes,
             kind,
@@ -1157,7 +1188,9 @@ impl Workbook {
                 | Operation::ClearCell { address }
                 | Operation::CellWrite { address, .. } => *address,
                 Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
-                Operation::CopyRange { .. } | Operation::RangeWrite { .. } => {
+                Operation::CopyRange { .. }
+                | Operation::RangeWrite { .. }
+                | Operation::MoveRange { .. } => {
                     return Err(DomainError::InvalidAxis);
                 }
             };
@@ -1205,6 +1238,282 @@ impl Workbook {
             next.apply_operation(operation, budgets, target_version)?;
         }
         Ok(next)
+    }
+    fn move_rectangle(
+        &self,
+        origin: CellAddress,
+        rows: u32,
+        columns: u32,
+    ) -> Result<Vec<CellAddress>, DomainError> {
+        if rows == 0 || columns == 0 || u64::from(rows) * u64::from(columns) > 1_000 {
+            return Err(DomainError::LimitExceeded);
+        }
+        let sheet = self
+            .sheets
+            .iter()
+            .find(|sheet| sheet.id == origin.sheet)
+            .ok_or(DomainError::MissingSheet)?;
+        let row = sheet
+            .row_position(origin.row)
+            .ok_or(DomainError::MissingRow)? as usize;
+        let column = sheet
+            .column_position(origin.column)
+            .ok_or(DomainError::MissingColumn)? as usize;
+        let row_end = row
+            .checked_add(rows as usize)
+            .ok_or(DomainError::LimitExceeded)?;
+        let column_end = column
+            .checked_add(columns as usize)
+            .ok_or(DomainError::LimitExceeded)?;
+        let rows = sheet
+            .rows
+            .get(row..row_end)
+            .ok_or(DomainError::MissingRow)?;
+        let columns = sheet
+            .columns
+            .get(column..column_end)
+            .ok_or(DomainError::MissingColumn)?;
+        Ok(rows
+            .iter()
+            .flat_map(|row| {
+                columns.iter().map(move |column| CellAddress {
+                    sheet: origin.sheet,
+                    row: *row,
+                    column: *column,
+                })
+            })
+            .collect())
+    }
+    fn move_candidate(
+        &self,
+        source: CellAddress,
+        destination: CellAddress,
+        rows: u32,
+        columns: u32,
+        writes: &[GuardedContentWrite],
+        next_version: DocumentVersion,
+    ) -> Result<Self, DomainError> {
+        if source.sheet != destination.sheet || source == destination {
+            return Err(DomainError::InvalidAxis);
+        }
+        if writes.is_empty() || writes.len() > 10_000 {
+            return Err(DomainError::LimitExceeded);
+        }
+        let source = self.move_rectangle(source, rows, columns)?;
+        let destination = self.move_rectangle(destination, rows, columns)?;
+        let remap: BTreeMap<_, _> = source
+            .iter()
+            .copied()
+            .zip(destination.iter().copied())
+            .collect();
+        let first = *source.first().ok_or(DomainError::InvalidAxis)?;
+        let last = *source.last().ok_or(DomainError::InvalidAxis)?;
+        let (r1, c1) = self.move_cell_position(first)?;
+        let (r2, c2) = self.move_cell_position(last)?;
+        let source_bounds = (first.sheet, r1, r2, c1, c2);
+        let mut by_address = BTreeMap::new();
+        let mut incoming = 0usize;
+        let mut previous = 0usize;
+        for write in writes {
+            if by_address.insert(write.address, write).is_some() {
+                return Err(DomainError::InvalidAxis);
+            }
+            incoming = incoming
+                .checked_add(write.content.as_ref().map_or(0, CellContent::text_bytes))
+                .ok_or(DomainError::LimitExceeded)?;
+            previous = previous
+                .checked_add(write.previous.as_ref().map_or(0, CellContent::text_bytes))
+                .ok_or(DomainError::LimitExceeded)?;
+            if incoming > MAX_CELL_VALUE_BATCH_TEXT_BYTES
+                || previous > MAX_CELL_VALUE_BATCH_TEXT_BYTES
+            {
+                return Err(DomainError::LimitExceeded);
+            }
+        }
+        let source_set: BTreeSet<_> = source.iter().copied().collect();
+        let destination_set: BTreeSet<_> = destination.iter().copied().collect();
+        for address in source_set.union(&destination_set) {
+            if !by_address.contains_key(address) {
+                return Err(DomainError::InvalidAxis);
+            }
+        }
+        for (from, to) in source.iter().zip(&destination) {
+            let old = &by_address
+                .get(from)
+                .ok_or(DomainError::InvalidAxis)?
+                .previous;
+            let new = &by_address.get(to).ok_or(DomainError::InvalidAxis)?.content;
+            match (old, new) {
+                (None, None) => {}
+                (Some(CellContent::Value(before)), Some(CellContent::Value(after)))
+                    if before == after => {}
+                (Some(CellContent::Formula(before)), Some(CellContent::Formula(formula))) => {
+                    if formula.origin() != *to
+                        || formula.bound_at_version() >= next_version
+                        || before.source() != formula.source()
+                        || before.canonical() != formula.canonical()
+                    {
+                        return Err(DomainError::InvalidFormula);
+                    }
+                    self.validate_moved_formula(before, formula, &remap, source_bounds)?;
+                }
+                _ => return Err(DomainError::InvalidValue),
+            }
+        }
+        // Replay must reject an omitted inbound rewrite as well as a forged
+        // included one. Comparing an unchanged formula to its expected mapping
+        // detects both affected scalar targets and unsupported partial ranges.
+        let mut visited_nodes = 0usize;
+        for sheet in &self.sheets {
+            for (address, content) in &sheet.cells {
+                if source_set.contains(address) || destination_set.contains(address) {
+                    continue;
+                }
+                if let CellContent::Formula(formula) = content {
+                    visited_nodes = visited_nodes
+                        .checked_add(formula.ast().nodes().len())
+                        .filter(|nodes| *nodes <= 1_000_000)
+                        .ok_or(DomainError::LimitExceeded)?;
+                    if !by_address.contains_key(address) {
+                        self.validate_moved_formula(formula, formula, &remap, source_bounds)?;
+                    }
+                }
+            }
+        }
+        let mut operations = Vec::with_capacity(writes.len());
+        for write in writes {
+            if source_set.contains(&write.address)
+                && !destination_set.contains(&write.address)
+                && write.content.is_some()
+            {
+                return Err(DomainError::InvalidValue);
+            }
+            if !source_set.contains(&write.address) && !destination_set.contains(&write.address) {
+                match (&write.previous, &write.content) {
+                    (Some(CellContent::Formula(old)), Some(CellContent::Formula(new)))
+                        if old.ast() != new.ast()
+                            && old.source() == new.source()
+                            && old.canonical() == new.canonical() =>
+                    {
+                        self.validate_moved_formula(old, new, &remap, source_bounds)?;
+                    }
+                    _ => return Err(DomainError::InvalidFormula),
+                }
+            }
+            let kind = Some(match &write.content {
+                None => CellWriteKind::Clear,
+                Some(CellContent::Value(_)) => CellWriteKind::SetValue,
+                Some(CellContent::Formula(_)) => CellWriteKind::SetFormula,
+            });
+            let operation = Operation::CellWrite {
+                address: write.address,
+                content: write.content.clone(),
+                previous: write.previous.clone(),
+                kind,
+                undoes: None,
+                undoes_version: None,
+            };
+            self.validate_guarded_write(&operation)?;
+            operations.push(operation);
+        }
+        self.preview_candidate(&operations, next_version)
+    }
+    fn move_cell_position(&self, address: CellAddress) -> Result<(u32, u32), DomainError> {
+        let sheet = self
+            .sheets
+            .iter()
+            .find(|sheet| sheet.id == address.sheet)
+            .ok_or(DomainError::MissingSheet)?;
+        Ok((
+            sheet
+                .row_position(address.row)
+                .ok_or(DomainError::MissingRow)?,
+            sheet
+                .column_position(address.column)
+                .ok_or(DomainError::MissingColumn)?,
+        ))
+    }
+    fn expected_move_reference(
+        &self,
+        reference: &BoundCellReference,
+        origin: CellAddress,
+        remap: &BTreeMap<CellAddress, CellAddress>,
+    ) -> Result<BoundCellReference, DomainError> {
+        let old = CellAddress {
+            sheet: reference.target_sheet,
+            row: reference.target_row,
+            column: reference.target_column,
+        };
+        // Exactly one lookup: overlapping destinations must not move twice.
+        let target = remap.get(&old).copied().unwrap_or(old);
+        let (row, column) = self.move_cell_position(target)?;
+        let (origin_row, origin_column) = self.move_cell_position(origin)?;
+        Ok(BoundCellReference {
+            target_sheet: target.sheet,
+            target_row: target.row,
+            target_column: target.column,
+            row_mode: match reference.row_mode {
+                AxisReferenceMode::Absolute => AxisReferenceMode::Absolute,
+                AxisReferenceMode::Relative { .. } => AxisReferenceMode::Relative {
+                    original_delta: i64::from(row) - i64::from(origin_row),
+                },
+            },
+            column_mode: match reference.column_mode {
+                AxisReferenceMode::Absolute => AxisReferenceMode::Absolute,
+                AxisReferenceMode::Relative { .. } => AxisReferenceMode::Relative {
+                    original_delta: i64::from(column) - i64::from(origin_column),
+                },
+            },
+        })
+    }
+    fn validate_moved_formula(
+        &self,
+        old: &Formula,
+        new: &Formula,
+        remap: &BTreeMap<CellAddress, CellAddress>,
+        source_bounds: (SheetId, u32, u32, u32, u32),
+    ) -> Result<(), DomainError> {
+        if old.source() != new.source()
+            || old.canonical() != new.canonical()
+            || old.profile() != new.profile()
+            || old.ast().schema_version() != new.ast().schema_version()
+            || old.ast().root() != new.ast().root()
+            || old.ast().nodes().len() != new.ast().nodes().len()
+        {
+            return Err(DomainError::InvalidFormula);
+        }
+        for (before, after) in old.ast().nodes().iter().zip(new.ast().nodes()) {
+            let valid = match (before, after) {
+                (Node::Cell(before), Node::Cell(after)) => {
+                    self.expected_move_reference(before, new.origin(), remap)? == *after
+                }
+                (Node::Range(before), Node::Range(after)) => {
+                    let (ra, ca) = self.reference_position(&before.start)?;
+                    let (rb, cb) = self.reference_position(&before.end)?;
+                    let (sheet, r1, r2, c1, c2) = source_bounds;
+                    let intersects = before.start.target_sheet == sheet
+                        && ra.min(rb) <= r2
+                        && ra.max(rb) >= r1
+                        && ca.min(cb) <= c2
+                        && ca.max(cb) >= c1;
+                    let contained = ra.min(rb) >= r1
+                        && ra.max(rb) <= r2
+                        && ca.min(cb) >= c1
+                        && ca.max(cb) <= c2;
+                    if intersects && !contained {
+                        return Err(DomainError::InvalidFormula);
+                    }
+                    self.expected_move_reference(&before.start, new.origin(), remap)? == after.start
+                        && self.expected_move_reference(&before.end, new.origin(), remap)?
+                            == after.end
+                }
+                _ => before == after,
+            };
+            if !valid {
+                return Err(DomainError::InvalidFormula);
+            }
+        }
+        Ok(())
     }
     fn operation_budgets(&self, operation: &Operation) -> Result<(usize, usize), DomainError> {
         // Check the incoming value and aggregate budget before cloning the existing
@@ -1367,7 +1676,9 @@ impl Workbook {
                 self.updated_budgets(*address, value.text_bytes(), 0)?
             }
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
-            Operation::CopyRange { .. } | Operation::RangeWrite { .. } => {
+            Operation::CopyRange { .. }
+            | Operation::RangeWrite { .. }
+            | Operation::MoveRange { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {
@@ -1598,7 +1909,9 @@ impl Workbook {
                 }
             }
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
-            Operation::CopyRange { .. } | Operation::RangeWrite { .. } => {
+            Operation::CopyRange { .. }
+            | Operation::RangeWrite { .. }
+            | Operation::MoveRange { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {

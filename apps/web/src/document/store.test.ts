@@ -18,6 +18,363 @@ import {
   type Projection,
 } from './store';
 
+describe('server-authoritative cut and move', () => {
+  const cutProjection = (): Projection => {
+    const state = projection();
+    state.sheets[0]!.rows.push(uuidV7());
+    state.sheets[0]!.columns.push(uuidV7(), uuidV7(), uuidV7());
+    state.sheets[0]!.cells.push({
+      row_id: rowId,
+      column_id: columnId,
+      value: { type: 'text', value: 'source' },
+    });
+    return state;
+  };
+  const commands = (sent: Uint8Array[]) =>
+    sent
+      .map((bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload)
+      .filter((p) => p.case === 'command');
+
+  it('captures stable geometry without clearing cells and submits exactly one move for overlapping paste', async () => {
+    const { store, sent } = await connectedStore();
+    const state = cutProjection();
+    store.load(state);
+    store.select({ row: 0, column: 1 }, true);
+    const raw = store.cutRangePayload();
+    expect(raw).toBeDefined();
+    expect(JSON.parse(raw ?? '')).toMatchObject({
+      schema_version: 1,
+      intent: 'cut',
+      document_id: documentId,
+      version: '1',
+      sheet_id: sheetId,
+      row_id: rowId,
+      column_id: columnId,
+      rows: 1,
+      columns: 2,
+    });
+    expect(store.cutStatus).toBe('ready');
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    expect(commands(sent)).toHaveLength(0);
+    store.select({ row: 0, column: 1 });
+    expect(store.pasteCutRange(raw ?? '')).toBe(true);
+    const command = commands(sent)[0];
+    if (command?.case !== 'command' || !command.value.moveRange) throw new Error('Missing move');
+    expect(command.value.baseVersion).toBe(1n);
+    expect(command.value.moveRange).toMatchObject({ rows: 1, columns: 2 });
+    expect(bytesUuid(command.value.moveRange.source?.rowId ?? new Uint8Array())).toBe(rowId);
+    expect(bytesUuid(command.value.moveRange.destination?.columnId ?? new Uint8Array())).toBe(
+      state.sheets[0]!.columns[1],
+    );
+    expect(command.value.operation).toBeUndefined();
+    expect(command.value.copyRange).toBeUndefined();
+    expect(commands(sent)).toHaveLength(1);
+    expect(store.pending[0]?.kind).toBe('moveRange');
+    expect(store.cutStatus).toBe('pending');
+    expect(store.projection?.version).toBe('1');
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    expect(store.value({ row: 0, column: 1 })).toBeUndefined();
+    expect(store.pasteCutRange(raw ?? '')).toBe(false);
+    expect(commands(sent)).toHaveLength(1);
+    store.dispose();
+  });
+
+  it('accepts a same-document marker in another connected tab without local cut state', async () => {
+    const first = await connectedStore();
+    const second = await connectedStore();
+    const state = cutProjection();
+    first.store.load(structuredClone(state));
+    second.store.load(structuredClone(state));
+    const raw = first.store.cutRangePayload();
+    expect(second.store.cutStatus).toBeUndefined();
+    expect(second.store.pasteCutRange(raw ?? '', { row: 1, column: 0 })).toBe(true);
+    expect(commands(first.sent)).toHaveLength(0);
+    expect(commands(second.sent)).toHaveLength(1);
+    expect(second.store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    first.store.dispose();
+    second.store.dispose();
+  });
+
+  it('rejects foreign, stale and malformed cut markers without fallback or writes', async () => {
+    const { store, sent } = await connectedStore();
+    const state = cutProjection();
+    store.load(state);
+    const raw = store.cutRangePayload();
+    const valid = JSON.parse(raw ?? '') as Record<string, unknown>;
+    for (const patch of [
+      { document_id: uuidV7() },
+      { version: '0' },
+      { sheet_id: uuidV7() },
+      { rows: 0 },
+      { rows: 1.5 },
+      { rows: 1001 },
+      { columns: -1 },
+      { row_id: uuidV7() },
+      { column_id: 'bad' },
+      { intent: 'copy' },
+      { cut_id: 'bad' },
+    ]) {
+      expect(
+        store.pasteCutRange(JSON.stringify({ ...valid, ...patch }), { row: 1, column: 0 }),
+      ).toBe(false);
+      expect(store.error).not.toBe('');
+    }
+    expect(store.pasteCutRange(raw ?? '', { row: 0, column: -1 })).toBe(false);
+    expect(store.pasteCutRange(raw ?? '', { row: Number.NaN, column: 0 })).toBe(false);
+    expect(store.pasteCutRange(raw ?? '', { row: 2, column: 0 })).toBe(false);
+    expect(store.pasteCutRange(raw ?? '', { row: 0, column: 0 })).toBe(false);
+    expect(commands(sent)).toHaveLength(0);
+    expect(store.pending).toHaveLength(0);
+    expect(store.confirmed.get(`${rowId}/${columnId}`)).toEqual({ type: 'text', value: 'source' });
+    store.dispose();
+  });
+
+  it('marks a cut stale after a remote change and requires a fresh cut', async () => {
+    const { store, sent } = await connectedStore();
+    const state = cutProjection();
+    store.load(state);
+    const raw = store.cutRangePayload();
+    store.load({ ...state, version: '2' });
+    expect(store.cutStatus).toBe('stale');
+    expect(store.pasteCutRange(raw ?? '', { row: 1, column: 0 })).toBe(false);
+    expect(store.error).toContain('Вырежьте');
+    expect(commands(sent)).toHaveLength(0);
+    const fresh = store.cutRangePayload();
+    expect(store.pasteCutRange(fresh ?? '', { row: 1, column: 0 })).toBe(true);
+    store.dispose();
+  });
+
+  it('does not capture a cut while disconnected, editing or awaiting a command', async () => {
+    const { store, sent } = await connectedStore();
+    store.load(cutProjection());
+    store.begin('draft');
+    expect(store.cutRangePayload()).toBeUndefined();
+    store.cancel();
+    store.set({ row: 0, column: 0 }, { type: 'text', value: 'pending' });
+    expect(store.cutRangePayload()).toBeUndefined();
+    expect(commands(sent)).toHaveLength(1);
+    store.disconnected();
+    expect(store.cutRangePayload()).toBeUndefined();
+    store.dispose();
+  });
+
+  it('abandons local cut decoration when clipboard content changes but keeps TSV paste semantics', async () => {
+    const { store, sent } = await connectedStore();
+    store.load(cutProjection());
+    const raw = store.cutRangePayload();
+    store.reconcileCutClipboard(raw ?? '');
+    expect(store.cutStatus).toBe('ready');
+    store.reconcileCutClipboard('');
+    expect(store.cutStatus).toBeUndefined();
+    expect(store.pasteTsv('external', { row: 1, column: 0 })).toBe(true);
+    expect(commands(sent)[0]?.value.operation?.kind.case).toBe('setCellValues');
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    store.dispose();
+  });
+
+  it('never retries a rejected move automatically and preserves a stale cut until recaptured', async () => {
+    const { store, sent } = await connectedStore();
+    const state = cutProjection();
+    store.load(state);
+    const raw = store.cutRangePayload();
+    expect(store.pasteCutRange(raw ?? '', { row: 1, column: 0 })).toBe(true);
+    const command = commands(sent)[0];
+    if (command?.case !== 'command') throw new Error('Missing command');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ ...state, version: '2' }) })),
+    );
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'rejected',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: command.value.operationId,
+            code: 17,
+            retryable: true,
+            resyncRequired: true,
+          },
+        },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(commands(sent)).toHaveLength(1);
+    expect(store.pending).toHaveLength(0);
+    expect(store.cutStatus).toBe('stale');
+    expect(store.error).toContain('Вырежьте');
+    expect(store.pasteCutRange(raw ?? '', { row: 1, column: 0 })).toBe(false);
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    store.dispose();
+  });
+
+  it('keeps a terminal dependency refusal non-destructive and allows an explicit fresh attempt', async () => {
+    const { store, sent } = await connectedStore();
+    store.load(cutProjection());
+    const raw = store.cutRangePayload();
+    store.pasteCutRange(raw ?? '', { row: 1, column: 0 });
+    const command = commands(sent)[0];
+    if (command?.case !== 'command') throw new Error('Missing command');
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'rejected',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: command.value.operationId,
+            code: 18,
+            retryable: false,
+          },
+        },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(commands(sent)).toHaveLength(1);
+    expect(store.cutStatus).toBe('ready');
+    expect(store.error).toContain('отклонено');
+    expect(store.pasteCutRange(raw ?? '', { row: 1, column: 0 })).toBe(true);
+    expect(commands(sent)).toHaveLength(2);
+    expect(commands(sent)[1]?.value.operationId).not.toEqual(command.value.operationId);
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    store.dispose();
+  });
+
+  it.each([7, 8])(
+    'retains an uncertain move ID after transient rejection %i until a receipt resolves it',
+    async (code) => {
+      const { store, sent } = await connectedStore();
+      store.set({ row: 0, column: 0 }, { type: 'number', value: 7 });
+      await acknowledgeCellResult(store, sent, 7);
+      expect(store.canUndo).toBe(true);
+      sent.length = 0;
+      const state = { ...cutProjection(), version: '2' };
+      store.load(state);
+      const raw = store.cutRangePayload();
+      expect(store.pasteCutRange(raw ?? '', { row: 1, column: 0 })).toBe(true);
+      const first = commands(sent)[0];
+      if (first?.case !== 'command') throw new Error('Missing move');
+      const originalBytes = store.pending[0]?.bytes;
+      // The original move may already be committed, but its ACK never arrives.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(commands(sent)).toHaveLength(2);
+      await store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'rejected',
+            value: {
+              documentId: uuidBytes(documentId),
+              operationId: first.value.operationId,
+              code,
+              retryable: true,
+            },
+          },
+        }),
+      );
+      expect(store.pending).toHaveLength(1);
+      expect(store.pending[0]?.bytes).toEqual(originalBytes);
+      expect(store.cutStatus).toBe('pending');
+      expect(store.cutRangePayload()).toBeUndefined();
+      expect(store.pasteCutRange(raw ?? '', { row: 1, column: 0 })).toBe(false);
+      await vi.advanceTimersByTimeAsync(1500);
+      const retries = commands(sent);
+      expect(retries).toHaveLength(3);
+      for (const retry of retries) expect(retry.value).toEqual(first.value);
+      for (const bytes of sent.filter(
+        (data) => fromBinary(ClientEnvelopeSchema, data).payload.case === 'command',
+      ))
+        expect(bytes).toEqual(originalBytes);
+      expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+
+      const moved = structuredClone(state);
+      moved.version = '3';
+      moved.sheets[0]!.cells[0]!.row_id = moved.sheets[0]!.rows[1]!;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => moved })),
+      );
+      const receipt = create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'receipt',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: first.value.operationId,
+            committedVersion: 3n,
+            currentHeadVersion: 3n,
+            canonicalEventHash: new Uint8Array(32),
+          },
+        },
+      });
+      await store.receive(receipt);
+      expect(store.pending).toHaveLength(0);
+      expect(store.cutStatus).toBeUndefined();
+      expect(store.canUndo).toBe(false);
+      expect(store.canRedo).toBe(false);
+      expect(store.value({ row: 0, column: 0 })).toBeUndefined();
+      expect(store.value({ row: 1, column: 0 })).toEqual({ type: 'text', value: 'source' });
+      await store.receive(receipt);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(commands(sent)).toHaveLength(3);
+      expect(store.pending).toHaveLength(0);
+      store.dispose();
+    },
+  );
+
+  it('clears the cut and unsupported history only after committed projection hydration', async () => {
+    const { store, sent } = await connectedStore();
+    store.set({ row: 0, column: 0 }, { type: 'number', value: 7 });
+    await acknowledgeCellResult(store, sent, 7);
+    expect(store.canUndo).toBe(true);
+    const state = { ...cutProjection(), version: '2' };
+    store.load(state);
+    const raw = store.cutRangePayload();
+    store.pasteCutRange(raw ?? '', { row: 1, column: 0 });
+    const command = commands(sent).at(-1);
+    if (command?.case !== 'command') throw new Error('Missing move');
+    let resolveRefresh: ((value: unknown) => void) | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      ),
+    );
+    const receive = store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'committed',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: command.value.operationId,
+            committedVersion: 3n,
+            confirmedStateHash: new Uint8Array(32),
+          },
+        },
+      }),
+    );
+    expect(store.cutStatus).toBe('pending');
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    const moved = structuredClone(state);
+    moved.version = '3';
+    moved.sheets[0]!.cells[0]!.row_id = moved.sheets[0]!.rows[1]!;
+    resolveRefresh?.({ ok: true, json: async () => moved });
+    await receive;
+    expect(store.cutStatus).toBeUndefined();
+    expect(store.pending).toHaveLength(0);
+    expect(store.value({ row: 0, column: 0 })).toBeUndefined();
+    expect(store.value({ row: 1, column: 0 })).toEqual({ type: 'text', value: 'source' });
+    expect(store.canUndo).toBe(false);
+    expect(store.canRedo).toBe(false);
+    store.dispose();
+  });
+});
+
 const documentId = '01994100-0000-7000-8000-000000000001';
 const rowId = '01994100-0000-7000-8000-000000000002';
 const columnId = '01994100-0000-7000-8000-000000000003';

@@ -38,8 +38,10 @@ pub enum SessionError {
     InvalidCommand,
     #[error("formula base version is outside the available axis history")]
     RebaseWindowExceeded,
-    #[error("range copy source version is no longer current")]
+    #[error("source version is no longer current for this operation")]
     SourceVersionChanged,
+    #[error("move intersects an unsupported reference dependency")]
+    UnsupportedMoveDependency,
     #[error("formula could not be normalized")]
     InvalidFormula,
     #[error("document invariant failed")]
@@ -1186,6 +1188,46 @@ fn normalize(
                 kind: Some(spreadsheet_domain::workbook::RangeWriteKind::Copy),
                 undoes: None,
                 undoes_version: None,
+            })
+        }
+        CommandPayload::MoveRange {
+            source,
+            destination,
+            rows,
+            columns,
+        } => {
+            if command.base_version != workbook.version() {
+                return Err(SessionError::SourceVersionChanged);
+            }
+            workbook.cell_content(*source)?;
+            workbook.cell_content(*destination)?;
+            let plan = spreadsheet_formula::relocation::plan_move(
+                workbook,
+                spreadsheet_formula::relocation::MoveRequest {
+                    source: *source,
+                    destination: *destination,
+                    rows: *rows,
+                    columns: *columns,
+                },
+            )
+            .map_err(|error| match error {
+                spreadsheet_formula::relocation::MoveError::PartialRange => {
+                    SessionError::UnsupportedMoveDependency
+                }
+                spreadsheet_formula::relocation::MoveError::Domain(error) => {
+                    SessionError::Domain(error)
+                }
+                spreadsheet_formula::relocation::MoveError::LimitExceeded => {
+                    SessionError::Domain(DomainError::LimitExceeded)
+                }
+                _ => SessionError::InvalidCommand,
+            })?;
+            Ok(Operation::MoveRange {
+                source: *source,
+                destination: *destination,
+                rows: *rows,
+                columns: *columns,
+                writes: plan.writes,
             })
         }
         CommandPayload::ClearCell { address } => Ok(Operation::CellWrite {

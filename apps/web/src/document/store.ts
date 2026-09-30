@@ -120,6 +120,13 @@ type PendingRangeCopy = {
   bytes: Uint8Array;
   attempts: number;
 };
+type PendingRangeMove = {
+  kind: 'moveRange';
+  id: string;
+  cutPayload: string;
+  bytes: Uint8Array;
+  attempts: number;
+};
 type Pending =
   | PendingCell
   | PendingBatch
@@ -130,7 +137,8 @@ type Pending =
   | PendingColumnDeletion
   | PendingAddSheet
   | PendingUndo
-  | PendingRangeCopy;
+  | PendingRangeCopy
+  | PendingRangeMove;
 export function uuidBytes(id: string) {
   return Uint8Array.from(id.replaceAll('-', '').match(/../g) ?? [], (pair) => parseInt(pair, 16));
 }
@@ -185,6 +193,7 @@ const rejectionText: Record<number, string> = {
   15: 'Срок отмены этой операции истек. Последние 10 000 изменений доступны для отмены.',
   16: 'Изменение слишком большое для надежной записи в журнал.',
   17: 'Источник диапазона изменился. Скопируйте его ещё раз.',
+  18: 'Диапазон пересекает часть ссылки в формуле. Выберите другой диапазон перемещения.',
 };
 const isUuid = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -409,6 +418,7 @@ export class DocumentStore {
   private headRefreshAttempts = 0;
   private inflight: string | undefined;
   private formulaCopyInFlight = false;
+  private cutIntent: { raw: string; version: string; stale: boolean } | undefined;
   private sequence = 0n;
   private syncGeneration = 0;
   private connectionGeneration = 0;
@@ -784,6 +794,7 @@ export class DocumentStore {
       this.remotePresence = [];
       this.undoHistory = [];
       this.redoHistory = [];
+      this.cutIntent = undefined;
     }
     const remap = (position: Position): Position => {
       if (documentChanged || !previousSheet || !nextSheet) return { row: 0, column: 0 };
@@ -1314,6 +1325,172 @@ export class DocumentStore {
       from_row: this.selected.row,
       from_column: this.selected.column,
     });
+  }
+  get cutStatus(): 'ready' | 'pending' | 'stale' | undefined {
+    const cut = this.cutIntent;
+    if (!cut) return undefined;
+    if (
+      this.pending.some((pending) => pending.kind === 'moveRange' && pending.cutPayload === cut.raw)
+    )
+      return 'pending';
+    return cut.stale || cut.version !== this.projection?.version ? 'stale' : 'ready';
+  }
+  reconcileCutClipboard(raw: string) {
+    if (this.cutIntent && this.cutIntent.raw !== raw) {
+      this.cutIntent = undefined;
+      this.notify();
+    }
+  }
+  private moveError(message: string) {
+    this.error = message;
+    this.notify();
+    return false;
+  }
+  private canPrepareMove() {
+    if (!this.projection || !this.sheet || !this.actor || !this.sender)
+      return this.moveError('Для перемещения подключитесь к таблице. Исходные ячейки не изменены.');
+    if (
+      this.editing ||
+      this.pending.length ||
+      this.syncing ||
+      this.loading ||
+      this.formulaCopyInFlight
+    )
+      return this.moveError('Завершите ввод и дождитесь сохранения перед перемещением.');
+    return true;
+  }
+  cutRangePayload() {
+    if (!this.canPrepareMove()) return undefined;
+    const sheet = this.sheet,
+      projection = this.projection;
+    if (!sheet || !projection) return undefined;
+    const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
+    const rows = endRow - startRow + 1,
+      columns = endColumn - startColumn + 1;
+    if (
+      ![startRow, endRow, startColumn, endColumn].every(Number.isSafeInteger) ||
+      startRow < 0 ||
+      startColumn < 0 ||
+      rows * columns > 1_000 ||
+      endRow >= sheet.rows.length ||
+      endColumn >= sheet.columns.length
+    ) {
+      this.moveError('Можно переместить от 1 до 1000 ячеек в пределах одного листа.');
+      return undefined;
+    }
+    const raw = JSON.stringify({
+      schema_version: 1,
+      intent: 'cut',
+      cut_id: uuidV7(),
+      document_id: projection.document_id,
+      version: projection.version,
+      sheet_id: sheet.id,
+      row_id: sheet.rows[startRow],
+      column_id: sheet.columns[startColumn],
+      rows,
+      columns,
+    });
+    this.cutIntent = { raw, version: projection.version, stale: false };
+    this.error = '';
+    this.notify();
+    return raw;
+  }
+  pasteCutRange(raw: string, position: Position = this.pasteOrigin) {
+    if (!this.canPrepareMove()) return false;
+    const projection = this.projection,
+      sheet = this.sheet,
+      actor = this.actor;
+    if (!projection || !sheet || !actor) return false;
+    const invalid = () => this.moveError('Некорректный вырезанный диапазон. Вырежьте его ещё раз.');
+    if (byteLength(raw) > 16 * 1024) return invalid();
+    let payload: unknown;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return invalid();
+    }
+    if (!payload || typeof payload !== 'object') return invalid();
+    const cut = payload as Record<string, unknown>;
+    if (
+      cut.schema_version !== 1 ||
+      cut.intent !== 'cut' ||
+      !isUuid(cut.cut_id) ||
+      !isUuid(cut.document_id) ||
+      !isUuid(cut.sheet_id) ||
+      !isUuid(cut.row_id) ||
+      !isUuid(cut.column_id) ||
+      typeof cut.version !== 'string' ||
+      !/^\d{1,20}$/.test(cut.version) ||
+      !Number.isSafeInteger(cut.rows) ||
+      !Number.isSafeInteger(cut.columns) ||
+      (cut.rows as number) < 1 ||
+      (cut.columns as number) < 1 ||
+      (cut.rows as number) * (cut.columns as number) > 1_000
+    )
+      return invalid();
+    if (cut.document_id !== projection.document_id || cut.sheet_id !== sheet.id)
+      return this.moveError('Перемещение возможно только в пределах исходного листа и таблицы.');
+    if (cut.version !== projection.version || (this.cutIntent?.raw === raw && this.cutIntent.stale))
+      return this.moveError('Источник диапазона изменился. Вырежьте его ещё раз.');
+    const sourceRow = sheet.rows.indexOf(cut.row_id),
+      sourceColumn = sheet.columns.indexOf(cut.column_id);
+    const rows = cut.rows as number,
+      columns = cut.columns as number;
+    if (
+      !Number.isSafeInteger(position.row) ||
+      !Number.isSafeInteger(position.column) ||
+      sourceRow < 0 ||
+      sourceColumn < 0 ||
+      position.row < 0 ||
+      position.column < 0 ||
+      sourceRow + rows > sheet.rows.length ||
+      sourceColumn + columns > sheet.columns.length ||
+      position.row + rows > sheet.rows.length ||
+      position.column + columns > sheet.columns.length
+    )
+      return this.moveError('Диапазон перемещения выходит за границы листа.');
+    if (sourceRow === position.row && sourceColumn === position.column)
+      return this.moveError('Для перемещения выберите другую ячейку назначения.');
+    const destinationRow = sheet.rows[position.row],
+      destinationColumn = sheet.columns[position.column];
+    if (!destinationRow || !destinationColumn) return invalid();
+    const id = uuidV7();
+    const bytes = toBinary(
+      ClientEnvelopeSchema,
+      create(ClientEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'command',
+          value: {
+            operationId: uuidBytes(id),
+            documentId: uuidBytes(projection.document_id),
+            actorId: actor,
+            baseVersion: BigInt(cut.version),
+            clientSequence: ++this.sequence,
+            moveRange: {
+              source: {
+                sheetId: uuidBytes(sheet.id),
+                rowId: uuidBytes(cut.row_id),
+                columnId: uuidBytes(cut.column_id),
+              },
+              destination: {
+                sheetId: uuidBytes(sheet.id),
+                rowId: uuidBytes(destinationRow),
+                columnId: uuidBytes(destinationColumn),
+              },
+              rows,
+              columns,
+            },
+          },
+        },
+      }),
+    );
+    this.cutIntent = { raw, version: cut.version, stale: false };
+    this.pending.push({ kind: 'moveRange', id, cutPayload: raw, bytes, attempts: 0 });
+    this.error = '';
+    this.notify();
+    this.flush();
+    return true;
   }
   copyRangePayload() {
     const sheet = this.sheet,
@@ -2083,16 +2260,36 @@ export class DocumentStore {
     this.inflight = undefined;
     if (payload.case === 'rejected') {
       const rejection = payload.value;
+      const sourceChanged =
+        rejection.code === 17 && (pending?.kind === 'copyRange' || pending?.kind === 'moveRange');
+      const unsupportedMove = pending?.kind === 'moveRange' && rejection.code === 18;
+      if (rejection.retryable && !sourceChanged && !unsupportedMove) {
+        // An admission failure can follow a committed move whose ACK was lost.
+        // Its original bytes and ID must survive until a receipt resolves the outcome.
+        this.error =
+          pending?.kind === 'moveRange'
+            ? 'Не удалось подтвердить перемещение. Повторяем запрос…'
+            : 'Сервер занят. Повторяем изменение…';
+        this.timer = setTimeout(() => this.flush(), 1500);
+        this.notify();
+        return;
+      }
+      if (pending?.kind === 'moveRange') {
+        this.pending = this.pending.filter((p) => p.id !== id);
+        const stale = rejection.code === 17 || rejection.code === 4;
+        if (stale && this.cutIntent?.raw === pending.cutPayload) this.cutIntent.stale = true;
+        if (stale || rejection.resyncRequired) await this.refresh();
+        this.error = stale
+          ? 'Источник диапазона изменился. Вырежьте его ещё раз.'
+          : `Перемещение отклонено. ${rejectionText[rejection.code] ?? 'Обновите таблицу и вырежьте диапазон ещё раз.'}`;
+        this.notify();
+        this.flush();
+        return;
+      }
       if (pending?.kind === 'copyRange' && rejection.code === 17) {
         this.pending = this.pending.filter((p) => p.id !== id);
         this.error = 'Источник диапазона изменился. Скопируйте его ещё раз.';
         await this.refresh();
-        this.notify();
-        return;
-      }
-      if (rejection.retryable) {
-        this.error = 'Сервер занят. Повторяем изменение…';
-        this.timer = setTimeout(() => this.flush(), 1500);
         this.notify();
         return;
       }
@@ -2141,6 +2338,8 @@ export class DocumentStore {
       // Consume history only if this intent is still pending after the await.
       const completed = this.pending.find((p) => p.id === id);
       this.pending = this.pending.filter((p) => p.id !== id);
+      if (completed?.kind === 'moveRange' && this.cutIntent?.raw === completed.cutPayload)
+        this.cutIntent = undefined;
       if (
         completed?.kind === 'addSheet' &&
         this.projection?.sheets.some((sheet) => sheet.id === completed.sheetId)

@@ -24,6 +24,14 @@ Bound references: BoundCell, BoundRange или Invalid(ReferenceError). BoundCel
 
 Для move/cut/copy нужны отдельные fixtures Excel/Google-style UX; таблица задает проектный контракт, не полную Excel parity. Merge/array dependencies вне поддержанного scope отклоняются до commit. Formula binding на base_version определяется точным window/checkpoint алгоритмом в collaboration.md.
 
+ADR-081 реализует same-sheet cut/move содержимого с однократным frozen mapping,
+включая перекрытие в обе стороны и scalar inbound refs на других листах.
+Полностью содержащиеся ranges следуют переносу, partial intersection отклоняет
+всю команду (code18). AST literals/operators/authored text сохраняются; относительные
+offsets пересчитываются. Delayed formula с base до переноса получает code17,
+в том числе после actor restart через bounded history restoration. Move preview
+в WASM и manual Excel move goldens пока не подтверждены.
+
 ## Числа и порядок
 
 IEEE-754 binary64, -0 → +0; nonfinite literal/input rejected; computed NaN/infinity → NUM, divide by zero → DIV/0. Hash использует normalized bit pattern, не форматированный decimal text. Subnormals сохраняются и считаются отдельным compatibility case.

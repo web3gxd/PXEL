@@ -20,4 +20,5 @@ run(process.execPath, [
   '--test-concurrency=1',
   'tests/recovery/server-restart.test.mjs',
   'tests/recovery/convergence-restart.test.mjs',
+  'tests/recovery/move-restart.test.mjs',
 ]);

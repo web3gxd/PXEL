@@ -4,6 +4,11 @@
 
 Google Sheets задает пользовательскую модель мгновенного редактирования и collaboration. Excel — целевая совместимость формул/файлов в явно ограниченном профиле, не источник runtime architecture. Excel/LibreOffice headless, готовые spreadsheet/formula/collaboration engines не входят в runtime.
 
+Cut/move content (ADR-081): same-sheet stable rectangle, overlap, scalar inbound
+references across sheets и fully contained ranges поддержаны сервером. Partial
+range intersection получает typed rejection; cross-sheet moves, styles/merges и
+move undo остаются открытыми. Эти правила не заявлены как manual Excel parity.
+
 ## Formula profile
 
 Точные правила и ограничения: [formula-semantics.md](formula-semantics.md). Convergence нашего native/WASM — exact normalized result hash. Совместимость с Excel проверяется fixtures с версией Excel/ОС/locale и указанным tolerance, где он необходим. Bitwise Excel parity не обещается.

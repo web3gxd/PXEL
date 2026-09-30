@@ -3737,3 +3737,88 @@ fullserver/wire/worker/UI integration and remainingphasegates explicitlyopen.
 Read-only finalreview confirms clone/discard issue closed and no additional
 concrete semantic defect found. Reviewer did not run tests; actual commandresults
 above are from primaryagent. ADR080 remains acceptedforplanneronly.
+
+## 2026-09-30 — ADR081 atomic durable cut/move
+
+Authorized phase4 integration follows ADR080. Coordinated separate domain,
+codec and frontend files; primary owns actor/journal/wire/tests/docs. Added
+Operation/CommandPayload::MoveRange, frozen guardedsource/destination/inbound
+footprint. Domain checksgeometry, area1..1000/writes<=10000, two512KiB textcaps,
+exactpreimages/finalcapacity, scalar/blank frozenmapping and formula origins/
+source/canonical/ASTshape/nonreference nodes/exactonce-mappedreferences/modes.
+Read-only reviewcaughtmissinginboundfootprint; directcandidate RED reproduced,
+thenboundedexternalformula validationfixed it. Finaldomainmove9/9passed, planner
+12/12passed and domainclippy passed. Nonreference AST/source forgery also first
+reproduced andfixed; formerfixture onlycheckedchangedAST and wasstrengthened.
+
+Separate persisted schema19/oneof19/hash21/commandfingerprint17/principal migration
+added; schemas1..18/goldensunchanged. Codec35/35 andclippy passed (6newtests,
+4MiB envelope); oversizedfixtureinitiallybuiltunreachableAST, correctedreachable
+fixturethenGREEN. Wirev1adds move_rangefield10 and dependencycode18, exactlyone
+payload; malformedgeometrydecoder RED thenfixed, serverunit18/18passed.
+Actor exactheadplan/candidate/CAS/durableACK path reused, late receipt precedes
+newsource admission. Journaltouchedaddresses make Move a historybarrier; old
+formula inverse acrosslaterMove isNotUndoable. AxisHistory recordscontentfree
+relocationfloor; newactorsrestore boundedhistory evenwithoutaxischange before
+oldformula binding. Delayedformula refuses17 ratherthanwrongtargetbind.
+
+FrontendCtrlX/MetaX richintent and CtrlV/MetaV same-documentcross-tab MoveRange,
+no canonicaloptimisticmove inthisslice. Sourcesremainbeforecommit/refresh; cell
+textarea cut staysnative. Terminalstale17/partial18 do notfallbackcopy/TSV ornewID.
+Reviewfoundtransientrejection droppinguncertainMove ID afterACKloss; twoREDtests
+reproduced codes7/8, fixedretryables preserveexactbytes/id andblocknewcutuntilreceipt.
+Fullfrontend98unit/typecheck/lintpassed; buildpassedbeforethatretry-onlycorrection.
+Focused8/8ChromiumDPR1/2passed17.5s afterretryfix. Full106/106browserpassed5.8min;
+no runtime restartuntilterminalexit0. FirstfocusedHTTPstartedbeforereadycausedone
+ECONNREFUSED; thenfixtureframecase/path mistakescorrected (documentHeadChanged;
+formula value.value.current_text). FocusedHTTP4/4passed5594.0396ms. Complete
+HTTP/security/network74/74passed106532.9433ms onlivePG/server, includingexisting
+3x100network writes. Nativecollab22passed/twointentionaltimingignored; newnative
+incrementalMove graph testpassed1/1, proves2dirtyformulas/independentcachedvalue.
+
+RealPGseparatejournalMove tests2/2passed1.49s (agent), covering schema19, late
+CommitRequest receipt afterlaterhead, pagedreplay/frozenvalue, changedgeometry-ID
+conflict, stalecommandbase/systemprincipal nonwrite; rerunafterfinaldomainhardening
+pendingbelow. Sharedalltargetsclippy andSQLxpreparecheckpassedbeforelatejournal/
+domaininboundfix; finalchecksbelow. Migration appliedthroughactualserverstartup.
+
+Newoptimizedcandidate benchmark1000cells/5000inboundformulas(7000guardedwrites)
+45.205–47.698ms central46.411,10samples/1s warmup/requested2s(55iterations,
+actualestimated2.5694s). Excludesplanning,hash,calculation,DB/network/browser; developer
+machinealso ranChromium,uncontrolledload. Notp95commit. Plannerbenchmarkprevious
+8.4866–8.8520ms remainsdifferentmeasurement. AddedADR081, synchronizeddocs/
+operationcaps andpresentationphase4line; discoveredstaleproposedcaps corrected
+fromactualcode(64actorqueue,128pending,160frames/2MiB outbound,4MiBpersisted).
+Unifieddecoded-memoryaccounting explicitlyopen ratherthanclaimed4MiBcap.
+
+Ownedhiddenlauncher6120 identityverified/stoppedonlyafterfull106browserterminal,
+forWindows-safe finalbinaryrecoverybuild. Recovery3cases nowrunning; noresult
+claimedyet. Runtime/datarestorationrequiredafterterminal. Moveundo,styles/merges,
+cross-sheetmove,partialrangeunion,WASMmovepreview/parity,controlledp95/manualExcel,
+fullMVP/deploymentgatesremainopen. No fullgoalcompletion claimed.
+Final ADR081 outcomes: full106Chromium passed5.8min before stoppingown6120. Final
+recoverybinary built15.49s; complete3/3hardrestarttests passed13631.4733ms, including
+frozenMove content/calculatedhash, late receipt aftersourceedit, anddelayedformula
+rebase refusal afterfreshactor. FinalPGMove2/2rerunpassed1.01s afterinboundhardening.
+Hiddenlauncher32120 restored: WASMrelease25.30s/serverdev7.82s, readyz8080 andweb5173
+returned200. PostgreSQL18.6/dataretained; no unrelatedprocess stopped.
+
+Final sharedstrictall-targetsclippy andSQLxpreparecheckpassed after lateRustfixes;
+proto:checkpassed, defaultservercheckpassed. Full domain allfeatures suitepassed
+withoneexisting convergence stressignore; full formula suitepassed includingnew
+incrementalMove test. Frontendfinalbuildpassedafterretryfix. Rebuiltordinaryshared
+native/browser corpus554cases and1010workbooks/2020patches matchednormalizedhashes;
+thisdoesnotproveMove planner/workerpreview parity (notimplemented). FinalHTTPMove
+5/5passed6507.5652ms afterruntime rebuild, including deleted-sourcecode9 andzero/
+oversizegeometrycode3. FullHTTP74was earlierfour-Move-test invocation; nofull75
+one-runclaimed. SelectedPrettier/rustfmt/diff checks passed. Presentationactual
+Chromium1440x900/390x84410slides,updatedmove/undo-openline,Home/End/nooverflow/errors
+passed; checker initially used inputValue on output element, fixedcheckertextContent.
+
+Finalread-onlyreview confirms omitted-inbound gap closed and noadditionalconcrete
+criticalfinding; reviewer didnotruntests. Scope remains exacthead same-sheetcontent
+Move with cross-sheetinboundrefs. Partialrangeunion/cross-sheetmove/styles/merges,
+Moveundo/referenceguards,workeroptimisticMove/parity,controlledlatency/manualExcel,
+largecombinedconvergence/LINUXCompose/remoteCI/RussianS3/fullXLSX remainopen.
+Allstagesgoalactive. Nextminimalstage isversionedguardedMovecompensation+newreference
+historyguards (schema18limitsmustnotbechanged), then sharedworkerpreview/parity.

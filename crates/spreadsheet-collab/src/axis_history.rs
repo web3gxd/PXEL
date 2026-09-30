@@ -15,17 +15,21 @@ pub(crate) struct Checkpoint {
 pub(crate) struct AxisHistory {
     checkpoints: VecDeque<Checkpoint>,
     bytes: usize,
+    relocation_floor: DocumentVersion,
 }
 impl AxisHistory {
     pub(crate) fn covers(&self, base: DocumentVersion) -> bool {
-        self.checkpoints
-            .front()
-            .is_some_and(|entry| entry.version <= base)
+        base >= self.relocation_floor
+            && self
+                .checkpoints
+                .front()
+                .is_some_and(|entry| entry.version <= base)
     }
     pub(crate) fn new(book: &Workbook) -> Self {
         let mut history = Self {
             checkpoints: VecDeque::new(),
             bytes: 0,
+            relocation_floor: DocumentVersion::ZERO,
         };
         if let Some(checkpoint) = Self::checkpoint(book, None) {
             history.bytes = checkpoint.bytes;
@@ -112,6 +116,9 @@ impl AxisHistory {
         operation: &Operation,
         checkpoint: Option<Checkpoint>,
     ) {
+        if matches!(operation, Operation::MoveRange { .. }) {
+            self.relocation_floor = book.version();
+        }
         if Self::structural(operation) {
             if let Some(checkpoint) = checkpoint {
                 self.bytes += checkpoint.bytes;
@@ -142,10 +149,17 @@ impl AxisHistory {
         base: DocumentVersion,
     ) -> Result<Formula, SessionError> {
         head.cell_content(address)?; // Deleted origins have typed domain errors.
+        if base < self.relocation_floor {
+            return Err(SessionError::SourceVersionChanged);
+        }
         if base == DocumentVersion::ZERO
             || base > head.version()
             || head.version().get().saturating_sub(base.get()) > MAX_VERSIONS
         {
+            return Err(SessionError::RebaseWindowExceeded);
+        }
+        // A fresh actor restores move history even when axes did not change.
+        if !self.covers(base) {
             return Err(SessionError::RebaseWindowExceeded);
         }
         if base >= head.last_axis_change_version() {

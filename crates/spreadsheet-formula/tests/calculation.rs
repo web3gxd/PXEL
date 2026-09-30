@@ -8,6 +8,70 @@ use std::{collections::BTreeSet, sync::atomic::AtomicBool};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
+fn frozen_move_reconciles_inbound_edges_without_recalculating_independent_formulas() -> TestResult {
+    let mut book = fixture(vec![(address(0, 0)?, CellValue::Number(3.).into())], 2, 4)?;
+    for (column, source) in [(1, "=A1*2"), (2, "=B1+1"), (3, "=42")] {
+        let op = formula(&book, address(0, column)?, source)?;
+        book = book.candidate(&op, DocumentVersion::new(book.version().get() + 1)?)?;
+    }
+    let limits = CalculationLimits::default();
+    let mut projection = CalculationProjection::from_workbook(&book, limits)?;
+    projection.calculate(&book, limits, &AtomicBool::new(false))?;
+    let source = address(0, 0)?;
+    let destination = address(1, 0)?;
+    let plan = spreadsheet_formula::relocation::plan_move(
+        &book,
+        spreadsheet_formula::relocation::MoveRequest {
+            source,
+            destination,
+            rows: 1,
+            columns: 2,
+        },
+    )?;
+    edit(
+        &mut book,
+        &mut projection,
+        Operation::MoveRange {
+            source,
+            destination,
+            rows: 1,
+            columns: 2,
+            writes: plan.writes,
+        },
+    )?;
+    let patch = projection.calculate(&book, limits, &AtomicBool::new(false))?;
+    assert_eq!(patch.evaluated_cells, 2);
+    assert!(!projection.results().contains_key(&address(0, 1)?));
+    assert_eq!(
+        projection.results().get(&address(1, 1)?),
+        Some(&Value::Number(6.))
+    );
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(7.))
+    );
+    assert_eq!(
+        projection.results().get(&address(0, 3)?),
+        Some(&Value::Number(42.))
+    );
+    edit(
+        &mut book,
+        &mut projection,
+        Operation::SetCellValue {
+            address: destination,
+            value: CellValue::Number(5.),
+        },
+    )?;
+    let patch = projection.calculate(&book, limits, &AtomicBool::new(false))?;
+    assert_eq!(patch.evaluated_cells, 2);
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(11.))
+    );
+    Ok(())
+}
+
+#[test]
 fn multiple_criteria_dependencies_follow_sources_and_threshold() -> TestResult {
     let mut book = fixture(
         vec![

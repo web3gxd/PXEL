@@ -32,3 +32,22 @@ warm-up/measurement settings; timing intervals are not p95 UI or commit latency.
 No database, ACL/history transaction, candidate application, formula evaluation,
 network, serialization or browser/WASM crossing is included. No production
 performance gate is closed by this developer-machine result.
+
+## Atomic candidate validation (ADR081)
+
+```sh
+cargo bench -p spreadsheet-formula --bench relocation -- candidate_move --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+The same7000-write frozen plan is prepared outside this measurement. The timed
+domain candidate validates source/destination/external preimages, complete inbound
+footprint, exact bound reference mappings and unchanged AST literals/operators,
+then applies one private final-capacity projection. Its final sparse state still
+contains6000 cells. This measures candidate validation/application rather than
+planning, hashing, formula calculation, PostgreSQL or delivery.
+
+Criterion reported **45.205–47.698 ms**, central **46.411 ms**,10 samples,
+1s warm-up, requested2s measurement. It collected55 iterations in an estimated
+2.5694s and reported three mild outliers (one low/two high). The same developer
+machine also ran Chromium E2E, so load was uncontrolled. This is not p95 commit
+latency and does not establish the simple-operation commit target.

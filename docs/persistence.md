@@ -22,6 +22,14 @@ footprint и сокращение own scalar/range pairs выполняются 
 foreign/legacy barriers не исчезают после компенсации. Tail budgets:10000versions,
 64MiB payload и100000 matching-address updates. Отказ не создаёт event/receipt.
 
+ADR-081 добавляет frozen MoveRange schema19 с geometry и complete guarded
+source/destination/inbound writes, hash tag21 и отдельным command tag17.
+User-only principal migration сохраняет ограничения старых schemas.
+Source area<=1000, writes<=10000, incoming/preimage text отдельно512KiB,
+envelope4MiB. Candidate проверяет точное преобразование AST и полноту внешних
+ссылок до CAS; replay использует frozen contents/preimages. Move пока не inverse
+target; восстановление прежних формул через последующий move отклоняется.
+
 Статус: migrations/readiness, LocalFilesystemBlobStore и durable document
 operations реализованы локально. `SnapshotImage` и binary codec проверены.
 ADR-033 добавил PostgreSQL snapshot metadata и внутренние publish/read/recover API:

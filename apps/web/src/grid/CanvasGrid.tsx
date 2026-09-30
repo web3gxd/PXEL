@@ -126,8 +126,14 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
         aria-label="Область таблицы"
         aria-describedby="grid-description"
         onPaste={(event) => {
-          if (!document?.sheet) return;
+          if (!document?.sheet || document.editing) return;
           event.preventDefault();
+          const cut = event.clipboardData.getData('application/x-pxel-cut+json');
+          document.reconcileCutClipboard(cut);
+          if (cut) {
+            document.pasteCutRange(cut, document.pasteOrigin);
+            return;
+          }
           const formula = event.clipboardData.getData('application/x-pxel-formula+json');
           const range = event.clipboardData.getData('application/x-pxel-range+json');
           const tsv = event.clipboardData.getData('application/x-pxel-tsv+json');
@@ -146,8 +152,9 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           } else document.pasteTsv(event.clipboardData.getData('text/plain'), document.pasteOrigin);
         }}
         onCopy={(event) => {
-          if (!document?.sheet) return;
+          if (!document?.sheet || document.editing) return;
           event.preventDefault();
+          document.reconcileCutClipboard('');
           const text = document.copySelectionTsv();
           if (text === undefined) return;
           event.clipboardData.setData('text/plain', text);
@@ -159,6 +166,16 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           if (formula) event.clipboardData.setData('application/x-pxel-formula+json', formula);
           const range = document.copyRangePayload();
           if (range) event.clipboardData.setData('application/x-pxel-range+json', range);
+        }}
+        onCut={(event) => {
+          if (!document?.sheet || document.editing) return;
+          event.preventDefault();
+          const text = document.copySelectionTsv();
+          if (text === undefined) return;
+          const cut = document.cutRangePayload();
+          if (!cut) return;
+          event.clipboardData.setData('text/plain', text);
+          event.clipboardData.setData('application/x-pxel-cut+json', cut);
         }}
         onPointerDown={(event) => {
           if (!document?.sheet) return;
@@ -263,6 +280,15 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
         />
       </div>
       <canvas ref={canvasRef} className="grid-canvas" aria-hidden="true" />
+      {document?.cutStatus && (
+        <output className="cut-status" aria-live="polite" data-testid="cut-status">
+          {document.cutStatus === 'pending'
+            ? 'Перемещение ожидает подтверждения сервера.'
+            : document.cutStatus === 'stale'
+              ? 'Таблица изменилась. Вырежьте диапазон ещё раз.'
+              : 'Диапазон вырезан. Выберите место и нажмите Ctrl+V. Исходные ячейки пока сохранены.'}
+        </output>
+      )}
       {document?.editing?.source === 'cell' && (
         <textarea
           ref={editorRef}
@@ -319,7 +345,7 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
         )}
       <p id="grid-description" className="sr-only">
         {document?.sheet
-          ? 'Стрелки и Tab перемещают выделение. Shift со стрелками выделяет диапазон, Ctrl+C и Ctrl+V копируют и вставляют значения. Ctrl+Z отменяет последнюю сохраненную правку ячейки. F2 или двойной щелчок открывают редактор. Enter сохраняет, Escape отменяет ввод.'
+          ? 'Стрелки и Tab перемещают выделение. Shift со стрелками выделяет диапазон, Ctrl+C и Ctrl+V копируют и вставляют значения. Ctrl+X подготавливает перемещение в пределах листа; исходные ячейки меняются после подтверждения сервера. Перемещение пока нельзя отменить. Ctrl+Z отменяет последнюю сохраненную правку ячейки. F2 или двойной щелчок открывают редактор. Enter сохраняет, Escape отменяет ввод.'
           : 'Пустой лист: 1000 строк и 26 столбцов. Режим просмотра. Для прокрутки используйте клавиши со стрелками или Page Down. Создайте таблицу для редактирования.'}
       </p>
       {!canvasAvailable && (

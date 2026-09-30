@@ -343,6 +343,11 @@ export function batchValuesCommand(
   };
 }
 
+export function moveRangeCommand(client, snapshot, rectangle, options = {}) {
+  const { copyRange, ...command } = copyRangeCommand(client, snapshot, rectangle, options);
+  return { ...command, moveRange: copyRange };
+}
+
 export function extendRowsCommand(
   client,
   snapshot,

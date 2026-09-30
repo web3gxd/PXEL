@@ -68,6 +68,19 @@ fn setup(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>> {
     c.bench_function("move_1000_cells_5000_inbound_formulas", |b| {
         b.iter(|| black_box(plan_move(black_box(&book), request)))
     });
+    let operation = Operation::MoveRange {
+        source: request.source,
+        destination: request.destination,
+        rows: request.rows,
+        columns: request.columns,
+        writes: plan_move(&book, request)?.writes,
+    };
+    let next = DocumentVersion::new(book.version().get() + 1)?;
+    let candidate = book.candidate(&operation, next)?;
+    assert_eq!(candidate.sheets()[0].cells().len(), 6000);
+    c.bench_function("candidate_move_1000_cells_5000_inbound_formulas", |b| {
+        b.iter(|| black_box(book.candidate(black_box(&operation), next)))
+    });
     let independent = book.sheets()[0]
         .cells()
         .iter()

@@ -35,6 +35,7 @@ message Operation {
   CreateWorkbook add_sheet = 16;
   RangeWrite authored_range_write = 17;
   RangeWrite compensating_range_write = 18;
+  MoveRange move_range = 19;
  }
 }
 message AdvanceCalculationEpoch {
@@ -87,6 +88,14 @@ message GuardedContentWrite {
  CellAddress address = 1;
  CellContent content = 2;
  CellContent previous = 3;
+}
+// Schema 19 freezes cut destinations, clears and inbound reference changes.
+message MoveRange {
+ CellAddress source = 1;
+ CellAddress destination = 2;
+ uint32 rows = 3;
+ uint32 columns = 4;
+ repeated GuardedContentWrite writes = 5;
 }
 enum AuthoredRangeWriteKind {
  AUTHORED_RANGE_WRITE_KIND_UNSPECIFIED = 0;

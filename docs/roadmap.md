@@ -24,6 +24,12 @@ frozen overlap, внешние ссылки на всех листах, preimage
 Это компонент следующего среза: durable MoveRange и пользовательский cut/paste
 ещё не реализованы, native/browser relocation parity ещё не проверена.
 
+Следующий срез [ADR-081](adr/081-durable-range-move.md) подключает planner к
+schema19/CAS journal и CtrlX/CtrlV, включая вставку в другую вкладку той же книги.
+Source/inbound formulas обновляются атомарно после commit/projection refresh;
+terminal conflicts не превращаются в TSV/copy. Move undo/optimistic WASM preview,
+cross-sheet move, styles/merges и manual Excel profile остаются открытыми.
+
 Локальный функциональный gate фазы 2 по описанному ниже базовому профилю
 пройден 2026-09-29: общий native/browser WASM corpus 99/99, 1000 книг/2000
 patches с одинаковыми normalized hashes; инкрементальность, cycle и parser
