@@ -313,6 +313,36 @@ fn workbook_ast_budget_rejects_before_mutation_and_clearing_releases_charge()
         Err(DomainError::LimitExceeded)
     ));
     assert_eq!(book.hash(), before);
+    let occupied = CellAddress {
+        row: rows[0],
+        ..address
+    };
+    let writes = vec![
+        spreadsheet_domain::workbook::ContentWrite {
+            address: spare,
+            content: Some(CellContent::Formula(make(spare.row)?)),
+        },
+        spreadsheet_domain::workbook::ContentWrite {
+            address: occupied,
+            content: None,
+        },
+    ];
+    let moved = book.candidate(
+        &Operation::CopyRange {
+            writes: writes.clone(),
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    let reversed = book.candidate(
+        &Operation::CopyRange {
+            writes: writes.into_iter().rev().collect(),
+        },
+        DocumentVersion::new(2)?,
+    )?;
+    assert_eq!(moved.hash(), reversed.hash());
+    assert_eq!(moved.ast_memory_bytes(), book.ast_memory_bytes());
+    assert_eq!(moved.cell_content(occupied)?, None);
+    assert_eq!(book.hash(), before);
     contents.push((spare, CellContent::Formula(make(spare.row)?)));
     assert!(matches!(
         Workbook::from_content_fixture(

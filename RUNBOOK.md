@@ -3549,3 +3549,58 @@ Feature commit f4b9ba7 created. Hidden launcher2456 rebuilt current backend/WASM
 readyz8080 and frontend5173 both returned200. Feature worktree was clean at that
 check. Local data/PostgreSQL retained. This final verification record is a docs-only
 follow-up; the original all-stages objective remains active.
+
+## 2026-09-30 — ADR078 atomic batch final-capacity prerequisite
+
+Previous turn made verified progress (ADR077 feature f4b9ba7 and runtime/docs
+bf89427). Goal remains all remaining MVP stages; logo task was previously closed.
+Read AGENTS, roadmap, architecture, relevant ADR025/030/077, current candidate,
+actor/journal/codec and RUNBOOK. During range undo preparation found an existing
+order-dependent capacity rejection in batch candidate application. This is a
+necessary correctness prerequisite; range undo itself is not yet implemented.
+
+Applied existing TDD/incremental workflow. New test initially failed to compile
+because it used state_hash instead of Workbook::hash; corrected the harness.
+The attempted PowerShell Set-Content -NoNewline was unsupported and changed no
+file; switched to explicit .NET WriteAllText. Actual RED then reproduced
+LimitExceeded in three tests (copy/value/guarded preview) at full text allocation;
+original-state overflow rejection already passed. A first extraction script's
+line-ending check aborted before writing; completed extraction using actual LF.
+
+Candidate now validates unique destinations and guarded original preimages,
+clears all replaced contents in a private clone, then applies final writes.
+Shared guarded validator retains metadata, formula/value and preimage checks;
+future undo target versions are checked against original head. No event/wire
+format, canonical hash, dependency or formula evaluator identity change.
+Seven focused capacity/guard tests passed, including100k populated cells,
+order-independent hashes, formula origin/future binding and no mutation on error.
+Feature-enabled formula_content7passed, including AST-memory saturated exchange.
+Readonly reviewer found no concrete defect and requested cell-count/AST/formula
+checks; these were added. It did not execute tests or edit files.
+
+Native domain/storage-codec/collab suites passed (codec23; collab22passed,
+2intentional timing ignores; full convergence intentionally ignored). Those ran
+with the first4new tests; the final7focused tests separately passed. Domain
+all-targets clippy with test-support and default server check passed. Frontend
+87unit passed. Optimized Criterion1000-value candidate:519.93–652.33us,
+central599.42us,10samples; this is domain-only/uncontrolled, not commit p95.
+Hardware re-read: Windows10.0.26100/CoreUltra9 185H/16373108KiBvisibleRAM.
+
+Own hidden launcher2456 identity verified and its process tree stopped;
+launcher32260 rebuilt WASM release15.41s and backend dev9.94s. Backend readyz200
+and frontend200 confirmed after build (first early backend probe refused while
+compiler was still running; launcher was not restarted). PostgreSQL/data retained.
+Full live HTTP/network/security and native/browser parity are now running;
+terminal outcomes, final formatting and commit will be recorded below.
+Final ADR078 regression: shared corpus554native/browser cases and1010workbooks/
+2020patches converged on rebuilt WASM. Full66HTTP/network/security passed in
+88614.0504ms. Focused18Chromium paste/copy/undo/redo tests passed29.9s atDPR1/2;
+additional mixed formula/value range2passed7.2s. Initial pnpm-shim regex invocation
+failed before tests because Windows interpreted pipe characters; direct Node
+Playwright CLI invocation ran the actual tests. No assertion/test was removed.
+Rustfmt, selected Prettier and git diff checks passed. Final recovery currently
+running after own32260 was verified/stopped only after all browser handles ended.
+No full98browser suite, full100k convergence stress, controlled p95, manual Excel,
+Linux/Compose or remoteCI run is claimed for this slice. New saturated100k-cell
+unit fixture is distinct from a100k-command convergence/load run.
+Final hard-restart recovery2/2passed10803.837ms after0.35s build; own launcher restarted, readiness verification follows. ADR078 is a complete candidate correctness fix; persisted range history remains next and the full goal stays active.

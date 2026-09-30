@@ -1067,10 +1067,43 @@ impl Workbook {
             if !seen.insert(address) {
                 return Err(DomainError::InvalidAxis);
             }
+            if matches!(operation, Operation::CellWrite { .. }) {
+                self.validate_guarded_write(operation)?;
+            }
         }
         let mut next = self.clone();
         next.version = target_version;
+        // Release all replaced allocations in this private candidate first.
+        // Atomic batches must be limited by their final state, not by the order
+        // in which additions and removals happen to appear in the payload.
+        for address in seen {
+            let clear = Operation::ClearCell { address };
+            let budgets = next.operation_budgets(&clear)?;
+            next.apply_operation(&clear, budgets, target_version)?;
+        }
         for operation in operations {
+            // The guard was checked against the original projection above.
+            // Clearing candidate destinations must not invalidate its preimage.
+            let replacement;
+            let operation = if let Operation::CellWrite {
+                address, content, ..
+            } = operation
+            {
+                replacement = match content {
+                    Some(CellContent::Value(value)) => Operation::SetCellValue {
+                        address: *address,
+                        value: value.clone(),
+                    },
+                    Some(CellContent::Formula(formula)) => Operation::SetCellFormula {
+                        address: *address,
+                        formula: formula.clone(),
+                    },
+                    None => Operation::ClearCell { address: *address },
+                };
+                &replacement
+            } else {
+                operation
+            };
             let budgets = next.operation_budgets(operation)?;
             next.apply_operation(operation, budgets, target_version)?;
         }
@@ -1244,52 +1277,9 @@ impl Workbook {
             }
             Operation::ClearCell { address } => self.updated_budgets(*address, 0, 0)?,
             Operation::CellWrite {
-                address,
-                content,
-                previous,
-                kind,
-                undoes,
-                undoes_version,
+                address, content, ..
             } => {
-                if undoes.is_some() != undoes_version.is_some()
-                    || undoes_version.is_some_and(|version| version > self.version)
-                    || (kind.is_some() == undoes.is_some())
-                {
-                    return Err(DomainError::VersionConflict);
-                }
-                match kind {
-                    Some(CellWriteKind::SetValue)
-                        if content
-                            .as_ref()
-                            .is_some_and(|content| !matches!(content, CellContent::Value(_))) =>
-                    {
-                        return Err(DomainError::InvalidValue);
-                    }
-                    Some(CellWriteKind::Clear) if content.is_some() => {
-                        return Err(DomainError::InvalidValue);
-                    }
-                    Some(CellWriteKind::SetFormula)
-                        if !matches!(content, Some(CellContent::Formula(_))) =>
-                    {
-                        return Err(DomainError::InvalidValue);
-                    }
-                    _ => {}
-                }
-                if self.cell_content(*address)? != previous.as_ref() {
-                    return Err(DomainError::PreimageConflict);
-                }
-                match content {
-                    Some(CellContent::Value(CellValue::Blank)) => {
-                        return Err(DomainError::InvalidValue);
-                    }
-                    Some(CellContent::Value(value)) => {
-                        value.validate()?;
-                    }
-                    Some(CellContent::Formula(formula)) => {
-                        self.validate_formula(*address, formula)?;
-                    }
-                    None => {}
-                }
+                self.validate_guarded_write(operation)?;
                 self.updated_budgets(
                     *address,
                     content.as_ref().map_or(0, CellContent::text_bytes),
@@ -1297,6 +1287,59 @@ impl Workbook {
                 )?
             }
         })
+    }
+    fn validate_guarded_write(&self, operation: &Operation) -> Result<(), DomainError> {
+        let Operation::CellWrite {
+            address,
+            content,
+            previous,
+            kind,
+            undoes,
+            undoes_version,
+        } = operation
+        else {
+            return Err(DomainError::InvalidValue);
+        };
+        if undoes.is_some() != undoes_version.is_some()
+            || undoes_version.is_some_and(|version| version > self.version)
+            || (kind.is_some() == undoes.is_some())
+        {
+            return Err(DomainError::VersionConflict);
+        }
+        match kind {
+            Some(CellWriteKind::SetValue)
+                if content
+                    .as_ref()
+                    .is_some_and(|content| !matches!(content, CellContent::Value(_))) =>
+            {
+                return Err(DomainError::InvalidValue);
+            }
+            Some(CellWriteKind::Clear) if content.is_some() => {
+                return Err(DomainError::InvalidValue);
+            }
+            Some(CellWriteKind::SetFormula)
+                if !matches!(content, Some(CellContent::Formula(_))) =>
+            {
+                return Err(DomainError::InvalidValue);
+            }
+            _ => {}
+        }
+        if self.cell_content(*address)? != previous.as_ref() {
+            return Err(DomainError::PreimageConflict);
+        }
+        match content {
+            Some(CellContent::Value(CellValue::Blank)) => {
+                return Err(DomainError::InvalidValue);
+            }
+            Some(CellContent::Value(value)) => {
+                value.validate()?;
+            }
+            Some(CellContent::Formula(formula)) => {
+                self.validate_formula(*address, formula)?;
+            }
+            None => {}
+        }
+        Ok(())
     }
     fn validate_new_rows(&self, rows: &[RowId]) -> Result<(), DomainError> {
         if rows.iter().any(|row| {
