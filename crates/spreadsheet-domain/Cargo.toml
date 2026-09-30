@@ -25,5 +25,9 @@ name = "recovery"
 harness = false
 required-features = ["test-support"]
 
+[[bench]]
+name = "style"
+harness = false
+
 [lints]
 workspace = true

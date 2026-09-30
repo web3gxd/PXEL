@@ -5,6 +5,7 @@ pub mod axis_history;
 pub mod formula;
 pub mod lifecycle;
 pub mod move_history;
+pub mod style;
 pub mod workbook;
 
 use std::fmt;

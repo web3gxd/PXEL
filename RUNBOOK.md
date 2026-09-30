@@ -4389,3 +4389,55 @@ OSXLSXworkerisolation, new100kcombinedstress/fuzz/manualExcelgoldens. FullMVPgoa
 active/incomplete; nextminimalstage independentstyles inclstyledblanks anddurable
 stylewrites, thenrangeformatting/history/merges/fullXLSXprofile. Localruntime25768
 retained; PG55432 preserved. ADR086acceptedonlythislocallyverifiedslice.
+
+ADR086 committed d41a7bb, gitworktreeclean immediatelyaftercommit, localready/web
+200. Nextstagepreplanningreadroadmap/ADR086/currentdomain/Worker. Appliedthink-
+tank skill inonecontext (fictionalmoderator/domain/UX/recovery/testroles), user
+alreadyauthorizedautonomousallphases so no repeatedapprovalpause. NewADR087
+PROPOSEDrecordsstyleproperty/sparseblank/legacycopy/axispreimages/snapshot/Worker
+risks andfullverticalacceptance; no stylecodeorwholeMVPclaim. Code-levelcontract
+stillneedsreviewbeforeparallelsharededits; no blockinguserquestion.
+
+ADR087 corecontract frozen afteractualread-onlydomain+storage/Workerreview. Leaf
+font/alignmentkeys16 preventlostbold/italic;typedSet/Reset/defaultprofile1 and
+privatevalidatedvalues. PreserveMAX_CELLS perSheet viaunion(content,styles),
+addglobalstyled100k/64MiBcharge; chargeisadmissionnotmeasuredmemory. Explicit
+stablecelltargets≤1000, activationfloors/receiptfirst, perleafinverseguards.
+Reserve23/24events,25/26semantictags,snapshot4,Workerinit4/patch2/output2 with
+independentcomputedauthoredhashandallhash-coveredmetadata (existingresult_hash
+aloneisNOTauthoredhashproof). No newstylevolatiletrigger; legacyCopy/Movebytes
+retaincontentsonly. Destructiveaxesoriginal/inversegateuntilstylepreimages.
+Domainagent ownsONLYnewstyle.rs/tests/style.rs/libexport, typedcoreTDD underway;
+rootownsADR/contracts/nextWorkbookintegration. No sharededits orfeatureacceptance.
+
+ADR087 puretypes increment implemented ONLYstyle.rs/tests/style.rs/libexport.
+ActualTDDunresolved-moduleRED→7styletestsPASSinclproptest, strictdomainall-targets
+all-featuresClippyPASS. Typed16leafkeys, fixedprivateCellStyle, validatedFontFamily/
+FontSize/RGB/borders/enums, atomicduplicate/emptyrefusal, defaultnormalization,
+canonicalprofile1bytes. NoWorkbook/journal/snapshot/Worker/UIstylewriteyet.
+
+Rootaddedcriterionstylebench+Cargotarget(no newdependency) andrealbenchrun21372
+PASS optimizedcompile37.01s,10samples/warm1s/measure1s. Centralmapbuild/drop100k
+14.940ms,canonical100k2.8488ms; isolatedcoreNOToptimisticedit/commitp95. Actual
+CellStyle64B/CellAddress48B,11.2MBvalues+keysnotRSS. MachineCoreUltra9 185H,
+Win10.0.26100,RAM15.61GiB,rustc1.98.1. No fullHTTP/browserloadparallelbench.
+Newdocs/benchmarks/2026-09-30-cell-style-core-local.md recordsallfivecases/ranges/
+outliers/limits. FullDomaintest48453/workspacecheck43815live; no featureacceptance.
+
+Corefinalchecks: fullDomaintest48453PASS(all emittedsuites,1existing100kstress
+ignored),7newstyletestsincluded; workspaceall-featurescheck43815PASS24.44s.
+Finaldomainall-target/all-featureClippyPASS2.82s, rustfmtallcheckPASS, no direct
+unwrap/expect/panic/unsafe innewcore/bench. Existingruntime25768ready/web200,
+unchangedUI(no styletoolbarclaim). RootcaughtADRwordingerrorbycodeinspection:
+last_axis_change_version isderived, NOTinWorkbookhash; clarifiedWorkerhydration
+needsbothhash-coveredretired/floorsand separatelyvalidatedstructuralmarker.
+Explicitprofile1noinheritance; futurecolumn/rowinheritance requiresmigrationADR,
+notreinterpretationofoldReset. Freshreadonlycore/benchreview underway.
+
+Freshreadonlycore/benchmarkreview foundnoconcretedefect; no testsrunbyreviewer.
+CapinventorycaughtEXISTINGboundarymismatch: durablecandidateperSheet100k versus
+hydrate_sheets/snapshot3/Worker global100k. ADR087STYLE-01 recordscontext/reason/
+completioncriteria/dependencies; snapshot4musthandlevalidcandidatewithinexplicit
+binary/decodedbudgets; Workermaytypedrefuseoversizedpreviewwithoutfakehashparity.
+No newformat/gateacceptedbythismodelincrement. Coretypesandbenchmarkcomplete,
+nextincrementdomainmetadata/guardedwrites +codec4/23/24coordination.
