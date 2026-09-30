@@ -64,6 +64,10 @@ pub struct HeadUpdate {
 }
 
 enum Request {
+    Open {
+        identity: AuthenticatedActor,
+        reply: oneshot::Sender<Result<DocumentVersion, SessionError>>,
+    },
     Timer {
         identity: AuthenticatedActor,
     },
@@ -96,6 +100,20 @@ pub struct DocumentSession {
 }
 
 impl DocumentSession {
+    /// Internal subscription transition. Ordinary reads/replay never renew context.
+    pub async fn opened(
+        &self,
+        identity: AuthenticatedActor,
+    ) -> Result<DocumentVersion, SessionError> {
+        let (reply, receiver) = oneshot::channel();
+        self.sender
+            .try_send(Request::Open { identity, reply })
+            .map_err(queue_error)?;
+        tokio::time::timeout(Duration::from_secs(10), receiver)
+            .await
+            .map_err(|_| SessionError::Unavailable)?
+            .map_err(|_| SessionError::Unavailable)?
+    }
     /// Internal heartbeat admission for an authenticated active subscription.
     /// Enqueueing is neither a commit nor a permission lease.
     pub fn request_timer(&self, identity: AuthenticatedActor) -> Result<(), SessionError> {
@@ -446,6 +464,38 @@ async fn run<J: OperationJournal>(
         tokio::time::timeout(Duration::from_secs(60), receiver.recv()).await
     {
         match request {
+            Request::Open { identity, reply } => {
+                let before = workbook.version();
+                let result = async {
+                    refresh(&journal, identity, &mut workbook, &calculation, &mut axes).await?;
+                    let previous = workbook
+                        .calculation_context()
+                        .map(|context| context.context_id());
+                    bootstrap
+                        .ensure(&journal, identity, &mut workbook, &calculation, &mut axes)
+                        .await?;
+                    let renew = previous
+                        == workbook
+                            .calculation_context()
+                            .map(|context| context.context_id());
+                    bootstrap
+                        .opened(
+                            &journal,
+                            identity,
+                            &mut workbook,
+                            &calculation,
+                            &mut axes,
+                            renew,
+                        )
+                        .await?;
+                    Ok(workbook.version())
+                }
+                .await;
+                if workbook.version() > before {
+                    maybe_snapshot(snapshots.as_ref(), &workbook);
+                }
+                let _ = reply.send(result);
+            }
             Request::Timer { identity } => {
                 let before = workbook.version();
                 let result = async {

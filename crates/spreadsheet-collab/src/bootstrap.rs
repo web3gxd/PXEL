@@ -7,6 +7,9 @@ use spreadsheet_domain::{formula::Node, workbook::CalculationReason};
 pub(crate) enum Admission {
     Explicit,
     Bootstrap,
+    Open {
+        context_id: CalculationContextId,
+    },
     AfterEdit {
         context_id: CalculationContextId,
         watermark: DocumentVersion,
@@ -23,6 +26,11 @@ impl Admission {
         match self {
             Self::Explicit => true,
             Self::Bootstrap => needed(book).is_some(),
+            Self::Open { context_id } => {
+                book.calculation_context()
+                    .is_some_and(|context| context.context_id() == context_id)
+                    && has_volatile(book)
+            }
             Self::AfterEdit { context_id, .. } => {
                 book.calculation_context()
                     .is_some_and(|context| context.context_id() == context_id)
@@ -58,6 +66,7 @@ pub(crate) struct Bootstrap {
     inspected: Option<DocumentVersion>,
     required_edit: Option<DocumentVersion>,
     pending_timer: Option<(OperationId, CalculationContext, Admission)>,
+    pending_open: Option<(OperationId, CalculationContext, Admission)>,
 }
 impl Bootstrap {
     pub fn new(sampler: Option<Sampler>) -> Self {
@@ -67,12 +76,70 @@ impl Bootstrap {
             inspected: None,
             required_edit: None,
             pending_timer: None,
+            pending_open: None,
         }
     }
     pub fn edited(&mut self, book: &Workbook, operation: &Operation) {
         if affects_calculation(operation) && (self.pending.is_some() || has_volatile(book)) {
             self.required_edit = Some(book.version());
         }
+    }
+    pub async fn opened<J: OperationJournal>(
+        &mut self,
+        journal: &J,
+        identity: AuthenticatedActor,
+        workbook: &mut Arc<Workbook>,
+        calculation: &CalculationHandle,
+        axes: &mut axis_history::AxisHistory,
+        renew: bool,
+    ) -> Result<(), SessionError> {
+        // Resolve an uncertain Open before checking whether a new one is needed.
+        if self.pending_open.is_none() {
+            if !renew || !has_volatile(workbook) {
+                return Ok(());
+            }
+            let Some(sampler) = &self.sampler else {
+                return Ok(());
+            };
+            let Some(previous) = workbook.calculation_context() else {
+                return Err(SessionError::InvalidCommand);
+            };
+            let (id, context) = sampler(CalculationReason::Open)?;
+            if context.reason() != CalculationReason::Open
+                || context.engine_version() != calculation::ENGINE_VERSION
+                || context.compatibility_profile() != calculation::COMPATIBILITY_PROFILE
+                || context.utc_offset_minutes() != previous.utc_offset_minutes()
+            {
+                return Err(SessionError::InvalidCommand);
+            }
+            self.pending_open = Some((
+                id,
+                context,
+                Admission::Open {
+                    context_id: previous.context_id(),
+                },
+            ));
+        }
+        let Some((id, context, admission)) = &self.pending_open else {
+            return Err(SessionError::InvalidCommand);
+        };
+        advance_context(
+            journal,
+            identity,
+            workbook,
+            ContextAdvance {
+                operation_id: *id,
+                context,
+                admission: *admission,
+            },
+            calculation,
+            axes,
+        )
+        .await?;
+        self.ensure(journal, identity, workbook, calculation, axes)
+            .await?;
+        self.pending_open = None;
+        Ok(())
     }
     pub async fn timer<J: OperationJournal>(
         &mut self,
@@ -465,6 +532,36 @@ mod tests {
             }
             assert!(timer_due_at(&clock_book, 60_000, 0, 0));
         }
+        Ok(())
+    }
+    #[test]
+    fn open_admission_renews_only_its_observed_volatile_context()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let admission = Admission::Open {
+            context_id: CalculationContextId::from_bytes([5; 16])?,
+        };
+        for (source, expected) in [
+            ("=RAND()", true),
+            ("=NOW()", true),
+            ("=TODAY()", true),
+            ("=1+2", false),
+            ("=\"RAND()\"", false),
+        ] {
+            let book = fixture(source)?.candidate(
+                &Operation::AdvanceCalculationEpoch {
+                    context: context(CalculationReason::Explicit, calculation::ENGINE_VERSION)?,
+                },
+                DocumentVersion::new(3)?,
+            )?;
+            assert_eq!(admission.permits(&book), expected);
+            assert!(
+                !Admission::Open {
+                    context_id: CalculationContextId::from_bytes([10; 16])?
+                }
+                .permits(&book)
+            );
+        }
+        assert!(!admission.permits(&fixture("=RAND()")?));
         Ok(())
     }
     #[test]

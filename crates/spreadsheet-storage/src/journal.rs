@@ -2414,9 +2414,27 @@ mod tests {
     struct TimerAckLossJournal {
         database: PgDatabase,
         lose: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        reason: CalculationReason,
+        recovery_fault: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     }
     impl OperationJournal for TimerAckLossJournal {
-        delegate_journal!(calculation_epoch_version(identity:AuthenticatedActor,document:DocumentId,through:DocumentVersion) -> Option<DocumentVersion>);
+        async fn calculation_epoch_version(
+            &self,
+            identity: AuthenticatedActor,
+            document: DocumentId,
+            through: DocumentVersion,
+        ) -> Result<Option<DocumentVersion>, JournalError> {
+            if self
+                .recovery_fault
+                .as_ref()
+                .is_some_and(|fault| fault.swap(false, std::sync::atomic::Ordering::SeqCst))
+            {
+                return Err(JournalError::Unavailable);
+            }
+            self.database
+                .calculation_epoch_version(identity, document, through)
+                .await
+        }
         delegate_journal!(quarantine(document:DocumentId) -> ());
         delegate_journal!(access(identity:AuthenticatedActor,document:DocumentId) -> DocumentAccess);
         delegate_journal!(create(identity:AuthenticatedActor,event:CommittedEvent) -> CommitReceipt);
@@ -2430,7 +2448,12 @@ mod tests {
             request: &SystemCommitRequest,
         ) -> Result<CommitOutcome, JournalError> {
             let outcome = self.database.commit_system(request).await?;
-            if matches!(&request.event.operation, Operation::AdvanceCalculationEpoch { context } if context.reason() == CalculationReason::Timer)
+            if matches!(&request.event.operation, Operation::AdvanceCalculationEpoch { context } if context.reason() == CalculationReason::Open && context.epoch() > 1)
+                && let Some(fault) = &self.recovery_fault
+            {
+                fault.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            if matches!(&request.event.operation, Operation::AdvanceCalculationEpoch { context } if context.reason() == self.reason)
                 && self.lose.swap(false, std::sync::atomic::Ordering::SeqCst)
             {
                 return Err(JournalError::Unavailable);
@@ -2471,6 +2494,8 @@ mod tests {
         let journal = TimerAckLossJournal {
             database: db.clone(),
             lose: Arc::new(AtomicBool::new(lose_ack)),
+            reason: CalculationReason::Timer,
+            recovery_fault: None,
         };
         let directory = spreadsheet_collab::InProcessSessionDirectory::new(journal)
             .with_context_sampler(move |reason| {
@@ -2599,6 +2624,220 @@ mod tests {
         Ok(())
     }
     #[sqlx::test(migrations = false)]
+    async fn open_compatible_rand_renews_but_reads_do_not(pool: sqlx::PgPool) -> TestResult {
+        open_epoch_case(pool, "=RAND()", 0).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_bootstrap_reuses_first_epoch(pool: sqlx::PgPool) -> TestResult {
+        open_epoch_case(pool, "=RAND()", 3).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_static_book_has_no_epoch(pool: sqlx::PgPool) -> TestResult {
+        open_epoch_case(pool, "=1+2", 0).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_lost_commit_response_keeps_sample(pool: sqlx::PgPool) -> TestResult {
+        open_epoch_case(pool, "=RAND()", 1).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_deleted_consumer_resolves_pending_receipt(pool: sqlx::PgPool) -> TestResult {
+        open_epoch_case(pool, "=RAND()", 2).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_viewer_allowed_then_revocation_stops_renewal(pool: sqlx::PgPool) -> TestResult {
+        open_epoch_case(pool, "=RAND()", 4).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_recovers_edit_and_reuses_its_epoch(pool: sqlx::PgPool) -> TestResult {
+        open_epoch_case(pool, "=RAND()", 5).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_cross_tenant_identity_cannot_renew(pool: sqlx::PgPool) -> TestResult {
+        open_epoch_case(pool, "=RAND()", 6).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_post_commit_recovery_failure_retains_receipt(pool: sqlx::PgPool) -> TestResult {
+        open_epoch_case(pool, "=RAND()", 7).await
+    }
+    async fn open_epoch_case(pool: sqlx::PgPool, source: &str, mode: u8) -> TestResult {
+        use spreadsheet_collab::SessionDirectory;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        let (db, identity, book) = fixture(pool).await?;
+        let address = CellAddress {
+            sheet: SheetId::from_bytes([5; 16])?,
+            row: RowId::from_bytes([6; 16])?,
+            column: ColumnId::from_bytes([7; 16])?,
+        };
+        let mut formula = request(&db, identity, &book, 180).await?;
+        formula.command.operation = CommandPayload::SetCellFormula {
+            address,
+            source: spreadsheet_domain::formula::FormulaSource::new(source.into())?,
+        };
+        formula.event.operation = Operation::SetCellFormula {
+            address,
+            formula: spreadsheet_formula::binder::bind(source, &book, address)?,
+        };
+        formula.event.state_hash = book
+            .candidate(&formula.event.operation, formula.event.version)?
+            .hash();
+        db.commit(&formula).await?;
+        let lose = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let directory = spreadsheet_collab::InProcessSessionDirectory::new(TimerAckLossJournal {
+            database: db.clone(),
+            lose: lose.clone(),
+            reason: CalculationReason::Open,
+            recovery_fault: (mode == 7).then(|| Arc::new(AtomicBool::new(false))),
+        })
+        .with_context_sampler(move |reason| {
+            let count = counter.fetch_add(1, Ordering::SeqCst) as u8;
+            Ok((
+                OperationId::from_bytes([190 + count; 16])?,
+                CalculationContext::new(
+                    CalculationContextId::from_bytes([200 + count; 16])?,
+                    1,
+                    i64::from(count) * 1000,
+                    0,
+                    0,
+                    [210 + count; 32],
+                    spreadsheet_formula::calculation::ENGINE_VERSION.into(),
+                    spreadsheet_formula::calculation::COMPATIBILITY_PROFILE.into(),
+                    reason,
+                )?,
+            ))
+        });
+        let session = directory.session(identity, book.document_id()).await?;
+        if mode == 3 {
+            assert_eq!(session.opened(identity).await?.get(), 3);
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                session
+                    .read(identity)
+                    .await?
+                    .calculation_context()
+                    .ok_or("missing context")?
+                    .epoch(),
+                1
+            );
+            return Ok(());
+        }
+        let initial = session.read(identity).await?;
+        if source == "=1+2" {
+            assert_eq!(session.opened(identity).await?.get(), 2);
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            assert!(
+                session
+                    .read(identity)
+                    .await?
+                    .calculation_context()
+                    .is_none()
+            );
+            return Ok(());
+        }
+        assert_eq!(initial.version().get(), 3);
+        if mode == 5 {
+            let mut edit = request(&db, identity, &initial, 220).await?;
+            edit.command.operation = CommandPayload::SetCellFormula {
+                address,
+                source: spreadsheet_domain::formula::FormulaSource::new("=RAND()+1".into())?,
+            };
+            edit.event.operation = Operation::SetCellFormula {
+                address,
+                formula: spreadsheet_formula::binder::bind("=RAND()+1", &initial, address)?,
+            };
+            edit.event.state_hash = initial
+                .candidate(&edit.event.operation, edit.event.version)?
+                .hash();
+            db.commit(&edit).await?;
+            assert_eq!(session.opened(identity).await?.get(), 5);
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            assert_eq!(
+                session
+                    .read(identity)
+                    .await?
+                    .calculation_context()
+                    .ok_or("missing context")?
+                    .reason(),
+                CalculationReason::VolatileDependency
+            );
+            return Ok(());
+        }
+        if mode == 6 {
+            assert!(
+                session
+                    .opened(AuthenticatedActor {
+                        workspace_id: WorkspaceId::from_bytes([222; 16])?,
+                        ..identity
+                    })
+                    .await
+                    .is_err()
+            );
+            assert_eq!(db.access(identity, book.document_id()).await?.head.get(), 3);
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            return Ok(());
+        }
+        lose.store(mode == 1 || mode == 2, Ordering::SeqCst);
+        if mode == 4 {
+            sqlx::raw_sql("UPDATE document_permissions SET role='viewer'")
+                .execute(&db.pool)
+                .await?;
+        }
+        if mode == 1 || mode == 2 || mode == 7 {
+            assert!(session.opened(identity).await.is_err());
+            assert_eq!(db.access(identity, book.document_id()).await?.head.get(), 4);
+            if mode == 2 {
+                session
+                    .submit(
+                        identity,
+                        Command {
+                            operation_id: OperationId::from_bytes([230; 16])?,
+                            document_id: book.document_id(),
+                            actor_id: identity.actor_id,
+                            base_version: DocumentVersion::new(4)?,
+                            client_sequence: 1,
+                            operation: CommandPayload::ClearCell { address },
+                        },
+                    )
+                    .await?;
+            }
+        }
+        assert_eq!(
+            session.opened(identity).await?.get(),
+            if mode == 2 { 5 } else { 4 }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let renewed = session.read(identity).await?;
+        assert_eq!(
+            renewed
+                .calculation_context()
+                .ok_or("missing context")?
+                .epoch(),
+            2
+        );
+        assert_eq!(
+            renewed
+                .calculation_context()
+                .ok_or("missing context")?
+                .reason(),
+            CalculationReason::Open
+        );
+        assert_ne!(renewed.calculation_context(), initial.calculation_context());
+        assert_eq!(session.read(identity).await?.hash(), renewed.hash());
+        assert_eq!(session.head(identity).await?, renewed.version());
+        if mode == 4 {
+            sqlx::raw_sql("DELETE FROM document_permissions")
+                .execute(&db.pool)
+                .await?;
+            assert!(session.opened(identity).await.is_err());
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+        }
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
     async fn timer_now_threshold_and_subscriber_coalescing(pool: sqlx::PgPool) -> TestResult {
         timer_epoch_case(pool, "=NOW()", 0).await
     }
@@ -2622,6 +2861,21 @@ mod tests {
     }
     #[sqlx::test(migrations = false)]
     async fn timer_cas_race_preserves_edit_after_external_epoch(pool: sqlx::PgPool) -> TestResult {
+        clock_open_cas_race(pool, false, true).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_cas_race_preserves_edit_after_external_epoch(pool: sqlx::PgPool) -> TestResult {
+        clock_open_cas_race(pool, true, true).await
+    }
+    #[sqlx::test(migrations = false)]
+    async fn open_new_external_epoch_supersedes_candidate(pool: sqlx::PgPool) -> TestResult {
+        clock_open_cas_race(pool, true, false).await
+    }
+    async fn clock_open_cas_race(
+        pool: sqlx::PgPool,
+        opening: bool,
+        edit_after: bool,
+    ) -> TestResult {
         use spreadsheet_collab::SessionDirectory;
         use std::sync::{
             Arc,
@@ -2697,7 +2951,7 @@ mod tests {
         let journal = ReceiptRaceJournal {
             database: db.clone(),
             pending: Arc::new(AtomicBool::new(true)),
-            followup: Some(Arc::new(edit)),
+            followup: edit_after.then(|| Arc::new(edit)),
             event: Arc::new(SystemCommitRequest {
                 identity,
                 expected_head: initialized.version(),
@@ -2733,24 +2987,35 @@ mod tests {
                 ))
             });
         let session = directory.session(identity, book.document_id()).await?;
-        session.request_timer(identity)?;
-        assert_eq!(session.head(identity).await?.get(), 6);
+        if opening {
+            session.opened(identity).await?;
+        } else {
+            session.request_timer(identity)?;
+        }
+        assert_eq!(
+            session.head(identity).await?.get(),
+            if edit_after { 6 } else { 4 }
+        );
         let restored = session.read(identity).await?;
         assert_eq!(
             restored
                 .calculation_context()
                 .ok_or("context missing")?
                 .epoch(),
-            3
+            if edit_after { 3 } else { 2 }
         );
         assert_eq!(
             restored
                 .calculation_context()
                 .ok_or("context missing")?
                 .reason(),
-            CalculationReason::VolatileDependency
+            if edit_after {
+                CalculationReason::VolatileDependency
+            } else {
+                CalculationReason::Explicit
+            }
         );
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(calls.load(Ordering::SeqCst), if edit_after { 2 } else { 1 });
         Ok(())
     }
     #[sqlx::test(migrations = false)]

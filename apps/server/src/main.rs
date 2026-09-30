@@ -909,6 +909,19 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 Ok(session) => session,
                                 Err(_) => break,
                             };
+                            let after = match DocumentVersion::new(request.last_seen_version) {
+                                Ok(version) => version,
+                                Err(_) => break,
+                            };
+                            let authorized_head = match session.head(principal.identity).await {
+                                Ok(head) => head,
+                                Err(_) => break,
+                            };
+                            if after > authorized_head { break; }
+                            if head_subscription.as_ref().is_none_or(|active| active.document != document)
+                                && session.opened(principal.identity).await.is_err() {
+                                break;
+                            }
                             let updates = match session.watch_head(principal.identity).await {
                                 Ok(updates) => updates,
                                 Err(_) => break,
@@ -924,10 +937,6 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                             };
                             let access_changes = gate.watch();
                             if request.last_seen_version > current.get() { break; }
-                            let after = match DocumentVersion::new(request.last_seen_version) {
-                                Ok(version) => version,
-                                Err(_) => break,
-                            };
                             let resync_required = match send_replay(
                                 &outbound, &state, &principal, &session,
                                 &DocumentDelivery { document, gate: gate.clone(), ticket },

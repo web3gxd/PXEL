@@ -71,3 +71,5 @@ ADR-066 снимает ручной bootstrap prerequisite для NOW/TODAY/RAND
 ADR-067 добавляет automatic edit epochs, в том числе после независимой content правки, и recovery отсутствующего epoch из журнала. Volatile functions остаются Partially supported: timer, open-renewal, date formatting и Excel goldens не закрыты.
 
 ADR-068 добавляет active NOW/TODAY timer через durable context, проверенный на реальном heartbeat. Partially supported остаётся до open-renewal, timezone/date formatting и manual Excel verification; fixed interval не обещает realtime deadline при backpressure.
+
+ADR-069 включает open-renewal: новая WS-подписка/switch/reconnect меняет общий context и RAND для всех клиентов. Duplicate active Subscribe и HTTP reads не меняют epoch. Replay воспроизводит сохранённый context; новое открытие намеренно создаёт следующий. Partially supported сохраняется до timezone/date formatting и manual Excel goldens; Excel RNG sequence parity не обещается.

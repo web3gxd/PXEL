@@ -37,6 +37,71 @@ beforeEach(async () => {
   await delay(1100);
 });
 
+test('volatile subscription renews on transition, not duplicate subscribe or HTTP read', async () => {
+  const cookie = await login(base);
+  const { snapshot } = await createDocument(base, cookie);
+  const { snapshot: other } = await createDocument(base, cookie);
+  const client = await connect(base, cookie);
+  const subscribe = (document, version) =>
+    new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => finish(new Error('Subscribe barrier timed out')), 15000);
+      const onMessage = (data) => {
+        try {
+          const frame = decodeFrame(data);
+          if (frame.case === 'replayComplete') finish(null, frame.value);
+        } catch (error) {
+          finish(error);
+        }
+      };
+      function finish(error, value) {
+        clearTimeout(timeout);
+        client.socket.off('message', onMessage);
+        if (error) reject(error);
+        else resolve(value);
+      }
+      client.socket.on('message', onMessage);
+      subscribeDocument(client, document, version);
+    });
+  try {
+    assert.equal(
+      (await client.send(formulaCommand(client, snapshot, '=RAND()'))).case,
+      'committed',
+    );
+    const initial = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(initial.version, '3');
+    const invalid = await connect(base, cookie);
+    try {
+      const closed = once(invalid.socket, 'close', { signal: AbortSignal.timeout(15000) });
+      subscribeDocument(invalid, snapshot.document_id, 999999);
+      await closed;
+      assert.deepEqual(
+        (await getDocument(base, cookie, snapshot.document_id)).calculation_context,
+        initial.calculation_context,
+      );
+      assert.equal((await getDocument(base, cookie, snapshot.document_id)).version, '3');
+    } finally {
+      invalid.socket.terminate();
+    }
+    assert.equal((await subscribe(snapshot.document_id, initial.version)).barrierVersion, 4n);
+    const opened = await getDocument(base, cookie, snapshot.document_id);
+    assert.equal(opened.calculation_context.epoch, '2');
+    assert.equal(opened.calculation_context.reason, 'open');
+    assert.equal((await subscribe(snapshot.document_id, opened.version)).barrierVersion, 4n);
+    assert.deepEqual(
+      (await getDocument(base, cookie, snapshot.document_id)).calculation_context,
+      opened.calculation_context,
+    );
+    assert.equal((await subscribe(other.document_id, other.version)).barrierVersion, 1n);
+    assert.equal((await subscribe(snapshot.document_id, opened.version)).barrierVersion, 5n);
+    assert.equal(
+      (await getDocument(base, cookie, snapshot.document_id)).calculation_context.epoch,
+      '3',
+    );
+  } finally {
+    client.socket.terminate();
+  }
+});
+
 test('committed content edits advance volatile epoch once and receipt retries do not', async () => {
   const cookie = await login(base);
   const { snapshot } = await createDocument(base, cookie);

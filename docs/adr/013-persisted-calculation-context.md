@@ -3,7 +3,8 @@
 Current update2026-09-30: ADR-065 enables deterministic volatile evaluation;
 ADR-066 initializes context automatically and ADR-067 admits durable edit epochs
 with journal-based restart/refresh recovery. ADR-068 adds durable heartbeat timer
-epochs for active NOW/TODAY consumers. Compatible open-renewal and the full
+epochs for active NOW/TODAY consumers. ADR-069 adds subscription-open renewal.
+Timezone policy, admission load and the full
 production snapshot crash matrix remain open. Earlier notes below record the
 original decision and intermediate verification scope.
 

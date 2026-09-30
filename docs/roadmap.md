@@ -393,3 +393,5 @@ ADR-066 добавляет automatic first context после volatile user comm
 ADR-067 добавляет volatile edit epochs и восстановление admission intent из durable журнала после restart/CAS refresh. Новая правка после внешнего epoch не теряется за старым receipt. Normal burst edits пока имеют отдельные epochs; timer/open-renewal и измеренное admission/coalescing остаются gates.
 
 ADR-068 добавляет active timer NOW/TODAY: bounded heartbeat admission, persisted due predicate/coalescing, same-ID retry и concurrent-edit recovery. Compatible open-renewal, load profiling/timezone и общие MVP gates остаются следующими работами.
+
+ADR-069 добавляет volatile Open renewal на новую WS-подписку/switch/reconnect, включая shared RAND. Duplicate Subscribe текущей книги и HTTP reads не пересэмплируют. Первый/recovered edit context переиспользуется, malformed future replay cursor отклоняется до durable trigger. Функциональные проверки записываются в RUNBOOK; subscriber load, timezone/manual Excel и остальные gates остаются открыты.

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { fromBinary } from '@bufbuild/protobuf';
 import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
 
-test('first volatile formula calculates without manual recalc and keeps context on reload', async ({
+test('first volatile formula calculates without manual recalc and renews context on reload', async ({
   page,
 }) => {
   await page.goto('/');
@@ -25,11 +25,15 @@ test('first volatile formula calculates without manual recalc and keeps context 
   expect(state.calculation_context.epoch).toBe('1');
   expect(state.calculation_context.reason).toBe('open');
   await page.reload();
-  await expect(active).toHaveText(value!);
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await expect(active).toHaveText(/^A1: 0\./);
+  await expect(active).not.toHaveText(value!);
   await expect(bar).toHaveValue('=RAND()');
   const restored = await (await page.request.get(`/api/documents/${id}`)).json();
-  expect(restored.version).toBe('3');
-  expect(restored.calculation_context).toEqual(state.calculation_context);
+  expect(restored.version).toBe('4');
+  expect(restored.calculation_context.epoch).toBe('2');
+  expect(restored.calculation_context.reason).toBe('open');
+  expect(restored.calculation_context.context_id).not.toBe(state.calculation_context.context_id);
 });
 
 test('active NOW updates from a durable heartbeat timer without user edits', async ({ page }) => {
@@ -102,8 +106,10 @@ test('editing another cell advances RAND epoch automatically and survives reload
   await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
   const second = await active.textContent();
   await page.reload();
-  await expect(active).toHaveText(second!);
-  expect((await state()).calculation_context.epoch).toBe('2');
+  await expect(active).toHaveText(/^A1: 0\./);
+  await expect(active).not.toHaveText(second!);
+  expect((await state()).calculation_context.epoch).toBe('3');
+  expect((await state()).calculation_context.reason).toBe('open');
 });
 
 test('volatile RAND preview stays separate and durable epoch survives reload', async ({ page }) => {
@@ -141,9 +147,43 @@ test('volatile RAND preview stays separate and durable epoch survives reload', a
   await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
   const second = await active.textContent();
   await page.reload();
-  await expect(active).toHaveText(second!);
+  await expect(active).toHaveText(/^A1: 0\./);
+  await expect(active).not.toHaveText(second!);
   await expect(bar).toHaveValue('=RAND()');
-  expect((await state()).calculation_context.epoch).toBe('3');
+  expect((await state()).calculation_context.epoch).toBe('4');
+  expect((await state()).calculation_context.reason).toBe('open');
+});
+
+test('opening a second tab publishes the same renewed RAND to both clients', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.fill('=RAND()');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await page.getByRole('region', { name: 'Область таблицы' }).focus();
+  await page.keyboard.press('ArrowUp');
+  const active = page.getByTestId('active-cell');
+  await expect(active).toHaveText(/^A1: 0\./);
+  const first = await active.textContent();
+  const second = await page.context().newPage();
+  try {
+    await second.goto(page.url());
+    await expect(second.getByTestId('connection-status')).toHaveText('Подключено');
+    await expect(active).not.toHaveText(first!);
+    await expect(active).toHaveText(/^A1: 0\./);
+    await expect(second.getByTestId('active-cell')).toHaveText((await active.textContent())!);
+    await expect(second.getByTestId('calculation-preview')).toHaveCount(0);
+    await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
+    const id = new URL(page.url()).searchParams.get('document');
+    const state = await (await page.request.get(`/api/documents/${id}`)).json();
+    expect(state.version).toBe('4');
+    expect(state.calculation_context.epoch).toBe('2');
+    expect(state.calculation_context.reason).toBe('open');
+  } finally {
+    await second.close();
+  }
 });
 
 for (const scenario of [
