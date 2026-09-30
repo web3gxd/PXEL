@@ -51,3 +51,22 @@ Criterion reported **45.205–47.698 ms**, central **46.411 ms**,10 samples,
 2.5694s and reported three mild outliers (one low/two high). The same developer
 machine also ran Chromium E2E, so load was uncontrolled. This is not p95 commit
 latency and does not establish the simple-operation commit target.
+
+## Frozen inverse planning (ADR082)
+
+```sh
+cargo bench -p spreadsheet-formula --bench relocation -- inverse_move --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
+The same1000-source/5000-inbound fixture first applies its move into a private
+candidate outside timing. The inverse planner checks the terminal input hash,
+all7000 frozen contents, builds its per-sheet row/column guard index, and clones
+the complete swapped preimages. This case has no post-target tail to scan.
+
+Criterion reported **6.8870–10.002 ms**, central **7.7314 ms**,10 samples,
+1s warm-up and275 iterations in an estimated2.3251s (requested2s).
+Optimized compilation took23.56s. Machine and uncontrolled concurrent local app/PG
+conditions match the earlier runs. No inverse candidate application, journal
+history acquisition/transaction, ACL, database, recalculation, serialization,
+network or JS/WASM crossing is timed. This is neither p95 user undo nor proof of
+large-tail latency or a production performance target.

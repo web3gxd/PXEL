@@ -2,6 +2,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use spreadsheet_domain::workbook::*;
 use spreadsheet_formula::{
     binder::bind,
+    move_history::plan_move_inverse,
     relocation::{MoveRequest, plan_move},
 };
 use std::hint::black_box;
@@ -81,6 +82,32 @@ fn setup(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>> {
     c.bench_function("candidate_move_1000_cells_5000_inbound_formulas", |b| {
         b.iter(|| black_box(book.candidate(black_box(&operation), next)))
     });
+    let move_event = CommittedEvent {
+        document_id: book.document_id(),
+        operation_id: OperationId::from_bytes([9; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([8; 16])?),
+        version: next,
+        operation,
+        state_hash: candidate.hash(),
+    };
+    assert_eq!(
+        plan_move_inverse(&candidate, &move_event, &[])?
+            .writes
+            .len(),
+        7000
+    );
+    c.bench_function(
+        "inverse_move_1000_cells_5000_inbound_formulas_no_tail",
+        |b| {
+            b.iter(|| {
+                black_box(plan_move_inverse(
+                    black_box(&candidate),
+                    black_box(&move_event),
+                    &[],
+                ))
+            })
+        },
+    );
     let independent = book.sheets()[0]
         .cells()
         .iter()

@@ -506,3 +506,15 @@ reset on reload; durable history discovery, atomic range/batch inverses and
 structural compensation remain phase4 work. Full XLSX/recovery/load/production/
 Linux/Compose/remoteCI gates stay open. Next implementation: batch preimages and
 atomic guarded Undo/Redo for TSV and mixed CopyRange operations.
+
+ADR082 adds locally verified pure frozen Move inverse planning with12native tests.
+Contiguous verified history, terminal hash, exact preimages, foreign equal-value
+barriers and new scalar/interior/reversed/cross-sheet range references are checked.
+Inspection and cancellation are bounded. This first planner conservatively refuses
+all later footprint/reference writes, including own neutralized edits; full own
+history reduction remains required. No durable move inverse, UI eligibility,
+wire/storage schema or evaluation identity changed. Full formula tests, wasm32
+compilation and strict formula Clippy passed; no inverse runtime parity claim.
+Optimized7000-write/no-tail planner central7.7314ms is a preliminary local metric,
+not end-to-end undo. Next: versioned compensation + transactional reference/history
+admission, then browser undo/redo/worker parity. Wider MVP gates remain open.

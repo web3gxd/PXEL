@@ -32,6 +32,11 @@ offsets пересчитываются. Delayed formula с base до перен�
 в том числе после actor restart через bounded history restoration. Move preview
 в WASM и manual Excel move goldens пока не подтверждены.
 
+ADR-082 adds pure frozen inverse planning with bounded tail/reference guards.
+It restores exact stored ASTs and rejects subsequent footprint or new-reference
+conflicts, including range interiors on other sheets. This API does not yet
+enable durable move undo/redo or worker preview; those remain phase4 work.
+
 ## Числа и порядок
 
 IEEE-754 binary64, -0 → +0; nonfinite literal/input rejected; computed NaN/infinity → NUM, divide by zero → DIV/0. Hash использует normalized bit pattern, не форматированный decimal text. Subnormals сохраняются и считаются отдельным compatibility case.

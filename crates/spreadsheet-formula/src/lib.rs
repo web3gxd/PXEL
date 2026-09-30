@@ -12,6 +12,7 @@ mod formatter;
 mod index;
 mod lexer;
 mod lookup;
+pub mod move_history;
 mod parser;
 mod power;
 pub mod range_index;

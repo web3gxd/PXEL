@@ -3822,3 +3822,52 @@ Moveundo/referenceguards,workeroptimisticMove/parity,controlledlatency/manualExc
 largecombinedconvergence/LINUXCompose/remoteCI/RussianS3/fullXLSX remainopen.
 Allstagesgoalactive. Nextminimalstage isversionedguardedMovecompensation+newreference
 historyguards (schema18limitsmustnotbechanged), then sharedworkerpreview/parity.
+
+2026-09-30 ADR081 finalized as commit0da1136 (38files). Working tree was clean
+before the next stage. Existing own runtime retained; readyz8080/web5173 both200.
+
+ADR082 risk-first inverse planning slice: read AGENTS, RUNBOOK, roadmap and
+ADR077/079/081; applied incremental-implementation, test-driven-development and
+documentation-and-adrs. Invariants: exact persisted preimages/AST, no foreign undo,
+confirmed vs pending separation, candidate/CAS/COMMIT path unchanged, no altered
+schema18limits. Read-only adversarial reviewer highlighted equal-value foreign
+writes and potentially10^10range comparisons; addressed with history touch barriers
+and sheet/row->sorted-column index plus combined1Mwork budget.
+
+Added formula move_history module returning input hash/version and complete frozen
+inverse writes for verified durable user MoveRange+contiguous tail. Checks same
+book/document/head/terminalhash, exact currentcontents, uniquefootprint,10k events/
+10k writes, later axes/move/footprint writes, and new references in all formula
+write forms (legacy/copy/scalar/range/compensation). Reversed range interiors and
+sparse external writes on other sheets included. Callback cancellation checked
+throughout inspection. Entire workbook stays immutable. Own canceled writes are
+explicitly conservative barriers for now; no full move undo/redo claim.
+
+TDD initial stub compiled and5tests failed (RED), then5GREEN. Expanded9GREEN;
+final12/12GREEN,1.03s focused/1.14s full-suite invocation. Real10000-event history
+is generated through candidate application with exact preimages/hashes, then
+hits combined inspection budget. Range compensation fixture tests routing only,
+not journal provenance/admission. Complete formula suite passed (noignored),
+strict alltargets formula Clippy passed, wasm32-unknown-unknown formula check
+passed. Commands: cargo fmt --all; cargo test -p spreadsheet-formula --test
+move_history; cargo test -p spreadsheet-formula; cargo clippy -p spreadsheet-formula
+--all-targets -- -D warnings; cargo check -p spreadsheet-formula --target
+wasm32-unknown-unknown. Public API remains pure/native; no worker inverse parity
+asserted. Formula evaluation/engine0.14.0 behavior unchanged.
+
+Added inverse benchmark to existing relocation harness; optimized compilation
+23.56s. Command: cargo bench -p spreadsheet-formula --bench relocation --
+inverse_move --sample-size10 --warm-up-time1 --measurement-time2 (CLI options
+actually separated byspaces). Criterion6.8870–10.002ms central7.7314ms,275iterations
+estimated2.3251s.1000sourcecells+5000inbound formulas/7000inversewrites/no-tail.
+Includes inputhash/checks/index/preimage cloning, excludes candidate/DB/history
+fetch/ACL/calculation/network/browser; local concurrentloaduncontrolled, notp95.
+Recorded conditions/results in docs/benchmarks/2026-09-30-move-planner-local.md.
+
+Added ADR082; synchronized roadmap/formula semantics. No wire/storage schema,
+dependency/lockfiles, UI eligibility or migration changed. Full HTTP/browser/
+recovery/parity suites not rerun for this pure unbound planning API; priorADR081
+results remain historical, not new inverse evidence. Next required slice remains
+new versioned durable Move compensation, transactional guarded history/reference
+admission + own-pair reduction, then UI undo/redo and worker parity. No full MVP,
+Linux/Compose/remoteCI/production or large-stress gate claimed complete.
