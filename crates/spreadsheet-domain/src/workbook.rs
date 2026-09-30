@@ -1220,6 +1220,22 @@ impl Workbook {
         }
         Ok(next)
     }
+    /// Validated move preview with the original confirmed version retained.
+    /// This never establishes server authority or publishes a synthetic version.
+    pub fn preview_move_candidate(&self, operation: &Operation) -> Result<Self, DomainError> {
+        if !matches!(operation, Operation::MoveRange { .. }) {
+            return Err(DomainError::InvalidValue);
+        }
+        let next_version = DocumentVersion::new(
+            self.version
+                .get()
+                .checked_add(1)
+                .ok_or(DomainError::LimitExceeded)?,
+        )?;
+        let mut candidate = self.candidate(operation, next_version)?;
+        candidate.version = self.version;
+        Ok(candidate)
+    }
     /// Atomic preview-only patch over immutable axes. Does not establish server
     /// authority or commit any operation. Equal versions represent pending edits;
     /// larger versions allow coalesced confirmed patches supplied by the adapter.

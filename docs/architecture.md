@@ -29,6 +29,10 @@ Garage/российский S3 ещё не проверены.
 Формульное ядро/bound AST и native/browser parity harness реализованы.
 Сервер использует bounded calculation executor, а приложение — stateful WASM
 preview worker. Предварительные результаты остаются отдельно от серверного расчёта.
+Перенос использует shared Rust planner внутри этого Worker: передаются stable-ID
+геометрия и версии, возвращаются bounded content/calculation patches. Кандидат
+и calculation cache публикуются локально только после успешного расчёта и
+сериализации; confirmed content/hash никогда не меняются от preview (ADR084).
 
 ## Crates и направление зависимостей
 

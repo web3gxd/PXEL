@@ -236,4 +236,8 @@ foreign/legacy equal-value writes and new effective references remain barriers.
 Compensation updates the relocation floor on recovery too. Delivery uses existing
 authorized projection resync; moves enter acknowledged100-entry local history.
 Cross-sheet/partial-range/style/merge moves, axis/style compensation, discovered
-history and optimistic worker move preview remain open. See ADR083 and RUNBOOK.
+history remain open. ADR084 adds geometry-only shared Rust Worker preview, kept
+in a private pending overlay until server confirmation. Worker failure never
+blocks durable command submission. A newer head, terminal rejection, refresh or
+ordinary edit discards the private moved projection; retryable uncertainty keeps
+the original operation bytes/ID. See ADR083/084 and RUNBOOK.

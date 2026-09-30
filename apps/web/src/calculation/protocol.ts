@@ -60,6 +60,17 @@ export type PreviewPatch = Stamp & {
   expected_pending_revision: string;
   cells: PreviewCell[];
 };
+export type PreviewMoveGeometry = {
+  source: Omit<PreviewCell, 'value'>;
+  destination: Omit<PreviewCell, 'value'>;
+  rows: number;
+  columns: number;
+};
+export type PreviewMove = Stamp &
+  PreviewMoveGeometry & {
+    schema_version: 1;
+    expected_pending_revision: string;
+  };
 export type PreviewResult = Stamp & {
   schema_version: 1;
   preview: true;
@@ -72,12 +83,14 @@ export type PreviewResult = Stamp & {
   dirty_cells: number;
   results: (Omit<PreviewCell, 'value'> & { value: CalculatedValue })[];
   cleared: Omit<PreviewCell, 'value'>[];
+  move_writes?: PreviewCell[];
 };
 export type Request =
   | { id: number; kind: 'init'; data: PreviewInit }
-  | { id: number; kind: 'apply'; data: PreviewPatch };
+  | { id: number; kind: 'apply'; data: PreviewPatch }
+  | { id: number; kind: 'move'; data: PreviewMove };
 export type Reply =
   | { id: number; result: PreviewResult }
-  | { id: number; error: string; phase: 'init' | 'apply' | 'calculate' };
+  | { id: number; error: string; phase: 'init' | 'apply' | 'move' | 'calculate' };
 export const addressKey = (cell: Omit<PreviewCell, 'value'>) =>
   `${cell.sheet_id}/${cell.row_id}/${cell.column_id}`;

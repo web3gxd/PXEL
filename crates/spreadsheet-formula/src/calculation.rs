@@ -185,6 +185,7 @@ pub struct CalculationPatch {
     pub evaluation_work_used: u64,
 }
 
+#[derive(Clone)]
 pub struct CalculationProjection {
     document_id: DocumentId,
     input_version: DocumentVersion,

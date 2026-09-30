@@ -151,4 +151,13 @@ SQLx-test: 20 000 durable commits, verified snapshot на v10001, 10 000
 
 ## Правила отчета
 
+`just formula-parity` также запускает отдельный Move corpus через native runner
+и реальный browser Worker:209книг/418переносов, полный output/hash/renderedtext.
+`just bench-move-preview` измеряет shared planner+private candidate+incremental
+calculation на100000initialoccupiedcells и1000-cell Move. Он требует готового
+WASM (`node scripts/wasm.mjs`), проверяет реальные лимиты и отдельно считает
+encode/call/decode/Workerroundtrip. [Условия и результаты](benchmarks/2026-09-30-move-preview-local.md).
+Developer percentiles не заменяют fixed-runner
+acceptance; серверный commit и GPU presentation этим harness не измеряются.
+
 Failure не удаляет тест и не ослабляет assertion без причины. Root cause исправляется либо явно записывается blocker с воспроизведением. Skipped и not-run отличаются от passed. Нельзя назвать CI green, если прогон был только локальным; локальный CI-equivalent run так и называется. Combined toolchain becomes tested baseline только после соответствующих реальных builds/integration gates, а не metadata registry lookup.

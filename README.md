@@ -34,7 +34,11 @@ snapshots уже проходят проверенную активацию и �
 охватывает значения, формулы, вставки TSV, копии и переносы диапазонов. Отмена
 создаёт новую committed version и отклоняет конфликт с чужими изменениями или
 новыми зависимостями. Структурный/style undo, полноценные styles/merges/XLSX,
-WASM preview переноса и общие нагрузочные/deployment gates ещё открыты.
+общие нагрузочные/deployment gates ещё открыты. Перенос теперь получает отдельный
+WASM preview содержимого и формул до подтверждения сервера: shared Rust planner,
+геометрический запрос, отдельный pending overlay и сброс при конфликте/resync.
+Native/browser corpus переноса: 209 книг / 418 операций, exact results и rendered
+formula text. [Контракт](docs/adr/084-optimistic-move-worker.md).
 
 Архитектура принята только для фазы 0. Все решения, проверки и ограничения:
 [RUNBOOK.md](RUNBOOK.md), [roadmap](docs/roadmap.md), [architecture](docs/architecture.md).

@@ -44,6 +44,126 @@ function harness() {
   return { client, worker, requests, update, reply, result };
 }
 afterEach(() => vi.useRealTimers());
+it('queues geometry during initialization and publishes move contents separately from calculated results', () => {
+  const h = harness();
+  const geometry = { source: address, destination: address, rows: 1, columns: 1 };
+  expect(h.client.move({ ...initial, pending_revision: '1' }, geometry)).toBe(true);
+  expect(h.requests).toHaveLength(1);
+  const init = h.requests[0]!;
+  h.reply({ id: init.id, result: h.result(init) });
+  const move = h.requests[1]!;
+  expect(move.kind).toBe('move');
+  expect(move.data).toEqual({
+    ...geometry,
+    schema_version: 1,
+    document_id: id,
+    input_version: '1',
+    pending_revision: '1',
+    expected_pending_revision: '0',
+  });
+  h.reply({
+    id: move.id,
+    result: { ...h.result(move), move_writes: [{ ...address, value: { type: 'blank' } }] },
+  });
+  expect(h.update.mock.lastCall?.[0]).toBe('ready');
+  expect(h.update.mock.lastCall?.[3].get(`${id}/${id}/${id}`)).toEqual({ type: 'blank' });
+  h.client.dispose();
+});
+it('declines a move when unresolved cell edits or a second move exist', () => {
+  const h = harness();
+  const geometry = { source: address, destination: address, rows: 1, columns: 1 };
+  h.client.patch({ ...initial, pending_revision: '1' }, [
+    { ...address, value: { type: 'number', value: 1 } },
+  ]);
+  expect(h.client.move({ ...initial, pending_revision: '2' }, geometry)).toBe(false);
+  h.client.dispose();
+  const other = harness();
+  expect(other.client.move({ ...initial, pending_revision: '1' }, geometry)).toBe(true);
+  expect(other.client.move({ ...initial, pending_revision: '2' }, geometry)).toBe(false);
+  other.client.dispose();
+});
+it('rejects missing, duplicate and nonfinite move content replies without promoting a preview', () => {
+  for (const writes of [
+    undefined,
+    [{ ...address, value: { type: 'number', value: Infinity } }],
+    [
+      { ...address, value: { type: 'blank' } },
+      { ...address, value: { type: 'blank' } },
+    ],
+  ]) {
+    const h = harness();
+    const init = h.requests[0]!;
+    h.reply({ id: init.id, result: h.result(init) });
+    h.client.move(
+      { ...initial, pending_revision: '1' },
+      { source: address, destination: address, rows: 1, columns: 1 },
+    );
+    const move = h.requests[1]!;
+    h.reply({ id: move.id, result: { ...h.result(move), move_writes: writes } as PreviewResult });
+    expect(h.update.mock.lastCall?.[0]).toBe('failed');
+    expect(
+      h.update.mock.calls.some(([status, , , contents]) => status === 'ready' && contents),
+    ).toBe(false);
+  }
+});
+it('rejects move output byte overflow and contents attached to a normal reply', () => {
+  const h = harness();
+  const init = h.requests[0]!;
+  h.reply({ id: init.id, result: h.result(init) });
+  h.client.move(
+    { ...initial, pending_revision: '1' },
+    { source: address, destination: address, rows: 1, columns: 1 },
+  );
+  const move = h.requests[1]!;
+  const writes = Array.from({ length: 130 }, (_, index) => ({
+    ...address,
+    row_id: `01994100-0000-7000-8000-${String(index).padStart(12, '0')}`,
+    value: { type: 'text' as const, value: 'x'.repeat(32768) },
+  }));
+  h.reply({ id: move.id, result: { ...h.result(move), move_writes: writes } });
+  expect(h.update.mock.lastCall?.[0]).toBe('failed');
+  const other = harness();
+  const otherInit = other.requests[0]!;
+  other.reply({
+    id: otherInit.id,
+    result: { ...other.result(otherInit), move_writes: [{ ...address, value: { type: 'blank' } }] },
+  });
+  expect(other.update.mock.lastCall?.[0]).toBe('failed');
+});
+it('does not publish an old moved projection after confirmed reset or a worker failure', () => {
+  const h = harness();
+  const init = h.requests[0]!;
+  h.reply({ id: init.id, result: h.result(init) });
+  h.client.move(
+    { ...initial, pending_revision: '1' },
+    { source: address, destination: address, rows: 1, columns: 1 },
+  );
+  const move = h.requests[1]!;
+  h.client.reset({ ...initial, input_version: '2', pending_revision: '2' });
+  h.reply({
+    id: move.id,
+    result: { ...h.result(move), move_writes: [{ ...address, value: { type: 'blank' } }] },
+  });
+  expect(h.update.mock.lastCall?.[0]).toBe('pending');
+  expect(h.update.mock.calls.some(([, , , contents]) => contents)).toBe(false);
+  h.client.dispose();
+});
+it('declines invalid or cross-sheet geometry and handles typed move refusal without changing canonical state', () => {
+  const h = harness();
+  const geometry = { source: address, destination: address, rows: 1, columns: 1 };
+  for (const invalid of [
+    { ...geometry, rows: 0 },
+    { ...geometry, rows: 1001 },
+    { ...geometry, destination: { ...address, sheet_id: '01994100-0000-7000-8000-000000000002' } },
+  ])
+    expect(h.client.move({ ...initial, pending_revision: '1' }, invalid)).toBe(false);
+  expect(h.client.move({ ...initial, pending_revision: '1' }, geometry)).toBe(true);
+  const init = h.requests[0]!;
+  h.reply({ id: init.id, result: h.result(init) });
+  h.reply({ id: h.requests[1]!.id, phase: 'move', error: 'UnsupportedMoveDependency' });
+  expect(h.worker.terminate).toHaveBeenCalledOnce();
+  expect(h.update.mock.lastCall?.[0]).toBe('failed');
+});
 it('coalesces edits while initialization is running, rejects stale UI promotion and keeps the result cache', () => {
   const h = harness();
   for (let revision = 1; revision <= 20; revision++)

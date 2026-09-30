@@ -4,6 +4,8 @@ import {
   toPreviewValue,
   type PreviewCell,
   type PreviewInit,
+  type PreviewMoveGeometry,
+  type PreviewValue,
   type PreviewResult,
   type Reply,
   type Request,
@@ -19,6 +21,8 @@ export class PreviewClient {
   private active: Request | undefined;
   private id = 0;
   private queued = new Map<string, PreviewCell>();
+  private queuedMove: { stamp: Stamp; geometry: PreviewMoveGeometry } | undefined;
+  private hasMove = false;
   private values = new Map<string, CalculatedValue>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   constructor(
@@ -26,6 +30,7 @@ export class PreviewClient {
       status: PreviewStatus,
       values?: ReadonlyMap<string, CalculatedValue>,
       stamp?: Stamp,
+      moveWrites?: ReadonlyMap<string, PreviewValue>,
     ) => void,
     private readonly factory: () => WorkerPort | undefined = () =>
       typeof Worker === 'undefined'
@@ -70,6 +75,11 @@ export class PreviewClient {
   }
   patch(stamp: Stamp, cells: PreviewCell[]) {
     if (!this.worker || !this.desired) return;
+    // A private moved projection cannot receive ordinary patches based on confirmed content.
+    if (this.hasMove) {
+      this.fail();
+      return;
+    }
     if (
       stamp.document_id !== this.desired.document_id ||
       BigInt(stamp.input_version) < BigInt(this.desired.input_version) ||
@@ -91,6 +101,42 @@ export class PreviewClient {
     this.update('pending');
     this.flush();
   }
+  move(stamp: Stamp, geometry: PreviewMoveGeometry): boolean {
+    if (!this.worker || !this.desired || this.hasMove || this.queued.size > 0) return false;
+    if (
+      stamp.document_id !== this.desired.document_id ||
+      stamp.input_version !== this.desired.input_version ||
+      !/^\d+$/.test(stamp.pending_revision) ||
+      BigInt(stamp.pending_revision) <= BigInt(this.desired.pending_revision) ||
+      !validAddress(geometry.source) ||
+      !validAddress(geometry.destination) ||
+      geometry.source.sheet_id !== geometry.destination.sheet_id ||
+      !Number.isInteger(geometry.rows) ||
+      !Number.isInteger(geometry.columns) ||
+      geometry.rows < 1 ||
+      geometry.columns < 1 ||
+      geometry.rows * geometry.columns > 1000
+    )
+      return false;
+    this.desired = stamp;
+    this.hasMove = true;
+    this.queuedMove = {
+      stamp: {
+        document_id: stamp.document_id,
+        input_version: stamp.input_version,
+        pending_revision: stamp.pending_revision,
+      },
+      geometry: {
+        source: { ...geometry.source },
+        destination: { ...geometry.destination },
+        rows: geometry.rows,
+        columns: geometry.columns,
+      },
+    };
+    this.update('pending');
+    this.flush();
+    return true;
+  }
   private flush() {
     if (
       this.active ||
@@ -99,6 +145,25 @@ export class PreviewClient {
       this.acknowledged.pending_revision === this.desired.pending_revision
     )
       return;
+    if (this.queuedMove) {
+      const move = this.queuedMove;
+      if (this.acknowledged.input_version !== move.stamp.input_version) {
+        this.fail();
+        return;
+      }
+      this.queuedMove = undefined;
+      this.send({
+        id: ++this.id,
+        kind: 'move',
+        data: {
+          ...move.stamp,
+          ...move.geometry,
+          schema_version: 1,
+          expected_pending_revision: this.acknowledged.pending_revision,
+        },
+      });
+      return;
+    }
     const data = {
       document_id: this.desired.document_id,
       input_version: this.desired.input_version,
@@ -143,9 +208,11 @@ export class PreviewClient {
       return;
     }
     const result = reply.result;
+    const isMove = this.active.kind === 'move';
     const sent = this.active.data;
     if (
       !validResult(result) ||
+      (isMove ? !validMoveWrites(result.move_writes) : result.move_writes !== undefined) ||
       result.document_id !== sent.document_id ||
       result.input_version !== sent.input_version ||
       result.pending_revision !== sent.pending_revision
@@ -162,7 +229,14 @@ export class PreviewClient {
       result.input_version === this.desired?.input_version &&
       result.pending_revision === this.desired.pending_revision
     )
-      this.update('ready', this.values, result);
+      this.update(
+        'ready',
+        this.values,
+        result,
+        isMove
+          ? new Map(result.move_writes?.map((cell) => [addressKey(cell), cell.value]))
+          : undefined,
+      );
     this.flush();
   }
   private fail() {
@@ -177,15 +251,46 @@ export class PreviewClient {
     this.acknowledged = undefined;
     this.desired = undefined;
     this.queued.clear();
+    this.queuedMove = undefined;
+    this.hasMove = false;
     this.values.clear();
   }
 }
-function validResult(result: PreviewResult) {
-  const validAddress = (cell: Omit<PreviewCell, 'value'>) =>
+function validAddress(cell: Omit<PreviewCell, 'value'>) {
+  return (
     cell &&
     [cell.sheet_id, cell.row_id, cell.column_id].every(
       (id) => typeof id === 'string' && /^[0-9a-f-]{36}$/.test(id),
+    )
+  );
+}
+function validMoveWrites(writes: PreviewCell[] | undefined) {
+  if (
+    !Array.isArray(writes) ||
+    writes.length === 0 ||
+    writes.length > 10000 ||
+    new TextEncoder().encode(JSON.stringify(writes)).length > 4_194_304
+  )
+    return false;
+  const seen = new Set<string>();
+  return writes.every((cell) => {
+    if (!validAddress(cell) || seen.has(addressKey(cell)) || !cell.value) return false;
+    seen.add(addressKey(cell));
+    const value = cell.value;
+    return (
+      value.type === 'blank' ||
+      (value.type === 'number' && Number.isFinite(value.value)) ||
+      (value.type === 'boolean' && typeof value.value === 'boolean') ||
+      (value.type === 'text' && typeof value.value === 'string' && value.value.length <= 32768) ||
+      (value.type === 'formula' &&
+        value.value &&
+        typeof value.value.source === 'string' &&
+        value.value.source.startsWith('=') &&
+        value.value.source.length <= 32768)
     );
+  });
+}
+function validResult(result: PreviewResult) {
   return (
     result &&
     result.schema_version === 1 &&

@@ -30,14 +30,18 @@ ADR-081 реализует same-sheet cut/move содержимого с одн�
 всю команду (code18). AST literals/operators/authored text сохраняются; относительные
 offsets пересчитываются. Delayed formula с base до переноса получает code17,
 в том числе после actor restart через bounded history restoration. Move preview
-в WASM и manual Excel move goldens пока не подтверждены.
+в WASM теперь использует тот же Rust planner (ADR084); manual Excel move goldens
+пока не подтверждены.
 
 ADR-082 adds pure frozen inverse planning with bounded tail/reference guards.
 It restores exact stored ASTs and rejects subsequent footprint or new-reference
 conflicts, including range interiors on other sheets. This API does not yet
 enable worker preview. ADR-083 moves the pure guard to domain and connects it to
 durable move undo/redo; exact own inverse pairs can now neutralize history, while
-foreign/new effective references remain barriers. Worker preview stays open.
+foreign/new effective references remain barriers. ADR084 adds the shared Worker
+forward planner with incremental calculation and failure-atomic private state.
+Rendered formula text and calculated results agree for209native/browser books
+and418moves. These fixtures prove convergence, rather than manual Excel parity.
 
 ## Числа и порядок
 

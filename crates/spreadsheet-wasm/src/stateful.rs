@@ -26,6 +26,7 @@ use wasm_bindgen::prelude::*;
 const MAX_INITIAL_BYTES: usize = 32 * 1024 * 1024;
 const MAX_PATCH_BYTES: usize = 1024 * 1024;
 const MAX_PATCH_CELLS: usize = 1000;
+const MAX_MOVE_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum PreviewError {
@@ -39,6 +40,8 @@ pub enum PreviewError {
     StaleRevision,
     #[error("UnsupportedProfile")]
     UnsupportedProfile,
+    #[error("UnsupportedMoveDependency")]
+    UnsupportedMoveDependency,
     #[error("InvalidFormula")]
     InvalidFormula,
     #[error("InvalidProjection")]
@@ -78,6 +81,32 @@ impl From<CalculationError> for PreviewError {
             _ => Self::InvalidProjection,
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MoveAddress {
+    sheet_id: String,
+    row_id: String,
+    column_id: String,
+}
+impl MoveAddress {
+    fn decode(&self) -> Result<CellAddress, PreviewError> {
+        address(&self.sheet_id, &self.row_id, &self.column_id)
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MoveInput {
+    schema_version: u32,
+    document_id: String,
+    input_version: String,
+    expected_pending_revision: String,
+    pending_revision: String,
+    source: MoveAddress,
+    destination: MoveAddress,
+    rows: u32,
+    columns: u32,
 }
 
 #[derive(Deserialize)]
@@ -451,6 +480,41 @@ struct CalculationOutput {
     normalized_result_hash: String,
     evaluated_cells: usize,
     dirty_cells: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_writes: Option<Vec<MoveWriteOutput>>,
+}
+
+#[derive(Serialize)]
+struct MoveWriteOutput {
+    #[serde(flatten)]
+    address: AddressOutput,
+    value: AuthoredOutputValue,
+}
+#[derive(Serialize)]
+#[serde(tag = "type", content = "value", rename_all = "lowercase")]
+enum AuthoredOutputValue {
+    Blank,
+    Number(f64),
+    Text(String),
+    Boolean(bool),
+    Formula(FormulaTextOutput),
+}
+#[derive(Serialize)]
+struct FormulaTextOutput {
+    source: String,
+}
+struct CappedOutput(Vec<u8>);
+impl std::io::Write for CappedOutput {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.0.len().saturating_add(bytes.len()) > MAX_MOVE_OUTPUT_BYTES {
+            return Err(std::io::Error::other("preview output limit"));
+        }
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// Native callable API used unchanged by the browser wrapper and differential tests.
@@ -461,6 +525,109 @@ pub struct PreviewWorkbook {
     first_calculation: bool,
 }
 impl PreviewWorkbook {
+    /// Runs the shared move planner and incremental evaluator on a private
+    /// candidate. Any validation, calculation or output-limit failure rolls back.
+    pub fn move_json(&mut self, json: &str) -> Result<String, PreviewError> {
+        use spreadsheet_formula::relocation::{MoveError, MoveRequest, plan_move};
+        if json.len() > MAX_PATCH_BYTES {
+            return Err(PreviewError::LimitExceeded);
+        }
+        let input: MoveInput = serde_json::from_str(json).map_err(|_| PreviewError::InvalidJson)?;
+        if input.schema_version != 1 {
+            return Err(PreviewError::UnsupportedProfile);
+        }
+        if DocumentId::from_bytes(identity(&input.document_id)?)? != self.workbook.document_id() {
+            return Err(PreviewError::InvalidIdentity);
+        }
+        let pending = revision(&input.pending_revision)?;
+        if revision(&input.input_version)? != self.workbook.version().get()
+            || revision(&input.expected_pending_revision)? != self.pending_revision
+            || pending <= self.pending_revision
+        {
+            return Err(PreviewError::StaleRevision);
+        }
+        let source = input.source.decode()?;
+        let destination = input.destination.decode()?;
+        let plan = plan_move(
+            &self.workbook,
+            MoveRequest {
+                source,
+                destination,
+                rows: input.rows,
+                columns: input.columns,
+            },
+        )
+        .map_err(|error| match error {
+            MoveError::PartialRange => PreviewError::UnsupportedMoveDependency,
+            MoveError::LimitExceeded => PreviewError::LimitExceeded,
+            MoveError::Cancelled => PreviewError::Cancelled,
+            _ => PreviewError::InvalidProjection,
+        })?;
+        let changed = plan.writes.iter().map(|write| write.address).collect();
+        let operation = Operation::MoveRange {
+            source,
+            destination,
+            rows: input.rows,
+            columns: input.columns,
+            writes: plan.writes,
+        };
+        let candidate = self.workbook.preview_move_candidate(&operation)?;
+        let delta = self.calculation.prepare_reconcile(
+            &candidate,
+            &changed,
+            CalculationLimits::default(),
+        )?;
+        let mut temporary = Self {
+            workbook: candidate,
+            calculation: self.calculation.clone(),
+            pending_revision: pending,
+            first_calculation: self.first_calculation,
+        };
+        temporary.calculation.apply(delta);
+        let Operation::MoveRange { writes, .. } = &operation else {
+            return Err(PreviewError::InvalidProjection);
+        };
+        let mut move_writes = Vec::with_capacity(writes.len());
+        let mut output_bytes = 0usize;
+        for write in writes {
+            let value = match &write.content {
+                None | Some(CellContent::Value(CellValue::Blank)) => AuthoredOutputValue::Blank,
+                Some(CellContent::Value(CellValue::Number(number))) => {
+                    AuthoredOutputValue::Number(*number)
+                }
+                Some(CellContent::Value(CellValue::Boolean(value))) => {
+                    AuthoredOutputValue::Boolean(*value)
+                }
+                Some(CellContent::Value(CellValue::Text(text))) => {
+                    output_bytes = output_bytes.saturating_add(text.len());
+                    AuthoredOutputValue::Text(text.clone())
+                }
+                Some(CellContent::Formula(formula)) => {
+                    let source =
+                        spreadsheet_formula::bound::render_current(formula, &temporary.workbook)
+                            .map_err(|_| PreviewError::InvalidFormula)?;
+                    output_bytes = output_bytes.saturating_add(source.len());
+                    AuthoredOutputValue::Formula(FormulaTextOutput { source })
+                }
+            };
+            output_bytes = output_bytes.saturating_add(128);
+            if output_bytes > MAX_MOVE_OUTPUT_BYTES {
+                return Err(PreviewError::LimitExceeded);
+            }
+            move_writes.push(MoveWriteOutput {
+                address: write.address.into(),
+                value,
+            });
+        }
+        let mut output = temporary.calculate_output(&AtomicBool::new(false))?;
+        output.move_writes = Some(move_writes);
+        let mut bytes = CappedOutput(Vec::new());
+        serde_json::to_writer(&mut bytes, &output).map_err(|_| PreviewError::LimitExceeded)?;
+        let json = String::from_utf8(bytes.0).map_err(|_| PreviewError::InvalidProjection)?;
+        temporary.first_calculation = false;
+        *self = temporary;
+        Ok(json)
+    }
     pub fn from_json(json: &str) -> Result<Self, PreviewError> {
         if json.len() > MAX_INITIAL_BYTES {
             return Err(PreviewError::LimitExceeded);
@@ -601,6 +768,15 @@ impl PreviewWorkbook {
         &mut self,
         cancelled: &AtomicBool,
     ) -> Result<String, PreviewError> {
+        let output = self.calculate_output(cancelled)?;
+        let json = serde_json::to_string(&output).map_err(|_| PreviewError::InvalidProjection)?;
+        self.first_calculation = false;
+        Ok(json)
+    }
+    fn calculate_output(
+        &mut self,
+        cancelled: &AtomicBool,
+    ) -> Result<CalculationOutput, PreviewError> {
         let patch =
             self.calculation
                 .calculate(&self.workbook, CalculationLimits::default(), cancelled)?;
@@ -635,10 +811,9 @@ impl PreviewWorkbook {
             normalized_result_hash: hash.iter().map(|b| format!("{b:02x}")).collect(),
             evaluated_cells: patch.evaluated_cells,
             dirty_cells: patch.dirty_cells,
+            move_writes: None,
         };
-        let json = serde_json::to_string(&output).map_err(|_| PreviewError::InvalidProjection)?;
-        self.first_calculation = false;
-        Ok(json)
+        Ok(output)
     }
     pub fn workbook(&self) -> &Workbook {
         &self.workbook
@@ -662,5 +837,8 @@ impl WasmWorkbook {
     }
     pub fn calculate(&mut self) -> Result<String, JsValue> {
         self.inner.calculate_json().map_err(PreviewError::js)
+    }
+    pub fn move_preview(&mut self, json: &str) -> Result<String, JsValue> {
+        self.inner.move_json(json).map_err(PreviewError::js)
     }
 }

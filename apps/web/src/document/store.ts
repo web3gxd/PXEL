@@ -1,7 +1,13 @@
 import { create, toBinary } from '@bufbuild/protobuf';
 import { PreviewClient, type PreviewStatus } from '../calculation/client';
 import { copyFormulaInWorker } from '../calculation/formula-copy';
-import type { Stamp, PreviewCell, PreviewContext } from '../calculation/protocol';
+import type {
+  Stamp,
+  PreviewCell,
+  PreviewContext,
+  PreviewMoveGeometry,
+  PreviewValue,
+} from '../calculation/protocol';
 import {
   ClientEnvelopeSchema,
   CanonicalOperationSchema,
@@ -379,10 +385,24 @@ export class DocumentStore {
   private previewOverlay = new Set<string>();
   private previewDirty = new Set<string>();
   private previewSheetByRow = new Map<string, string>();
-  private preview = new PreviewClient((status, values, stamp) => {
+  private movePreview:
+    | { operationId: string; stamp: Stamp; writes: ReadonlyMap<string, PreviewValue> | undefined }
+    | undefined;
+  private preview = new PreviewClient((status, values, stamp, moveWrites) => {
     this.previewStatus = status;
     this.previewValues = values ?? new Map();
     this.previewStamp = stamp;
+    if (this.movePreview) {
+      this.movePreview.writes =
+        status === 'ready' &&
+        this.matchesPreview(stamp) &&
+        this.movePreview.stamp.pending_revision === stamp?.pending_revision &&
+        this.pending.some(
+          (pending) => pending.kind === 'moveRange' && pending.id === this.movePreview?.operationId,
+        )
+          ? moveWrites
+          : undefined;
+    }
     this.notify();
   });
   projection: Projection | undefined;
@@ -467,7 +487,7 @@ export class DocumentStore {
         if (write) return write.value;
       }
     }
-    return this.confirmed.get(key(row, column));
+    return this.movePreviewValue(row, column) ?? this.confirmed.get(key(row, column));
   }
   display(position: Position) {
     const row = this.sheet?.rows[position.row],
@@ -478,8 +498,7 @@ export class DocumentStore {
       row &&
       column &&
       this.previewStatus === 'ready' &&
-      this.previewStamp?.input_version === this.projection?.version &&
-      this.previewStamp?.pending_revision === String(this.previewRevision) &&
+      this.matchesPreview(this.previewStamp) &&
       (this.editing || this.pending.length || this.calculationStatus !== 'complete')
     ) {
       const preview = this.previewValues.get(`${this.sheet?.id}/${row}/${column}`);
@@ -488,6 +507,7 @@ export class DocumentStore {
     if (
       !row ||
       !column ||
+      this.movePreviewValue(row, column) ||
       this.pending.some(
         (pending) =>
           (pending.kind === 'cell' && pending.row === row && pending.column === column) ||
@@ -506,11 +526,46 @@ export class DocumentStore {
   get previewVisible() {
     return (
       this.previewStatus === 'ready' &&
-      this.previewStamp?.input_version === this.projection?.version &&
-      this.previewStamp?.pending_revision === String(this.previewRevision) &&
-      this.previewValues.size > 0 &&
+      this.matchesPreview(this.previewStamp) &&
+      (this.previewValues.size > 0 || (this.activeMovePreview?.writes?.size ?? 0) > 0) &&
       Boolean(this.editing || this.pending.length || this.calculationStatus !== 'complete')
     );
+  }
+  private matchesPreview(stamp: Stamp | undefined) {
+    return Boolean(
+      stamp &&
+      stamp.document_id === this.projection?.document_id &&
+      stamp.input_version === this.projection.version &&
+      stamp.pending_revision === String(this.previewRevision),
+    );
+  }
+  private get activeMovePreview() {
+    const preview = this.movePreview;
+    return this.previewStatus === 'ready' &&
+      preview &&
+      this.matchesPreview(preview.stamp) &&
+      this.matchesPreview(this.previewStamp) &&
+      this.pending.some(
+        (pending) => pending.kind === 'moveRange' && pending.id === preview.operationId,
+      )
+      ? preview
+      : undefined;
+  }
+  private movePreviewValue(row: string, column: string): Value | undefined {
+    return this.activeMovePreview?.writes?.get(
+      `${this.previewSheetByRow.get(row)}/${row}/${column}`,
+    );
+  }
+  private startMovePreview(operationId: string, geometry: PreviewMoveGeometry) {
+    const projection = this.projection;
+    if (!projection || !this.pending.some((pending) => pending.id === operationId)) return;
+    const stamp = {
+      document_id: projection.document_id,
+      input_version: projection.version,
+      pending_revision: String(++this.previewRevision),
+    };
+    this.movePreview = { operationId, stamp, writes: undefined };
+    if (!this.preview.move(stamp, geometry)) this.movePreview = undefined;
   }
   private previewValue(row: string, column: string): Value {
     const edit = this.editing;
@@ -529,9 +584,18 @@ export class DocumentStore {
         if (write) return write.value;
       }
     }
-    return this.confirmed.get(key(row, column)) ?? { type: 'blank' };
+    return (
+      this.movePreviewValue(row, column) ??
+      this.confirmed.get(key(row, column)) ?? { type: 'blank' }
+    );
   }
   private syncPreview(reset = false) {
+    // A move mutates only the Worker's private candidate. Any later ordinary
+    // preview must rebuild from confirmed content, never from that candidate.
+    if (this.movePreview) {
+      this.movePreview = undefined;
+      reset = true;
+    }
     const sheet = this.sheet,
       projection = this.projection;
     if (!sheet || !projection) return;
@@ -900,6 +964,7 @@ export class DocumentStore {
   async refresh(minimumVersion = 0n): Promise<boolean> {
     const id = this.projection?.document_id ?? new URL(location.href).searchParams.get('document');
     if (!id) return true;
+    if (this.movePreview) this.syncPreview(true);
     const generation = ++this.syncGeneration;
     this.syncing = true;
     this.loading = true;
@@ -1091,6 +1156,7 @@ export class DocumentStore {
     this.previewValues = new Map();
     this.previewStamp = undefined;
     this.previewStatus = 'idle';
+    this.movePreview = undefined;
   }
   select(position: Position, extend = false) {
     if (!extend) this.selectionAnchor = { ...position };
@@ -1490,6 +1556,12 @@ export class DocumentStore {
     this.error = '';
     this.notify();
     this.flush();
+    this.startMovePreview(id, {
+      source: { sheet_id: sheet.id, row_id: cut.row_id, column_id: cut.column_id },
+      destination: { sheet_id: sheet.id, row_id: destinationRow, column_id: destinationColumn },
+      rows,
+      columns,
+    });
     return true;
   }
   copyRangePayload() {
@@ -2276,6 +2348,7 @@ export class DocumentStore {
       }
       if (pending?.kind === 'moveRange') {
         this.pending = this.pending.filter((p) => p.id !== id);
+        this.syncPreview();
         const stale = rejection.code === 17 || rejection.code === 4;
         if (stale && this.cutIntent?.raw === pending.cutPayload) this.cutIntent.stale = true;
         if (stale || rejection.resyncRequired) await this.refresh();

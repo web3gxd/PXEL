@@ -3970,3 +3970,82 @@ Final ADR083 PG move-history rerun after wrong-document context assertion:
 presentation Prettier andgitdiffcheck passed; runtime remainsown23680, lastreadyz/
 webcheck200. Existing100kdomainconvergence, oldtimingharnesses and controlled
 production/deployment gates were not executed or claimed passed in this stage.
+
+## 2026-09-30 — ADR084 shared Worker move preview (verification in progress)
+
+Previous goal turn answered a status question; that was no implementation progress.
+This continuation revalidated current worktree/AGENTS/roadmap/ADR083 and resumed
+the actual pending Worker slice. Logo removal/gallery from previous stages was
+not redone. Full remaining-phase goal remains active.
+
+Rust: domain preview_move_candidate accepts MoveRange only, validates a private
+next-version candidate and retains the confirmed input version. WASM move_json /
+move_preview strict schema1 decode geometry and expected/next pending revisions;
+shared relocation planner + incremental dependency reconcile; temporary workbook
+and cloned calculation cache; calculation and capped4MiB serialization before
+private swap. Failures preserve book/cache/pendingrevision. Complete move_writes
+contain blanks/scalars/rendered formulas, never ASTs or preimages. Added native
+move_runner and7move tests. Engine identity stays0.14.0; no wire/storage format,
+migration, dependency, lock or toolchain changes.
+
+Frontend: geometry-only request and serial Worker route; PreviewClient correlates
+request/doc/head/pendingrevision, queues during init, refuses unresolved edits or
+second moves, validates bounded unique content writes, and returns an owned Map.
+Store keeps content overlay associated with pending operation ID, independent
+confirmed content/hash. Durable flush does not wait for WASM. Newerhead, terminal
+rejection, refresh/dispose or ordinary draft discards private Move state; retry7/8
+keeps originalbytes/id. Ordinary patches never apply to a moved private book.
+
+TDD rootclient first3tests RED because move API absent; after implementation one
+geometry test correctly found spread-Stamp leaked sheets into strict command.
+Fixed explicit three-field stamp serialization rather than weakening assertion.
+Final12client tests PASS. Agent9store preview tests initially RED ->GREEN; first
+typecheck exposed exactOptional writes union and fake MessageEvent cast, fixed
+with explicitundefined union and real MessageEvent. Full115frontend unit,
+typecheck/lint/Vite productionbuild PASS root10:17. New browser4/4DPR1/2 PASS13.3s
+with real Worker: hold outgoingMove -> preview and exactunchangedHTTPprojection;
+hold committed/ACK delivery -> preview remains unconfirmed; release -> convergence
+and reload; remotehead -> reset before stale17 refusal. Full120browser suite
+currently running, not yet claimed passed.
+
+Rootcargo test --locked -p spreadsheet-wasm PASS20tests (4lib+7move+9stateful);
+focused7move PASS2.10s, finalwholemove3.51s. Strict alltarget/allfeature Clippy
+domain/formula/wasm PASS4.01s. Agentwasm32check PASS. Release generatedWASM build
+PASS17.08s. Rootformula554cases andworkbook1010books/2020patches exactnative/browser
+parity PASS, using freshartifact1233905bytes. NewMove209books/418moves exactfull
+native/browser outputs/hash/renderedmove_writes PASS;8sharedexpectedcases. Raw
+.local/move-parity.json and tracked benchmark report record328.20ms corpuscompute,
+1372.39ms roundtrip inclinit/clone,707391/1814682APIbytes; notp95 orcommitlatency.
+
+Targeted liveHTTP/PG/WebSocket6Move tests PASS8006.2518ms: frozenmove/retry, stale
+andpartialrange, ownundo/history/redo, delayedformula, atomicboundary anddeleted
+stabletarget. FullHTTP/recovery/PGrestart suites are unchanged and not rerun here.
+Readonly TS review found no confirmedcontamination or blocked durable send;
+initial hypothetical renderedformula-length finding was withdrawn after checking
+formatter's32KiB cap. Review itself ran no tests. Presentation updated Move preview
+line and actualChromium10slides/1440&390px/navigation/nooverflow/noerrors PASS.
+Large100k Worker clone/boundary benchmark and fullbrowser finalresult still pending.
+
+ADR084 finalverification: full120/120ChromiumDPR1/2 PASS6.5min, exit0. No runtime
+restart needed for this preview-only slice: ownedlauncher23680 stillrunning,
+backendreadyz8080/web5173 both200; realPGdata retained. Existing durable server
+semantics unchanged; freshVite/generatedWASM served. No unrelatedprocess stopped.
+
+Added real100k-initial-cell Worker benchmark, verified1000sourcecells/3000writes,
+1000rendereddependents+hash,5warmups/20samples/1load/1init; firstoverwrite leaves
+99000occupiedcells, explicitly reported. Concurrentrun Workerp95488.9ms,
+WASMcallp95472.1ms, hydrate1202.1ms. After fullbrowserterminal, copied originalreport
+to.local/move-preview-large-concurrent.json and reran samefixture without concurrent
+PXELchecks to distinguish loadvariation: Workerp95197.4ms/callp95190.3ms,
+hydrate469.3ms. BothPASS withrealcaps andsamehash; backgroundloaduncontrolled,
+memorynotmeasured, nearest-rank20sample percentiles notproductionclaim. Initinput
+14146036B vs497–499Bgeometryrequest;763340–763341Bresponse, below4MiB. Real1000cell
+bulkpreview cost remains material, no16msproof. Futureoptimizationrequiresprofile.
+
+ADR084 acceptedonlysame-sheetpreview; docs/README/roadmap/testing/presentation
+and trackedbenchmark synchronized. justformula-parity now includesMovecorpus;
+justbench-move-preview exposeslargeharness. Current sharedformula554 andworkbook
+1010/2020 rerunPASS; theirboundarytimes includedotherchecks and are notnewp95.
+Structural/styleundo, discoveredhistory, richerstyles/merges/XLSX/manualExcel,
+combinedlargeACL/stress, Linux/Compose/remoteCI/RussianS3/OSisolation gates remain
+open. Fullgoal staysactive; nextminimalstage guardedaxisinverse/history.

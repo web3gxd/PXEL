@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { create, fromBinary } from '@bufbuild/protobuf';
-import type { Reply, Request } from '../calculation/protocol';
+import type { PreviewCell, PreviewResult, Reply, Request } from '../calculation/protocol';
 import {
   CellAddressSchema,
   ClientEnvelopeSchema,
@@ -803,6 +803,312 @@ it('initializes every sheet once and addresses preview patches by the owning she
   ]);
   store.dispose();
 });
+describe('isolated pending move preview', () => {
+  function workerFixture() {
+    const requests: { request: Request; worker: PreviewWorker }[] = [];
+    class PreviewWorker {
+      onmessage: ((event: MessageEvent<Reply>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      terminated = false;
+      postMessage(request: Request) {
+        requests.push({ request, worker: this });
+      }
+      terminate() {
+        this.terminated = true;
+      }
+    }
+    vi.stubGlobal('Worker', PreviewWorker);
+    const latest = () => {
+      const entry = requests.at(-1);
+      if (!entry) throw new Error('Expected a Worker request');
+      return entry;
+    };
+    const finish = (
+      entry: (typeof requests)[number],
+      writes?: PreviewCell[],
+      results: PreviewResult['results'] = [],
+    ) =>
+      entry.worker.onmessage?.(
+        new MessageEvent<Reply>('message', {
+          data: {
+            id: entry.request.id,
+            result: {
+              document_id: entry.request.data.document_id,
+              input_version: entry.request.data.input_version,
+              pending_revision: entry.request.data.pending_revision,
+              schema_version: 1,
+              preview: true,
+              complete: true,
+              full: entry.request.kind === 'init',
+              formula_engine_version: 'pxel-formula-0.14.0',
+              compatibility_profile: 'pxel-excel-subset-v1',
+              normalized_result_hash: 'a'.repeat(64),
+              evaluated_cells: results.length,
+              dirty_cells: results.length,
+              results,
+              cleared: [],
+              ...(writes ? { move_writes: writes } : {}),
+            },
+          },
+        }),
+      );
+    return { requests, latest, finish };
+  }
+  async function pendingMove() {
+    const worker = workerFixture();
+    const { store, sent } = await connectedStore();
+    const original = projection();
+    original.sheets[0]!.rows.push(uuidV7());
+    original.sheets[0]!.columns.push(uuidV7(), uuidV7());
+    original.sheets[0]!.cells.push({
+      row_id: rowId,
+      column_id: columnId,
+      value: { type: 'number', value: 7 },
+    });
+    store.load(original);
+    worker.finish(worker.latest());
+    const raw = store.cutRangePayload();
+    expect(store.pasteCutRange(raw ?? '', { row: 1, column: 0 })).toBe(true);
+    const entry = worker.latest();
+    expect(entry.request.kind).toBe('move');
+    const destinationRow = original.sheets[0]!.rows[1]!;
+    const writes: PreviewCell[] = [
+      { sheet_id: sheetId, row_id: rowId, column_id: columnId, value: { type: 'blank' } },
+      {
+        sheet_id: sheetId,
+        row_id: destinationRow,
+        column_id: columnId,
+        value: { type: 'number', value: 7 },
+      },
+    ];
+    return { ...worker, store, sent, entry, writes, original, destinationRow };
+  }
+
+  it('shows scalar move contents and a preview badge without changing confirmed content or hash', async () => {
+    const fixture = await pendingMove();
+    const { store, entry, writes, original, finish, sent } = fixture;
+    const confirmed = [...store.confirmed];
+    expect(store.display({ row: 0, column: 0 })).toBe('7');
+    expect(store.display({ row: 1, column: 0 })).toBe('');
+    finish(entry, writes);
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'blank' });
+    expect(store.display({ row: 0, column: 0 })).toBe('');
+    expect(store.value({ row: 1, column: 0 })).toEqual({ type: 'number', value: 7 });
+    expect(store.display({ row: 1, column: 0 })).toBe('7');
+    expect(store.previewVisible).toBe(true);
+    expect([...store.confirmed]).toEqual(confirmed);
+    expect(store.projection).toEqual(original);
+    expect(store.calculated.size).toBe(0);
+    expect(store.pending).toHaveLength(1);
+    expect(
+      sent.filter((bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload.case === 'command'),
+    ).toHaveLength(1);
+    store.dispose();
+  });
+
+  it('renders moved and inbound formula text and results exclusively from the matching preview', async () => {
+    const fixture = await pendingMove();
+    const { store, entry, writes, original, destinationRow, finish } = fixture;
+    const externalColumn = original.sheets[0]!.columns[2]!;
+    const movedFormula: PreviewCell = {
+      sheet_id: sheetId,
+      row_id: destinationRow,
+      column_id: columnId,
+      value: { type: 'formula', value: { source: '=(B2+1)' } },
+    };
+    const inboundFormula: PreviewCell = {
+      sheet_id: sheetId,
+      row_id: rowId,
+      column_id: externalColumn,
+      value: { type: 'formula', value: { source: '=(A2+1)' } },
+    };
+    finish(
+      entry,
+      [writes[0]!, movedFormula, inboundFormula],
+      [
+        { ...movedFormula, value: { type: 'number', value: 8 } },
+        { ...inboundFormula, value: { type: 'number', value: 9 } },
+      ],
+    );
+    expect(store.value({ row: 1, column: 0 })).toEqual(movedFormula.value);
+    expect(store.value({ row: 0, column: 2 })).toEqual(inboundFormula.value);
+    expect(store.display({ row: 1, column: 0 })).toBe('8');
+    expect(store.display({ row: 0, column: 2 })).toBe('9');
+    expect(store.confirmed.size).toBe(1);
+    expect(store.projection).toEqual(original);
+    store.dispose();
+  });
+
+  it.each([17, 18])(
+    'resets a move preview after terminal rejection %i and ignores the late Worker',
+    async (code) => {
+      const { store, entry, writes, original, finish } = await pendingMove();
+      finish(entry, writes);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => original })),
+      );
+      const pending = store.pending[0]!;
+      await store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'rejected',
+            value: {
+              documentId: uuidBytes(documentId),
+              operationId: uuidBytes(pending.id),
+              code,
+              retryable: code === 17,
+              resyncRequired: code === 17,
+            },
+          },
+        }),
+      );
+      expect(entry.worker.terminated).toBe(true);
+      finish(entry, writes);
+      expect(store.previewVisible).toBe(false);
+      expect(store.pending).toHaveLength(0);
+      expect(store.display({ row: 0, column: 0 })).toBe('7');
+      expect(store.value({ row: 1, column: 0 })).toBeUndefined();
+      expect(store.projection).toEqual(original);
+      store.dispose();
+    },
+  );
+
+  it.each([7, 8])(
+    'retains preview and exact move bytes during uncertain rejection %i, then retires on receipt',
+    async (code) => {
+      const { store, entry, writes, original, destinationRow, finish, sent } = await pendingMove();
+      finish(entry, writes);
+      const pending = store.pending[0]!;
+      await store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'rejected',
+            value: {
+              documentId: uuidBytes(documentId),
+              operationId: uuidBytes(pending.id),
+              code,
+              retryable: true,
+            },
+          },
+        }),
+      );
+      expect(store.previewVisible).toBe(true);
+      expect(store.display({ row: 1, column: 0 })).toBe('7');
+      expect(entry.worker.terminated).toBe(false);
+      await vi.advanceTimersByTimeAsync(1500);
+      const commands = sent.filter(
+        (bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload.case === 'command',
+      );
+      expect(commands).toEqual([pending.bytes, pending.bytes]);
+      const committed = structuredClone(original);
+      committed.version = '2';
+      committed.sheets[0]!.cells[0]!.row_id = destinationRow;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => committed })),
+      );
+      await store.receive(
+        create(ServerEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'receipt',
+            value: {
+              documentId: uuidBytes(documentId),
+              operationId: uuidBytes(pending.id),
+              committedVersion: 2n,
+              currentHeadVersion: 2n,
+              canonicalEventHash: new Uint8Array(32),
+            },
+          },
+        }),
+      );
+      finish(entry, writes);
+      expect(store.previewVisible).toBe(false);
+      expect(store.pending).toHaveLength(0);
+      expect(store.projection).toEqual(committed);
+      expect(store.display({ row: 1, column: 0 })).toBe('7');
+      expect(store.value({ row: 0, column: 0 })).toBeUndefined();
+      store.dispose();
+    },
+  );
+
+  it('drops a move as soon as a newer head requires resync and rejects an old ready reply', async () => {
+    const { store, entry, writes, original, finish } = await pendingMove();
+    finish(entry, writes);
+    let complete: ((value: unknown) => void) | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            complete = resolve;
+          }),
+      ),
+    );
+    const refresh = store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'documentHeadChanged',
+          value: {
+            documentId: uuidBytes(documentId),
+            headVersion: 2n,
+          },
+        },
+      }),
+    );
+    expect(store.previewVisible).toBe(false);
+    expect(store.display({ row: 0, column: 0 })).toBe('7');
+    expect(entry.worker.terminated).toBe(true);
+    finish(entry, writes);
+    expect(store.value({ row: 1, column: 0 })).toBeUndefined();
+    complete?.({ ok: true, json: async () => ({ ...original, version: '2' }) });
+    await refresh;
+    expect(store.pending).toHaveLength(1);
+    expect(store.projection?.version).toBe('2');
+    store.dispose();
+  });
+
+  it('resets from confirmed cells when another draft supersedes the move preview', async () => {
+    const { store, entry, writes, finish, latest } = await pendingMove();
+    finish(entry, writes);
+    store.select({ row: 0, column: 2 });
+    store.begin('draft');
+    const reset = latest();
+    expect(reset.request.kind).toBe('init');
+    if (reset.request.kind !== 'init') throw new Error('Expected confirmed preview reset');
+    expect(reset.request.data.sheets[0]?.cells).toEqual(
+      expect.arrayContaining([
+        { row_id: rowId, column_id: columnId, value: { type: 'number', value: 7 } },
+      ]),
+    );
+    expect(reset.request.data.sheets[0]?.cells.some((cell) => cell.row_id !== rowId)).toBe(false);
+    finish(entry, writes);
+    expect(store.display({ row: 0, column: 0 })).toBe('7');
+    expect(store.display({ row: 1, column: 0 })).toBe('');
+    expect(store.pending).toHaveLength(1);
+    store.dispose();
+  });
+
+  it('never makes preview failure or disposal a prerequisite for sending the durable move', async () => {
+    const { store, entry, writes, finish, sent } = await pendingMove();
+    entry.worker.onerror?.();
+    expect(store.previewVisible).toBe(false);
+    expect(store.pending).toHaveLength(1);
+    expect(
+      sent.some((bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload.case === 'command'),
+    ).toBe(true);
+    store.dispose();
+    finish(entry, writes);
+    expect(store.previewStatus).toBe('idle');
+    expect(store.display({ row: 0, column: 0 })).toBe('7');
+    expect(store.value({ row: 1, column: 0 })).toBeUndefined();
+  });
+});
+
 async function connectedStore() {
   vi.useFakeTimers();
   vi.stubGlobal('location', { href: 'http://localhost/' });

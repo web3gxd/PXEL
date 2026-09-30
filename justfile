@@ -47,6 +47,7 @@ formula-parity:
     node scripts/wasm.mjs
     node tests/parity/formula.mjs
     node tests/parity/workbook.mjs
+    node tests/parity/move.mjs
 
 convergence:
     cargo test --locked -p spreadsheet-domain --test convergence -- --ignored --nocapture
@@ -62,6 +63,9 @@ bench-render-sparse:
 
 bench-optimistic:
     node tests/performance/optimistic.mjs
+
+bench-move-preview:
+    node tests/performance/move-preview.mjs
 
 bench-recovery-storage:
     cargo test --release --locked -p spreadsheet-storage --lib recovery_benchmark::persisted_snapshot_plus_ten_thousand_tail_events -- --ignored --exact --nocapture --test-threads=1

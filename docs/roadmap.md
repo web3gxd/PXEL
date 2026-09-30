@@ -532,3 +532,16 @@ on current engine0.14.0; this is not Move worker preview/parity, which remains n
 Structural/style history, durable discovered history, richer styles/merges/XLSX,
 controlledlarge/stress metrics, Linux/Compose/remoteCI and production gates remain
 open. Detailed actual commands, failures and outcomes in RUNBOOK.
+
+ADR084 closes same-sheet optimistic Worker move preview locally. Geometry-only
+commands call the shared Rust planner; private candidate/incremental cache swap
+only after successful calculation and capped serialization. Move overlay never
+changes confirmed content/version/hash and is dropped on stale head/refusal/reset.
+Full120ChromiumDPR1/2,115frontendunit,20WASMnative and6liveMoveHTTP checks passed.
+Native/browser209books/418moves match fullhash/results/renderedwrites; existing
+554formulas and1010books/2020patches still match. A100k-initial-cell1000-cellmove
+has quietdeveloperWorkerp95197.4ms versus488.9ms with parallelbrowserchecks; these
+are20-samplebulkmeasurements, not16msedit orcontrolledproductiongate. Benchmark
+and limitations are recorded. Next phase4 work: guarded structural history and
+durable history discovery, followed by styles/merges and fuller XLSX. Wider
+combinedstress/Linux/Compose/remoteCI/production gates remain open.
