@@ -188,6 +188,14 @@ test('opening a second tab publishes the same renewed RAND to both clients', asy
 
 for (const scenario of [
   {
+    name: 'SUMIF and COUNTIF conditional aggregates',
+    source: '=SUMIF(A1:A2,">5")+COUNTIF(A1:A2,">5")',
+    input: '7',
+    edit: '13',
+    before: '8',
+    after: '14',
+  },
+  {
     name: 'XLOOKUP reference selection',
     source: '=SUM(XLOOKUP(A1,A1:A2,A1:A2))+XLOOKUP(7,A1:A2,A1:A2,9)',
     input: '7',

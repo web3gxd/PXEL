@@ -3249,3 +3249,71 @@ HTTP/browser/recovery, benchmarks and docs; no new dependencies or schema. Final
 format/readiness/diff and commit follow. Next SUMIF/COUNTIF then SUMIFS/COUNTIFS;
 full original goal remains active, production/manualExcel/full XLSX/structure/
 recovery/load/Linux/Compose/remote CI gates open.
+
+## 2026-09-30 — SUMIF/COUNTIF single-criterion slice, in progress
+
+Previous goal turn made verified progress: XLOOKUP committed9e796fd. Read AGENTS/
+RUNBOOK/roadmap/ADR073/current lookup/INDEX/dependency contracts; continued TDD and
+incremental skills. Official Microsoft SUMIF and COUNTIF docs read (COUNTIF canonical
+URL fetch failed; actual official en-gb article fetched). ADR074 PROPOSED records
+explicit provisional coercion/blank/error/255scalar/text/collation rules and static
+SUMIF top-left expansion with implicit dependencies. Native RED observed NAME.
+Pure criteria module now reuses charged Unicode/wildcard and selection helpers;
+streaming COUNTIF/defaultSUMIF, bounded selection mask + sum traversal for separate
+range. Numeric/explicit/implicit/nested INDEX cases pass native test. No new
+libraries/persisted/wire/AST schema changes.
+
+Graph RED observed evaluated_cells0 instead1 after B2edit with source formula
+SUMIF(A1:A3,">5",B1). bound_dependencies now includes derived sum rectangle,
+without rewriting durable AST/text. Same assertion passes and result50->70;
+independent formula stayscached. Compiler FunctionName/string comparison corrected
+using existing typed as_str; formula all-targets clippy passed. Current running
+server/WASM remains lastverified0.12.0; engine bump/resource/property/fixtures/
+parity/live/recovery/benchmarks still pending. Read-only review requested. Full MVP
+remains active; ADR074 not accepted yet.
+
+Continuation after percentage status: preceding turn was status-only, so checked
+current worktree and continued the active criteria slice. Seven native criteria
+tests pass, including property oracle,2D/reversed/shrunken INDEX and XLOOKUP
+references, both visitor cardinalities, typed limits/cancellation, wildcard and
+selected errors. A test mistakenly used unsupported compact2D INDEX and a horizontal
+XLOOKUP result requiring dynamic expansion; corrected test inputs to explicit
+INDEX(...,0,0) and a2-row returned column, preserving the existing profile limits.
+Two graph tests pass including implicit summed formula topological order/self-cycle
+and inserted/deleted row dimensions/anchor. Added38 derived shared fixtures,
+520total native corpus cases passed; no manual Excel verification claimed.
+Full formula/WASM native test suites passed before identity bump. Verified launcher
+3284 identity and stopped only its process tree, retaining PostgreSQL/data.
+Current guards advanced0.13.0 and stateful corpus source pool gained four conditional
+aggregate forms. Browser WASM/parity/live/recovery/benchmarks remain pending.
+
+Engine0.13 hidden launcher23780 rebuilt WASM/backend and starts successfully.
+520 shared expected/native/browser cases and1010books/2020patches parity passed.
+83frontend unit tests, typecheck/lint/production build passed. Full52real-PG HTTP
+tests passed79693.3769ms, including implicit B2 edit changing52->62 and receipt.
+Full90browser tests live62498; first DPR1 conditional edit/reload passed. Additive
+hard-restart SUMIF hash/source/receipt/implicit edit fixture prepared, not run yet.
+Full all-targets formula/WASM/collab/storage/server-dev clippy passed; SQLx offline
+prepare check and default server check passed; post-bump WASM4unit/9stateful tests
+and final formula all-targets clippy passed. Native100k release benchmark passed:
+COUNTIF21.002ms, defaultSUMIF15.171ms, anchoredSUMIF58.659ms estimates; concurrent
+load, notp95. Actual command/report in docs/benchmarks/2026-09-30-criteria-local.md.
+Docs updated to explicit partial criteria profile; ADR074 still PROPOSED pending
+full browser/restart/final review. Full MVP remains active.
+
+Final SUMIF/COUNTIF regression: full90Playwright tests passed4.7min (62498terminal
+exit0). Second read-only review found no concrete defect and ran no tests.
+Collab22passed/2intentional benchmark ignores; real-PG volatile_edit3/Open11/Timer6
+passed, one intentional timer benchmark ignored. Improved only formatting in the
+new bound dependency block; both implicit graph tests and all-targets formula
+clippy passed afterwards. Format:check/rustfmt/diff passed and readiness/web200.
+Verified launcher23780 and stopped its tree only after browser terminal success.
+Hard-restart2/2 passed9773.1093ms after5.54s server build: SUMIF source/content and
+calculated hashes restored exactly, duplicate command returns receipt, implicit B2
+edit52->62 recalculates. Finally restarted hidden25956 with PG/data retained.
+ADR074 accepted only for bounded criteria slice. Changed formula criteria/dispatch/
+shared lookup helpers/reverse dependencies and0.13guards, native tests/fixtures/
+stateful parity, HTTP/browser/recovery, benchmarks and docs; no new dependencies
+or schemas. Next SUMIFS/COUNTIFS; original full MVP goal remains active and wider
+manual Excel/full XLSX/structure/recovery/load/production/Linux/Compose/remote CI
+gates remain open. Final formatting/readiness and commit follow.

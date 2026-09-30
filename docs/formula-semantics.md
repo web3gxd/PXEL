@@ -220,3 +220,14 @@ Shared INDEX/XLOOKUP scalar materialization enforces text work/caps and normaliz
 DateTime/nonfinite results; aggregate reference coercion remains separate. No AST,
 wire or storage schema change. Unsupported spill/colon/binary-wildcard combinations
 fail typed. See ADR073 and the preliminary benchmark for remaining limitations.
+
+ADR074 introduces COUNTIF and SUMIF in engine0.13.0. Criteria use explicit
+comparison/coercion/wildcard rules, with limits described in the ADR. COUNTIF
+streams one rectangle; default SUMIF sums matching numeric/date values in row-major
+order. Separate SUMIF uses a bounded selection mask and the top-left anchored
+rectangle with criteria dimensions. Selected errors propagate, unselected errors
+do not; typed text/array/work/cardinality failures cannot be hidden by IFERROR.
+Literal expanded sum rectangles contribute reverse dependencies without rewriting
+persisted AST/text. Structural changes rebuild those rectangles from current bound
+targets. Dynamic references may shrink but unsupported expansion is rejected.
+Full-source dependencies remain conservative, including unselected source cycles.

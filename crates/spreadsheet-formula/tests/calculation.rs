@@ -8,6 +8,132 @@ use std::{collections::BTreeSet, sync::atomic::AtomicBool};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
+fn sumif_implicit_range_is_a_real_reverse_dependency() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(5.))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(25.))),
+            (address(2, 0)?, CellContent::Value(CellValue::Number(38.))),
+            (address(0, 1)?, CellContent::Value(CellValue::Number(10.))),
+            (address(1, 1)?, CellContent::Value(CellValue::Number(20.))),
+            (address(2, 1)?, CellContent::Value(CellValue::Number(30.))),
+        ],
+        3,
+        4,
+    )?;
+    for (column, source) in [(2, "=SUMIF(A1:A3,\">5\",B1)"), (3, "=1+2")] {
+        let operation = formula(&book, address(0, column)?, source)?;
+        book = book.candidate(&operation, DocumentVersion::new(book.version().get() + 1)?)?;
+    }
+    let mut projection = CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(50.))
+    );
+    edit(
+        &mut book,
+        &mut projection,
+        Operation::SetCellValue {
+            address: address(1, 1)?,
+            value: CellValue::Number(40.),
+        },
+    )?;
+    let patch =
+        projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(patch.evaluated_cells, 1);
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(70.))
+    );
+    assert_eq!(
+        projection.results().get(&address(0, 3)?),
+        Some(&Value::Number(3.))
+    );
+    let operation = formula(&book, address(1, 1)?, "=A2*2")?;
+    edit(&mut book, &mut projection, operation)?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(80.))
+    );
+    edit(
+        &mut book,
+        &mut projection,
+        Operation::SetCellValue {
+            address: address(1, 0)?,
+            value: CellValue::Number(7.),
+        },
+    )?;
+    let patch =
+        projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(patch.evaluated_cells, 2);
+    assert_eq!(
+        projection.results().get(&address(0, 2)?),
+        Some(&Value::Number(44.))
+    );
+    let operation = formula(&book, address(1, 1)?, "=SUMIF(A1:A3,\">5\",B1)")?;
+    edit(&mut book, &mut projection, operation)?;
+    projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+    assert_eq!(
+        projection.results().get(&address(1, 1)?),
+        Some(&Value::Error(FormulaError::Cycle))
+    );
+    Ok(())
+}
+
+#[test]
+fn sumif_implicit_dimensions_follow_structural_changes() -> TestResult {
+    let mut book = fixture(
+        vec![
+            (address(0, 0)?, CellContent::Value(CellValue::Number(1.))),
+            (address(1, 0)?, CellContent::Value(CellValue::Number(1.))),
+            (address(2, 0)?, CellContent::Value(CellValue::Number(1.))),
+            (address(2, 1)?, CellContent::Value(CellValue::Number(10.))),
+            (address(3, 1)?, CellContent::Value(CellValue::Number(20.))),
+            (address(4, 1)?, CellContent::Value(CellValue::Number(30.))),
+            (address(5, 1)?, CellContent::Value(CellValue::Number(40.))),
+        ],
+        7,
+        3,
+    )?;
+    let at = address(0, 2)?;
+    let operation = formula(&book, at, "=SUMIF(A1:A3,1,B3)")?;
+    book = book.candidate(&operation, DocumentVersion::new(2)?)?;
+    let inserted = address(20, 0)?.row;
+    for (operation, expected) in [
+        (None, 60.),
+        (
+            Some(Operation::InsertRowsRebased {
+                sheet: at.sheet,
+                before: address(2, 0)?.row,
+                rows: vec![inserted],
+            }),
+            70.,
+        ),
+        (
+            Some(Operation::DeleteRows {
+                sheet: at.sheet,
+                rows: vec![inserted],
+            }),
+            60.,
+        ),
+    ] {
+        if let Some(operation) = operation {
+            book = book.candidate(&operation, DocumentVersion::new(book.version().get() + 1)?)?;
+        }
+        let mut projection =
+            CalculationProjection::from_workbook(&book, CalculationLimits::default())?;
+        projection.calculate(&book, CalculationLimits::default(), &AtomicBool::new(false))?;
+        assert_eq!(
+            projection.results().get(&at),
+            Some(&Value::Number(expected))
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn xlookup_arguments_invalidate_only_dependent_formula() -> TestResult {
     let mut book = fixture(
         vec![

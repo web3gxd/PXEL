@@ -185,6 +185,16 @@
       "url": "https://support.microsoft.com/en-us/excel/functions/xlookup-function",
       "title": "XLOOKUP function",
       "retrieved_at": "2026-09-30"
+    },
+    "sumif": {
+      "url": "https://support.microsoft.com/en-us/excel/functions/sumif-function",
+      "title": "SUMIF function",
+      "retrieved_at": "2026-09-30"
+    },
+    "countif": {
+      "url": "https://support.microsoft.com/en-gb/excel/get-started/use-the-countif-function-in-microsoft-excel?nochrome=true",
+      "title": "COUNTIF function",
+      "retrieved_at": "2026-09-30"
     }
   },
   "cases": [
@@ -11082,6 +11092,1793 @@
       "provenance": {
         "sources": ["xlookup"],
         "basis": "derived bounded PXEL XLOOKUP profile; blank/error/collation and binary ties provisional",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-count->5",
+      "formula": "=COUNTIF(A1:A3,\">5\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-sum->5",
+      "formula": "=SUMIF(A1:A3,\">5\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 63
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-count->=25",
+      "formula": "=COUNTIF(A1:A3,\">=25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-sum->=25",
+      "formula": "=SUMIF(A1:A3,\">=25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 63
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-count-<25",
+      "formula": "=COUNTIF(A1:A3,\"<25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-sum-<25",
+      "formula": "=SUMIF(A1:A3,\"<25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 5
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-count-<=25",
+      "formula": "=COUNTIF(A1:A3,\"<=25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-sum-<=25",
+      "formula": "=SUMIF(A1:A3,\"<=25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-count-=25",
+      "formula": "=COUNTIF(A1:A3,\"=25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-sum-=25",
+      "formula": "=SUMIF(A1:A3,\"=25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 25
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-count-<>25",
+      "formula": "=COUNTIF(A1:A3,\"<>25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-sum-<>25",
+      "formula": "=SUMIF(A1:A3,\"<>25\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 43
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-anchor",
+      "formula": "=SUMIF(A1:A3,\">5\",B1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 50
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-reversed",
+      "formula": "=SUMIF(A3:A1,\">5\",B3:B1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 50
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-missing-sum",
+      "formula": "=SUMIF(A1:A3,\">5\",)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 63
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-dynamic-keys",
+      "formula": "=SUMIF(INDEX(A1:A3,0),\">5\",B1:B3)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 50
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-dynamic-expansion",
+      "formula": "=IFERROR(SUMIF(INDEX(A1:A3,0),\">5\",B1),99)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "diagnostic",
+        "value": "UnsupportedCompatibilityFeature"
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-rectangle",
+      "formula": "=SUMIF(A1:B2,\">2\",C1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 4
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!D1": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!D2": {
+          "type": "number",
+          "value": 40
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 70
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-rectangle-reversed",
+      "formula": "=SUMIF(B2:A1,\">2\",D2:C1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 4
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!D1": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!D2": {
+          "type": "number",
+          "value": 40
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 70
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-dynamic-shrink",
+      "formula": "=SUMIF(A1:A2,\">0\",INDEX(C1:D2,0,0))",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 4
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!D1": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!D2": {
+          "type": "number",
+          "value": 40
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 40
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-xlookup-source",
+      "formula": "=SUMIF(A1:A2,\">0\",XLOOKUP(1,A1:B1,C1:D2))",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 1
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 2
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 3
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 4
+        },
+        "Sheet1!C1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!D1": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!C2": {
+          "type": "number",
+          "value": 30
+        },
+        "Sheet1!D2": {
+          "type": "number",
+          "value": 40
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 40
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-wildcard",
+      "formula": "=COUNTIF(A1:A8,\"apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-escaped",
+      "formula": "=COUNTIF(A1:A8,\"apple~*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-empty",
+      "formula": "=COUNTIF(A1:A8,\"\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 2
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-not-empty",
+      "formula": "=COUNTIF(A1:A8,\"<>\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 6
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-zero",
+      "formula": "=COUNTIF(A1:A8,0)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-blank-criterion",
+      "formula": "=COUNTIF(A1:A8,C1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 3
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-boolean",
+      "formula": "=COUNTIF(A1:A8,TRUE)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-error-string",
+      "formula": "=COUNTIF(A1:A8,\"#DIV/0!\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 1
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-all-text",
+      "formula": "=COUNTIF(A1:A8,\"*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 4
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-negated-wildcard",
+      "formula": "=COUNTIF(A1:A8,\"<>apple*\")",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 6
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-error-criterion",
+      "formula": "=COUNTIF(A1:A8,1/0)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-sum-text",
+      "formula": "=SUMIF(A1:A3,\"apple*\",B1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-sum-empty",
+      "formula": "=SUMIF(A1:A3,\"\",B1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "text",
+          "value": "Apple"
+        },
+        "Sheet1!A2": {
+          "type": "text",
+          "value": "apple*"
+        },
+        "Sheet1!A3": {
+          "type": "blank"
+        },
+        "Sheet1!A4": {
+          "type": "text",
+          "value": ""
+        },
+        "Sheet1!A5": {
+          "type": "number",
+          "value": 0
+        },
+        "Sheet1!A6": {
+          "type": "text",
+          "value": "0"
+        },
+        "Sheet1!A7": {
+          "type": "boolean",
+          "value": true
+        },
+        "Sheet1!A8": {
+          "type": "error",
+          "value": "#DIV/0!"
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 30
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-unselected-error",
+      "formula": "=SUMIF(A1:A2,7,B1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 7
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 13
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 21
+        },
+        "Sheet1!B2": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 21
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-selected-error",
+      "formula": "=SUMIF(A1:A2,13,B1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 7
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 13
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 21
+        },
+        "Sheet1!B2": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "error",
+        "value": "#DIV/0!"
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-no-match",
+      "formula": "=SUMIF(A1:A2,99,B1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 7
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 13
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 21
+        },
+        "Sheet1!B2": {
+          "type": "error",
+          "value": "#DIV/0!"
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 0
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "verified_in_excel": false
+      }
+    },
+    {
+      "id": "criteria-cross-sheet-anchor",
+      "formula": "=SUMIF(A1:A3,\">5\",'Other sheet'!B1)",
+      "origin": "Sheet1!F8",
+      "cells": {
+        "Sheet1!A1": {
+          "type": "number",
+          "value": 5
+        },
+        "Sheet1!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Sheet1!A2": {
+          "type": "number",
+          "value": 25
+        },
+        "Sheet1!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Sheet1!A3": {
+          "type": "number",
+          "value": 38
+        },
+        "Sheet1!B3": {
+          "type": "number",
+          "value": 30
+        },
+        "Other sheet!B1": {
+          "type": "number",
+          "value": 10
+        },
+        "Other sheet!B2": {
+          "type": "number",
+          "value": 20
+        },
+        "Other sheet!B3": {
+          "type": "number",
+          "value": 30
+        }
+      },
+      "expected": {
+        "type": "number",
+        "value": 50
+      },
+      "provenance": {
+        "sources": ["sumif", "countif"],
+        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
         "verified_in_excel": false
       }
     }

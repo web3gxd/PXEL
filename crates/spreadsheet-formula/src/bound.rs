@@ -105,6 +105,30 @@ pub fn bound_dependencies(
             _ => {}
         }
     }
+    if formula.ast().nodes().iter().any(|node| {
+        matches!(node, bound::Node::Call { name, arguments }
+            if name.as_str() == "SUMIF" && arguments.len() == 3)
+    }) {
+        let ast = project(formula, workbook)?;
+        for range in crate::criteria::implicit_sum_ranges(&ast)? {
+            if dependencies.ranges.len() >= 256 {
+                return Err(EvaluationError::CalculationLimitExceeded);
+            }
+            let sheet = workbook
+                .sheets()
+                .iter()
+                .find(|sheet| range.start.sheet.as_ref() == Some(&key(sheet.id())))
+                .ok_or(EvaluationError::InvalidAst)?;
+            dependencies.ranges.push(RangeDependency {
+                formula: formula.origin(),
+                sheet: sheet.id(),
+                first_row: range.start.row,
+                last_row: range.end.row,
+                first_column: range.start.column,
+                last_column: range.end.column,
+            });
+        }
+    }
     Ok(dependencies)
 }
 fn error(e: bound::FormulaError) -> syntax::FormulaError {

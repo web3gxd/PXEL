@@ -83,7 +83,7 @@ Source provenance and documentation conflicts are retained in the corpus.
   conditions, preserving later errors even after a decisive boolean; range
   traversal is budgeted and checked. NOT takes one scalar and inverts the same
   scalar coercion as IF. Arrays/implicit intersection remain unsupported.
-  Engine identity is `pxel-formula-0.12.0`; old persisted contexts require a new
+  Engine identity is `pxel-formula-0.13.0`; old persisted contexts require a new
   authorized calculation epoch. See ADR-055 and the common fixture corpus.
 
 - ABS takes one scalar; MOD takes two and follows the divisor sign. Blank is
@@ -138,7 +138,13 @@ then resolve one return cell. They return scalar values rather than references;
 blank returns zero. Whole-table100k cap, visitor cardinality, text/array boundaries
 and cancellation remain enforced. Mixed-type/coercion/error/collation edge cases
 are provisional; manual Excel validation and dynamic selected dependencies remain
-open. Current identity is pxel-formula-0.12.0.
+open. Current identity is pxel-formula-0.13.0.
+
+SUMIF/COUNTIF (ADR-074) share bounded scalar criteria and charged wildcard helpers.
+Literal SUMIF anchors expand using criteria dimensions and add corresponding
+reverse dependencies. Dynamic INDEX/XLOOKUP ranges support covered shrinkage;
+uncovered expansion fails typed. Blank/numeric-text/boolean/error/Unicode rules
+remain provisional pending manual Excel goldens; SUMIFS/COUNTIFS are next.
 
 `cargo test -p spreadsheet-formula` runs scalar/reference fixtures, canonical
 round trips, generated UTF-8 parsing (both raw and prefixed `=`), malformed arena

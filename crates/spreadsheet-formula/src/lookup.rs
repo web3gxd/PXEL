@@ -7,7 +7,10 @@ use crate::{
 };
 use std::cmp::Ordering;
 
-fn folded(text: &str, budget: &mut EvaluationBudget) -> Result<Vec<char>, EvaluationError> {
+pub(crate) fn folded(
+    text: &str,
+    budget: &mut EvaluationBudget,
+) -> Result<Vec<char>, EvaluationError> {
     if text.len() > MAX_SOURCE_BYTES {
         return Err(EvaluationError::CalculationLimitExceeded);
     }
@@ -26,12 +29,15 @@ fn folded(text: &str, budget: &mut EvaluationBudget) -> Result<Vec<char>, Evalua
 }
 
 #[derive(Clone, Copy)]
-enum Token {
+pub(crate) enum Token {
     Literal(char),
     Any,
     Star,
 }
-fn pattern(text: &[char], budget: &mut EvaluationBudget) -> Result<Vec<Token>, EvaluationError> {
+pub(crate) fn pattern(
+    text: &[char],
+    budget: &mut EvaluationBudget,
+) -> Result<Vec<Token>, EvaluationError> {
     let mut result = Vec::new();
     let mut chars = text.iter().copied().peekable();
     while let Some(ch) = chars.next() {
@@ -49,7 +55,7 @@ fn pattern(text: &[char], budget: &mut EvaluationBudget) -> Result<Vec<Token>, E
     }
     Ok(result)
 }
-fn wildcard(
+pub(crate) fn wildcard(
     tokens: &[Token],
     text: &[char],
     budget: &mut EvaluationBudget,
@@ -89,7 +95,7 @@ fn wildcard(
     }
     Ok(prior[text.len()])
 }
-fn text_order(
+pub(crate) fn text_order(
     left: &[char],
     right: &[char],
     budget: &mut EvaluationBudget,
@@ -140,7 +146,7 @@ fn order(
         _ => return Err(EvaluationError::InvalidResolverResult),
     })
 }
-fn source(
+pub(crate) fn source(
     ast: &Ast,
     id: NodeId,
     resolver: &impl ReferenceResolver,
@@ -508,7 +514,7 @@ pub(crate) fn call(
     }
     search(&range, lookup, mode, resolver, budget)
 }
-fn normalize(range: &mut RangeReference) -> Result<(u32, u32), EvaluationError> {
+pub(crate) fn normalize(range: &mut RangeReference) -> Result<(u32, u32), EvaluationError> {
     if range.start.sheet != range.end.sheet
         || range.start.row >= 1_048_576
         || range.end.row >= 1_048_576

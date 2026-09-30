@@ -276,6 +276,77 @@ test(
         } finally {
           xEditor.socket.terminate();
         }
+        const criteriaSource = '=SUMIF(A1:A2,">0",B1)+COUNTIF(A1:A2,">0")';
+        const { snapshot: criteriaBook } = await createDocument(base, cookie);
+        const criteriaWriter = await connect(base, cookie);
+        for (const [index, [row, column, value]] of [
+          [0, 0, 7],
+          [1, 0, 13],
+          [0, 1, 21],
+          [1, 1, 29],
+        ].entries()) {
+          assert.equal(
+            (
+              await criteriaWriter.send(
+                setCommand(criteriaWriter, { ...criteriaBook, version: String(index + 1) }, value, {
+                  row,
+                  column,
+                  sequence: index + 1,
+                }),
+              )
+            ).case,
+            'committed',
+          );
+        }
+        const criteriaCommand = formulaCommand(
+          criteriaWriter,
+          { ...criteriaBook, version: '5' },
+          criteriaSource,
+          { column: 2, sequence: 5 },
+        );
+        const criteriaAck = await criteriaWriter.send(criteriaCommand);
+        assert.equal(criteriaAck.case, 'committed');
+        const criteriaBefore = await calculation(base, cookie, criteriaBook.document_id, 6);
+        assert.deepEqual(criteriaBefore.values[0].value, { type: 'number', value: 52 });
+        criteriaWriter.socket.terminate();
+        await kill();
+        await start();
+        const criteriaRestored = await getDocument(base, cookie, criteriaBook.document_id);
+        assert.equal(criteriaRestored.version, '6');
+        assert.equal(
+          criteriaRestored.state_hash,
+          Buffer.from(criteriaAck.value.confirmedStateHash).toString('hex'),
+        );
+        assert.equal(
+          criteriaRestored.sheets[0].cells.find((cell) => cell.value.type === 'formula').value.value
+            .source,
+          criteriaSource,
+        );
+        const criteriaAfter = await calculation(base, cookie, criteriaBook.document_id, 6);
+        assert.equal(criteriaAfter.calculated_state_hash, criteriaBefore.calculated_state_hash);
+        assert.deepEqual(criteriaAfter.values, criteriaBefore.values);
+        const criteriaEditor = await connect(base, cookie);
+        try {
+          assert.equal((await criteriaEditor.send(criteriaCommand)).case, 'receipt');
+          assert.equal(
+            (
+              await criteriaEditor.send(
+                setCommand(criteriaEditor, criteriaRestored, 39, {
+                  row: 1,
+                  column: 1,
+                  sequence: 6,
+                }),
+              )
+            ).case,
+            'committed',
+          );
+          assert.deepEqual(
+            (await calculation(base, cookie, criteriaBook.document_id, 7)).values[0].value,
+            { type: 'number', value: 62 },
+          );
+        } finally {
+          criteriaEditor.socket.terminate();
+        }
         const matchSource = '=MATCH(A1+1,A1:A2,1)+IFERROR(MATCH(7,A1:A2,0),9)';
         const { snapshot: matchBook } = await createDocument(base, cookie);
         const matchWriter = await connect(base, cookie);

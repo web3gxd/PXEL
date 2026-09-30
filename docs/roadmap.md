@@ -438,3 +438,12 @@ colon/binary-wildcard/manual Excel/locale/dynamic selected dependencies remain
 open. Preliminary100k bound benchmarks in benchmarks/2026-09-30-xlookup-local.md.
 Next functional slice SUMIF/COUNTIF, then SUMIFS/COUNTIFS; remaining full XLSX,
 structure/recovery/load/production and Linux/Compose/remote CI gates stay open.
+SUMIF/COUNTIF (ADR074) is locally verified:520shared fixtures and1010books/2020patches
+native/browser parity,7native criteria tests and2implicit-range graph/structural
+tests. Real PostgreSQL52HTTP,90browser,83frontend unit and2hard-restart tests
+passed. Literal top-left sum expansion has actual reverse dependencies;
+dynamic uncovered expansion is typed unsupported. Numeric-text/blank/error/Unicode
+rules remain provisional pending manual Excel goldens. Preliminary100k bound
+measurements are in benchmarks/2026-09-30-criteria-local.md. Next functional slice
+SUMIFS/COUNTIFS; the broader XLSX/structure/recovery/load/production and deployment
+gates remain open.

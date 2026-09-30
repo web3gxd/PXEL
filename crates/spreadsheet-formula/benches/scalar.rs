@@ -346,6 +346,17 @@ fn index_benchmarks(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>>
             "=MATCH(1,A1:A100000,1)",
             100000.0,
         ),
+        (
+            "COUNTIF_bound_100k",
+            "=COUNTIF(A1:A100000,\">0\")",
+            100000.0,
+        ),
+        ("SUMIF_bound_100k", "=SUMIF(A1:A100000,\">0\")", 100000.0),
+        (
+            "SUMIF_bound_anchor_100k",
+            "=SUMIF(A1:A100000,\">0\",A1)",
+            100000.0,
+        ),
     ] {
         let formula = binder::bind(source, &book, origin)?;
         if bound::evaluate_bound(&formula, &book, &cache, &mut EvaluationBudget::default())?

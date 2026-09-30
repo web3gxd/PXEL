@@ -120,3 +120,14 @@ Sorted validation returnsNA on unsorted binary source; binary duplicate tie rule
 and type/blank/error/coercion/collation are provisional. Manual Excel goldens remain
 open. All keys and selected result boundaries are bounded and charged; binary total
 cost isO(n). Conservative full-source dependencies may report unselected cycles.
+
+## Single-criterion aggregate profile (ADR-074)
+
+Engine0.13.0: partially supported. COUNTIF(range,criterion) and SUMIF with optional
+sum range support comparison operators and charged case-insensitive wildcards.
+The separate sum rectangle starts at the supplied top-left and uses criteria
+dimensions; literal expansion is included in reverse dependencies. INDEX/XLOOKUP
+selections support shrinkage within their resolved rectangle; dynamic expansion
+outside that rectangle is typed unsupported. Numeric-text, blank/boolean/error,
+Unicode collation and255-character criteria rules are provisional PXEL semantics.
+Derived fixtures do not claim manual Excel validation. SUMIFS/COUNTIFS are next.
