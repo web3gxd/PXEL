@@ -236,6 +236,33 @@ for (const [source, value] of [
     patches: [mutation(1, 1), mutation(2, 0)],
   });
 }
+const styleFixtures = JSON.parse(
+  readFileSync('crates/spreadsheet-wasm/fixtures/styles-v4.json', 'utf8'),
+);
+requests.push(...styleFixtures);
+const styleLeaves = {
+  font_family: 'Courier New',
+  font_size_hundredth_points: 1400,
+  font_bold: true,
+  font_italic: true,
+  font_underline: 'double',
+  font_strike: true,
+  font_color: [10, 20, 30],
+  fill: [230, 240, 250],
+  border_top: { line: 'thin', color: [1, 2, 3] },
+  border_right: { line: 'medium', color: [1, 2, 3] },
+  border_bottom: { line: 'double', color: [1, 2, 3] },
+  border_left: { line: 'dashed', color: [1, 2, 3] },
+  horizontal: 'center',
+  vertical: 'top',
+  wrap: true,
+  number_format: 'decimal2',
+};
+for (const [property, value] of Object.entries(styleLeaves)) {
+  const fixture = structuredClone(styleFixtures[0]);
+  fixture.patches[0].styles[0].changes = [{ property, value }];
+  requests.push(fixture);
+}
 const input = JSON.stringify(requests);
 const native = spawnSync(
   'cargo',
@@ -262,17 +289,22 @@ for (const fixture of volatileExpectations) {
   );
 }
 assert.equal(expected.length, requests.length);
-for (const outputs of expected) {
-  assert.equal(outputs.length, 3);
+for (const [index, outputs] of expected.entries()) {
+  assert.equal(outputs.length, requests[index].patches.length + 1);
   assert.equal(
     outputs[0].normalized_result_hash,
-    outputs[2].normalized_result_hash,
+    outputs.at(-1).normalized_result_hash,
     'Reverting a preview delta restores the original normalized result hash',
   );
   for (const output of outputs) {
     assert.equal(output.preview, true);
-    assert.equal(output.input_version, '3');
+    assert.equal(output.input_version, requests[index].init.input_version);
     assert.match(output.normalized_result_hash, /^[0-9a-f]{64}$/);
+    if (requests[index].init.schema_version === 4) {
+      assert.equal(output.schema_version, 2);
+      assert.match(output.normalized_authored_state_hash, /^[0-9a-f]{64}$/);
+      assert.equal(output.evaluated_cells, 0);
+    }
   }
 }
 const files = new Map([
@@ -294,7 +326,7 @@ const files = new Map([
     '/worker.js',
     [
       'text/javascript',
-      `import init,{WasmWorkbook} from '/engine.js';self.onmessage=async e=>{try{await init({module_or_path:'/engine.wasm'});const start=performance.now();const results=e.data.map(item=>{const book=new WasmWorkbook(JSON.stringify(item.init));try{const outputs=[JSON.parse(book.calculate())];for(const patch of item.patches){book.apply(JSON.stringify(patch));outputs.push(JSON.parse(book.calculate()));}return outputs;}finally{book.free();}});self.postMessage({results,compute_ms:performance.now()-start});}catch{self.postMessage({error:'stateful worker failed'});}};`,
+      `import init,{WasmWorkbook} from '/engine.js';self.onmessage=async e=>{try{await init({module_or_path:'/engine.wasm'});const start=performance.now();const results=e.data.map(item=>{const book=new WasmWorkbook(JSON.stringify(item.init));try{const outputs=[JSON.parse(book.calculate())];for(const patch of item.patches){if(patch.schema_version===2){outputs.push(JSON.parse(book.patch(JSON.stringify(patch))));}else{book.apply(JSON.stringify(patch));outputs.push(JSON.parse(book.calculate()));}}return outputs;}finally{book.free();}});self.postMessage({results,compute_ms:performance.now()-start});}catch{self.postMessage({error:'stateful worker failed'});}};`,
     ],
   ],
   [

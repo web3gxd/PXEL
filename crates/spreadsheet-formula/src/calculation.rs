@@ -334,7 +334,9 @@ impl CalculationProjection {
             | Operation::AxisCompensation { .. } => {
                 return Err(CalculationError::InvalidProjection);
             }
-            Operation::AdvanceCalculationEpoch { .. } => {
+            Operation::AdvanceCalculationEpoch { .. }
+            | Operation::StyleWrite { .. }
+            | Operation::StyleCompensation { .. } => {
                 return self.prepare_reconcile(book, &BTreeSet::new(), limits);
             }
         };

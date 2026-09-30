@@ -15,7 +15,8 @@ use spreadsheet_application::journal::{
 };
 use spreadsheet_domain::workbook::{
     CalculationContext, CellContent, CellWriteKind, Command, CommandPayload, CommittedEvent,
-    DocumentId, DocumentVersion, DomainError, EventPrincipal, Operation, OperationId, Workbook,
+    DocumentId, DocumentVersion, DomainError, EventPrincipal, GuardedStyleWrite, Operation,
+    OperationId, StyleWriteKind, Workbook,
 };
 use std::{
     collections::HashMap, future::Future, num::NonZeroU64, pin::Pin, sync::Arc, time::Duration,
@@ -780,7 +781,23 @@ async fn submit<J: OperationJournal>(
                 if !target.operation.is_inverse_target() {
                     return Err(JournalError::NotUndoable.into());
                 }
-                if matches!(
+                if let Operation::StyleWrite { kind, writes }
+                | Operation::StyleCompensation { kind, writes, .. } = &target.operation
+                {
+                    Operation::StyleCompensation {
+                        kind: *kind,
+                        writes: writes
+                            .iter()
+                            .map(|write| GuardedStyleWrite {
+                                address: write.address,
+                                previous: write.changes.clone(),
+                                changes: write.previous.clone(),
+                            })
+                            .collect(),
+                        undoes: target.operation_id,
+                        undoes_version: target.version,
+                    }
+                } else if matches!(
                     target.operation,
                     Operation::AxisEdit { .. } | Operation::AxisCompensation { .. }
                 ) {
@@ -1125,6 +1142,22 @@ fn normalize(
             sheet: *sheet,
             columns: columns.clone(),
         }),
+        CommandPayload::SetCellStyle { address, changes } => {
+            Ok(spreadsheet_domain::style_write::prepare_style_write(
+                workbook,
+                &[*address],
+                changes,
+                StyleWriteKind::Cell,
+            )?)
+        }
+        CommandPayload::SetRangeStyle { addresses, changes } => {
+            Ok(spreadsheet_domain::style_write::prepare_style_write(
+                workbook,
+                addresses,
+                changes,
+                StyleWriteKind::Range,
+            )?)
+        }
         CommandPayload::SetCellValue { address, value } => {
             let value = value.normalized()?;
             Ok(Operation::CellWrite {

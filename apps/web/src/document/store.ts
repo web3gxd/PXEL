@@ -2,11 +2,25 @@ import { create, toBinary } from '@bufbuild/protobuf';
 import { PreviewClient, type PreviewStatus } from '../calculation/client';
 import { copyFormulaInWorker } from '../calculation/formula-copy';
 import { readHistory } from './history';
+import {
+  DEFAULT_STYLE,
+  applyStyle,
+  decodeStyle,
+  decodeAuthoredMetadata,
+  encodeStylePatch,
+  formatNumber,
+  isDefaultStyle,
+  type CellStyle,
+  type StyleChange,
+  type StyledCell,
+  type AuthoredMetadata,
+} from './styles';
 import type {
   Stamp,
   PreviewCell,
   PreviewContext,
   PreviewMoveGeometry,
+  PreviewStyleMutation,
   PreviewValue,
 } from '../calculation/protocol';
 import {
@@ -15,6 +29,7 @@ import {
   CellValueSchema,
   SetCellValueSchema,
   CalculationCommittedSchema,
+  BoundFormulaSchema,
 } from '../generated/pxel/wire/v1/session_pb';
 import type {
   CanonicalOperation,
@@ -30,6 +45,7 @@ export type FormulaDescriptor = {
   ast_schema?: number;
   compatibility_profile?: string;
   bound_at_version?: string;
+  bound_formula_wire_hex?: string;
 };
 export type Value =
   | { type: 'blank' }
@@ -45,8 +61,9 @@ export type Sheet = {
   rows: string[];
   columns: string[];
   cells: { row_id: string; column_id: string; value: Value }[];
+  styles?: StyledCell[];
 };
-export type Projection = {
+export type Projection = AuthoredMetadata & {
   document_id: string;
   version: string;
   state_hash: string;
@@ -134,6 +151,15 @@ type PendingRangeMove = {
   bytes: Uint8Array;
   attempts: number;
 };
+type PendingStyle = {
+  kind: 'style';
+  id: string;
+  sheet: string;
+  targets: ReadonlySet<string>;
+  changes: readonly StyleChange[];
+  bytes: Uint8Array;
+  attempts: number;
+};
 type Pending =
   | PendingCell
   | PendingBatch
@@ -145,7 +171,8 @@ type Pending =
   | PendingAddSheet
   | PendingUndo
   | PendingRangeCopy
-  | PendingRangeMove;
+  | PendingRangeMove
+  | PendingStyle;
 export function uuidBytes(id: string) {
   return Uint8Array.from(id.replaceAll('-', '').match(/../g) ?? [], (pair) => parseInt(pair, 16));
 }
@@ -207,7 +234,7 @@ const isUuid = (value: unknown): value is string =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 const formulaProfile = 'pxel-excel-subset-v1';
 const byteLength = (text: string) => new TextEncoder().encode(text).length;
-function decodeFormula(input: unknown): FormulaDescriptor {
+function decodeFormula(input: unknown, authored = false): FormulaDescriptor {
   const value = input as Partial<FormulaDescriptor> | undefined;
   if (
     !value ||
@@ -225,7 +252,13 @@ function decodeFormula(input: unknown): FormulaDescriptor {
     value.ast_schema !== 1 ||
     value.compatibility_profile !== formulaProfile ||
     typeof value.bound_at_version !== 'string' ||
-    !/^\d+$/.test(value.bound_at_version)
+    !/^\d+$/.test(value.bound_at_version) ||
+    ((authored || value.bound_formula_wire_hex !== undefined) &&
+      (typeof value.bound_formula_wire_hex !== 'string' ||
+        !value.bound_formula_wire_hex.length ||
+        value.bound_formula_wire_hex.length > 1048576 ||
+        value.bound_formula_wire_hex.length % 2 !== 0 ||
+        !/^[0-9a-f]+$/.test(value.bound_formula_wire_hex)))
   )
     throw new Error('Неподдерживаемое представление формулы');
   return value.current_text && value.current_text !== value.canonical
@@ -308,6 +341,8 @@ export function decodeProjection(input: unknown): Projection {
   const rowIds = new Set<string>();
   const columnIds = new Set<string>();
   let totalCells = 0;
+  let totalStyles = 0;
+  let styleBytes = 0;
   for (const sheet of p.sheets) {
     if (
       !sheet ||
@@ -334,7 +369,7 @@ export function decodeProjection(input: unknown): Projection {
     sheetIds.add(sheet.id);
     sheetNames.add(foldedName);
     totalCells += sheet.cells.length;
-    if (totalCells > 100000) throw invalid();
+    if (p.authored_projection_schema_version !== 4 && totalCells > 100000) throw invalid();
     if (
       !sheet.rows.every(isUuid) ||
       !sheet.columns.every(isUuid) ||
@@ -360,7 +395,7 @@ export function decodeProjection(input: unknown): Projection {
       cells.add(key(cell.row_id, cell.column_id));
       const v = cell.value;
       if (v?.type === 'formula') {
-        v.value = decodeFormula(v.value);
+        v.value = decodeFormula(v.value, p.authored_projection_schema_version === 4);
         continue;
       }
       if (
@@ -374,7 +409,31 @@ export function decodeProjection(input: unknown): Projection {
       )
         throw invalid();
     }
+    if (p.authored_projection_schema_version === 4) {
+      if (!Array.isArray(sheet.styles) || sheet.styles.length > 100000) throw invalid();
+      const styled = new Set<string>();
+      for (const cell of sheet.styles) {
+        if (
+          !cell ||
+          !rows.has(cell.row_id) ||
+          !columns.has(cell.column_id) ||
+          styled.has(key(cell.row_id, cell.column_id)) ||
+          Object.keys(cell).length !== 3
+        )
+          throw invalid();
+        const style = decodeStyle(cell.style);
+        if (isDefaultStyle(style)) throw invalid();
+        cell.style = style;
+        styled.add(key(cell.row_id, cell.column_id));
+        cells.add(key(cell.row_id, cell.column_id));
+        totalStyles++;
+        styleBytes += 512 + byteLength(style.font_family);
+      }
+      if (cells.size > 100000 || totalStyles > 100000 || styleBytes > 64 * 1024 * 1024)
+        throw invalid();
+    } else if (sheet.styles !== undefined) throw invalid();
   }
+  decodeAuthoredMetadata(p, rowIds, columnIds);
   return p as Projection;
 }
 
@@ -389,10 +448,34 @@ export class DocumentStore {
   private movePreview:
     | { operationId: string; stamp: Stamp; writes: ReadonlyMap<string, PreviewValue> | undefined }
     | undefined;
-  private preview = new PreviewClient((status, values, stamp, moveWrites) => {
+  private previewStyleOverlay = new Map<string, Set<keyof CellStyle>>();
+  private authoredPreviewHash: string | undefined;
+  get previewAuthoredHash() {
+    return this.previewStatus === 'ready' && this.matchesPreview(this.previewStamp)
+      ? this.authoredPreviewHash
+      : undefined;
+  }
+  private preview = new PreviewClient((status, values, stamp, moveWrites, authoredHash) => {
+    if (
+      status === 'ready' &&
+      this.matchesPreview(stamp) &&
+      authoredHash &&
+      !this.editing &&
+      !this.pending.length &&
+      authoredHash !== this.projection?.state_hash
+    ) {
+      this.previewStatus = 'failed';
+      this.previewValues = new Map();
+      this.authoredPreviewHash = undefined;
+      this.previewStamp = undefined;
+      this.notify();
+      return;
+    }
     this.previewStatus = status;
     this.previewValues = values ?? new Map();
     this.previewStamp = stamp;
+    this.authoredPreviewHash =
+      status === 'ready' && this.matchesPreview(stamp) ? authoredHash : undefined;
     if (this.movePreview) {
       this.movePreview.writes =
         status === 'ready' &&
@@ -409,6 +492,7 @@ export class DocumentStore {
   projection: Projection | undefined;
   activeSheetId: string | undefined;
   confirmed = new Map<string, Value>();
+  confirmedStyles = new Map<string, CellStyle>();
   pending: Pending[] = [];
   private quarantinedPending: { actor: string; document: string; intents: Pending[] } | undefined;
   private get pendingCount() {
@@ -632,11 +716,32 @@ export class DocumentStore {
     }
     return this.movePreviewValue(row, column) ?? this.confirmed.get(key(row, column));
   }
+  style(position: Position): Readonly<CellStyle> {
+    const sheet = this.sheet,
+      row = sheet?.rows[position.row],
+      column = sheet?.columns[position.column];
+    if (!sheet || !row || !column) return DEFAULT_STYLE;
+    return this.styleAt(sheet.id, row, column);
+  }
+  private styleAt(sheetId: string, row: string, column: string): Readonly<CellStyle> {
+    const cellKey = key(row, column);
+    let result = this.confirmedStyles.get(`${sheetId}/${cellKey}`) ?? DEFAULT_STYLE;
+    for (const pending of this.pending)
+      if (pending.kind === 'style' && pending.sheet === sheetId && pending.targets.has(cellKey))
+        result = applyStyle(result, pending.changes);
+    return result;
+  }
   display(position: Position) {
+    const value = this.displayContent(position);
+    return value?.type === 'number'
+      ? formatNumber(value.value, this.style(position).number_format)
+      : displayValue(value);
+  }
+  displayContent(position: Position): Value | CalculatedValue | undefined {
     const row = this.sheet?.rows[position.row],
       column = this.sheet?.columns[position.column];
     const value = row && column ? this.previewValue(row, column) : this.value(position);
-    if (value?.type !== 'formula') return displayValue(value);
+    if (value?.type !== 'formula') return value;
     if (
       row &&
       column &&
@@ -645,7 +750,7 @@ export class DocumentStore {
       (this.editing || this.pending.length || this.calculationStatus !== 'complete')
     ) {
       const preview = this.previewValues.get(`${this.sheet?.id}/${row}/${column}`);
-      if (preview) return displayValue(preview);
+      if (preview) return preview;
     }
     if (
       !row ||
@@ -658,13 +763,13 @@ export class DocumentStore {
             pending.writes.some((item) => item.row === row && item.column === column)),
       )
     )
-      return displayValue(value);
+      return value;
     if (
       this.calculatedVersion !== this.projection?.version ||
       this.calculationStatus !== 'complete'
     )
-      return displayValue(value);
-    return displayValue(this.calculated.get(key(row, column)));
+      return value;
+    return this.calculated.get(key(row, column));
   }
   get previewVisible() {
     return (
@@ -759,6 +864,24 @@ export class DocumentStore {
       if (row && column) overlay.add(key(row, column));
     }
     const touched = new Set([...this.previewOverlay, ...overlay, ...this.previewDirty]);
+    const styleOverlay = new Map<string, Set<keyof CellStyle>>();
+    for (const pending of this.pending)
+      if (pending.kind === 'style')
+        for (const target of pending.targets) {
+          const address = `${pending.sheet}/${target}`,
+            leaves = styleOverlay.get(address) ?? new Set<keyof CellStyle>();
+          for (const change of pending.changes) leaves.add(change.property);
+          styleOverlay.set(address, leaves);
+        }
+    const styleTouched = new Map<string, Set<keyof CellStyle>>(
+      [...this.previewStyleOverlay].map(([address, leaves]) => [address, new Set(leaves)]),
+    );
+    for (const [address, leaves] of styleOverlay) {
+      const union = styleTouched.get(address) ?? new Set<keyof CellStyle>();
+      for (const leaf of leaves) union.add(leaf);
+      styleTouched.set(address, union);
+    }
+    this.previewStyleOverlay = styleOverlay;
     this.previewOverlay = overlay;
     this.previewDirty.clear();
     if (reset) this.previewRevision = -1n;
@@ -767,8 +890,34 @@ export class DocumentStore {
       input_version: projection.version,
       pending_revision: String(++this.previewRevision),
     };
+    const styleMutations = (targets: Map<string, Set<keyof CellStyle>>): PreviewStyleMutation[] =>
+      projection.authored_projection_schema_version === 4
+        ? [...targets].flatMap(([address, leaves]) => {
+            const [sheet_id = '', row_id = '', column_id = ''] = address.split('/');
+            const owner = projection.sheets.find((s) => s.id === sheet_id);
+            if (!owner?.rows.includes(row_id) || !owner.columns.includes(column_id)) return [];
+            const style = this.styleAt(sheet_id, row_id, column_id);
+            return [
+              {
+                sheet_id,
+                row_id,
+                column_id,
+                changes: [...leaves].map((property) => ({
+                  property,
+                  value:
+                    JSON.stringify(style[property]) === JSON.stringify(DEFAULT_STYLE[property])
+                      ? null
+                      : style[property],
+                })),
+              },
+            ];
+          })
+        : [];
     if (reset) {
-      const keys = new Set([...this.confirmed.keys(), ...overlay]);
+      const keys = new Set([
+        ...this.confirmed.keys(),
+        ...(projection.authored_projection_schema_version === 4 ? [] : overlay),
+      ]);
       const cellsBySheet = new Map(
         projection.sheets.map((item) => [item.id, [] as Sheet['cells']]),
       );
@@ -779,19 +928,82 @@ export class DocumentStore {
         cellsBySheet.get(owner)?.push({
           row_id,
           column_id,
-          value: this.previewValue(row_id, column_id),
+          value:
+            projection.authored_projection_schema_version === 4
+              ? this.confirmed.get(cellKey)!
+              : this.previewValue(row_id, column_id),
         });
       }
-      this.preview.reset({
-        ...stamp,
-        ...(projection.calculation_context
-          ? { schema_version: 3 as const, calculation_context: projection.calculation_context }
-          : { schema_version: projection.sheets.length === 1 ? (1 as const) : (2 as const) }),
-        sheets: projection.sheets.map((item) => ({
+      const sheets = projection.sheets.map((item) => {
+        const styles = new Map(
+          (item.styles ?? []).map((cell) => [key(cell.row_id, cell.column_id), cell]),
+        );
+        const rows = new Set(item.rows),
+          columns = new Set(item.columns);
+        for (const address of projection.authored_projection_schema_version === 4
+          ? []
+          : styleOverlay.keys()) {
+          const [owner, row = '', column = ''] = address.split('/');
+          if (owner !== item.id || !rows.has(row) || !columns.has(column)) continue;
+          const style = this.styleAt(item.id, row, column);
+          if (isDefaultStyle(style)) styles.delete(key(row, column));
+          else styles.set(key(row, column), { row_id: row, column_id: column, style });
+        }
+        return {
           ...item,
           cells: cellsBySheet.get(item.id) ?? [],
-        })),
+          ...(projection.authored_projection_schema_version === 4
+            ? { styles: [...styles.values()] }
+            : {}),
+        };
       });
+      if (projection.authored_projection_schema_version === 4) {
+        if (
+          projection.last_axis_change_version === undefined ||
+          !projection.retired_row_ids ||
+          !projection.retired_column_ids ||
+          !projection.row_activation_floors ||
+          !projection.column_activation_floors
+        ) {
+          this.preview.dispose();
+          this.previewStatus = 'failed';
+          return;
+        }
+        this.preview.reset({
+          ...stamp,
+          schema_version: 4,
+          sheets,
+          last_axis_change_version: projection.last_axis_change_version,
+          retired_row_ids: projection.retired_row_ids,
+          retired_column_ids: projection.retired_column_ids,
+          row_activation_floors: projection.row_activation_floors,
+          column_activation_floors: projection.column_activation_floors,
+          ...(projection.calculation_context
+            ? { calculation_context: projection.calculation_context }
+            : {}),
+        });
+        // Exact hydration contains only authored values with server-bound ASTs.
+        // Draft source and pending leaves are separate commands, even after reset.
+        if (overlay.size || styleOverlay.size)
+          this.preview.patch(
+            { ...stamp, pending_revision: String(++this.previewRevision) },
+            [...overlay].flatMap((cellKey) => {
+              const [row_id = '', column_id = ''] = cellKey.split('/'),
+                sheet_id = this.previewSheetByRow.get(row_id);
+              return sheet_id
+                ? [{ sheet_id, row_id, column_id, value: this.previewValue(row_id, column_id) }]
+                : [];
+            }),
+            styleMutations(styleOverlay),
+          );
+      } else
+        this.preview.reset({
+          ...stamp,
+          ...(projection.calculation_context
+            ? { schema_version: 3 as const, calculation_context: projection.calculation_context }
+            : { schema_version: projection.sheets.length === 1 ? (1 as const) : (2 as const) }),
+          sheets,
+        });
     } else {
       const cells: PreviewCell[] = [...touched].flatMap((cellKey) => {
         const [row_id = '', column_id = ''] = cellKey.split('/');
@@ -806,7 +1018,7 @@ export class DocumentStore {
           },
         ];
       });
-      this.preview.patch(stamp, cells);
+      this.preview.patch(stamp, cells, styleMutations(styleTouched));
     }
   }
   private restartCalculation() {
@@ -1033,6 +1245,13 @@ export class DocumentStore {
     this.confirmed = new Map(
       projection.sheets.flatMap((sheet) =>
         sheet.cells.map((c) => [key(c.row_id, c.column_id), c.value] as const),
+      ),
+    );
+    this.confirmedStyles = new Map(
+      projection.sheets.flatMap((sheet) =>
+        (sheet.styles ?? []).map(
+          (cell) => [`${sheet.id}/${key(cell.row_id, cell.column_id)}`, cell.style] as const,
+        ),
       ),
     );
     this.restartCalculation();
@@ -1513,6 +1732,86 @@ export class DocumentStore {
     this.notify();
     this.flush();
     return true;
+  }
+  get canFormat() {
+    return Boolean(
+      this.sheet &&
+      this.actor &&
+      this.sender &&
+      !this.syncing &&
+      !this.editing &&
+      this.pendingCount < 128,
+    );
+  }
+  setStyle(changes: readonly StyleChange[]) {
+    const sheet = this.sheet,
+      projection = this.projection,
+      actor = this.actor;
+    if (!sheet || !projection || !actor || !this.canFormat) return false;
+    const bounds = this.selectionBounds;
+    const count =
+      (bounds.endRow - bounds.startRow + 1) * (bounds.endColumn - bounds.startColumn + 1);
+    if (!Number.isInteger(count) || count < 1 || count > 1000) {
+      this.error = 'Можно оформить не более 1000 ячеек за один раз.';
+      this.notify();
+      return false;
+    }
+    try {
+      const patch = encodeStylePatch(changes);
+      const addresses = [],
+        targets = new Set<string>();
+      for (let r = bounds.startRow; r <= bounds.endRow; r++)
+        for (let c = bounds.startColumn; c <= bounds.endColumn; c++) {
+          const row = sheet.rows[r],
+            column = sheet.columns[c];
+          if (!row || !column) throw new Error('Выделение находится вне листа.');
+          addresses.push({
+            sheetId: uuidBytes(sheet.id),
+            rowId: uuidBytes(row),
+            columnId: uuidBytes(column),
+          });
+          targets.add(key(row, column));
+        }
+      const id = uuidV7();
+      const bytes = toBinary(
+        ClientEnvelopeSchema,
+        create(ClientEnvelopeSchema, {
+          protocolVersion: 1,
+          payload: {
+            case: 'command',
+            value: {
+              operationId: uuidBytes(id),
+              documentId: uuidBytes(projection.document_id),
+              actorId: actor,
+              baseVersion: BigInt(projection.version),
+              clientSequence: ++this.sequence,
+              ...(addresses.length === 1
+                ? { setCellStyle: { address: addresses[0], patch } }
+                : { setRangeStyle: { addresses, patch } }),
+            },
+          },
+        }),
+      );
+      if (bytes.length > 1048576) throw new Error('Изменение оформления слишком большое.');
+      this.pending.push({
+        kind: 'style',
+        id,
+        sheet: sheet.id,
+        targets,
+        changes: structuredClone(changes),
+        bytes,
+        attempts: 0,
+      });
+      this.syncPreview();
+      this.error = '';
+      this.notify();
+      this.flush();
+      return true;
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'Не удалось изменить оформление.';
+      this.notify();
+      return false;
+    }
   }
   get canUndo() {
     return Boolean(
@@ -2402,6 +2701,9 @@ export class DocumentStore {
           ast_schema: formula.ast.schemaVersion,
           compatibility_profile: formulaProfile,
           bound_at_version: String(formula.boundAtVersion),
+          bound_formula_wire_hex: [...toBinary(BoundFormulaSchema, formula)]
+            .map((byte) => byte.toString(16).padStart(2, '0'))
+            .join(''),
         }),
       });
       return;
@@ -2680,7 +2982,8 @@ export class DocumentStore {
           completed?.kind === 'insertRows' ||
           completed?.kind === 'deleteRows' ||
           completed?.kind === 'insertColumns' ||
-          completed?.kind === 'deleteColumns'
+          completed?.kind === 'deleteColumns' ||
+          completed?.kind === 'style'
         ) {
           this.undoHistory.push(completed.id);
           if (this.undoHistory.length > 100) this.undoHistory.shift();

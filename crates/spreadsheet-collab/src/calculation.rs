@@ -115,6 +115,7 @@ impl CalculationHandle {
             | Operation::AxisEdit { .. }
             | Operation::AxisCompensation { .. } => pending.rebuild = true,
             Operation::AdvanceCalculationEpoch { .. } => pending.rebuild = true,
+            Operation::StyleWrite { .. } | Operation::StyleCompensation { .. } => {}
         }
         if pending.changed.len() > 100_000 {
             pending.changed.clear();

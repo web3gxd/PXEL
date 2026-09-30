@@ -182,3 +182,37 @@ Developer percentiles не заменяют fixed-runner
 acceptance; серверный commit и GPU presentation этим harness не измеряются.
 
 Failure не удаляет тест и не ослабляет assertion без причины. Root cause исправляется либо явно записывается blocker с воспроизведением. Skipped и not-run отличаются от passed. Нельзя назвать CI green, если прогон был только локальным; локальный CI-equivalent run так и называется. Combined toolchain becomes tested baseline только после соответствующих реальных builds/integration gates, а не metadata registry lookup.
+
+## Локальные проверки оформления, ADR-087 (2026-09-30)
+
+На текущем срезе прошли следующие проверки; результаты общей завершающей регрессии
+фиксируются отдельно в RUNBOOK.
+
+| Проверка                        | Полученное свидетельство                                                                                  |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Frontend                        | 175 unit tests; TypeScript, ESLint и production build прошли                                              |
+| Rust/SQLx                       | Workspace strict Clippy и SQLx checked-query check прошли                                                 |
+| Durable style journal           | 7 tests на реальном PostgreSQL: guards свойств/автора, candidate context, replay, Undo/Redo после вставки |
+| Persisted codec                 | 56 tests; новые style families/snapshot 4 и сохранённые legacy goldens                                    |
+| Native WASM adapter             | 27 tests; дополнительно 3 domain authored-preview tests                                                   |
+| Настоящий native/browser Worker | 1027 книг, 2037 patches; полный normalized output и самостоятельно вычисленные authored hashes совпали    |
+| Canvas/toolbar browser          | 8 сценариев при DPR 1/2: sparse styles, цвета, Undo/Redo, вставка/reload, preview hash                    |
+
+Frontend команды: `pnpm --filter @pxel/web test`,
+`pnpm --filter @pxel/web typecheck`, `pnpm --filter @pxel/web lint`,
+`pnpm --filter @pxel/web build`. Stateful parity:
+`node tests/parity/workbook.mjs`. Corpus включает 17 style cases и все 16 свойств;
+style-only patches вычислили ноль формул и сохранили calculated-result hash.
+Init 4 использует настоящий bound AST, retired IDs и activation floors;
+подмена расчёта возвратом серверного хэша проверкой не считается.
+
+[Отчёт parity](benchmarks/2026-09-30-style-worker-parity-local.md) содержит машину,
+версии и размеры. Worker computation 251,4 ms и browser roundtrip 1740,26 ms
+относятся ко всему corpus в одном прогоне; это не p95 отдельной правки или новый
+performance baseline. Старые замеры редактора не переименовываются в style benchmark.
+
+Полная браузерная регрессия с новым оформлением и runtime gate отказа styled XLSX
+ещё выполняются. Не заявлены новое нагрузочное испытание 100000 styled cells,
+полная style crash matrix, Linux/Compose/remote CI, российский S3 либо ручная
+Excel/OOXML style parity. Typed XLSX 422 защищает от потери оформления, но не
+заменяет реализацию его import/export/reimport.

@@ -33,4 +33,7 @@ message SnapshotCell {
 message SnapshotSheet {
   CreateWorkbook sheet = 1;
   repeated SnapshotCell cells = 2;
+  // Schema 4 adds independent non-default styles, including styled blanks.
+  repeated SnapshotStyle styles = 3;
 }
+message SnapshotStyle { CellAddress address = 1; CellStyle style = 2; }

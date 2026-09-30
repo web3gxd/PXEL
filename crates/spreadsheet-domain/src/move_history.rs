@@ -364,7 +364,9 @@ fn visit_writes<'a>(
         | Operation::DeleteColumns { .. }
         | Operation::AdvanceCalculationEpoch { .. }
         | Operation::AxisEdit { .. }
-        | Operation::AxisCompensation { .. } => {}
+        | Operation::AxisCompensation { .. }
+        | Operation::StyleWrite { .. }
+        | Operation::StyleCompensation { .. } => {}
     }
     Ok(())
 }

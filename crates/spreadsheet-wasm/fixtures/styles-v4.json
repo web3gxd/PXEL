@@ -1,0 +1,122 @@
+[
+  {
+    "init": {
+      "schema_version": 4,
+      "document_id": "00000000-0000-0000-0000-000000000001",
+      "input_version": "3",
+      "pending_revision": "0",
+      "last_axis_change_version": "2",
+      "retired_row_ids": [
+        "00000000-0000-0000-0000-000000000003"
+      ],
+      "retired_column_ids": [
+        "00000000-0000-0000-0000-000000000009"
+      ],
+      "row_activation_floors": [
+        {
+          "row_id": "00000000-0000-0000-0000-000000000003",
+          "version": "2"
+        }
+      ],
+      "column_activation_floors": [],
+      "sheets": [
+        {
+          "id": "00000000-0000-0000-0000-000000000002",
+          "name": "Sheet1",
+          "rows": [
+            "00000000-0000-0000-0000-000000000003"
+          ],
+          "columns": [
+            "00000000-0000-0000-0000-000000000004"
+          ],
+          "cells": [
+            {
+              "row_id": "00000000-0000-0000-0000-000000000003",
+              "column_id": "00000000-0000-0000-0000-000000000004",
+              "value": {
+                "type": "number",
+                "value": 5
+              }
+            }
+          ],
+          "styles": [
+            {
+              "row_id": "00000000-0000-0000-0000-000000000003",
+              "column_id": "00000000-0000-0000-0000-000000000004",
+              "style": {
+                "font_family": "Arial",
+                "font_size_hundredth_points": 1000,
+                "font_bold": true,
+                "font_italic": false,
+                "font_underline": "none",
+                "font_strike": false,
+                "font_color": [
+                  0,
+                  0,
+                  0
+                ],
+                "fill": [
+                  255,
+                  255,
+                  255
+                ],
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "horizontal": "general",
+                "vertical": "bottom",
+                "wrap": false,
+                "number_format": "general"
+              }
+            }
+          ]
+        },
+        {
+          "id": "00000000-0000-0000-0000-000000000006",
+          "name": "Second",
+          "rows": [
+            "00000000-0000-0000-0000-000000000007"
+          ],
+          "columns": [
+            "00000000-0000-0000-0000-000000000008"
+          ],
+          "cells": [],
+          "styles": []
+        }
+      ]
+    },
+    "patches": [
+      {
+        "schema_version": 2,
+        "document_id": "00000000-0000-0000-0000-000000000001",
+        "expected_input_version": "3",
+        "input_version": "3",
+        "expected_pending_revision": "0",
+        "pending_revision": "1",
+        "cells": [],
+        "styles": [
+          {
+            "sheet_id": "00000000-0000-0000-0000-000000000002",
+            "row_id": "00000000-0000-0000-0000-000000000003",
+            "column_id": "00000000-0000-0000-0000-000000000004",
+            "changes": [
+              {
+                "property": "font_italic",
+                "value": true
+              },
+              {
+                "property": "fill",
+                "value": [
+                  230,
+                  240,
+                  250
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

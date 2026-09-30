@@ -103,3 +103,5 @@ mod tests {
         assert!(BlobKey::parse("01990000-0000-7000-8000-000000000001").is_ok());
     }
 }
+
+pub mod style_write;

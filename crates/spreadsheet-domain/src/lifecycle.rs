@@ -19,6 +19,14 @@ pub fn check_command_activation(book: &Workbook, command: &Command) -> Result<()
         Ok(())
     };
     match &command.operation {
+        CommandPayload::SetRangeStyle { addresses, .. } => {
+            for target in addresses {
+                address(*target)?;
+            }
+        }
+        CommandPayload::SetCellStyle {
+            address: target, ..
+        } => address(*target)?,
         CommandPayload::SetCellValue {
             address: target, ..
         }

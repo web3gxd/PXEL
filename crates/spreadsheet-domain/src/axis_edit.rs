@@ -171,6 +171,9 @@ fn transformed(
         .ok_or(DomainError::MissingSheet)?;
     let inverse = match delta {
         AxisDelta::Rows { removed, inserted } => {
+            if original.styles.keys().any(|a| removed.contains(&a.row)) {
+                return Err(DomainError::UnsupportedStructuralDependency);
+            }
             if removed
                 .iter()
                 .any(|row| !original.row_positions.contains_key(row))
@@ -227,6 +230,9 @@ fn transformed(
             }
         }
         AxisDelta::Columns { removed, inserted } => {
+            if original.styles.keys().any(|a| removed.contains(&a.column)) {
+                return Err(DomainError::UnsupportedStructuralDependency);
+            }
             if removed
                 .iter()
                 .any(|column| !original.column_positions.contains_key(column))
@@ -471,6 +477,7 @@ fn validate_writes_budget(writes: &[GuardedContentWrite]) -> Result<(), DomainEr
     Ok(())
 }
 fn finish(candidate: &mut Workbook) -> Result<(), DomainError> {
+    crate::style_write::validate_capacity(candidate)?;
     let mut text = 0usize;
     let mut ast = 0usize;
     let mut cells = 0usize;

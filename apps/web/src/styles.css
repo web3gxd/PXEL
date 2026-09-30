@@ -173,6 +173,131 @@ h1 {
 .tool:not(:disabled):hover {
   background: #dce8da;
 }
+.tool[aria-pressed='true'] {
+  background: #ccdfc8;
+  color: #174b2d;
+}
+.style-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.style-select {
+  height: 28px;
+  border: 1px solid #d3ddcf;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  max-width: 104px;
+}
+.style-select:disabled {
+  color: #778478;
+}
+.style-font {
+  width: 96px;
+}
+.style-size {
+  width: 46px;
+}
+.style-color {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  font-size: 14px;
+}
+.style-color input {
+  width: 24px;
+  height: 10px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.style-dialog {
+  width: min(430px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  box-sizing: border-box;
+  border: 1px solid #c7d0c5;
+  border-radius: 8px;
+  padding: 20px;
+  color: #25342b;
+}
+.style-dialog::backdrop {
+  background: #182d2444;
+}
+.style-dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.style-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.style-dialog p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.style-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.style-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  min-width: 0;
+}
+.style-options input,
+.style-options select {
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid #d3ddcf;
+  border-radius: 4px;
+  padding: 4px;
+}
+.style-options .style-check {
+  flex-direction: row;
+  align-items: center;
+}
+.style-border-controls {
+  display: flex;
+  gap: 4px;
+}
+.style-border-controls select {
+  flex: 1;
+}
+.style-border-controls input {
+  width: 32px;
+}
+.style-reset {
+  border: 1px solid #c7d0c5;
+  border-radius: 4px;
+  background: #eaf0e8;
+  padding: 8px 12px;
+  color: inherit;
+}
+@media (max-width: 600px) {
+  .style-font,
+  .style-size,
+  .style-alignment,
+  .style-format {
+    display: none;
+  }
+  .style-toolbar {
+    flex: 1;
+  }
+}
 .tool:not(:disabled):focus-visible {
   outline: 2px solid #285c39;
   outline-offset: 2px;

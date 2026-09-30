@@ -2,6 +2,8 @@
 pub use crate::axis_edit::{AxisChange, AxisDelta, ColumnPlacement, RowPlacement};
 pub use crate::formula::FormulaSource;
 use crate::formula::{AxisReferenceMode, BoundCellReference, Formula, Node};
+use crate::style::CellStyle;
+pub use crate::style_write::{GuardedStyleWrite, StyleWriteKind};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -23,6 +25,8 @@ pub const MAX_WORKBOOK_AST_BYTES: usize = 32 * 1024 * 1024;
 pub enum DomainError {
     #[error("sheet does not exist")]
     MissingSheet,
+    #[error("invalid style operation")]
+    InvalidStyle,
     #[error("row does not exist")]
     MissingRow,
     #[error("column does not exist")]
@@ -331,6 +335,16 @@ pub enum CellWriteKind {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
+    StyleWrite {
+        kind: StyleWriteKind,
+        writes: Vec<GuardedStyleWrite>,
+    },
+    StyleCompensation {
+        kind: StyleWriteKind,
+        writes: Vec<GuardedStyleWrite>,
+        undoes: OperationId,
+        undoes_version: DocumentVersion,
+    },
     AxisEdit {
         change: AxisChange,
     },
@@ -434,6 +448,14 @@ pub enum Operation {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum CommandPayload {
+    SetCellStyle {
+        address: CellAddress,
+        changes: Vec<crate::style::StyleChange>,
+    },
+    SetRangeStyle {
+        addresses: Vec<CellAddress>,
+        changes: Vec<crate::style::StyleChange>,
+    },
     CreateWorkbook {
         sheet: SheetSeed,
     },
@@ -513,7 +535,9 @@ impl Operation {
         self.is_cell_inverse_target()
             || matches!(
                 self,
-                Self::MoveRange { .. }
+                Self::StyleWrite { .. }
+                    | Self::StyleCompensation { .. }
+                    | Self::MoveRange { .. }
                     | Self::MoveCompensation { .. }
                     | Self::AxisEdit { .. }
                     | Self::AxisCompensation { .. }
@@ -582,6 +606,7 @@ pub struct Sheet {
     pub(crate) row_positions: HashMap<RowId, u32>,
     pub(crate) column_positions: HashMap<ColumnId, u32>,
     pub(crate) cells: BTreeMap<CellAddress, CellContent>,
+    pub(crate) styles: BTreeMap<CellAddress, CellStyle>,
 }
 
 /// Versioned storage codecs encode this authored image; calculated values are absent.
@@ -603,8 +628,20 @@ pub struct SnapshotImage {
 pub struct SnapshotSheetImage {
     pub sheet: SheetSeed,
     pub cells: Vec<(CellAddress, CellContent)>,
+    pub styles: Vec<(CellAddress, CellStyle)>,
 }
 impl Sheet {
+    pub fn styles(&self) -> &BTreeMap<CellAddress, CellStyle> {
+        &self.styles
+    }
+    pub(crate) fn occupied_count(&self) -> usize {
+        self.cells.len()
+            + self
+                .styles
+                .keys()
+                .filter(|a| !self.cells.contains_key(a))
+                .count()
+    }
     pub const fn id(&self) -> SheetId {
         self.id
     }
@@ -666,6 +703,7 @@ impl Sheet {
             row_positions,
             column_positions,
             cells: BTreeMap::new(),
+            styles: BTreeMap::new(),
         })
     }
     pub(crate) fn validate_address(&self, address: CellAddress) -> Result<(), DomainError> {
@@ -818,6 +856,12 @@ impl Workbook {
     pub fn row_activation_floors(&self) -> impl Iterator<Item = (RowId, DocumentVersion)> + '_ {
         self.row_activation_floors.iter().map(|(id, v)| (*id, *v))
     }
+    pub fn retired_row_ids(&self) -> impl Iterator<Item = RowId> + '_ {
+        self.retired_row_ids.iter().copied()
+    }
+    pub fn retired_column_ids(&self) -> impl Iterator<Item = ColumnId> + '_ {
+        self.retired_column_ids.iter().copied()
+    }
     pub fn column_activation_floors(
         &self,
     ) -> impl Iterator<Item = (ColumnId, DocumentVersion)> + '_ {
@@ -872,6 +916,7 @@ impl Workbook {
                         columns: sheet.columns.clone(),
                     },
                     cells: sheet.cells.iter().map(|(a, c)| (*a, c.clone())).collect(),
+                    styles: sheet.styles.iter().map(|(a, c)| (*a, c.clone())).collect(),
                 })
                 .collect(),
             retired_rows: self.retired_row_ids.iter().copied().collect(),
@@ -893,6 +938,15 @@ impl Workbook {
         image: SnapshotImage,
         expected_hash: [u8; 32],
     ) -> Result<Self, DomainError> {
+        let workbook = Self::hydrate_snapshot(image)?;
+        if workbook.hash() != expected_hash {
+            return Err(DomainError::HashMismatch);
+        }
+        Ok(workbook)
+    }
+    /// Validates authored metadata without authenticating its source. Adapters
+    /// must independently authenticate server projections or verify stored hashes.
+    pub fn hydrate_snapshot(image: SnapshotImage) -> Result<Self, DomainError> {
         if image.last_axis_change_version == DocumentVersion::ZERO
             || image.last_axis_change_version > image.version
             || image.retired_rows.len() > MAX_RETIRED_ROWS
@@ -905,12 +959,44 @@ impl Workbook {
             .iter()
             .map(|sheet| sheet.sheet.clone())
             .collect::<Vec<_>>();
+        if image
+            .sheets
+            .iter()
+            .try_fold(0usize, |n, s| n.checked_add(s.styles.len()))
+            .is_none_or(|n| n > crate::style_write::MAX_STYLED_CELLS)
+        {
+            return Err(DomainError::LimitExceeded);
+        }
+        if image
+            .sheets
+            .iter()
+            .any(|s| s.styles.iter().any(|(a, _)| a.sheet != s.sheet.id))
+        {
+            return Err(DomainError::InvalidStyle);
+        }
+        let styles = image
+            .sheets
+            .iter()
+            .flat_map(|sheet| sheet.styles.iter().cloned())
+            .collect::<Vec<_>>();
         let mut workbook = Self::hydrate_sheets(
             image.document_id,
             image.version,
             seeds,
             image.sheets.into_iter().flat_map(|sheet| sheet.cells),
         )?;
+        for (address, style) in styles {
+            let sheet = workbook
+                .sheets
+                .iter_mut()
+                .find(|s| s.id == address.sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            sheet.validate_address(address)?;
+            if style.is_default() || sheet.styles.insert(address, style).is_some() {
+                return Err(DomainError::InvalidStyle);
+            }
+        }
+        crate::style_write::validate_capacity(&workbook)?;
         if image.row_activation_floors.len() > MAX_RETIRED_ROWS
             || image.column_activation_floors.len() > MAX_RETIRED_COLUMNS
         {
@@ -978,10 +1064,14 @@ impl Workbook {
         workbook.last_axis_change_version = image.last_axis_change_version;
         workbook.retired_row_ids = retired_rows;
         workbook.retired_column_ids = retired_columns;
-        workbook.calculation_context = image.calculation_context;
-        if workbook.hash() != expected_hash {
-            return Err(DomainError::HashMismatch);
+        if image
+            .calculation_context
+            .as_ref()
+            .is_some_and(|context| context.epoch() > image.version.get())
+        {
+            return Err(DomainError::InvalidCalculationContext);
         }
+        workbook.calculation_context = image.calculation_context;
         Ok(workbook)
     }
     /// Bounded fixture loader for tests and benchmarks; absent from default builds.
@@ -1065,8 +1155,11 @@ impl Workbook {
             ast_memory_bytes: 0,
         };
         let mut seen = BTreeSet::new();
-        for (index, (address, value)) in cells.into_iter().enumerate() {
-            if index >= MAX_CELLS {
+        let mut input_counts = BTreeMap::new();
+        for (address, value) in cells {
+            let count = input_counts.entry(address.sheet).or_insert(0usize);
+            *count = count.checked_add(1).ok_or(DomainError::LimitExceeded)?;
+            if *count > MAX_CELLS {
                 return Err(DomainError::LimitExceeded);
             }
             if !seen.insert(address) {
@@ -1119,6 +1212,21 @@ impl Workbook {
     ) -> Result<Self, DomainError> {
         if self.version.get().checked_add(1) != Some(next_version.get()) {
             return Err(DomainError::VersionConflict);
+        }
+        if let Operation::StyleWrite { kind, writes } = operation {
+            return crate::style_write::candidate(self, *kind, writes, next_version, true);
+        }
+        if let Operation::StyleCompensation {
+            kind,
+            writes,
+            undoes_version,
+            ..
+        } = operation
+        {
+            if *undoes_version == DocumentVersion::ZERO || *undoes_version >= next_version {
+                return Err(DomainError::VersionConflict);
+            }
+            return crate::style_write::candidate(self, *kind, writes, next_version, false);
         }
         if let Operation::AxisEdit { change } = operation {
             return crate::axis_edit::candidate(self, change, next_version, false);
@@ -1404,7 +1512,9 @@ impl Workbook {
                 | Operation::MoveRange { .. }
                 | Operation::MoveCompensation { .. }
                 | Operation::AxisEdit { .. }
-                | Operation::AxisCompensation { .. } => {
+                | Operation::AxisCompensation { .. }
+                | Operation::StyleWrite { .. }
+                | Operation::StyleCompensation { .. } => {
                     return Err(DomainError::InvalidAxis);
                 }
             };
@@ -1452,6 +1562,60 @@ impl Workbook {
             next.apply_operation(operation, budgets, target_version)?;
         }
         Ok(next)
+    }
+    /// Atomic preview over content and independent style leaves. Never establishes
+    /// server authority. Releases both replaced allocations before final admission.
+    pub fn preview_authored_candidate(
+        &self,
+        content: &[Operation],
+        styles: &[(CellAddress, Vec<crate::style::StyleChange>)],
+        target_version: DocumentVersion,
+    ) -> Result<Self, DomainError> {
+        if styles.len() > crate::style_write::MAX_STYLE_TARGETS {
+            return Err(DomainError::LimitExceeded);
+        }
+        let mut replacements = BTreeMap::new();
+        for (address, changes) in styles {
+            let sheet = self
+                .sheets
+                .iter()
+                .find(|s| s.id == address.sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            sheet.validate_address(*address)?;
+            let default = CellStyle::default();
+            let style = sheet
+                .styles
+                .get(address)
+                .unwrap_or(&default)
+                .apply(changes)
+                .map_err(|_| DomainError::InvalidStyle)?;
+            if replacements.insert(*address, style).is_some() {
+                return Err(DomainError::InvalidStyle);
+            }
+        }
+        let mut base = self.clone();
+        for address in replacements.keys() {
+            let sheet = base
+                .sheets
+                .iter_mut()
+                .find(|s| s.id == address.sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            sheet.styles.remove(address);
+        }
+        let mut candidate = base.preview_candidate(content, target_version)?;
+        for (address, style) in replacements {
+            if !style.is_default() {
+                candidate
+                    .sheets
+                    .iter_mut()
+                    .find(|s| s.id == address.sheet)
+                    .ok_or(DomainError::MissingSheet)?
+                    .styles
+                    .insert(address, style);
+            }
+        }
+        crate::style_write::validate_capacity(&candidate)?;
+        Ok(candidate)
     }
     fn move_rectangle(
         &self,
@@ -1895,7 +2059,9 @@ impl Workbook {
             | Operation::MoveRange { .. }
             | Operation::MoveCompensation { .. }
             | Operation::AxisEdit { .. }
-            | Operation::AxisCompensation { .. } => {
+            | Operation::AxisCompensation { .. }
+            | Operation::StyleWrite { .. }
+            | Operation::StyleCompensation { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {
@@ -2119,7 +2285,10 @@ impl Workbook {
                 if normalized == CellValue::Blank {
                     sheet.cells.remove(address);
                 } else {
-                    if sheet.cells.len() >= MAX_CELLS && !sheet.cells.contains_key(address) {
+                    if sheet.occupied_count() >= MAX_CELLS
+                        && !sheet.cells.contains_key(address)
+                        && !sheet.styles.contains_key(address)
+                    {
                         return Err(DomainError::LimitExceeded);
                     }
                     sheet.cells.insert(*address, CellContent::Value(normalized));
@@ -2131,7 +2300,9 @@ impl Workbook {
             | Operation::MoveRange { .. }
             | Operation::MoveCompensation { .. }
             | Operation::AxisEdit { .. }
-            | Operation::AxisCompensation { .. } => {
+            | Operation::AxisCompensation { .. }
+            | Operation::StyleWrite { .. }
+            | Operation::StyleCompensation { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {
@@ -2140,7 +2311,10 @@ impl Workbook {
                     .iter_mut()
                     .find(|sheet| sheet.id == address.sheet)
                     .ok_or(DomainError::MissingSheet)?;
-                if sheet.cells.len() >= MAX_CELLS && !sheet.cells.contains_key(address) {
+                if sheet.occupied_count() >= MAX_CELLS
+                    && !sheet.cells.contains_key(address)
+                    && !sheet.styles.contains_key(address)
+                {
                     return Err(DomainError::LimitExceeded);
                 }
                 sheet
@@ -2165,7 +2339,10 @@ impl Workbook {
                     .find(|sheet| sheet.id == address.sheet)
                     .ok_or(DomainError::MissingSheet)?;
                 if let Some(content) = content {
-                    if sheet.cells.len() >= MAX_CELLS && !sheet.cells.contains_key(address) {
+                    if sheet.occupied_count() >= MAX_CELLS
+                        && !sheet.cells.contains_key(address)
+                        && !sheet.styles.contains_key(address)
+                    {
                         return Err(DomainError::LimitExceeded);
                     }
                     let normalized = match content {
@@ -2250,6 +2427,9 @@ impl Workbook {
             .ok_or(DomainError::MissingSheet)?;
         let sheet = self.sheets.get(index).ok_or(DomainError::MissingSheet)?;
         let deleted = sheet.validate_column_deletion(columns)?;
+        if sheet.styles.keys().any(|a| deleted.contains(&a.column)) {
+            return Err(DomainError::UnsupportedStructuralDependency);
+        }
         let old_columns = sheet.columns.clone();
         let old_positions = sheet.column_positions.clone();
         let mut next_alive = vec![None; old_columns.len()];
@@ -2351,6 +2531,9 @@ impl Workbook {
             .ok_or(DomainError::MissingSheet)?;
         let sheet = self.sheets.get(index).ok_or(DomainError::MissingSheet)?;
         let deleted = sheet.validate_row_deletion(rows)?;
+        if sheet.styles.keys().any(|a| deleted.contains(&a.row)) {
+            return Err(DomainError::UnsupportedStructuralDependency);
+        }
         let old_rows = sheet.rows.clone();
         let old_positions = sheet.row_positions.clone();
         let mut next_alive = vec![None; old_rows.len()];
@@ -2619,6 +2802,23 @@ impl Workbook {
             for (id, version) in &self.column_activation_floors {
                 hash.update(id.as_bytes());
                 hash.update(version.get().to_be_bytes());
+            }
+        }
+        if self.sheets.iter().any(|s| !s.styles.is_empty()) {
+            hash.update(b"PXEL-STYLES-1\0");
+            hash.update(
+                (self.sheets.iter().map(|s| s.styles.len()).sum::<usize>() as u64).to_be_bytes(),
+            );
+            for sheet in &self.sheets {
+                for (address, style) in &sheet.styles {
+                    hash.update(address.sheet.as_bytes());
+                    hash.update(address.row.as_bytes());
+                    hash.update(address.column.as_bytes());
+                    let mut bytes = Vec::new();
+                    style.append_to(&mut bytes);
+                    hash.update((bytes.len() as u64).to_be_bytes());
+                    hash.update(bytes);
+                }
             }
         }
         hash.finalize().into()

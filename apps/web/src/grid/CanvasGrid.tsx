@@ -228,6 +228,17 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           if (
             (event.ctrlKey || event.metaKey) &&
             !event.altKey &&
+            !event.shiftKey &&
+            ['b', 'i'].includes(event.key.toLowerCase())
+          ) {
+            event.preventDefault();
+            const property = event.key.toLowerCase() === 'b' ? 'font_bold' : 'font_italic';
+            document.setStyle([{ property, value: !document.style(document.selected)[property] }]);
+            return;
+          }
+          if (
+            (event.ctrlKey || event.metaKey) &&
+            !event.altKey &&
             (event.key.toLowerCase() === 'z' ||
               (event.key.toLowerCase() === 'y' && !event.shiftKey))
           ) {
@@ -279,7 +290,13 @@ export function CanvasGrid({ document }: { document?: DocumentStore }) {
           }}
         />
       </div>
-      <canvas ref={canvasRef} className="grid-canvas" aria-hidden="true" />
+      <canvas
+        ref={canvasRef}
+        className="grid-canvas"
+        aria-hidden="true"
+        data-confirmed-state-hash={document?.projection?.state_hash}
+        data-preview-authored-hash={document?.previewAuthoredHash}
+      />
       {document?.cutStatus && (
         <output className="cut-status" aria-live="polite" data-testid="cut-status">
           {document.cutStatus === 'pending'

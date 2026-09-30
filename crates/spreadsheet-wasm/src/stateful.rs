@@ -1,4 +1,6 @@
 //! Mutable browser preview. Source binding is valid only for the immutable-axis profile.
+use crate::styles::{ChangeInput, StyleInput};
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use spreadsheet_domain::{
     formula::Formula,
@@ -113,12 +115,56 @@ struct MoveInput {
 #[serde(deny_unknown_fields)]
 struct Initialize {
     schema_version: u32,
+    #[serde(default, deserialize_with = "present")]
+    last_axis_change_version: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    retired_row_ids: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "present")]
+    retired_column_ids: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "present")]
+    row_activation_floors: Option<Vec<RowFloor>>,
+    #[serde(default, deserialize_with = "present")]
+    column_activation_floors: Option<Vec<ColumnFloor>>,
     #[serde(default)]
     calculation_context: Option<ContextInput>,
     document_id: String,
     input_version: String,
     pending_revision: String,
     sheets: Vec<SheetInput>,
+}
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RowFloor {
+    row_id: String,
+    version: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ColumnFloor {
+    column_id: String,
+    version: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StyledCellInput {
+    row_id: String,
+    column_id: String,
+    style: StyleInput,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StyleMutation {
+    sheet_id: String,
+    row_id: String,
+    column_id: String,
+    changes: Vec<ChangeInput>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -203,6 +249,8 @@ impl ContextInput {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SheetInput {
+    #[serde(default, deserialize_with = "present")]
+    styles: Option<Vec<StyledCellInput>>,
     id: String,
     name: String,
     rows: Vec<String>,
@@ -227,6 +275,8 @@ struct Mutation {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Patch {
+    #[serde(default, deserialize_with = "present")]
+    styles: Option<Vec<StyleMutation>>,
     schema_version: u32,
     document_id: String,
     expected_input_version: String,
@@ -252,6 +302,8 @@ enum InputValue {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FormulaInput {
+    #[serde(default, deserialize_with = "present")]
+    bound_formula_wire_hex: Option<String>,
     source: String,
     #[serde(default)]
     canonical: Option<String>,
@@ -331,6 +383,7 @@ fn cell_content(
     at: CellAddress,
     book: &Workbook,
     target_version: DocumentVersion,
+    bound_mode: u8,
 ) -> Result<CellContent, PreviewError> {
     Ok(match value {
         InputValue::Blank => CellContent::Value(CellValue::Blank),
@@ -338,6 +391,52 @@ fn cell_content(
         InputValue::Text(text) => CellContent::Value(CellValue::Text(text).normalized()?),
         InputValue::Boolean(b) => CellContent::Value(CellValue::Boolean(b)),
         InputValue::Formula(input) => {
+            if let Some(hex) = &input.bound_formula_wire_hex {
+                if bound_mode == 0 {
+                    return Err(PreviewError::UnsupportedProfile);
+                }
+                if hex.len() > 2 * 1024 * 1024 {
+                    return Err(PreviewError::LimitExceeded);
+                }
+                if hex.is_empty()
+                    || hex.len() % 2 != 0
+                    || !hex
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err(PreviewError::InvalidFormula);
+                }
+                let mut bytes = Vec::with_capacity(hex.len() / 2);
+                for pair in hex.as_bytes().as_chunks::<2>().0 {
+                    let digit = |b: u8| if b <= b'9' { b - b'0' } else { b - b'a' + 10 };
+                    bytes.push((digit(pair[0]) << 4) | digit(pair[1]));
+                }
+                let dto = spreadsheet_wire_protocol::v1::BoundFormula::decode(bytes.as_slice())
+                    .map_err(|_| PreviewError::InvalidFormula)?;
+                let formula = spreadsheet_wire_protocol::formula::decode_formula(dto)
+                    .map_err(|_| PreviewError::InvalidFormula)?;
+                if formula.origin() != at
+                    || formula.source() != input.source
+                    || input.canonical.as_deref() != Some(formula.canonical())
+                    || input.ast_schema != Some(formula.ast().schema_version())
+                    || input.compatibility_profile.as_deref()
+                        != Some(formula.profile().identifier())
+                    || input
+                        .bound_at_version
+                        .as_deref()
+                        .map(revision)
+                        .transpose()?
+                        != Some(formula.bound_at_version().get())
+                    || formula.bound_at_version() > target_version
+                {
+                    return Err(PreviewError::InvalidFormula);
+                }
+                return Ok(CellContent::Formula(formula));
+            }
+            if bound_mode == 2 {
+                return Err(PreviewError::InvalidFormula);
+            }
+
             if input.source.len() > 32 * 1024
                 || input
                     .canonical
@@ -478,6 +577,8 @@ struct CalculationOutput {
     results: Vec<CellOutput>,
     cleared: Vec<AddressOutput>,
     normalized_result_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    normalized_authored_state_hash: Option<String>,
     evaluated_cells: usize,
     dirty_cells: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -518,13 +619,109 @@ impl std::io::Write for CappedOutput {
 }
 
 /// Native callable API used unchanged by the browser wrapper and differential tests.
+#[derive(Clone)]
 pub struct PreviewWorkbook {
+    output_schema: u32,
     workbook: Workbook,
     calculation: CalculationProjection,
     pending_revision: u64,
     first_calculation: bool,
 }
 impl PreviewWorkbook {
+    pub fn patch_json(&mut self, json: &str) -> Result<String, PreviewError> {
+        self.patch_with_cancellation(json, &AtomicBool::new(false))
+    }
+    pub fn patch_with_cancellation(
+        &mut self,
+        json: &str,
+        cancelled: &AtomicBool,
+    ) -> Result<String, PreviewError> {
+        if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(PreviewError::Cancelled);
+        }
+        if json.len() > MAX_PATCH_BYTES {
+            return Err(PreviewError::LimitExceeded);
+        }
+        let patch: Patch = serde_json::from_str(json).map_err(|_| PreviewError::InvalidJson)?;
+        if patch.schema_version != 2 || self.output_schema != 2 || patch.styles.is_none() {
+            return Err(PreviewError::UnsupportedProfile);
+        }
+        if DocumentId::from_bytes(identity(&patch.document_id)?)? != self.workbook.document_id() {
+            return Err(PreviewError::InvalidIdentity);
+        }
+        let version = DocumentVersion::new(revision(&patch.input_version)?)?;
+        let pending = revision(&patch.pending_revision)?;
+        if revision(&patch.expected_input_version)? != self.workbook.version().get()
+            || revision(&patch.expected_pending_revision)? != self.pending_revision
+            || version < self.workbook.version()
+            || pending <= self.pending_revision
+        {
+            return Err(PreviewError::StaleRevision);
+        }
+        let styles = patch.styles.ok_or(PreviewError::InvalidProjection)?;
+        if patch.cells.len().saturating_add(styles.len()) > MAX_PATCH_CELLS {
+            return Err(PreviewError::LimitExceeded);
+        }
+        let mut changed = BTreeSet::new();
+        let mut operations = Vec::new();
+        let mut retained = (0usize, 0usize);
+        for cell in patch.cells {
+            let at = address(&cell.sheet_id, &cell.row_id, &cell.column_id)?;
+            if !changed.insert(at) {
+                return Err(PreviewError::InvalidProjection);
+            }
+            let content = cell_content(cell.value, at, &self.workbook, version, 1)?;
+            retain_budget(&content, &mut retained)?;
+            operations.push(match content {
+                CellContent::Value(CellValue::Blank) => Operation::ClearCell { address: at },
+                CellContent::Value(value) => Operation::SetCellValue { address: at, value },
+                CellContent::Formula(formula) => Operation::SetCellFormula {
+                    address: at,
+                    formula,
+                },
+            });
+        }
+        let mut style_changes = Vec::new();
+        for style in styles {
+            if style.changes.is_empty() || style.changes.len() > 16 {
+                return Err(PreviewError::InvalidProjection);
+            }
+            style_changes.push((
+                address(&style.sheet_id, &style.row_id, &style.column_id)?,
+                style
+                    .changes
+                    .into_iter()
+                    .map(ChangeInput::decode)
+                    .collect::<Result<Vec<_>, _>>()?,
+            ));
+        }
+        let candidate =
+            self.workbook
+                .preview_authored_candidate(&operations, &style_changes, version)?;
+        let delta = self.calculation.prepare_reconcile(
+            &candidate,
+            &changed,
+            CalculationLimits::default(),
+        )?;
+        let mut temporary = Self {
+            output_schema: 2,
+            workbook: candidate,
+            calculation: self.calculation.clone(),
+            pending_revision: pending,
+            first_calculation: self.first_calculation,
+        };
+        temporary.calculation.apply(delta);
+        let output = temporary.calculate_output(cancelled)?;
+        let mut bytes = CappedOutput(Vec::new());
+        serde_json::to_writer(&mut bytes, &output).map_err(|_| PreviewError::LimitExceeded)?;
+        if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(PreviewError::Cancelled);
+        }
+        let result = String::from_utf8(bytes.0).map_err(|_| PreviewError::InvalidProjection)?;
+        temporary.first_calculation = false;
+        *self = temporary;
+        Ok(result)
+    }
     /// Runs the shared move planner and incremental evaluator on a private
     /// candidate. Any validation, calculation or output-limit failure rolls back.
     pub fn move_json(&mut self, json: &str) -> Result<String, PreviewError> {
@@ -578,6 +775,7 @@ impl PreviewWorkbook {
             CalculationLimits::default(),
         )?;
         let mut temporary = Self {
+            output_schema: self.output_schema,
             workbook: candidate,
             calculation: self.calculation.clone(),
             pending_revision: pending,
@@ -633,11 +831,29 @@ impl PreviewWorkbook {
             return Err(PreviewError::LimitExceeded);
         }
         let init: Initialize = serde_json::from_str(json).map_err(|_| PreviewError::InvalidJson)?;
-        if !matches!(init.schema_version, 1..=3)
+        if !matches!(init.schema_version, 1..=4)
             || init.sheets.is_empty()
             || init.sheets.len() > 64
             || (init.schema_version == 1 && init.sheets.len() != 1)
-            || ((init.schema_version == 3) != init.calculation_context.is_some())
+            || (init.schema_version < 4
+                && ((init.schema_version == 3) != init.calculation_context.is_some()))
+        {
+            return Err(PreviewError::UnsupportedProfile);
+        }
+        let exact = init.schema_version == 4;
+        let metadata_present = init.last_axis_change_version.is_some()
+            && init.retired_row_ids.is_some()
+            && init.retired_column_ids.is_some()
+            && init.row_activation_floors.is_some()
+            && init.column_activation_floors.is_some();
+        let metadata_any = init.last_axis_change_version.is_some()
+            || init.retired_row_ids.is_some()
+            || init.retired_column_ids.is_some()
+            || init.row_activation_floors.is_some()
+            || init.column_activation_floors.is_some();
+        if (exact && !metadata_present)
+            || (!exact && metadata_any)
+            || init.sheets.iter().any(|s| s.styles.is_some() != exact)
         {
             return Err(PreviewError::UnsupportedProfile);
         }
@@ -654,7 +870,19 @@ impl PreviewWorkbook {
         let mut seeds = Vec::with_capacity(init.sheets.len());
         let mut sheet_cells = Vec::with_capacity(init.sheets.len());
         let mut total_cells = 0usize;
+        let mut all_styles = Vec::new();
         for sheet in init.sheets {
+            if let Some(styles) = sheet.styles {
+                if all_styles.len() + styles.len() > 100_000 {
+                    return Err(PreviewError::LimitExceeded);
+                }
+                for style in styles {
+                    all_styles.push((
+                        address(&sheet.id, &style.row_id, &style.column_id)?,
+                        style.style.decode()?,
+                    ));
+                }
+            }
             total_cells = total_cells
                 .checked_add(sheet.cells.len())
                 .ok_or(PreviewError::LimitExceeded)?;
@@ -688,20 +916,74 @@ impl PreviewWorkbook {
                 if !addresses.insert(at) {
                     return Err(PreviewError::InvalidProjection);
                 }
-                let content = cell_content(cell.value, at, &axes, version)?;
+                let content =
+                    cell_content(cell.value, at, &axes, version, if exact { 2 } else { 0 })?;
                 retain_budget(&content, &mut retained)?;
                 cells.push((at, content));
             }
         }
-        let workbook = match context {
+        let mut workbook = match context {
             Some(context) => {
                 Workbook::hydrate_sheets_with_context(document_id, version, seeds, cells, context)?
             }
             None => Workbook::hydrate_sheets(document_id, version, seeds, cells)?,
         };
+        if exact {
+            let mut image = workbook.snapshot_image()?;
+            image.last_axis_change_version = DocumentVersion::new(revision(
+                init.last_axis_change_version
+                    .as_deref()
+                    .ok_or(PreviewError::InvalidProjection)?,
+            )?)?;
+            image.retired_rows = init
+                .retired_row_ids
+                .ok_or(PreviewError::InvalidProjection)?
+                .iter()
+                .map(|s| Ok(RowId::from_bytes(identity(s)?)?))
+                .collect::<Result<_, PreviewError>>()?;
+            image.retired_columns = init
+                .retired_column_ids
+                .ok_or(PreviewError::InvalidProjection)?
+                .iter()
+                .map(|s| Ok(ColumnId::from_bytes(identity(s)?)?))
+                .collect::<Result<_, PreviewError>>()?;
+            image.row_activation_floors = init
+                .row_activation_floors
+                .ok_or(PreviewError::InvalidProjection)?
+                .iter()
+                .map(|f| {
+                    Ok((
+                        RowId::from_bytes(identity(&f.row_id)?)?,
+                        DocumentVersion::new(revision(&f.version)?)?,
+                    ))
+                })
+                .collect::<Result<_, PreviewError>>()?;
+            image.column_activation_floors = init
+                .column_activation_floors
+                .ok_or(PreviewError::InvalidProjection)?
+                .iter()
+                .map(|f| {
+                    Ok((
+                        ColumnId::from_bytes(identity(&f.column_id)?)?,
+                        DocumentVersion::new(revision(&f.version)?)?,
+                    ))
+                })
+                .collect::<Result<_, PreviewError>>()?;
+            for (at, style) in all_styles {
+                image
+                    .sheets
+                    .iter_mut()
+                    .find(|s| s.sheet.id == at.sheet)
+                    .ok_or(PreviewError::InvalidProjection)?
+                    .styles
+                    .push((at, style));
+            }
+            workbook = Workbook::hydrate_snapshot(image)?;
+        }
         let calculation =
             CalculationProjection::from_workbook(&workbook, CalculationLimits::default())?;
         Ok(Self {
+            output_schema: if exact { 2 } else { 1 },
             workbook,
             calculation,
             pending_revision,
@@ -713,7 +995,7 @@ impl PreviewWorkbook {
             return Err(PreviewError::LimitExceeded);
         }
         let patch: Patch = serde_json::from_str(json).map_err(|_| PreviewError::InvalidJson)?;
-        if patch.schema_version != 1 {
+        if patch.schema_version != 1 || patch.styles.is_some() || self.output_schema != 1 {
             return Err(PreviewError::UnsupportedProfile);
         }
         if DocumentId::from_bytes(identity(&patch.document_id)?)? != self.workbook.document_id() {
@@ -739,7 +1021,7 @@ impl PreviewWorkbook {
             if !changed.insert(at) {
                 return Err(PreviewError::InvalidProjection);
             }
-            let content = cell_content(cell.value, at, &self.workbook, version)?;
+            let content = cell_content(cell.value, at, &self.workbook, version, 0)?;
             retain_budget(&content, &mut retained)?;
             operations.push(match content {
                 CellContent::Value(CellValue::Blank) => Operation::ClearCell { address: at },
@@ -768,6 +1050,22 @@ impl PreviewWorkbook {
         &mut self,
         cancelled: &AtomicBool,
     ) -> Result<String, PreviewError> {
+        if self.output_schema == 2 {
+            if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(PreviewError::Cancelled);
+            }
+            let mut temporary = self.clone();
+            let output = temporary.calculate_output(cancelled)?;
+            let mut bytes = CappedOutput(Vec::new());
+            serde_json::to_writer(&mut bytes, &output).map_err(|_| PreviewError::LimitExceeded)?;
+            if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(PreviewError::Cancelled);
+            }
+            let result = String::from_utf8(bytes.0).map_err(|_| PreviewError::InvalidProjection)?;
+            temporary.first_calculation = false;
+            *self = temporary;
+            return Ok(result);
+        }
         let output = self.calculate_output(cancelled)?;
         let json = serde_json::to_string(&output).map_err(|_| PreviewError::InvalidProjection)?;
         self.first_calculation = false;
@@ -787,7 +1085,14 @@ impl PreviewWorkbook {
             &patch.changed_results
         };
         let output = CalculationOutput {
-            schema_version: 1,
+            schema_version: self.output_schema,
+            normalized_authored_state_hash: (self.output_schema == 2).then(|| {
+                self.workbook
+                    .hash()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect()
+            }),
             preview: true,
             document_id: id_string(self.workbook.document_id().as_bytes()),
             input_version: self.workbook.version().get().to_string(),
@@ -834,6 +1139,9 @@ impl WasmWorkbook {
     }
     pub fn apply(&mut self, json: &str) -> Result<(), JsValue> {
         self.inner.apply_json(json).map_err(PreviewError::js)
+    }
+    pub fn patch(&mut self, json: &str) -> Result<String, JsValue> {
+        self.inner.patch_json(json).map_err(PreviewError::js)
     }
     pub fn calculate(&mut self) -> Result<String, JsValue> {
         self.inner.calculate_json().map_err(PreviewError::js)

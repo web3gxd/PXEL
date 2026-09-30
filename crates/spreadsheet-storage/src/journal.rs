@@ -16,6 +16,9 @@ mod move_guard;
 mod move_tests;
 #[cfg(test)]
 mod range_history_tests;
+mod style_guard;
+#[cfg(test)]
+mod style_tests;
 #[cfg(test)]
 mod timer_admission_benchmark;
 fn uuid(bytes: &[u8; 16]) -> Uuid {
@@ -61,7 +64,7 @@ struct StoredEventRow<'a> {
     canonical_event_hash: &'a [u8],
 }
 fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=22) {
+    if !matches!(row.schema_version, 1..=24) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -168,7 +171,9 @@ fn touched_addresses(
         | Operation::InsertRows { .. }
         | Operation::InsertRowsRebased { .. }
         | Operation::InsertColumnsRebased { .. }
-        | Operation::AdvanceCalculationEpoch { .. } => Vec::new(),
+        | Operation::AdvanceCalculationEpoch { .. }
+        | Operation::StyleWrite { .. }
+        | Operation::StyleCompensation { .. } => Vec::new(),
     }
 }
 fn inverse_shape_matches(target: &Operation, inverse: &Operation) -> bool {
@@ -288,7 +293,9 @@ async fn undo_target_locked(
         payload_checksum: &row.payload_checksum,
         canonical_event_hash: &row.canonical_event_hash,
     })?;
-    target_writes(&event, actor)?;
+    if event.principal != EventPrincipal::User(actor) || !event.operation.is_inverse_target() {
+        return Err(JournalError::NotUndoable);
+    }
     if head
         .get()
         .checked_sub(event.version.get())
@@ -647,6 +654,15 @@ impl OperationJournal for PgDatabase {
             return Err(JournalError::Corrupt);
         }
         let canonical_payload = match &e.operation {
+            Operation::StyleWrite { .. } => match &c.operation {
+                CommandPayload::SetCellStyle { .. } | CommandPayload::SetRangeStyle { .. } => {
+                    c.operation.clone()
+                }
+                _ => return Err(JournalError::Corrupt),
+            },
+            Operation::StyleCompensation { undoes, .. } => CommandPayload::UndoCell {
+                target_operation_id: *undoes,
+            },
             Operation::AxisEdit { .. } => {
                 axis_guard::legacy(&c.operation)?;
                 c.operation.clone()
@@ -884,6 +900,9 @@ impl OperationJournal for PgDatabase {
             axis_guard::check_floors(projection, c)?;
             axis_guard::check_formulas(projection, c, &e.operation)?;
         }
+        if matches!(e.operation, Operation::StyleWrite { .. }) {
+            style_guard::validate(&mut tx, request, access.head, None).await?;
+        }
         if matches!(e.operation, Operation::AxisEdit { .. }) {
             axis_guard::validate(&mut tx, request, access.head, None).await?;
         }
@@ -905,6 +924,11 @@ impl OperationJournal for PgDatabase {
                 undoes_version: version,
                 ..
             }
+            | Operation::StyleCompensation {
+                undoes: id,
+                undoes_version: version,
+                ..
+            }
             | Operation::AxisCompensation {
                 undoes: id,
                 undoes_version: version,
@@ -921,7 +945,9 @@ impl OperationJournal for PgDatabase {
                 access.head,
             )
             .await?;
-            if matches!(e.operation, Operation::AxisCompensation { .. }) {
+            if matches!(e.operation, Operation::StyleCompensation { .. }) {
+                style_guard::validate(&mut tx, request, access.head, Some(&target)).await?;
+            } else if matches!(e.operation, Operation::AxisCompensation { .. }) {
                 axis_guard::validate(&mut tx, request, access.head, Some(&target)).await?;
             } else {
                 let original = target_writes(&target, request.identity.actor_id)?;

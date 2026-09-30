@@ -124,6 +124,11 @@ pub(super) async fn validate(
             })?);
         }
         drop(rows);
+        super::style_guard::validate_axis_styles(
+            &request.event.operation,
+            target.principal,
+            &tail,
+        )?;
         validate_axis_inverse(book, target, &tail, &candidate).map_err(history_error)?;
     } else {
         // Reject an authored edit before its durable commit if its immediate

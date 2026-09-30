@@ -1,5 +1,7 @@
 import type { DocumentStore } from '../document/store';
 import { GRID, backingSize, columnLabel, visibleRange } from './viewport';
+import { colorCss } from '../document/styles';
+import { drawCell, drawCellBorders } from './cell-style';
 
 export function drawGrid(
   canvas: HTMLCanvasElement,
@@ -36,6 +38,23 @@ export function drawGrid(
   const x = (column: number) => GRID.rowHeaderWidth + column * GRID.columnWidth - scrollLeft;
   const y = (row: number) => GRID.columnHeaderHeight + row * GRID.rowHeight - scrollTop;
   const pixel = (value: number) => (Math.round(value * dpr) + 0.5) / dpr;
+  if (document?.sheet) {
+    context.save();
+    context.beginPath();
+    context.rect(
+      GRID.rowHeaderWidth,
+      GRID.columnHeaderHeight,
+      width - GRID.rowHeaderWidth,
+      height - GRID.columnHeaderHeight,
+    );
+    context.clip();
+    for (let row = rows.start; row < rows.end; row++)
+      for (let column = columns.start; column < columns.end; column++) {
+        context.fillStyle = colorCss(document.style({ row, column }).fill);
+        context.fillRect(x(column), y(row), GRID.columnWidth, GRID.rowHeight);
+      }
+    context.restore();
+  }
   context.lineWidth = 1 / dpr;
   context.strokeStyle = '#e6e9e5';
   context.beginPath();
@@ -77,21 +96,32 @@ export function drawGrid(
         (selection.endRow - selection.startRow + 1) * GRID.rowHeight - 2,
       );
     }
-    context.font = '13px "Segoe UI", sans-serif';
-    context.textAlign = 'left';
-    context.textBaseline = 'middle';
-    context.fillStyle = '#25342b';
     for (let row = rows.start; row < rows.end; row++)
       for (let column = columns.start; column < columns.end; column++) {
         const value = document.display({ row, column });
-        if (!value) continue;
-        context.save();
-        context.beginPath();
-        context.rect(x(column) + 3, y(row) + 1, GRID.columnWidth - 6, GRID.rowHeight - 2);
-        context.clip();
-        context.fillText(value, x(column) + 7, y(row) + GRID.rowHeight / 2);
-        context.restore();
+        const style = document.style({ row, column });
+        if (value)
+          drawCell(
+            context,
+            style,
+            value,
+            x(column),
+            y(row),
+            GRID.columnWidth,
+            GRID.rowHeight,
+            document.displayContent({ row, column })?.type === 'number',
+          );
       }
+    for (let row = rows.start; row < rows.end; row++)
+      for (let column = columns.start; column < columns.end; column++)
+        drawCellBorders(
+          context,
+          document.style({ row, column }),
+          x(column),
+          y(row),
+          GRID.columnWidth,
+          GRID.rowHeight,
+        );
     context.strokeStyle = '#17664b';
     context.lineWidth = 2;
     context.strokeRect(

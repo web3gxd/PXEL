@@ -1,5 +1,6 @@
 //! Thin fixture and stateful preview boundaries over the shared pure Rust engine.
 mod stateful;
+mod styles;
 use serde::Deserialize;
 use serde_json::{Value as Json, json};
 use sha2::{Digest, Sha256};

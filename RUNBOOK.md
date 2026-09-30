@@ -4441,3 +4441,179 @@ completioncriteria/dependencies; snapshot4musthandlevalidcandidatewithinexplicit
 binary/decodedbudgets; Workermaytypedrefuseoversizedpreviewwithoutfakehashparity.
 No newformat/gateacceptedbythismodelincrement. Coretypesandbenchmarkcomplete,
 nextincrementdomainmetadata/guardedwrites +codec4/23/24coordination.
+
+ADR087 integration continued: domain types now include guarded StyleWrite and
+StyleCompensation, explicit stable SetCellStyle/SetRangeStyle intents and sparse
+snapshot style metadata. Root authorized narrow content-history no-touch arm;
+domain agent owns domain boundary tests. Storage codec agent owns ONLY codec crate
+and storage protobuf; root generated shared descriptor via pnpm proto:generate PASS.
+Root calculation adapter treats styles as empty content reconciliation: focused
+style_write_advances_input test PASS, zero dirty/evaluated cells and unchanged
+results. Application discovery recognizes style inverse IDs/versions; eight
+history tests PASS after adding original/compensation assertions. Initial workspace
+check failed at expected new enum/snapshot consumer boundaries; integration is
+ongoing, no commit or full feature acceptance. Running local binary unchanged.
+Root initial --lib test command passed two formula tests and zero application lib
+tests; subsequent actual integration history suite passed eight. A read-only
+Select-String command failed because -First is not its parameter; no code impact.
+
+ADR087 server integration progress: root maps style intents through pure guarded
+planner and swaps exact leaf preimages for style inverse candidates. Existing
+CommitRequest already carries locked-head projection for every user operation.
+Styles advance calculation input with empty changed set; bootstrap classification
+explicitly excludes style originals/inverses from volatile epoch triggers.
+Collab library tests76577 PASS28/2existingtimingignored after fixing missing
+newtypeimports (firstcheckRED, no assertion weakening). Root hydration changes
+per-sheet input cap (global text/AST budgets unchanged) and actual100002-cell
+2sheet snapshot-image restore/hash regression PASS; snapshot_image2PASS2.09s.
+Storagebinary budget remains separate, Worker profile still bounded independently.
+Migration202609300006 permits user-event23/24 and snapshot4, actual cargo sqlx
+migrate run PASS605.636ms. Snapshot metadata writer now4 with corresponding test
+expectation; SQLx prepare77153 live awaiting cargo lock, not yet passed.
+Wireagent ownswireproto/serverdocumentprojection; second actualproto generation
+PASS. PGjournalagent owns durable styleleafhistory/axisbarriers; code underway,
+noPG test pass claimed. Codecagent owns23/24/4 strictread/write formats.
+Fullworkspace and browser stylefeature remain unverified; no feature acceptance.
+
+ADR087 continuation: root terminal SQLxprepare77153 failed at codec test module
+not yet written; later55072 failed at mutable/immutable borrow in activecodec
+newtest. Both sent to owningagent; no retry success claimed. WASM currentinit1..3
+and result-onlyhash inspected as nextintegration, noWASMfeatureimplemented yet.
+Added purecalculation stylecompensation regression: original+inverse evaluatezero
+formulas, restoredefaultstyle, preserveformularesults; focusedtest11345PASS.
+Snapshotmetadata iteratorgetter assertions +100002cellroundtrip2PASS3.10s.
+Addedbootstrap RAND formatting/inverse exclusion testPASS1. Rootretiredrow/column
+ID sortediterators avoid cloning entireSnapshotImage justforHTTPmetadata.
+PGstyle tests first1PASS4FAIL caused missing23/24 in codecUser principal decoder;
+codecowner fixing, no failures hidden. Styleundo across intervening axis deletion/
+reactivation conservativelyreturnsUndoConflict even own neutralized axispairs;
+this needs later rich lifecycle-ledger integration, not an ABA bypass.
+
+ADR087 backendchecks: codecagent56/56tests+strictClippyPASS, realPGstyle6PASS
+and2existingundoPASS afterprincipaldecoderfix. RootworkspacecheckPASS8.34s;
+SQLxpreparefinalPASS6.10s and refreshedquerymetadata. Snapshotstorageactual5tests
+29273PASS5.59s filesystem/PG recovery/fallback/history; no fullrecoveryclaim.
+Oldruntime readinessbecame503 afterappliedmigration because exactmigration-set
+check comparescompiledoldset. Rootverifiedownnode25768commandline, stoppedonly
+itsprocesstree, startedhidden21136; WASMrelease41.06s/serverbuild34.76s;
+actualreadyz200 +frontend200 now. PostgreSQL/data not restarted/deleted.
+Rootnoticed Workerrebindingsourcecannotproveauthoredhashafterstructuraledit;
+addedHTTPbound_formula_wire_hex from existingtypedwireBoundFormula, no canonical
+protobufhashclaim/newlibrary. WASMagentownsinit4/patch2/output2, frontendagent
+ownsCanvas/styles/store, rootowns laterworkerJSprotocol. Pure hydrate_snapshot
+extractsallvalidationfromrestore_snapshot; externalhashcheckremainsrestoreonly.
+Rootservertest3775 ranZERO duewrongfilter/feature;2150defaultfeaturealsodoesnot
+coverdocuments. Correctedall-featuresfocused3772stilllive, NOTpassedclaim.
+
+Correction: defaultfeature2150 DID covernewdocuments test;3775zerotestswaswrong
+modulefilter notfeatureexclusion. 2150actualtest failedonlyexpectedcanonical
+rendertext: actual=(A2+1), fixtureexpected=A2+1. Sharedformatter alwaysparenthesizes
+binaryAST, so fixedexpectedexactcanonicaltext, no assertion weakened; ASTdecode
+exactformulaequalityalreadypassed. allfeature3772builtoldertest concurrently,
+willrerunfocusedupdatedfixture afterterminal. BroadAWSbuildnotneededforformula
+boundary; avoidrepeatingallfeatureswithoutreason.
+
+RootcorrectedASTprojectionfixture allfeatures3772PASS1 (22filtered), compile
+2m21s includedS3dependencies; actualtest validatesexactwiredecodedFormula after
+insert while authoredsource=A1+1/currenttext=(A2+1). Runtime21136 remainsbefore
+latestASTfield untilnextbuildrestart. RootrustfmtserverPASS andADRprettierPASS.
+Freshread-onlyPG/domainreview assignedcodecagentafterfreeze; noacceptanceclaim.
+
+ADR087 browserintegrationroot: protocol/client/worker now init4/patch2/output2,
+exactboundformulaDTO versuslegacyrenderedsource, styleleaf coalescing/nullReset,
+strictauthoredhash/downgraderefusal, atomicsingleWorkerpatch call. Actualfrontend
+vitest171PASS initially, thenfrontendagent175PASS afterpendinghydrate regression.
+InitialtypecheckRED newtest accessed.value onblankunion; narrowedformula type,
+fullbuildPASS96modules, WASM1632978B gzip433.32kB (previous1355725B). lintPASS.
+RootrebuiltWASM2899PASS40.16s. Latestdevlauncher468 verifiedownprevious21136tree
+stopped, latestserverbuild18.90s; actualreadyz/frontend200. Standalonebrowserstyle
+parity extendsworkbook corpus17fixtures inclall16leaves; run8917live noresultyet.
+Freshreviewfound/fixed inverseRangegeometry afterinterioraxisinsert:7domain+
+7realPGstylecasesPASS, strictdomain/storageClippyPASS. Rootfuturecontextvalidation
+assignedWASMagent: genuineRED→GREEN. WASM27native+3domainpreviewPASS, strict
+Clippy/wasm32checkPASS reportedagent, frozeninputs. Backend/Workerfullbookactual
+hash nowrequires exactAST; frontendreset hydratesconfirmed thencompactpendingpatch.
+FrontendagentownsUI/storestyles, reviewagentownsnewstylesE2E; no overlappingfiles.
+Productionformatting fullbrowser/recovery/load gates remain pending.
+
+Rootstandalonebrowserparity8917PASS actual1027books/2037patches, input1660241B,
+Worker251.4ms/roundtrip1740.26ms oneWASMload Chromium153.0.8010.12; exactalloutputs
+includingauthoredhash16leafcases matchnative. NEWbenchmarkreport documentslimits,
+notp95/productionclaim. ToolChromeDevToolsMCP couldnotconnect(noDevToolsActivePort);
+Playwrightrealbrowser remainsverificationpath, no globalChromeprofilechanged.
+Rootfrontend175/175PASS7files; fmtfirstRED rootexportgateunformatted thenrustfmt
+andworkspacefmtPASS. Addedtyped422styleXLSXexportgate +puretestPASS untilstyleaware
+normalizedexport implemented; prevents silentformatloss, runtimedeploygatepending
+whileE2E owns currentruntime. Browserspecagentrunning/authoring, notPASSclaimed.
+
+ActualstylesE2E558178/8PASS32s bothDPR: exactCanvasRGBA styledblank,
+confirmedindependentWorkerhash, reloadUndoRedo/clear/numericdisplayrawpreserved,
+insertedrow frozenrange inverse, twoeditorsindependentleaves, foreign equalbarrier.
+Priorharness failures wrong/historyURL thenmisplaced hookfixedwithoutprodweakening.
+Screenshots actual.local/styles-desktop.png1440x900/mobile390x900 viewedbyroot.
+RootallworkspaceClippy22534firstRED testconstantchunks; switchedas_chunks::<2>,
+rerunPASS6.11s. SQLxpreparecheckPASS13.30s; ESLint/protocheck/diffcheckPASS.
+Frontend175tests/typecheckPASS aftercloningqueuedstyleinput; newmutablesourcecopy
+keepspendingstyleoverlay independent. FullRustworkspaceallfeatures74946live.
+StylesXLSXread-onlyinventory started nextstage: exportgatependingdeploy;
+importjournal needsadmission/countbounds coordinatedbeforeaddingstyleevents.
+FullMVP gate stillopen includingmerges/richCopyMove/XLSX/controlledload/deployment.
+
+FullRust74946terminalPASS workspaceallfeatures (compile1m51s; storage97PASS/
+4ignored102.25s, S3contract8ignoredexplicitendpointprerequisite). Fullbrowser48928
+stilllive150cases, discoveredrealpatch2InvalidFormulaUIregression: clientonly
+recognizedlegacyapplyphase anddestroyedWorker. Addednewatomicdraft+style test
+actualREDfailedvsinvalid, fixedphasepatchhandling+retainedstylescoalesce,176unit
+PASS+typecheckPASS. Oldbrowserctx fixture expectedinitschema3; updatedto4 plus
+assertretired/floor/structuralmetadata ratherthanweakenassertions. Overallbrowser
+notgreenclaimed; focusedrealbrowserandnewfullrunneededafterterminal.
+
+2026-09-30 update: Full browser run48928 completed 145/150. Four failures were
+stale expectations/behavior from a run overlapping the Worker client fix: init
+schema3 versus current4, and invalid formula preview expecting its diagnostic
+while schema2 patch errors still terminated the Worker. Both schema fixture and
+client handling were corrected; the complete targeted set then passed12/12 at
+DPR1 and DPR2, repeated twice on one worker. The lone DPR2 overlapping formula
+move failure also passed three isolated/repeated reruns without code changes, so
+it is recorded as a load-sensitive test observation, not as proven fixed product
+behavior. A fresh full150-case browser run is now in progress; do not report it as
+green until its process exits successfully.
+
+Added tests/recovery/styles-restart.test.mjs to the real recovery runner. It
+passed1/1 on an isolated server at port18090 with two forced process restarts.
+The test verified a real active snapshot4 object/checksum, replayed journal tail,
+all16 style leaves on value/formula/blank cells, exact authored and calculated
+state across restart, lost-ACK Undo retry, Redo, and late idempotency receipts.
+The initial snapshot scheduling RED was a test interval expectation: snapshots
+are scheduled at (version-1)%interval, so the test now uses interval3 to activate
+version4; no production code change or failure was hidden.
+
+2026-09-30 browser follow-up: The first refreshed 150-case suite completed149/150;
+all product/style checks passed, while the owner-versus-foreign-move security test
+had a DPR2 pointer-selection miss immediately after page reload. Reproduced once
+in three isolated runs (two passed). The test now navigates from A1 to B2 by
+keyboard before writing, keeping authorization assertions unchanged and removing
+canvas hit-testing from this security test. The corrected scenario passed3/3. A
+second complete150-case suite is running to confirm the aggregate gate.
+
+2026-09-30 browser gate: After replacing pointer hit-testing with keyboard
+selection in the owner-authorization test, the complete command
+`corepack pnpm --filter @pxel/web test:e2e` passed150/150 at DPR1 and DPR2 in
+10.3 minutes. This includes the new8 style scenarios across both projects, formula
+preview/invalid draft, durable author history, move conflicts, two-user styles,
+reload/reconnect, and the corrected owner-versus-foreign-move permission case.
+No production behavior or assertion was relaxed. Focused target rerun passed3/3.
+Roadmap, README and closing presentation slide were updated to the actual result.
+The styled-XLSX runtime guard still needs deployment verification before the
+styles-aware import/export stage starts.
+
+2026-09-30 live export gate: After the 150-case browser suite, the owned dev
+launcher was rebuilt under `scripts/env.ps1` so its Rust/WASM toolchain was
+inherited. The first hidden launch without that environment stopped before the
+backend started; the PostgreSQL service and data were untouched. Restart with
+`env.ps1` compiled `pxel-server`, then actual `/readyz` and web returned200.
+Added a real browser test that commits bold style and calls the authorized export
+route. On DPR1 and DPR2, both requests returned HTTP422 with
+`{code:"xlsx_styles_not_supported"}` and the canonical projection remained
+byte-for-byte equal. Focused gate passed2/2; styles-aware XLSX import/export is
+still the next implementation slice.

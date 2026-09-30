@@ -389,7 +389,14 @@ test('persisted server context reaches real WASM initialization and survives rel
         { schema_version: number; calculation_context: unknown } | undefined;
     });
   await expect.poll(async () => (await latest())?.calculation_context).toEqual(context);
-  expect((await latest())?.schema_version).toBe(3);
+  expect(await latest()).toMatchObject({
+    schema_version: 4,
+    last_axis_change_version: '1',
+    retired_row_ids: [],
+    retired_column_ids: [],
+    row_activation_floors: [],
+    column_activation_floors: [],
+  });
   await page.reload();
   await expect.poll(async () => (await latest())?.calculation_context).toEqual(context);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');

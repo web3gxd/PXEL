@@ -275,11 +275,29 @@ pub async fn create(
 
 #[derive(Serialize)]
 pub struct DocumentView {
+    authored_projection_schema_version: u32,
+    style_schema_version: u32,
+    style_profile_version: u32,
     document_id: String,
     version: String,
     state_hash: String,
+    last_axis_change_version: String,
+    retired_row_ids: Vec<String>,
+    retired_column_ids: Vec<String>,
+    row_activation_floors: Vec<RowActivationFloorView>,
+    column_activation_floors: Vec<ColumnActivationFloorView>,
     calculation_context: Option<CalculationContextView>,
     sheets: Vec<SheetView>,
+}
+#[derive(Serialize)]
+struct RowActivationFloorView {
+    row_id: String,
+    version: String,
+}
+#[derive(Serialize)]
+struct ColumnActivationFloorView {
+    column_id: String,
+    version: String,
 }
 #[derive(Serialize)]
 struct CalculationContextView {
@@ -301,6 +319,110 @@ struct SheetView {
     rows: Vec<String>,
     columns: Vec<String>,
     cells: Vec<CellView>,
+    styles: Vec<StyledCellView>,
+}
+#[derive(Serialize)]
+struct StyledCellView {
+    row_id: String,
+    column_id: String,
+    style: CellStyleView,
+}
+#[derive(Serialize)]
+struct CellStyleView {
+    font_family: String,
+    font_size_hundredth_points: u16,
+    font_bold: bool,
+    font_italic: bool,
+    font_underline: UnderlineView,
+    font_strike: bool,
+    font_color: [u8; 3],
+    fill: [u8; 3],
+    border_top: Option<BorderView>,
+    border_right: Option<BorderView>,
+    border_bottom: Option<BorderView>,
+    border_left: Option<BorderView>,
+    horizontal: HorizontalView,
+    vertical: VerticalView,
+    wrap: bool,
+    number_format: NumberFormatView,
+}
+#[derive(Serialize)]
+struct BorderView {
+    line: BorderLineView,
+    color: [u8; 3],
+}
+macro_rules! style_json_enum {
+    ($view:ident, $domain:ident, $($variant:ident),+ $(,)?) => {
+        #[derive(Serialize)]
+        #[serde(rename_all = "snake_case")]
+        enum $view { $($variant),+ }
+        impl From<spreadsheet_domain::style::$domain> for $view {
+            fn from(value: spreadsheet_domain::style::$domain) -> Self {
+                match value { $(spreadsheet_domain::style::$domain::$variant => Self::$variant),+ }
+            }
+        }
+    };
+}
+style_json_enum!(UnderlineView, Underline, None, Single, Double);
+style_json_enum!(
+    BorderLineView,
+    BorderLine,
+    Thin,
+    Medium,
+    Thick,
+    Dashed,
+    Dotted,
+    Double
+);
+style_json_enum!(
+    HorizontalView,
+    HorizontalAlignment,
+    General,
+    Left,
+    Center,
+    Right
+);
+style_json_enum!(VerticalView, VerticalAlignment, Top, Center, Bottom);
+style_json_enum!(
+    NumberFormatView,
+    NumberFormat,
+    General,
+    Integer,
+    Decimal2,
+    Percent0,
+    Percent2,
+    Scientific2,
+    DateIso
+);
+impl From<spreadsheet_domain::style::Border> for BorderView {
+    fn from(value: spreadsheet_domain::style::Border) -> Self {
+        Self {
+            line: value.line().into(),
+            color: value.color().channels(),
+        }
+    }
+}
+impl From<&spreadsheet_domain::style::CellStyle> for CellStyleView {
+    fn from(value: &spreadsheet_domain::style::CellStyle) -> Self {
+        Self {
+            font_family: value.font_family().to_owned(),
+            font_size_hundredth_points: value.font_size().get(),
+            font_bold: value.font_bold(),
+            font_italic: value.font_italic(),
+            font_underline: value.font_underline().into(),
+            font_strike: value.font_strike(),
+            font_color: value.font_color().channels(),
+            fill: value.fill().channels(),
+            border_top: value.border_top().map(Into::into),
+            border_right: value.border_right().map(Into::into),
+            border_bottom: value.border_bottom().map(Into::into),
+            border_left: value.border_left().map(Into::into),
+            horizontal: value.horizontal().into(),
+            vertical: value.vertical().into(),
+            wrap: value.wrap(),
+            number_format: value.number_format().into(),
+        }
+    }
 }
 #[derive(Serialize)]
 struct CellView {
@@ -326,6 +448,7 @@ struct JsonFormula {
     ast_schema: u32,
     compatibility_profile: &'static str,
     bound_at_version: String,
+    bound_formula_wire_hex: String,
 }
 
 pub async fn get_document(
@@ -507,6 +630,16 @@ fn export_audit_api_error(error: ExportAuditError) -> ApiError {
 }
 
 fn export_projection(workbook: &Workbook) -> Result<NormalizedWorkbook, ApiError> {
+    if workbook
+        .sheets()
+        .iter()
+        .any(|sheet| !sheet.styles().is_empty())
+    {
+        return Err(ApiError(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "xlsx_styles_not_supported",
+        ));
+    }
     let mut sheets = Vec::with_capacity(workbook.sheets().len());
     for sheet in workbook.sheets() {
         let mut cells = Vec::with_capacity(sheet.cells().len());
@@ -630,6 +763,15 @@ fn document_view(id: DocumentId, workbook: &Workbook) -> Result<Json<DocumentVie
                     .iter()
                     .map(|id| id_string(id.as_bytes()))
                     .collect(),
+                styles: sheet
+                    .styles()
+                    .iter()
+                    .map(|(address, style)| StyledCellView {
+                        row_id: id_string(address.row.as_bytes()),
+                        column_id: id_string(address.column.as_bytes()),
+                        style: style.into(),
+                    })
+                    .collect(),
                 cells: sheet
                     .cells()
                     .iter()
@@ -645,6 +787,12 @@ fn document_view(id: DocumentId, workbook: &Workbook) -> Result<Json<DocumentVie
                                 }
                                 CellContent::Value(CellValue::Boolean(b)) => JsonValue::Boolean(*b),
                                 CellContent::Formula(formula) => JsonValue::Formula(JsonFormula {
+                                    bound_formula_wire_hex: prost::Message::encode_to_vec(
+                                        &wire::formula::encode_formula(formula),
+                                    )
+                                    .iter()
+                                    .map(|byte| format!("{byte:02x}"))
+                                    .collect(),
                                     source: formula.source().to_owned(),
                                     canonical: formula.canonical().to_owned(),
                                     current_text: spreadsheet_formula::bound::render_current(
@@ -668,8 +816,34 @@ fn document_view(id: DocumentId, workbook: &Workbook) -> Result<Json<DocumentVie
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
     Ok(Json(DocumentView {
+        authored_projection_schema_version: 4,
+        style_schema_version: wire::style::STYLE_SCHEMA_VERSION,
+        style_profile_version: wire::style::STYLE_PROFILE_VERSION,
         document_id: id_string(id.as_bytes()),
         version: workbook.version().get().to_string(),
+        last_axis_change_version: workbook.last_axis_change_version().get().to_string(),
+        retired_row_ids: workbook
+            .retired_row_ids()
+            .map(|row| id_string(row.as_bytes()))
+            .collect(),
+        retired_column_ids: workbook
+            .retired_column_ids()
+            .map(|column| id_string(column.as_bytes()))
+            .collect(),
+        row_activation_floors: workbook
+            .row_activation_floors()
+            .map(|(row, version)| RowActivationFloorView {
+                row_id: id_string(row.as_bytes()),
+                version: version.get().to_string(),
+            })
+            .collect(),
+        column_activation_floors: workbook
+            .column_activation_floors()
+            .map(|(column, version)| ColumnActivationFloorView {
+                column_id: id_string(column.as_bytes()),
+                version: version.get().to_string(),
+            })
+            .collect(),
         state_hash: workbook
             .hash()
             .iter()
@@ -909,11 +1083,37 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
         + usize::from(input.undo_cell.is_some())
         + usize::from(input.copy_range.is_some())
         + usize::from(input.move_range.is_some())
+        + usize::from(input.set_cell_style.is_some())
+        + usize::from(input.set_range_style.is_some())
         != 1
     {
         return Err(SessionError::InvalidCommand);
     }
-    let operation = if let Some(formula) = input.formula_command {
+    let operation = if let Some(style) = input.set_cell_style {
+        CommandPayload::SetCellStyle {
+            address: address(style.address).map_err(|_| SessionError::InvalidCommand)?,
+            changes: style_patch(style.patch)?,
+        }
+    } else if let Some(style) = input.set_range_style {
+        if style.addresses.is_empty() || style.addresses.len() > 1000 {
+            return Err(SessionError::InvalidCommand);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let mut sheet = None;
+        let mut addresses = Vec::with_capacity(style.addresses.len());
+        for target in style.addresses {
+            let target = address(Some(target)).map_err(|_| SessionError::InvalidCommand)?;
+            if sheet.is_some_and(|id| id != target.sheet) || !seen.insert(target) {
+                return Err(SessionError::InvalidCommand);
+            }
+            sheet = Some(target.sheet);
+            addresses.push(target);
+        }
+        CommandPayload::SetRangeStyle {
+            addresses,
+            changes: style_patch(style.patch)?,
+        }
+    } else if let Some(formula) = input.formula_command {
         CommandPayload::SetCellFormula {
             address: address(formula.address)?,
             source: FormulaSource::new(formula.source).map_err(|_| SessionError::InvalidFormula)?,
@@ -1177,6 +1377,20 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
     })
 }
 
+fn style_patch(
+    input: Option<v1::StylePatch>,
+) -> Result<Vec<spreadsheet_domain::style::StyleChange>, SessionError> {
+    wire::style::decode_patch(input.ok_or(SessionError::InvalidCommand)?).map_err(|error| {
+        match error {
+            wire::style::StyleCodecError::TooLarge => {
+                SessionError::Journal(JournalError::PayloadTooLarge)
+            }
+            wire::style::StyleCodecError::UnsupportedSchema
+            | wire::style::StyleCodecError::Invalid => SessionError::InvalidCommand,
+        }
+    })
+}
+
 fn wire_address(value: CellAddress) -> v1::CellAddress {
     v1::CellAddress {
         sheet_id: value.sheet.as_bytes().to_vec(),
@@ -1333,7 +1547,9 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
         | Operation::MoveRange { .. }
         | Operation::MoveCompensation { .. }
         | Operation::AxisEdit { .. }
-        | Operation::AxisCompensation { .. } => {
+        | Operation::AxisCompensation { .. }
+        | Operation::StyleWrite { .. }
+        | Operation::StyleCompensation { .. } => {
             return None;
         }
         Operation::SetCellFormula { address, formula } => {
@@ -1499,6 +1715,394 @@ mod undo_wire_tests {
             client_sequence: 1,
             ..Default::default()
         }
+    }
+
+    fn bold_patch() -> v1::StylePatch {
+        v1::StylePatch {
+            schema_version: 1,
+            profile_version: 1,
+            changes: vec![v1::StyleChange {
+                kind: Some(v1::style_change::Kind::FontBold(v1::BooleanStyleChange {
+                    action: Some(v1::boolean_style_change::Action::Set(true)),
+                })),
+            }],
+        }
+    }
+
+    #[test]
+    fn style_commands_use_stable_targets_and_exactly_one_intent() -> Result<(), SessionError> {
+        let cell = v1::CellAddress {
+            sheet_id: id(),
+            row_id: id(),
+            column_id: id(),
+        };
+        let mut request = envelope();
+        request.set_cell_style = Some(v1::SetCellStyleCommand {
+            address: Some(cell.clone()),
+            patch: Some(bold_patch()),
+        });
+        assert!(matches!(
+            command(request.clone())?.operation,
+            CommandPayload::SetCellStyle { .. }
+        ));
+        let mut combined = request.clone();
+        combined.undo_cell = Some(v1::UndoCell {
+            target_operation_id: id(),
+        });
+        assert!(matches!(
+            command(combined),
+            Err(SessionError::InvalidCommand)
+        ));
+        request.set_range_style = Some(v1::SetRangeStyleCommand {
+            addresses: vec![cell.clone()],
+            patch: Some(bold_patch()),
+        });
+        assert!(matches!(
+            command(request.clone()),
+            Err(SessionError::InvalidCommand)
+        ));
+        request.set_cell_style = None;
+        assert!(matches!(
+            command(request.clone())?.operation,
+            CommandPayload::SetRangeStyle { .. }
+        ));
+        request.set_range_style = Some(v1::SetRangeStyleCommand {
+            addresses: (0..1000)
+                .map(|_| v1::CellAddress {
+                    row_id: id(),
+                    ..cell.clone()
+                })
+                .collect(),
+            patch: Some(bold_patch()),
+        });
+        assert!(matches!(command(request.clone())?.operation,
+            CommandPayload::SetRangeStyle { addresses, .. } if addresses.len() == 1000));
+        for addresses in [
+            vec![],
+            vec![cell.clone(); 2],
+            vec![cell.clone(); 1001],
+            vec![
+                cell.clone(),
+                v1::CellAddress {
+                    sheet_id: id(),
+                    ..cell.clone()
+                },
+            ],
+            vec![v1::CellAddress {
+                row_id: vec![0; 16],
+                ..cell.clone()
+            }],
+        ] {
+            request.set_range_style = Some(v1::SetRangeStyleCommand {
+                addresses,
+                patch: Some(bold_patch()),
+            });
+            assert!(matches!(
+                command(request.clone()),
+                Err(SessionError::InvalidCommand)
+            ));
+        }
+        request.set_range_style = Some(v1::SetRangeStyleCommand {
+            addresses: vec![cell],
+            patch: None,
+        });
+        assert!(matches!(
+            command(request),
+            Err(SessionError::InvalidCommand)
+        ));
+        for patch in [
+            None,
+            Some(v1::StylePatch {
+                schema_version: 2,
+                ..bold_patch()
+            }),
+            Some(v1::StylePatch {
+                changes: vec![],
+                ..bold_patch()
+            }),
+        ] {
+            let mut invalid = envelope();
+            invalid.set_cell_style = Some(v1::SetCellStyleCommand {
+                address: Some(v1::CellAddress {
+                    sheet_id: id(),
+                    row_id: id(),
+                    column_id: id(),
+                }),
+                patch,
+            });
+            assert!(matches!(
+                command(invalid),
+                Err(SessionError::InvalidCommand)
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn formula_projection_preserves_bound_ast_after_axis_insertion()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document = DocumentId::from_bytes([1; 16])?;
+        let sheet = SheetSeed {
+            id: SheetId::from_bytes([2; 16])?,
+            name: "Sheet1".into(),
+            rows: vec![RowId::from_bytes([3; 16])?, RowId::from_bytes([4; 16])?],
+            columns: vec![ColumnId::from_bytes([5; 16])?],
+        };
+        let origin = CellAddress {
+            sheet: sheet.id,
+            row: sheet.rows[1],
+            column: sheet.columns[0],
+        };
+        let before = sheet.rows[0];
+        let mut book = Workbook::empty(document).candidate(
+            &Operation::CreateWorkbook { sheet },
+            DocumentVersion::new(1)?,
+        )?;
+        let formula = spreadsheet_formula::binder::bind("=A1+1", &book, origin)?;
+        book = book.candidate(
+            &Operation::SetCellFormula {
+                address: origin,
+                formula,
+            },
+            DocumentVersion::new(2)?,
+        )?;
+        book = book.candidate(
+            &Operation::InsertRowsRebased {
+                sheet: origin.sheet,
+                before,
+                rows: vec![RowId::from_bytes([6; 16])?],
+            },
+            DocumentVersion::new(3)?,
+        )?;
+        let view = serde_json::to_value(
+            document_view(document, &book)
+                .map_err(|_| "projection failed")?
+                .0,
+        )?;
+        let value = &view["sheets"][0]["cells"][0]["value"]["value"];
+        let hex = value["bound_formula_wire_hex"]
+            .as_str()
+            .ok_or("missing bound formula")?;
+        let bytes = hex
+            .as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair)?, 16).map_err(Into::into))
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+        let wire = <v1::BoundFormula as prost::Message>::decode(bytes.as_slice())?;
+        let decoded = wire::formula::decode_formula(wire)?;
+        assert_eq!(
+            book.cell_content(origin)?,
+            Some(&CellContent::Formula(decoded))
+        );
+        assert_eq!(value["source"], "=A1+1");
+        assert_eq!(value["current_text"], "=(A2+1)");
+        Ok(())
+    }
+    #[test]
+    fn style_projection_keeps_styled_blanks_and_exposes_authored_metadata()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use spreadsheet_domain::style::{Change, StyleChange};
+        let document = DocumentId::from_bytes(*Uuid::now_v7().as_bytes())?;
+        let sheet = SheetSeed {
+            id: SheetId::from_bytes(*Uuid::now_v7().as_bytes())?,
+            name: "Лист 1".into(),
+            rows: vec![RowId::from_bytes(*Uuid::now_v7().as_bytes())?],
+            columns: vec![ColumnId::from_bytes(*Uuid::now_v7().as_bytes())?],
+        };
+        let cell = CellAddress {
+            sheet: sheet.id,
+            row: sheet.rows[0],
+            column: sheet.columns[0],
+        };
+        let book = Workbook::empty(document).candidate(
+            &Operation::CreateWorkbook { sheet },
+            DocumentVersion::new(1)?,
+        )?;
+        let operation = spreadsheet_domain::style_write::prepare_style_write(
+            &book,
+            &[cell],
+            &[StyleChange::FontBold(Change::Set(true))],
+            StyleWriteKind::Cell,
+        )?;
+        let styled = book.candidate(&operation, DocumentVersion::new(2)?)?;
+        assert!(matches!(
+            export_projection(&styled),
+            Err(ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "xlsx_styles_not_supported"
+            ))
+        ));
+        let view = serde_json::to_value(
+            document_view(document, &styled)
+                .map_err(|_| "projection failed")?
+                .0,
+        )?;
+        assert_eq!(view["authored_projection_schema_version"], 4);
+        assert_eq!(view["style_schema_version"], 1);
+        assert_eq!(view["style_profile_version"], 1);
+        assert_eq!(view["last_axis_change_version"], "1");
+        assert_eq!(view["retired_row_ids"], serde_json::json!([]));
+        assert_eq!(view["row_activation_floors"], serde_json::json!([]));
+        assert!(view["calculation_context"].is_null());
+        assert_eq!(view["sheets"][0]["cells"], serde_json::json!([]));
+        assert_eq!(
+            view["sheets"][0]["styles"][0]["row_id"],
+            id_string(cell.row.as_bytes())
+        );
+        let style = &view["sheets"][0]["styles"][0]["style"];
+        assert_eq!(style["font_bold"], true);
+        assert_eq!(style["font_family"], "Arial");
+        assert_eq!(style["font_size_hundredth_points"], 1000);
+        assert_eq!(style["horizontal"], "general");
+        assert_eq!(style["vertical"], "bottom");
+        assert_eq!(style["font_underline"], "none");
+        assert_eq!(style["number_format"], "general");
+        assert_eq!(style["font_color"], serde_json::json!([0, 0, 0]));
+        assert_eq!(style["fill"], serde_json::json!([255, 255, 255]));
+        assert!(style["border_top"].is_null());
+        assert_ne!(book.hash(), styled.hash());
+        let cleared = styled.candidate(
+            &Operation::ClearCell { address: cell },
+            DocumentVersion::new(3)?,
+        )?;
+        let after = serde_json::to_value(
+            document_view(document, &cleared)
+                .map_err(|_| "projection failed")?
+                .0,
+        )?;
+        assert_eq!(after["sheets"][0]["styles"], view["sheets"][0]["styles"]);
+
+        let actor = ActorId::from_bytes(*Uuid::now_v7().as_bytes())?;
+        let event = CommittedEvent {
+            document_id: document,
+            operation_id: OperationId::from_bytes(*Uuid::now_v7().as_bytes())?,
+            principal: EventPrincipal::User(actor),
+            version: styled.version(),
+            operation,
+            state_hash: styled.hash(),
+        };
+        let message = committed_message(&event).ok_or("missing style receipt")?;
+        assert_eq!(message.actor_id, actor.as_bytes());
+        assert!(message.canonical_operation.is_none());
+        assert_eq!(message.confirmed_state_hash, styled.hash());
+        let Operation::StyleWrite { kind, writes } = event.operation else {
+            return Err("expected style write".into());
+        };
+        let inverse = Operation::StyleCompensation {
+            kind,
+            writes: writes
+                .into_iter()
+                .map(|write| GuardedStyleWrite {
+                    address: write.address,
+                    previous: write.changes,
+                    changes: write.previous,
+                })
+                .collect(),
+            undoes: event.operation_id,
+            undoes_version: event.version,
+        };
+        let restored = styled.candidate(&inverse, DocumentVersion::new(3)?)?;
+        let restored_view = serde_json::to_value(
+            document_view(document, &restored)
+                .map_err(|_| "projection failed")?
+                .0,
+        )?;
+        assert_eq!(restored_view["sheets"][0]["styles"], serde_json::json!([]));
+        let undo_event = CommittedEvent {
+            operation: inverse,
+            operation_id: OperationId::from_bytes(*Uuid::now_v7().as_bytes())?,
+            version: restored.version(),
+            state_hash: restored.hash(),
+            ..event
+        };
+        assert!(
+            committed_message(&undo_event)
+                .ok_or("missing style inverse receipt")?
+                .canonical_operation
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn authored_projection_preserves_retired_and_revived_axis_metadata()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use spreadsheet_domain::axis_edit::{prepare_axis_edit, prepare_axis_inverse};
+        let document = DocumentId::from_bytes(*Uuid::now_v7().as_bytes())?;
+        let actor = ActorId::from_bytes(*Uuid::now_v7().as_bytes())?;
+        let sheet = SheetSeed {
+            id: SheetId::from_bytes(*Uuid::now_v7().as_bytes())?,
+            name: "Лист 1".into(),
+            rows: (0..2)
+                .map(|_| RowId::from_bytes(*Uuid::now_v7().as_bytes()))
+                .collect::<Result<_, _>>()?,
+            columns: (0..2)
+                .map(|_| ColumnId::from_bytes(*Uuid::now_v7().as_bytes()))
+                .collect::<Result<_, _>>()?,
+        };
+        let row = sheet.rows[0];
+        let column = sheet.columns[0];
+        let sheet_id = sheet.id;
+        let mut book = Workbook::empty(document).candidate(
+            &Operation::CreateWorkbook { sheet },
+            DocumentVersion::new(1)?,
+        )?;
+        for operation in [
+            Operation::DeleteRows {
+                sheet: sheet_id,
+                rows: vec![row],
+            },
+            Operation::DeleteColumns {
+                sheet: sheet_id,
+                columns: vec![column],
+            },
+        ] {
+            let version = DocumentVersion::new(book.version().get() + 1)?;
+            let operation = prepare_axis_edit(&book, &operation, version)?;
+            book = book.candidate(&operation, version)?;
+            let target = CommittedEvent {
+                document_id: document,
+                operation_id: OperationId::from_bytes(*Uuid::now_v7().as_bytes())?,
+                principal: EventPrincipal::User(actor),
+                version,
+                operation,
+                state_hash: book.hash(),
+            };
+            let version = DocumentVersion::new(version.get() + 1)?;
+            let inverse = prepare_axis_inverse(&book, &target, version)?;
+            book = book.candidate(&inverse, version)?;
+        }
+        let view = serde_json::to_value(
+            document_view(document, &book)
+                .map_err(|_| "projection failed")?
+                .0,
+        )?;
+        assert_eq!(view["version"], "5");
+        assert_eq!(view["last_axis_change_version"], "5");
+        assert_eq!(
+            view["retired_row_ids"],
+            serde_json::json!([id_string(row.as_bytes())])
+        );
+        assert_eq!(
+            view["retired_column_ids"],
+            serde_json::json!([id_string(column.as_bytes())])
+        );
+        assert_eq!(
+            view["row_activation_floors"],
+            serde_json::json!([{ "row_id": id_string(row.as_bytes()), "version": "3" }])
+        );
+        assert_eq!(
+            view["column_activation_floors"],
+            serde_json::json!([{ "column_id": id_string(column.as_bytes()), "version": "5" }])
+        );
+        assert_eq!(view["sheets"][0]["rows"][0], id_string(row.as_bytes()));
+        assert_eq!(
+            view["sheets"][0]["columns"][0],
+            id_string(column.as_bytes())
+        );
+        Ok(())
     }
 
     #[test]

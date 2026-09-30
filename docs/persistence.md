@@ -3,7 +3,8 @@
 ADR085 introduces frozen AxisEdit/AxisCompensation schemas21/22 with semantic
 hash tags23/24. Explicit insert/delete operations store stable placements and
 content/formula preimages; automatic ExtendRows remains legacy/nonundoable.
-Snapshot writer3 persists per-ID activation floors; readers1/2 remain supported.
+ADR085 introduced snapshot writer3 with per-ID activation floors and readers1/2.
+ADR087 now uses writer4 and retains readers1..4, as specified below.
 `documents.axis_activation_version` is a transactional derived marker: after
 restoration every new command requires hash-verified current projection context.
 Reference admission uses hash-covered floors, and snapshot restore rejects an
@@ -231,6 +232,47 @@ Reader авторизует historical read, выбирает подходящи
 Cacheless content hash использует versioned domain encoding: fixed tags/endianness/lengths, ordered axes, sorted maps, normalized IEEE-754 bits. Runtime caches, pending operations, presence и protobuf field order исключены. Context identity/epoch передаются отдельно; result hash включает engine/profile/context/input_version и нормализованные результаты. Comparison проводится только при одинаковых версиях и завершенном calculation generation.
 
 [Protobuf serialization is not canonical](https://protobuf.dev/programming-guides/serialization-not-canonical/) — причина отдельной encoding, а не разрешение нестабильного domain hash.
+
+## Оформление и новые persisted форматы (ADR-087)
+
+Style originals используют schema 23, собственные компенсации — schema 24;
+semantic event hash tags — 25/26. Событие сохраняет сортированные stable адреса,
+точные preimages и изменения свойств, включая намерение Reset или Set(default).
+Проверяются kind/schema, user principal, provenance компенсации, уникальность
+адресов/свойств и общий mask для исходного диапазона. Предел — 1000 адресов и
+16 свойств на адрес. Envelope вместе с preimages ограничен 4 MiB; допустимость
+ближайшей обратной операции проверяется до принятия original. Старые payload
+и их hash goldens не переписываются; миграция расширяет допустимые family IDs.
+
+Snapshot writer 4 сохраняет sparse styles отдельно от contents, поэтому пустая
+оформленная ячейка переживает восстановление. Readers 1–3 сохраняют свои прежние
+профили и не принимают новые style fields под старым schema ID. Reader 4 восстанавливает
+не более 100000 занятых адресов на листе, считая union содержимого и оформления,
+и не более 100000 style entries во всей книге. Отдельный allocation charge стилей
+ограничен 64 MiB: 512 bytes на entry плюс UTF-8 bytes имени шрифта. Это admission
+budget, не измеренный RSS; snapshot binary cap — 32 MiB. Worker имеет собственный
+bounded профиль и может типизированно отказаться от слишком большой книги.
+
+Только новые persisted schema 23/24 и snapshot 4 закрепляют writer-normalized
+encoding profile 1: reader принимает байты, которые воспроизводит этот конкретный
+writer. Unknown fields, перестановка известных полей и иные wire-представления
+отклоняются; legacy readers этим правилом не ужесточаются. Это сознательно узкий
+контракт нашего формата, а не гарантия каноничности protobuf. Изменение generator/
+codec, влияющее на байты writer, требует совместимого reader либо новой схемы и
+миграции чтения, а не незаметной пересериализации старого журнала.
+
+Checksum защищает сохранённые bytes. Authored domain hash вычисляется собственной
+семантической кодировкой; условный style suffix включает profile 1 и ordered
+stable адреса/свойства. У пустой style map suffix отсутствует, сохраняя старые
+goldens. Calculated-result hash остаётся отдельным. Ни protobuf formula bytes,
+ни переданный сервером hash не подменяют вычисление Worker authored hash.
+
+История оформления проверяется отдельно по `(address, leaf)`; история содержимого
+не получает лишний конфликт от изменения шрифта. Axis lifecycle guards не дают
+original/undo/redo стереть оформление без preimages. Локально прошли 7 реальных
+PostgreSQL style tests, включая чужую запись равного значения, независимость
+содержимого и другого свойства, forged projection rejection и Undo/Redo после
+вставки строки. Это не закрывает всю crash matrix стилей или production recovery.
 
 ## Retention и эксплуатация
 

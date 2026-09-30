@@ -6,6 +6,19 @@
 Каждая новая фаза проверяет собственные acceptance criteria; разрешение продолжать
 не означает, что будущие функции или совместимость уже подтверждены.
 
+Текущий срез — [ADR-087](adr/087-cell-formatting.md), sparse оформление с 16
+свойствами, durable Undo/Redo и отдельным WASM preview. Локальные unit/build,
+Clippy/SQLx, полный Rust workspace, 7 PostgreSQL style tests, codec/adapter suites
+и Playwright E2E 150/150 при DPR 1/2 прошли. Recovery test с двумя hard restarts
+проверил snapshot4, журнал и историю стилей. Native/browser corpus — 1027 книг /
+2037 patches с независимым authored hash. Runtime test при DPR 1/2 подтвердил,
+что styled XLSX получает typed 422 вместо потери оформления. Styles-aware
+round-trip остаётся следующим срезом. Весь MVP или всю фазу 4 этим не объявляем
+завершёнными.
+
+Ниже сохранены записи предыдущих срезов. Формулировки «ещё не реализовано» внутри
+них относятся к соответствующему ADR; текущий статус уточняется последней записью.
+
 Подготовка диапазонного undo выявила и исправила отдельный дефект атомарных
 batch ([ADR-078](adr/078-atomic-batch-final-capacity.md)): допустимость зависит
 от итогового объёма текста, AST и ячеек, а не порядка добавлений и освобождений.
@@ -566,3 +579,25 @@ checks passed. Full142browser passed before final fallback-envelope adjustment;
 34affected checks then passed and final16history checks passed on updated binary.
 Native/browser parity remains green. RUNBOOK records commands and failures.
 Styles/merges/richerXLSX and deployment/stress/production gates stay open.
+
+ADR087: локально реализованы 16 typed style leaves, независимые content/style
+свойства, sparse styled blanks, bounded атомарные single/range commands и guarded
+own Undo/Redo. История автора восстанавливается после reload; стиль исходного
+диапазона можно отменить после вставки внутрь него новой строки. Persisted families
+23/24 и snapshot writer4 сохраняют семантику; legacy readers/goldens остаются.
+Worker init4 принимает точный bound AST и hash-covered identity metadata; patch2
+и output2 отделяют authored hash от calculated results. Canvas и toolbar
+применяют limited number-format profile без изменения значения ячейки.
+
+175 frontend units/typecheck/lint/build, workspace Clippy/SQLx, 7 PG style tests,
+56 codec tests, 27 native adapter tests, 3 domain preview tests и 8 focused browser
+cases прошли. [Реальный native/browser corpus](benchmarks/2026-09-30-style-worker-parity-local.md):
+1027 книг / 2037 patches. Общая завершающая регрессия и обновлённый runtime gate
+ещё не объявлены пройденными; итог и точные команды — в RUNBOOK.
+
+Следующие границы: структурные preimages оформления, rich Copy/Move, merges,
+styles-aware XLSX import/export/reimport и измерение sparse style memory. Пока
+Copy/Move переносят только содержимое, деструктивные axis операции без сохранения
+стиля отклоняются, а styled XLSX export получает typed HTTP 422 вместо тихой
+потери оформления. Production S3, Linux/Compose/CI, полный stress и подтверждённые
+Excel fixtures остаются самостоятельными gates.

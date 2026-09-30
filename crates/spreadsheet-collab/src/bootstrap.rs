@@ -396,6 +396,8 @@ fn affects_calculation(operation: &Operation) -> bool {
         Operation::CreateWorkbook { .. }
             | Operation::AdvanceCalculationEpoch { .. }
             | Operation::ExtendRows { .. }
+            | Operation::StyleWrite { .. }
+            | Operation::StyleCompensation { .. }
     )
 }
 fn clock_consumers(book: &Workbook) -> (bool, bool) {
@@ -461,6 +463,46 @@ mod tests {
             },
             DocumentVersion::new(2)?,
         )?)
+    }
+    #[test]
+    fn formatting_and_its_inverse_do_not_advance_volatile_epoch()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use spreadsheet_domain::{
+            style::{Change, StyleChange},
+            workbook::{GuardedStyleWrite, OperationId, StyleWriteKind},
+        };
+        let book = fixture("=RAND()")?;
+        let sheet = &book.sheets()[0];
+        let at = CellAddress {
+            sheet: sheet.id(),
+            row: sheet.rows()[0],
+            column: sheet.columns()[0],
+        };
+        let original = spreadsheet_domain::style_write::prepare_style_write(
+            &book,
+            &[at],
+            &[StyleChange::FontBold(Change::Set(true))],
+            StyleWriteKind::Cell,
+        )?;
+        assert!(!affects_calculation(&original));
+        let Operation::StyleWrite { kind, writes } = original else {
+            return Err("expected style write".into());
+        };
+        let inverse = Operation::StyleCompensation {
+            kind,
+            writes: writes
+                .into_iter()
+                .map(|w| GuardedStyleWrite {
+                    address: w.address,
+                    previous: w.changes,
+                    changes: w.previous,
+                })
+                .collect(),
+            undoes: OperationId::from_bytes([9; 16])?,
+            undoes_version: DocumentVersion::new(3)?,
+        };
+        assert!(!affects_calculation(&inverse));
+        Ok(())
     }
     fn context(reason: CalculationReason, engine: &str) -> Result<CalculationContext, DomainError> {
         CalculationContext::new(

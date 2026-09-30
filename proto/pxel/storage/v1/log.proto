@@ -39,7 +39,36 @@ message Operation {
   MoveCompensation move_compensation = 20;
   AxisChange axis_edit = 21;
   AxisCompensation axis_compensation = 22;
+  StyleWrite style_write = 23;
+  StyleCompensation style_compensation = 24;
  }
+}
+// Profile 1 uses the frozen sixteen leaf-property tags. A value kind must match
+// its property; reset is represented by true, never by a missing value.
+message StyleChange {
+ uint32 property = 1;
+ oneof kind {
+  bool reset = 2;
+  string font_family = 3;
+  uint32 font_size = 4;
+  bool boolean = 5;
+  uint32 enumeration = 6;
+  uint32 rgb = 7;
+  StyleBorder border = 8;
+ }
+}
+message StyleBorder { uint32 line = 1; uint32 rgb = 2; }
+message CellStyle { uint32 profile_version = 1; repeated StyleChange changes = 2; }
+message GuardedStyleWrite {
+ CellAddress address = 1;
+ repeated StyleChange previous = 2;
+ repeated StyleChange changes = 3;
+}
+message StyleWrite { uint32 kind = 1; repeated GuardedStyleWrite writes = 2; }
+message StyleCompensation {
+ StyleWrite write = 1;
+ bytes undoes_operation_id = 2;
+ uint64 undoes_version = 3;
 }
 message AdvanceCalculationEpoch {
  bytes context_id = 1;

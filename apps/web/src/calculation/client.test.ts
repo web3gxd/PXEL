@@ -44,6 +44,141 @@ function harness() {
   return { client, worker, requests, update, reply, result };
 }
 afterEach(() => vi.useRealTimers());
+it('uses atomic authored patches and coalesces independent style leaves while init is pending', () => {
+  const h = harness();
+  const init4: PreviewInit = {
+    ...initial,
+    schema_version: 4,
+    last_axis_change_version: '1',
+    retired_row_ids: [],
+    retired_column_ids: [],
+    row_activation_floors: [],
+    column_activation_floors: [],
+  };
+  h.client.reset(init4);
+  const init = h.requests.at(-1)!;
+  h.client.patch(
+    { ...initial, pending_revision: '1' },
+    [],
+    [{ ...address, changes: [{ property: 'font_bold', value: true }] }],
+  );
+  h.client.patch(
+    { ...initial, pending_revision: '2' },
+    [],
+    [
+      {
+        ...address,
+        changes: [
+          { property: 'font_italic', value: true },
+          { property: 'font_bold', value: null },
+        ],
+      },
+    ],
+  );
+  h.reply({
+    id: init.id,
+    result: {
+      ...h.result(init),
+      schema_version: 2,
+      normalized_authored_state_hash: 'b'.repeat(64),
+    },
+  });
+  const patch = h.requests.at(-1)!;
+  expect(patch.kind).toBe('patch');
+  expect(patch.data).toMatchObject({
+    schema_version: 2,
+    pending_revision: '2',
+    cells: [],
+    styles: [
+      {
+        ...address,
+        changes: [
+          { property: 'font_bold', value: null },
+          { property: 'font_italic', value: true },
+        ],
+      },
+    ],
+  });
+  h.reply({
+    id: patch.id,
+    result: {
+      ...h.result(patch),
+      schema_version: 2,
+      normalized_authored_state_hash: 'c'.repeat(64),
+    },
+  });
+  expect(h.update).toHaveBeenLastCalledWith(
+    'ready',
+    expect.any(Map),
+    expect.objectContaining({ pending_revision: '2' }),
+    undefined,
+    'c'.repeat(64),
+  );
+});
+it('rejects a result-only schema downgrade for authored preview hydration', () => {
+  const h = harness();
+  h.client.reset({
+    ...initial,
+    schema_version: 4,
+    last_axis_change_version: '1',
+    retired_row_ids: [],
+    retired_column_ids: [],
+    row_activation_floors: [],
+    column_activation_floors: [],
+  });
+  const init = h.requests.at(-1)!;
+  h.reply({ id: init.id, result: h.result(init) });
+  expect(h.update).toHaveBeenLastCalledWith('failed');
+});
+it('keeps an atomic invalid draft recoverable and retains its independent style changes', () => {
+  const h = harness();
+  h.client.reset({
+    ...initial,
+    schema_version: 4,
+    last_axis_change_version: '1',
+    retired_row_ids: [],
+    retired_column_ids: [],
+    row_activation_floors: [],
+    column_activation_floors: [],
+  });
+  const init = h.requests.at(-1)!;
+  h.reply({
+    id: init.id,
+    result: {
+      ...h.result(init),
+      schema_version: 2,
+      normalized_authored_state_hash: 'b'.repeat(64),
+    },
+  });
+  h.client.patch(
+    { ...initial, pending_revision: '1' },
+    [{ ...address, value: { type: 'formula', value: { source: '=SUM(' } } }],
+    [{ ...address, changes: [{ property: 'font_bold', value: true }] }],
+  );
+  const invalid = h.requests.at(-1)!;
+  h.reply({ id: invalid.id, error: 'InvalidFormula', phase: 'patch' });
+  expect(h.update).toHaveBeenLastCalledWith('invalid');
+  h.client.patch({ ...initial, pending_revision: '2' }, [
+    { ...address, value: { type: 'formula', value: { source: '=2+3' } } },
+  ]);
+  const retry = h.requests.at(-1)!;
+  expect(retry.kind).toBe('patch');
+  expect(retry.data).toMatchObject({
+    expected_pending_revision: '0',
+    pending_revision: '2',
+    cells: [{ ...address, value: { type: 'formula', value: { source: '=2+3' } } }],
+    styles: [{ ...address, changes: [{ property: 'font_bold', value: true }] }],
+  });
+  h.reply({
+    id: retry.id,
+    result: {
+      ...h.result(retry),
+      schema_version: 2,
+      normalized_authored_state_hash: 'c'.repeat(64),
+    },
+  });
+  expect(h.update.mock.lastCall?.[0]).toBe('ready');
+});
 it('queues geometry during initialization and publishes move contents separately from calculated results', () => {
   const h = harness();
   const geometry = { source: address, destination: address, rows: 1, columns: 1 };

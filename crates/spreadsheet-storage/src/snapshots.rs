@@ -259,7 +259,7 @@ impl PgDatabase {
         let key_uuid = uuid(snapshot_id.as_bytes());
         let key = BlobKey::parse(&key_uuid.to_string()).map_err(|_| SnapshotError::Corrupt)?;
         sqlx::query!(
-            "INSERT INTO document_snapshots (snapshot_id, document_id, snapshot_version, last_axis_change_version, snapshot_schema_version, object_key, byte_length, payload_checksum, state_hash, writer_engine_version, writer_compatibility_profile) VALUES ($1,$2,$3,$4,3,$5,$6,$7,$8,$9,$10)",
+            "INSERT INTO document_snapshots (snapshot_id, document_id, snapshot_version, last_axis_change_version, snapshot_schema_version, object_key, byte_length, payload_checksum, state_hash, writer_engine_version, writer_compatibility_profile) VALUES ($1,$2,$3,$4,4,$5,$6,$7,$8,$9,$10)",
             key_uuid, uuid(document_id.as_bytes()), sql_number(workbook.version().get())?,
             sql_number(workbook.last_axis_change_version().get())?, key_uuid,
             sql_number(body.len() as u64)?, &checksum[..], &workbook.hash()[..], engine_version, compatibility_profile
@@ -1132,7 +1132,7 @@ mod tests {
         )
         .fetch_one(&db.pool)
         .await?;
-        assert_eq!(schema, 3);
+        assert_eq!(schema, 4);
         let tail = Operation::SetCellValue {
             address: second_address,
             value: CellValue::Number(9.0),

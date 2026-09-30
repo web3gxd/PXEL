@@ -1,5 +1,6 @@
 //! Connection-only wire contract. Persisted event codecs live separately.
 pub mod formula;
+pub mod style;
 pub mod v1 {
     include!(concat!(env!("OUT_DIR"), "/pxel.wire.v1.rs"));
 }

@@ -10,6 +10,54 @@ fn version(value: u64) -> Result<DocumentVersion, DomainError> {
 }
 
 #[test]
+fn snapshot_restores_more_than_one_sheet_content_capacity() -> Result<(), DomainError> {
+    fn stable(prefix: u8, index: u32) -> [u8; 16] {
+        let mut bytes = [0; 16];
+        bytes[0] = prefix;
+        bytes[12..].copy_from_slice(&index.to_be_bytes());
+        bytes
+    }
+    let mut seeds = Vec::new();
+    let mut cells = Vec::new();
+    for prefix in [10u8, 20] {
+        let sheet = SheetId::from_bytes(stable(prefix, 0))?;
+        let column = ColumnId::from_bytes(stable(prefix + 1, 0))?;
+        let rows = (0..50_001)
+            .map(|index| RowId::from_bytes(stable(prefix + 2, index)))
+            .collect::<Result<Vec<_>, _>>()?;
+        cells.extend(rows.iter().map(|row| {
+            (
+                CellAddress {
+                    sheet,
+                    row: *row,
+                    column,
+                },
+                CellValue::Number(1.).into(),
+            )
+        }));
+        seeds.push(SheetSeed {
+            id: sheet,
+            name: format!("Sheet{prefix}"),
+            rows,
+            columns: vec![column],
+        });
+    }
+    let book =
+        Workbook::hydrate_sheets(DocumentId::from_bytes([1; 16])?, version(1)?, seeds, cells)?;
+    let restored = Workbook::restore_snapshot(book.snapshot_image()?, book.hash())?;
+    assert_eq!(restored.hash(), book.hash());
+    assert_eq!(
+        restored
+            .sheets()
+            .iter()
+            .map(|s| s.cells().len())
+            .sum::<usize>(),
+        100_002
+    );
+    Ok(())
+}
+
+#[test]
 fn snapshot_restores_retired_axes_context_and_replays_tail() -> Result<(), DomainError> {
     let document = DocumentId::from_bytes([1; 16])?;
     let sheet = SheetId::from_bytes([2; 16])?;
@@ -107,7 +155,15 @@ fn snapshot_restores_retired_axes_context_and_replays_tail() -> Result<(), Domai
     let image = book.snapshot_image()?;
     assert_eq!(image.last_axis_change_version, version(6)?);
     assert_eq!(image.retired_rows, vec![rows[1]]);
+    assert_eq!(
+        book.retired_row_ids().collect::<Vec<_>>(),
+        image.retired_rows
+    );
     assert_eq!(image.retired_columns, vec![columns[1]]);
+    assert_eq!(
+        book.retired_column_ids().collect::<Vec<_>>(),
+        image.retired_columns
+    );
     let mut restored = Workbook::restore_snapshot(image.clone(), book.hash())?;
     assert_eq!(restored.hash(), book.hash());
     assert_eq!(

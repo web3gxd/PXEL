@@ -225,6 +225,32 @@ fn describes_verified_events_without_retaining_document_contents() -> TestResult
         describe(&event, actor),
         Err(JournalError::Corrupt)
     ));
+    event.operation = Operation::StyleWrite {
+        kind: StyleWriteKind::Cell,
+        writes: vec![GuardedStyleWrite {
+            address,
+            previous: vec![spreadsheet_domain::style::StyleChange::FontBold(
+                spreadsheet_domain::style::Change::Reset,
+            )],
+            changes: vec![spreadsheet_domain::style::StyleChange::FontBold(
+                spreadsheet_domain::style::Change::Set(true),
+            )],
+        }],
+    };
+    assert_eq!(describe(&event, actor)?.kind, HistoryEntryKind::Original);
+    let Operation::StyleWrite { kind, writes } = event.operation else {
+        return Err("expected style original".into());
+    };
+    event.operation = Operation::StyleCompensation {
+        kind,
+        writes,
+        undoes: target(1)?.operation_id,
+        undoes_version: DocumentVersion::new(1)?,
+    };
+    assert_eq!(
+        describe(&event, actor)?.kind,
+        HistoryEntryKind::Compensation { target: target(1)? }
+    );
     event.operation = Operation::ExtendRows {
         sheet: address.sheet,
         rows: vec![RowId::from_bytes([8; 16])?],

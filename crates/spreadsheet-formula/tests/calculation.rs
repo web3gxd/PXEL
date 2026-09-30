@@ -8,6 +8,51 @@ use std::{collections::BTreeSet, sync::atomic::AtomicBool};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
+fn style_write_advances_input_without_dirtying_formula_dependencies() -> TestResult {
+    use spreadsheet_domain::style::{Change, StyleChange};
+    let mut book = fixture(vec![(address(0, 0)?, CellValue::Number(3.).into())], 2, 2)?;
+    let op = formula(&book, address(0, 1)?, "=A1*2")?;
+    book = book.candidate(&op, DocumentVersion::new(2)?)?;
+    let limits = CalculationLimits::default();
+    let mut projection = CalculationProjection::from_workbook(&book, limits)?;
+    projection.calculate(&book, limits, &AtomicBool::new(false))?;
+    let results = projection.results().clone();
+    let op = spreadsheet_domain::style_write::prepare_style_write(
+        &book,
+        &[address(0, 0)?],
+        &[StyleChange::FontBold(Change::Set(true))],
+        StyleWriteKind::Cell,
+    )?;
+    let Operation::StyleWrite { kind, writes } = &op else {
+        return Err("expected style write".into());
+    };
+    let inverse = Operation::StyleCompensation {
+        kind: *kind,
+        writes: writes
+            .iter()
+            .map(|w| GuardedStyleWrite {
+                address: w.address,
+                previous: w.changes.clone(),
+                changes: w.previous.clone(),
+            })
+            .collect(),
+        undoes: OperationId::from_bytes([9; 16])?,
+        undoes_version: DocumentVersion::new(3)?,
+    };
+    edit(&mut book, &mut projection, op)?;
+    assert_eq!(projection.dirty_count(), 0);
+    let patch = projection.calculate(&book, limits, &AtomicBool::new(false))?;
+    assert_eq!(patch.evaluated_cells, 0);
+    assert_eq!(projection.results(), &results);
+    edit(&mut book, &mut projection, inverse)?;
+    let patch = projection.calculate(&book, limits, &AtomicBool::new(false))?;
+    assert_eq!(patch.evaluated_cells, 0);
+    assert_eq!(projection.results(), &results);
+    assert!(book.sheets()[0].styles().is_empty());
+    Ok(())
+}
+
+#[test]
 fn frozen_move_reconciles_inbound_edges_without_recalculating_independent_formulas() -> TestResult {
     let mut book = fixture(vec![(address(0, 0)?, CellValue::Number(3.).into())], 2, 4)?;
     for (column, source) in [(1, "=A1*2"), (2, "=B1+1"), (3, "=42")] {

@@ -2602,11 +2602,13 @@ dependencies = [
 name = "spreadsheet-wasm"
 version = "0.1.0"
 dependencies = [
+ "prost",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "spreadsheet-domain",
  "spreadsheet-formula",
+ "spreadsheet-wire-protocol",
  "thiserror",
  "wasm-bindgen",
 ]

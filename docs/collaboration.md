@@ -290,7 +290,8 @@ bounded tail references before CAS/COMMIT. Own exact inverse pairs neutralize;
 foreign/legacy equal-value writes and new effective references remain barriers.
 Compensation updates the relocation floor on recovery too. Delivery uses existing
 authorized projection resync; moves enter acknowledged100-entry local history.
-Cross-sheet/partial-range/style/merge moves and style compensation remain open.
+Cross-sheet/partial-range/style/merge moves remain open. Style compensation was
+not part of ADR083; the separate ADR087 contract below adds it.
 Axis compensation follows in ADR085; author history discovery is implemented in
 ADR086 with local integration verification recorded in RUNBOOK. ADR084 adds geometry-only
 shared Rust Worker preview, kept in a private pending overlay until server
@@ -310,3 +311,38 @@ resolution. Structural canonical delivery uses authorized projection refresh.
 Snapshot3 and replay retain floors; ADR086 separately implements author history
 discovery with local integration verification recorded in RUNBOOK.
 See ADR085 and RUNBOOK for verification status and all inspection/size limits.
+
+## Оформление как независимые свойства (ADR-087)
+
+`SetCellStyle` и `SetRangeStyle` используют wire tags 11/12 и style schema/profile 1.
+Команда содержит 1–1000 явных stable адресов одного листа и 1–16 различных
+изменений свойств. Исходный диапазон должен быть прямоугольным в проверяемой
+проекции; он не переинтерпретируется по A1 после задержки. Для каждого свойства
+есть typed Set или Reset; неизвестные варианты, дубликаты, неверные RGB/размеры
+и превышение лимитов отклоняются целиком. Клиент не задаёт доверенные preimages.
+
+Actor готовит candidate, фиксирует точные предыдущие значения изменяемых свойств
+и проверяет forward/inverse budgets. Journal независимо проверяет receipt,
+актуальную авторизацию, activation floors, текущую projection и CAS. Содержимое
+и оформление независимы; два разных свойства стиля также не конфликтуют. Чужая
+запись того же свойства остаётся препятствием Undo даже при равном значении.
+Компенсация действует только на собственную операцию и создаёт новую версию.
+
+Style Undo/Redo восстанавливает зафиксированные stable targets. Вставленная
+внутри исходного диапазона строка не получает чужой стиль при его отмене или
+повторе; история сохраняется после reload. Деструктивные axis original/inverse
+операции пока отклоняются, если потеряли бы оформление, включая styled blank
+в добавленной строке. Полные структурные style preimages остаются отдельным
+расширением. Copy/cut/move по прежнему контракту переносят только содержимое.
+
+Canonical style event пока не содержит content patch. Подтверждение сохраняет
+свою версию, authored hash и provenance автора; клиент получает актуальные стили
+через авторизованный projection refresh. Pending style overlay отделён от
+confirmed map и снимается при согласованном ACK/refresh. Retryable отказ 7/8
+сохраняет исходные bytes/ID, terminal отказ снимает лишь неподтверждённое изменение.
+История ADR086 распознаёт style originals/compensations; обычный расчёт формул
+не запускает её discovery. Стиль не инициирует пересчёт или volatile epoch.
+
+8 сценариев браузера при DPR 1/2 прошли локально, включая проверку Canvas и
+независимого Worker authored hash. Общая регрессия среза и полный gate фазы 4
+на момент этой записи ещё не завершены; актуальный итог фиксируется в RUNBOOK.

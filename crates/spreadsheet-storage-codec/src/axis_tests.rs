@@ -455,7 +455,7 @@ fn snapshot_axis_fixture() -> Result<(Workbook, CellAddress), Box<dyn std::error
 fn snapshot_envelope(book: &Workbook) -> Result<v1::SnapshotEnvelope, Box<dyn std::error::Error>> {
     let bytes = encode_snapshot(book, "engine-v1", "pxel-excel-subset-v1")?;
     let envelope = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-    assert_eq!(envelope.snapshot_schema_version, 3);
+    assert_eq!(envelope.snapshot_schema_version, 4);
     assert_eq!(snapshot_restore(book, &envelope)?.hash(), book.hash());
     Ok(envelope)
 }

@@ -116,7 +116,7 @@
           <div class="arch-node browser">
             <span class="node-index">01 / БРАУЗЕР</span>
             <strong>Canvas + React</strong>
-            <p>Viewport, выделение, редактор и очередь неподтвержденных действий.</p>
+            <p>Viewport, редактор, оформление и отдельная очередь неподтвержденных действий.</p>
             <div class="node-tag">WASM Worker → preview</div>
           </div>
           <div class="arch-connector">
@@ -222,10 +222,10 @@
         <h2 id="proof-title">Измерено.<br /><em>С оговорками.</em></h2>
         <div class="metric-wall">
           <div class="metric hero-metric">
-            <strong>1 010</strong><span>книг в native/WASM corpus</span>
+            <strong>1 027</strong><span>книг в native/WASM corpus</span>
             <p>
-              Native и настоящий browser WASM дали одинаковые normalized hashes для 2 020 patches,
-              включая межлистовую формулу.
+              Native и настоящий browser WASM совпали для 2 037 patches, включая все 16 свойств
+              оформления и независимо вычисленный authored hash.
             </p>
           </div>
           <div class="metric">
@@ -267,6 +267,8 @@
           <a href="../RUNBOOK.md">RUNBOOK</a>,
           <a href="../docs/benchmarks/2026-09-29-phase3-local.md">collaboration benchmark</a> и
           <a href="../docs/wasm-plan.md">WASM plan</a>.
+          <a href="../docs/benchmarks/2026-09-30-style-worker-parity-local.md">Style parity</a> —
+          функциональная проверка; прежние latency-замеры не измеряют новое оформление.
         </p>
         <div class="slide-footer">
           <span>Факты отделены от целевых показателей</span><span>06 / 10</span>
@@ -274,10 +276,10 @@
       </section>
 
       <section class="slide" id="s07" aria-labelledby="context-title">
-        <div class="eyebrow">06 — Новый срез: воспроизводимый расчет</div>
+        <div class="eyebrow">06 — Воспроизводимый расчет</div>
         <div class="context-layout">
           <div>
-            <h2 id="context-title">Время и случайность<br /><em>получат историю.</em></h2>
+            <h2 id="context-title">Время и случайность<br /><em>имеют историю.</em></h2>
             <p class="section-intro">
               Контекст вычисления теперь записывается отдельным системным событием. Он содержит
               эпоху, время, смещение, seed и версии движка.
@@ -291,9 +293,9 @@
           </div>
         </div>
         <div class="context-warning">
-          Replay из PostgreSQL проверен; actor при открытии использует проверенный snapshot и хвост
-          журнала. RAND/NOW/TODAY пока не включены: сначала нужен общий native/WASM контекст и
-          differential corpus.
+          RAND/NOW/TODAY используют общий сохранённый контекст в native и WASM. NOW обновляется по
+          heartbeat, TODAY — при смене UTC-дня. Worker init 4 получает точный bound AST и
+          оформление; хэш authored state отделён от результатов формул.
         </div>
         <div class="slide-footer">
           <span>Старые schema 1/2 и их hash goldens сохранены</span><span>07 / 10</span>
@@ -358,9 +360,7 @@
           </div>
           <div class="doing">
             <b>04</b><span>Структура</span
-            ><small
-              >Оси, TSV, copy и cut/move; undo/redo ячеек, копий и переносов; WASM preview</small
-            >
+            ><small>Оси, TSV, copy/move; история после reload; 16 свойств стилей с Undo/Redo</small>
           </div>
           <div class="doing">
             <b>05</b><span>Snapshots</span
@@ -371,7 +371,7 @@
           </div>
           <div class="doing">
             <b>06</b><span>XLSX</span
-            ><small>ZIP/OOXML, owner export, локальный import и отчёт о потере свойств</small>
+            ><small>Scalar import/export; styled export отклоняется до расширения OOXML</small>
           </div>
         </div>
         <p class="roadmap-note">
@@ -379,8 +379,8 @@
           ограничения, тесты и решения — в <a href="../RUNBOOK.md">RUNBOOK</a> и
           <a href="../docs/roadmap.md">roadmap</a>. Фазы 3–5 ещё не закрыты; локальный XLSX import
           сохраняет несколько scalar-листов, редактор переключает вкладки и добавляет лист.
-          Межлистовой WASM preview прошёл native/browser parity; веб-загрузка и Excel golden gate
-          впереди.
+          Оформление прошло 8 браузерных сценариев при DPR 1/2; общая регрессия ещё выполняется.
+          Веб-загрузка, styles-aware XLSX и Excel golden gate впереди.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>
@@ -391,18 +391,17 @@
         <div class="eyebrow">09 — Дальше</div>
         <h2 id="closing-title">Таблица —<br /><em>наша система.</em></h2>
         <p class="lead">
-          Сетевой scalar stress 100×1000 прошёл за 21 мин 50 с на локальном debug-стенде; два автора
-          и подписчик сошлись после reconnect/replay. Следующие проверки — совместный stress формул,
-          ACL и рестартов, а также backpressure по этапам. Вставка и удаление строк с формулами уже
-          переживают перезапуск; cut/move и их undo/redo работают. Undo/redo строк и столбцов
-          проверен; история автора восстанавливается после reload и reconnect, включая правки из
-          других вкладок. Проверены два аварийных перезапуска и повторы операций без дублирования.
-          Остаются стили, объединения ячеек, расширенная crash matrix, production S3 и полный XLSX
-          import/reimport. Локальная dev-команда уже атомарно создаёт до 64 scalar-листов;
-          owner-only XLSX выдаётся через HTTP после записи аудита. Release benchmark с реальными
-          PostgreSQL и файловым snapshot восстановил 10 000 событий хвоста с p95 71–88 мс в двух
-          локальных прогонах. Для сравнения полный replay дал p95 131–139 мс; это тёплая книга с
-          одной ячейкой, без браузера.
+          Ввод, формулы, оси, cut/move и общая история автора после reload уже работают. Новый срез
+          добавляет 16 свойств оформления, отдельный preview и Undo/Redo, включая отмену после
+          вставки строки и перезагрузки. Все 150 браузерных E2E прошли при DPR 1/2; отдельное
+          восстановление подтвердило snapshot4 и историю стилей после двух жёстких перезапусков.
+          Native/WASM style corpus: 1027 книг и 2037 patches. Copy/Move пока переносят только
+          содержимое. Живой экспорт оформленной книги возвращает typed 422 и не теряет данные.
+          Следующие границы — round-trip стилей в XLSX, объединения, совместный stress
+          формул/ACL/рестартов и production-развёртывание. Styled XLSX временно отклоняется, чтобы
+          не потерять оформление. Отдельный прежний release benchmark с PostgreSQL и файловым
+          snapshot восстановил 10 000 событий хвоста с p95 71–88 мс; полный replay дал p95 131–139
+          мс. Это тёплая книга с одной ячейкой без браузера, не новый замер стилей.
           <a href="../docs/benchmarks/2026-09-29-snapshot-replay-persisted-local.md">Условия</a>.
         </p>
         <div class="closing-links">

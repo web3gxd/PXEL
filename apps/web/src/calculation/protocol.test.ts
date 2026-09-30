@@ -1,5 +1,32 @@
 import { expect, it } from 'vitest';
 import { toPreviewValue } from './protocol';
+it('preserves authored source and exact bound formula bytes for schema4 hydration', () => {
+  const value = {
+    type: 'formula' as const,
+    value: {
+      source: '=A1+1',
+      current_text: '=(A2+1)',
+      canonical: '=(A1+1)',
+      ast_schema: 1,
+      bound_at_version: '2',
+      bound_formula_wire_hex: '0a02abcd',
+    },
+  };
+  expect(toPreviewValue(value, true)).toEqual({
+    type: 'formula',
+    value: {
+      source: '=A1+1',
+      canonical: '=(A1+1)',
+      ast_schema: 1,
+      bound_at_version: '2',
+      bound_formula_wire_hex: '0a02abcd',
+    },
+  });
+  const legacy = toPreviewValue(value);
+  expect(legacy.type).toBe('formula');
+  if (legacy.type !== 'formula') throw new Error('expected formula preview');
+  expect(legacy.value).not.toHaveProperty('bound_formula_wire_hex');
+});
 it('converts HTTP formula display metadata into the current-axis Worker DTO', () => {
   expect(
     toPreviewValue({

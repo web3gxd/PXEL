@@ -49,13 +49,21 @@ is sufficient. Integration verification is recorded in RUNBOOK.
 Граница чтения — 10 001 запись с учётом цели и 64 MiB payload. Срез локально
 проверен на PostgreSQL, HTTP/WebSocket, в браузере и при аварийных перезапусках.
 
+[ADR-087](adr/087-cell-formatting.md) добавляет sparse оформление с 16 отдельными
+свойствами. `Sheet` хранит содержимое и непустые стили в разных maps по stable
+адресу. Guarded history работает на уровне свойства: изменение содержимого или
+другого свойства стиля не мешает Undo, чужая запись того же свойства мешает даже
+при равном значении. Стиль не добавляет dirty formula nodes и volatile epochs.
+Локальные codec/PG/Worker/UI проверки пройдены; полная регрессия нового среза
+и остающиеся MVP gates учитываются отдельно в RUNBOOK.
+
 ## Crates и направление зависимостей
 
 | Crate                     | Владелец ответственности                                          | Workspace dependencies                               | Вводится                            |
 | ------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------- |
 | spreadsheet-domain        | IDs, Workbook, чистые операции, normalized AST и guarded history  | Нет                                                  | Используемые типы и pure invariants |
 | spreadsheet-application   | Используемые use cases/ports                                      | domain                                               | 0: BlobStore                        |
-| spreadsheet-wire-protocol | Public protobuf DTO/codecs, без бизнес-модели                     | Нет                                                  | 0                                   |
+| spreadsheet-wire-protocol | Public protobuf DTO/codecs и явные typed conversions              | domain; никогда storage-codec                        | 0                                   |
 | spreadsheet-storage       | PostgreSQL, filesystem/S3 BlobStore и event persistence           | domain, application, storage-codec; optional AWS SDK | 0, S3 в фазе 5                      |
 | spreadsheet-storage-codec | Versioned durable protobuf envelope и его миграции при чтении     | domain при необходимости conversions                 | 1, когда сохраняется первое событие |
 | spreadsheet-collab        | Actor, command validation/rebase, subscriptions, SessionDirectory | domain, application; formula с фазы 2                | 1                                   |
@@ -67,7 +75,7 @@ is sufficient. Integration verification is recorded in RUNBOOK.
 
 `storage` никогда не импортирует `collab`; `collab` никогда не импортирует SQLx/storage types. OperationJournal, AuthorizationRepository, SnapshotRepository и CalculationExecutor вводятся в application только вместе с потребителями. Clock/IdGenerator не создаются ради каталогов интерфейсов. SessionDirectory вводится с actor по прямому требованию масштабирования.
 
-Wire schemas находятся в `proto/pxel/wire/v1`; будущие durable schemas — отдельно в `proto/pxel/storage/v1`. Совпадение protobuf compiler не объединяет их release policy. Изменение WebSocket DTO не переписывает operation log. Transport↔domain и persisted↔domain conversions явные.
+Wire schemas находятся в `proto/pxel/wire/v1`; durable schemas — отдельно в `proto/pxel/storage/v1`. Совпадение protobuf compiler не объединяет их release policy. Изменение WebSocket DTO не переписывает operation log. Transport↔domain и persisted↔domain conversions явные.
 
 `domain::formula` временно может владеть небольшими versioned normalized AST types. Они не зависят от parser/evaluator и не содержат source spans. Diagnostic syntax AST — отдельный тип движка. Выделение formula-model возможно при доказанной необходимости; пустого crate сейчас нет.
 
@@ -75,7 +83,7 @@ Wire schemas находятся в `proto/pxel/wire/v1`; будущие durable 
 
 Workbook хранит ordered SheetIds, sheets, date system, engine/profile settings. Sheet хранит оси, sparse cells, styles и document-level view settings. Имена и A1 — представление, не identity. Ключ ячейки: `(SheetId, StableRowId, StableColumnId)`.
 
-Axis: `ordered_ids: Vec<StableAxisId>`, `positions: HashMap<StableAxisId,u32>`, `visible_extent: u32`. Только allocated extent имеет IDs. Начало 1000×26 создает 1026 axis IDs и ноль Cell records. При приближении редактора к краю UI запрашивает atomic ExtendRows с 1000 новыми IDs; extent растет без ручного UX действия. Аналогичная колонная операция вводится с необходимостью. Удаление содержимого не уменьшает extent. Deleted IDs не переиспользуются.
+Axis: `ordered_ids: Vec<StableAxisId>`, `positions: HashMap<StableAxisId,u32>`, `visible_extent: u32`. Только allocated extent имеет IDs. Начало 1000×26 создает 1026 axis IDs и ноль Cell records. При приближении редактора к краю UI запрашивает atomic ExtendRows с 1000 новыми IDs; extent растет без ручного UX действия. Аналогичная колонная операция вводится с необходимостью. Удаление содержимого не уменьшает extent. Новые оси не получают ранее удалённые IDs; guarded компенсация может восстановить исходный ID с durable activation floor (ADR-085).
 
 Content и style — разные свойства. ClearCell очищает content, style меняется отдельной командой. Formula хранит source text, canonical text, versioned bound AST; результат — derived cache. Row/column sizes — defaults плюс sparse overrides. Merge и named ranges хранят stable anchors; personal selection/scroll/presence не входят в durable projection.
 
@@ -104,6 +112,24 @@ ACK или receipt требует discovery, даже если последне�
 сканирования. Поздние ответы проверяются по document/actor/generation, а ACK,
 уже включённый в загруженную историю, не добавляется повторно. Общая история
 автора не воспроизводит приватный стек каждой вкладки.
+
+Оформление проходит строгий typed projection decoder: authored projection schema 4,
+style schema/profile 1. `confirmedStyles` и pending style overlay разделены;
+неопределённый результат commit сохраняет исходные bytes/ID. Canvas рисует только
+видимые оформленные ячейки, в том числе пустые; числовой формат меняет отображение,
+но не значение в редакторе, clipboard или evaluator. Начальный профиль использует
+Arial 10 pt, фиксированные цвета RGB и закрытые enum границ/выравнивания/форматов.
+Шрифты не загружаются по URL. Copy/Move сохраняют прежнюю семантику переноса
+содержимого; richer copy и axis preimages оформления требуют отдельного среза.
+
+Worker init 4 получает confirmed cells, sparse styles, retired IDs, activation
+floors, last axis change marker и необязательный CalculationContext. Формула
+передаётся с точным `bound_formula_wire_hex`; исходный A1 не связывается заново
+относительно нынешних осей. Pending изменения поступают отдельным patch 2;
+`null` сбрасывает свойство стиля. Output 2 содержит самостоятельно рассчитанный
+authored state hash и отдельный calculated-result hash. Проверка серверного хэша
+проводится только для совпадающей версии/revision без pending edits. Данные
+protobuf формулы не используются как canonical encoding состояния.
 
 ## Развертывание и рост
 

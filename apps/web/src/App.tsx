@@ -2,6 +2,7 @@ import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DocumentStore, displayValue } from './document/store';
 import { columnLabel } from './grid/viewport';
 import { CanvasGrid } from './grid/CanvasGrid';
+import { StyleToolbar } from './document/StyleToolbar';
 import { useSession } from './connection/useSession';
 
 function Icon({ children, size = 18 }: { children: ReactNode; size?: number }) {
@@ -186,11 +187,7 @@ export function App() {
         </div>
       </header>
 
-      <div
-        className="toolbar"
-        role="toolbar"
-        aria-label="Форматирование (недоступно в режиме просмотра)"
-      >
+      <div className="toolbar" role="toolbar" aria-label="Форматирование">
         <div className="tool-group">
           <button
             type="button"
@@ -230,61 +227,7 @@ export function App() {
           </span>
         </span>
         <span className="tool-separator" />
-        <div className="tool-group number-tools">
-          <Tool label="Числовой формат">
-            <span>123</span>
-          </Tool>
-          <Tool label="Процентный формат">
-            <span>%</span>
-          </Tool>
-          <Tool label="Денежный формат">
-            <span>₽</span>
-          </Tool>
-        </div>
-        <span className="tool-separator number-tools" />
-        <Tool label="Шрифт" className="font-tool">
-          <span>По умолчанию</span>
-          <span className="tiny-chevron" aria-hidden="true">
-            ⌄
-          </span>
-        </Tool>
-        <Tool label="Размер шрифта" className="size-tool">
-          11
-        </Tool>
-        <span className="tool-separator" />
-        <div className="tool-group">
-          <Tool label="Полужирный">
-            <strong>B</strong>
-          </Tool>
-          <Tool label="Курсив">
-            <em>I</em>
-          </Tool>
-          <Tool label="Зачеркнутый">
-            <span className="strikethrough">S</span>
-          </Tool>
-          <Tool label="Цвет текста">
-            <span className="text-color">A</span>
-          </Tool>
-        </div>
-        <span className="tool-separator extra-tools" />
-        <div className="tool-group extra-tools">
-          <Tool label="Границы">
-            <Icon>
-              <rect x="4" y="4" width="16" height="16" rx="1" />
-              <path d="M12 4v16M4 12h16" />
-            </Icon>
-          </Tool>
-          <Tool label="Выравнивание">
-            <Icon>
-              <path d="M4 5h16M4 10h10M4 15h16M4 20h10" />
-            </Icon>
-          </Tool>
-          <Tool label="Перенос текста">
-            <Icon>
-              <path d="M4 6h16M4 11h12a3 3 0 0 1 0 6h-5m2-3-3 3 3 3M4 17h2" />
-            </Icon>
-          </Tool>
-        </div>
+        <StyleToolbar document={document} online={state.kind === 'online'} />
         <span className="view-mode">
           <Icon size={15}>
             <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />

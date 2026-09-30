@@ -253,7 +253,16 @@ test('a document owner cannot use an inverse command to undo another actor move'
     await editor.reload();
     await expect(editor.getByTestId('connection-status')).toHaveText('Подключено');
     await editor.bringToFront();
-    await write(editor, 1, 1, '7');
+    // The security assertion below is independent of pointer hit-testing. After
+    // this page reload, select B2 through the keyboard so DPR-specific canvas
+    // coordinates cannot make the authorization test flaky.
+    await grid(editor).focus();
+    await editor.keyboard.press('ArrowDown');
+    await editor.keyboard.press('ArrowRight');
+    await expect(active(editor)).toHaveText('B2: ');
+    await bar(editor).fill('7');
+    await bar(editor).press('Enter');
+    await expect(editor.getByTestId('save-status')).toHaveText('Сохранено');
     await move(editor, [1, 1], [1, 3]);
     expect(target).toBeDefined();
     if (!target) throw new Error('The foreign move command was not captured');

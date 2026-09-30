@@ -8,6 +8,7 @@ import {
 } from '../generated/pxel/wire/v1/session_pb';
 import type { FormulaError } from '../generated/pxel/wire/v1/session_pb';
 import { decodeHistory, readHistory } from './history';
+import { DEFAULT_STYLE } from './styles';
 import {
   DocumentStore,
   bytesUuid,
@@ -18,6 +19,392 @@ import {
   uuidV7,
   type Projection,
 } from './store';
+
+describe('independent optimistic formatting', () => {
+  const authored = (state = projection()): Projection => ({
+    ...state,
+    authored_projection_schema_version: 4,
+    style_schema_version: 1,
+    style_profile_version: 1,
+    last_axis_change_version: '1',
+    retired_row_ids: [],
+    retired_column_ids: [],
+    row_activation_floors: [],
+    column_activation_floors: [],
+    sheets: state.sheets.map((sheet) => ({ ...sheet, styles: sheet.styles ?? [] })),
+  });
+  it('keeps pending styles separate from confirmed contents and emits one typed intent', async () => {
+    const { store, sent } = await connectedStore();
+    expect(store.setStyle([{ property: 'font_bold', value: true }])).toBe(true);
+    expect(store.style({ row: 0, column: 0 }).font_bold).toBe(true);
+    expect(store.confirmedStyles.size).toBe(0);
+    expect(store.confirmed.size).toBe(0);
+    expect(store.projection?.version).toBe('1');
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1) ?? new Uint8Array()).payload;
+    if (payload.case !== 'command') throw new Error('Missing formatting command');
+    expect(payload.value.setCellStyle?.patch).toMatchObject({
+      schemaVersion: 1,
+      profileVersion: 1,
+      changes: [{ kind: { case: 'fontBold', value: { action: { case: 'set', value: true } } } }],
+    });
+    expect(payload.value.operation).toBeUndefined();
+    expect(payload.value.setRangeStyle).toBeUndefined();
+    expect(store.pending).toHaveLength(1);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'rejected',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: payload.value.operationId,
+            code: 3,
+          },
+        },
+      }),
+    );
+    expect(store.style({ row: 0, column: 0 }).font_bold).toBe(false);
+    expect(store.pending).toHaveLength(0);
+    store.dispose();
+  });
+  it('freezes a rectangular stable target list and enforces both range and patch limits', async () => {
+    const { store, sent } = await connectedStore();
+    const state = authored();
+    const sheet = state.sheets[0]!;
+    sheet.rows.push(uuidV7());
+    sheet.columns.push(uuidV7());
+    store.load(state);
+    store.select({ row: 1, column: 1 }, true);
+    expect(
+      store.setStyle([
+        { property: 'fill', value: [200, 220, 240] },
+        { property: 'font_italic', value: true },
+      ]),
+    ).toBe(true);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing range style');
+    expect(payload.value.setCellStyle).toBeUndefined();
+    expect(payload.value.setRangeStyle?.addresses).toHaveLength(4);
+    expect(
+      payload.value.setRangeStyle?.addresses.map((a) => [
+        bytesUuid(a.rowId),
+        bytesUuid(a.columnId),
+      ]),
+    ).toEqual(sheet.rows.flatMap((row) => sheet.columns.map((column) => [row, column])));
+    expect(store.style({ row: 1, column: 1 }).fill).toEqual([200, 220, 240]);
+    expect(store.confirmedStyles.size).toBe(0);
+    expect(store.setStyle([])).toBe(false);
+    expect(
+      store.setStyle([
+        { property: 'font_bold', value: true },
+        { property: 'font_bold', reset: true },
+      ]),
+    ).toBe(false);
+    expect(store.pending).toHaveLength(1);
+    sheet.rows = Array.from({ length: 1001 }, () => uuidV7());
+    store.load(state);
+    store.select({ row: 0, column: 0 });
+    store.select({ row: 1000, column: 0 }, true);
+    expect(store.setStyle([{ property: 'font_bold', value: true }])).toBe(false);
+    expect(store.error).toContain('1000');
+    store.dispose();
+  });
+  it('merges pending leaves over remote styles and clears only rejected local leaves', async () => {
+    const { store, sent } = await connectedStore();
+    store.setStyle([{ property: 'font_bold', value: true }]);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing style');
+    const remote = authored();
+    remote.version = '2';
+    remote.sheets[0]!.styles = [
+      { row_id: rowId, column_id: columnId, style: { ...DEFAULT_STYLE, font_italic: true } },
+    ];
+    store.load(remote);
+    expect(store.style({ row: 0, column: 0 })).toMatchObject({
+      font_bold: true,
+      font_italic: true,
+    });
+    expect(store.confirmedStyles.values().next().value?.font_bold).toBe(false);
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'rejected',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: payload.value.operationId,
+            code: 9,
+          },
+        },
+      }),
+    );
+    expect(store.style({ row: 0, column: 0 })).toMatchObject({
+      font_bold: false,
+      font_italic: true,
+    });
+    expect(store.projection?.version).toBe('2');
+    store.dispose();
+  });
+  it('retains original bytes on transient rejection then consumes style ACK/history only once', async () => {
+    const { store, sent } = await connectedStore();
+    store.setStyle([{ property: 'font_bold', value: true }]);
+    const original = sent.at(-1)!;
+    const payload = fromBinary(ClientEnvelopeSchema, original).payload;
+    if (payload.case !== 'command') throw new Error('Missing style');
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'rejected',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: payload.value.operationId,
+            code: 7,
+            retryable: true,
+          },
+        },
+      }),
+    );
+    expect(store.pending).toHaveLength(1);
+    expect(store.style({ row: 0, column: 0 }).font_bold).toBe(true);
+    await vi.advanceTimersByTimeAsync(1500);
+    const retry = sent
+      .filter((b) => fromBinary(ClientEnvelopeSchema, b).payload.case === 'command')
+      .at(-1);
+    expect(retry).toEqual(original);
+    const confirmed = authored();
+    confirmed.version = '2';
+    confirmed.sheets[0]!.styles = [
+      { row_id: rowId, column_id: columnId, style: { ...DEFAULT_STYLE, font_bold: true } },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.endsWith('/undo-history')
+          ? Response.json(
+              historyResponse({
+                through_version: '2',
+                undo: [
+                  { operation_id: bytesUuid(payload.value.operationId), committed_version: '2' },
+                ],
+              }),
+            )
+          : { ok: true, json: async () => structuredClone(confirmed) },
+      ),
+    );
+    const ack = create(ServerEnvelopeSchema, {
+      protocolVersion: 1,
+      payload: {
+        case: 'committed',
+        value: {
+          documentId: uuidBytes(documentId),
+          operationId: payload.value.operationId,
+          actorId: uuidBytes(documentId),
+          committedVersion: 2n,
+          confirmedStateHash: new Uint8Array(32),
+        },
+      },
+    });
+    await store.receive(ack);
+    await store.receive(ack);
+    expect(store.pending).toHaveLength(0);
+    expect(store.confirmedStyles.values().next().value?.font_bold).toBe(true);
+    expect(store.canUndo).toBe(true);
+    expect(store.undo()).toBe(true);
+    const undo = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (undo.case !== 'command') throw new Error('Missing style undo');
+    expect(undo.value.undoCell?.targetOperationId).toEqual(payload.value.operationId);
+    store.dispose();
+  });
+  it('formats numbers and confirmed formula results without changing editing/clipboard content', async () => {
+    const { store } = await connectedStore();
+    const state = authored();
+    state.sheets[0]!.cells = [
+      { row_id: rowId, column_id: columnId, value: { type: 'number', value: 0.125 } },
+    ];
+    state.sheets[0]!.styles = [
+      {
+        row_id: rowId,
+        column_id: columnId,
+        style: { ...DEFAULT_STYLE, number_format: 'percent2' },
+      },
+    ];
+    store.load(state);
+    expect(store.display({ row: 0, column: 0 })).toBe('12.50%');
+    expect(displayValue(store.value({ row: 0, column: 0 }))).toBe('0.125');
+    expect(store.copySelectionTsv()).toBe('0.125');
+    store.setStyle([{ property: 'number_format', value: 'decimal2' }]);
+    expect(store.display({ row: 0, column: 0 })).toBe('0.13');
+    expect(store.confirmed.get(`${rowId}/${columnId}`)).toEqual({ type: 'number', value: 0.125 });
+    store.dispose();
+  });
+  it('hydrates exact authored metadata and patches only changed style leaves, including rollback', async () => {
+    const requests: { worker: StyleWorker; request: Request }[] = [];
+    class StyleWorker {
+      onmessage: ((event: MessageEvent<Reply>) => void) | null = null;
+      onerror = null;
+      postMessage(request: Request) {
+        requests.push({ worker: this, request });
+      }
+      terminate() {}
+    }
+    vi.stubGlobal('Worker', StyleWorker);
+    const { store, sent } = await connectedStore();
+    const state = authored();
+    store.load(state);
+    const last = () => {
+      const entry = requests.at(-1);
+      if (!entry) throw new Error('Missing Worker request');
+      return entry;
+    };
+    const finish = (entry: ReturnType<typeof last>, hash: string) =>
+      entry.worker.onmessage?.({
+        data: {
+          id: entry.request.id,
+          result: {
+            schema_version: 2,
+            preview: true,
+            complete: true,
+            full: entry.request.kind === 'init',
+            document_id: documentId,
+            input_version: entry.request.data.input_version,
+            pending_revision: entry.request.data.pending_revision,
+            formula_engine_version: 'pxel-formula-0.14.0',
+            compatibility_profile: 'pxel-excel-subset-v1',
+            normalized_result_hash: 'a'.repeat(64),
+            normalized_authored_state_hash: hash,
+            evaluated_cells: 0,
+            dirty_cells: 0,
+            results: [],
+            cleared: [],
+          },
+        },
+      } as unknown as MessageEvent<Reply>);
+    const init = last();
+    expect(init.request.kind).toBe('init');
+    expect(init.request.data).toMatchObject({
+      schema_version: 4,
+      last_axis_change_version: '1',
+      retired_row_ids: [],
+      retired_column_ids: [],
+      row_activation_floors: [],
+      column_activation_floors: [],
+      sheets: [{ styles: [] }],
+    });
+    finish(init, state.state_hash);
+    expect(store.previewAuthoredHash).toBe(state.state_hash);
+    store.setStyle([{ property: 'font_bold', value: true }]);
+    const changed = last();
+    expect(changed.request.kind).toBe('patch');
+    if (changed.request.kind !== 'patch') throw new Error('Expected authored patch');
+    expect(changed.request.data.cells).toEqual([]);
+    expect(changed.request.data.styles).toEqual([
+      {
+        sheet_id: sheetId,
+        row_id: rowId,
+        column_id: columnId,
+        changes: [{ property: 'font_bold', value: true }],
+      },
+    ]);
+    expect(store.previewAuthoredHash).toBeUndefined();
+    finish(changed, 'b'.repeat(64));
+    expect(store.previewAuthoredHash).toBe('b'.repeat(64));
+    expect(store.projection?.state_hash).toBe(state.state_hash);
+    const command = sent
+      .map((bytes) => fromBinary(ClientEnvelopeSchema, bytes).payload)
+      .filter((p) => p.case === 'command')
+      .at(-1);
+    if (command?.case !== 'command') throw new Error('Missing durable style');
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'rejected',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: command.value.operationId,
+            code: 3,
+          },
+        },
+      }),
+    );
+    const rollback = last();
+    if (rollback.request.kind !== 'patch') throw new Error('Missing style rollback');
+    expect(rollback.request.data.styles[0]?.changes).toEqual([
+      { property: 'font_bold', value: null },
+    ]);
+    finish(rollback, state.state_hash);
+    finish(changed, 'b'.repeat(64));
+    expect(store.previewAuthoredHash).toBe(state.state_hash);
+    expect(store.style({ row: 0, column: 0 }).font_bold).toBe(false);
+    store.setStyle([{ property: 'font_italic', value: true }]);
+    store.set({ row: 0, column: 0 }, { type: 'formula', value: { source: '=1+2' } });
+    store.load(structuredClone(state));
+    const reset = last();
+    if (reset.request.kind !== 'init') throw new Error('Missing exact hydration');
+    expect(reset.request.data.sheets[0]?.cells).toEqual([]);
+    expect(reset.request.data.sheets[0]?.styles).toEqual([]);
+    finish(reset, state.state_hash);
+    const pending = last();
+    if (pending.request.kind !== 'patch') throw new Error('Missing post-hydration overlays');
+    expect(pending.request.data.cells[0]?.value).toEqual({
+      type: 'formula',
+      value: { source: '=1+2' },
+    });
+    expect(pending.request.data.styles[0]?.changes).toEqual([
+      { property: 'font_italic', value: true },
+    ]);
+    expect(store.previewAuthoredHash).toBeUndefined();
+    store.dispose();
+    expect(store.previewAuthoredHash).toBeUndefined();
+  });
+  it('refuses an idle Worker authored hash mismatch without changing confirmed formatting', async () => {
+    let deliver: ((request: Request) => void) | undefined;
+    class WrongHashWorker {
+      onmessage: ((event: MessageEvent<Reply>) => void) | null = null;
+      onerror = null;
+      postMessage(request: Request) {
+        deliver = () =>
+          this.onmessage?.({
+            data: {
+              id: request.id,
+              result: {
+                schema_version: 2,
+                preview: true,
+                complete: true,
+                full: true,
+                document_id: documentId,
+                input_version: request.data.input_version,
+                pending_revision: request.data.pending_revision,
+                formula_engine_version: 'pxel-formula-0.14.0',
+                compatibility_profile: 'pxel-excel-subset-v1',
+                normalized_result_hash: 'a'.repeat(64),
+                normalized_authored_state_hash: 'f'.repeat(64),
+                evaluated_cells: 0,
+                dirty_cells: 0,
+                results: [],
+                cleared: [],
+              },
+            },
+          } as unknown as MessageEvent<Reply>);
+      }
+      terminate() {}
+    }
+    vi.stubGlobal('Worker', WrongHashWorker);
+    const state = authored();
+    state.sheets[0]!.styles = [
+      { row_id: rowId, column_id: columnId, style: { ...DEFAULT_STYLE, font_bold: true } },
+    ];
+    const store = new DocumentStore();
+    store.load(state);
+    deliver?.({} as Request);
+    expect(store.previewStatus).toBe('failed');
+    expect(store.previewAuthoredHash).toBeUndefined();
+    expect(store.style({ row: 0, column: 0 }).font_bold).toBe(true);
+    expect(store.projection?.state_hash).toBe(state.state_hash);
+    store.dispose();
+  });
+});
 
 describe('server-authoritative cut and move', () => {
   const cutProjection = (): Projection => {

@@ -92,6 +92,11 @@ pub fn describe(event: &CommittedEvent, actor: ActorId) -> Result<HistoryEntry, 
             undoes_version,
             ..
         }
+        | Operation::StyleCompensation {
+            undoes,
+            undoes_version,
+            ..
+        }
         | Operation::AxisCompensation {
             undoes,
             undoes_version,

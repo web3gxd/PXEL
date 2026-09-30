@@ -101,15 +101,19 @@ initial charge is512bytes/entry plus font-name bytes, an admission budget rather
 than a measured allocator bound. Measure actual memory before optimizing. Do not
 retroactively introduce a workbook-wide content cap for old style-free books.
 
-Existing limits differ by boundary: durable candidates allow100000 content cells
-per sheet, while hydrate_sheets, snapshot3 restoration and Worker initialization
-currently allow100000 content cells across the workbook. This is an existing
+Before this integration, limits differed by boundary: durable candidates allowed
+100000 content cells per sheet, while hydrate_sheets, snapshot3 restoration and
+Worker initialization allowed100000 content cells across the workbook. This was an existing
 integration limitation, not permission to pretend all candidate states hydrate.
 Integration issue STYLE-01: preserve legacy candidate semantics, make snapshot4
 restoration support valid candidates within its explicit binary/decoded budgets,
 and publish a separate bounded Worker profile with a typed preview refusal when
 too large. Completion requires multi-sheet boundary/round-trip fixtures and no
-false parity claim. Dependency: Workbook/snapshot4/Worker integration, before
+false parity claim. Domain hydration now counts input cells per sheet with the
+existing global text/AST budgets retained. A real100002-cell two-sheet snapshot
+image restoration preserves the domain hash. Legacy snapshot codecs retain their
+old reader profiles; snapshot4 binary limits and Worker initialization still need
+their own verification. Dependency: Workbook/snapshot4/Worker integration, before
 claiming the style vertical slice complete.
 
 Commands address explicit stable cells, at most1000 addresses and16 distinct leaf
@@ -137,7 +141,13 @@ activation floors. Also hydrate and validate last_axis_change_version for
 structural semantics; that derived marker is not currently included in the
 Workbook hash. Patch2/output2 distinguish
 calculated hash from independently computed authored hash. No server hash echo
-is parity evidence. Old adapter schemas reject style payloads. Private candidate
+is parity evidence. Init4 must also hydrate the actual normalized bound formula
+AST: rebinding authored A1 source at current axes can change targets after an
+insert/delete/move. The additive HTTP formula field bound_formula_wire_hex carries
+the versioned public BoundFormula message as bounded lowercase hex. The adapter
+decodes and validates it rather than deriving canonical references from text.
+These transport bytes are not used as a domain hash. Old adapter schemas reject
+style payloads. Private candidate
 and serialization failure rollback remains atomic; styles create no new dirty
 formula dependencies or volatile epochs.
 

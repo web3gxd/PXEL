@@ -3,6 +3,7 @@ import {
   addressKey,
   toPreviewValue,
   type PreviewCell,
+  type PreviewStyleMutation,
   type PreviewInit,
   type PreviewMoveGeometry,
   type PreviewValue,
@@ -21,6 +22,8 @@ export class PreviewClient {
   private active: Request | undefined;
   private id = 0;
   private queued = new Map<string, PreviewCell>();
+  private queuedStyles = new Map<string, PreviewStyleMutation>();
+  private authoredProfile = false;
   private queuedMove: { stamp: Stamp; geometry: PreviewMoveGeometry } | undefined;
   private hasMove = false;
   private values = new Map<string, CalculatedValue>();
@@ -31,6 +34,7 @@ export class PreviewClient {
       values?: ReadonlyMap<string, CalculatedValue>,
       stamp?: Stamp,
       moveWrites?: ReadonlyMap<string, PreviewValue>,
+      authoredHash?: string,
     ) => void,
     private readonly factory: () => WorkerPort | undefined = () =>
       typeof Worker === 'undefined'
@@ -39,6 +43,7 @@ export class PreviewClient {
   ) {}
   reset(data: PreviewInit) {
     this.dispose();
+    this.authoredProfile = data.schema_version === 4;
     this.desired = data;
     try {
       this.worker = this.factory();
@@ -68,15 +73,19 @@ export class PreviewClient {
           name: sheet.name,
           rows: sheet.rows,
           columns: sheet.columns,
-          cells: sheet.cells.map((cell) => ({ ...cell, value: toPreviewValue(cell.value) })),
+          cells: sheet.cells.map((cell) => ({
+            ...cell,
+            value: toPreviewValue(cell.value, this.authoredProfile),
+          })),
+          ...(this.authoredProfile ? { styles: sheet.styles ?? [] } : {}),
         })),
       },
     });
   }
-  patch(stamp: Stamp, cells: PreviewCell[]) {
+  patch(stamp: Stamp, cells: PreviewCell[], styles: PreviewStyleMutation[] = []) {
     if (!this.worker || !this.desired) return;
     // A private moved projection cannot receive ordinary patches based on confirmed content.
-    if (this.hasMove) {
+    if (this.hasMove || (!this.authoredProfile && styles.length > 0)) {
       this.fail();
       return;
     }
@@ -90,10 +99,28 @@ export class PreviewClient {
     }
     this.desired = stamp;
     for (const cell of cells)
-      this.queued.set(addressKey(cell), { ...cell, value: toPreviewValue(cell.value) });
+      this.queued.set(addressKey(cell), {
+        ...cell,
+        value: toPreviewValue(cell.value, this.authoredProfile),
+      });
+    for (const inputStyle of styles) {
+      const style = structuredClone(inputStyle);
+      const key = addressKey(style);
+      const changes = new Map(
+        this.queuedStyles.get(key)?.changes.map((change) => [change.property, change]),
+      );
+      for (const change of style.changes) changes.set(change.property, change);
+      this.queuedStyles.set(key, { ...style, changes: [...changes.values()] });
+    }
     if (
       this.queued.size > 256 ||
-      new TextEncoder().encode(JSON.stringify([...this.queued.values()])).length > 1_048_576
+      this.queuedStyles.size + this.queued.size > 1000 ||
+      new TextEncoder().encode(
+        JSON.stringify({
+          cells: [...this.queued.values()],
+          styles: [...this.queuedStyles.values()],
+        }),
+      ).length > 1_048_576
     ) {
       this.fail();
       return;
@@ -102,7 +129,14 @@ export class PreviewClient {
     this.flush();
   }
   move(stamp: Stamp, geometry: PreviewMoveGeometry): boolean {
-    if (!this.worker || !this.desired || this.hasMove || this.queued.size > 0) return false;
+    if (
+      !this.worker ||
+      !this.desired ||
+      this.hasMove ||
+      this.queued.size > 0 ||
+      this.queuedStyles.size > 0
+    )
+      return false;
     if (
       stamp.document_id !== this.desired.document_id ||
       stamp.input_version !== this.desired.input_version ||
@@ -174,7 +208,11 @@ export class PreviewClient {
       cells: [...this.queued.values()],
     };
     this.queued.clear();
-    this.send({ id: ++this.id, kind: 'apply', data });
+    if (this.authoredProfile) {
+      const styles = [...this.queuedStyles.values()];
+      this.queuedStyles.clear();
+      this.send({ id: ++this.id, kind: 'patch', data: { ...data, schema_version: 2, styles } });
+    } else this.send({ id: ++this.id, kind: 'apply', data });
   }
   private send(request: Request) {
     this.active = request;
@@ -192,13 +230,25 @@ export class PreviewClient {
     if ('error' in reply) {
       if (
         reply.error === 'InvalidFormula' &&
-        reply.phase === 'apply' &&
-        this.active.kind === 'apply'
+        ((reply.phase === 'apply' && this.active.kind === 'apply') ||
+          (reply.phase === 'patch' && this.active.kind === 'patch'))
       ) {
         const failedRevision = this.active.data.pending_revision;
         const cells = new Map(this.active.data.cells.map((cell) => [addressKey(cell), cell]));
         for (const [address, cell] of this.queued) cells.set(address, cell);
         this.queued = cells;
+        if (this.active.kind === 'patch') {
+          const retained = new Map<string, PreviewStyleMutation>();
+          for (const style of [...this.active.data.styles, ...this.queuedStyles.values()]) {
+            const key = addressKey(style);
+            const changes = new Map(
+              retained.get(key)?.changes.map((change) => [change.property, change]),
+            );
+            for (const change of style.changes) changes.set(change.property, change);
+            retained.set(key, { ...style, changes: [...changes.values()] });
+          }
+          this.queuedStyles = retained;
+        }
         this.active = undefined;
         this.update('invalid');
         if (this.desired?.pending_revision !== failedRevision) this.flush();
@@ -212,6 +262,7 @@ export class PreviewClient {
     const sent = this.active.data;
     if (
       !validResult(result) ||
+      result.schema_version !== (this.authoredProfile ? 2 : 1) ||
       (isMove ? !validMoveWrites(result.move_writes) : result.move_writes !== undefined) ||
       result.document_id !== sent.document_id ||
       result.input_version !== sent.input_version ||
@@ -236,6 +287,7 @@ export class PreviewClient {
         isMove
           ? new Map(result.move_writes?.map((cell) => [addressKey(cell), cell.value]))
           : undefined,
+        result.normalized_authored_state_hash,
       );
     this.flush();
   }
@@ -251,6 +303,8 @@ export class PreviewClient {
     this.acknowledged = undefined;
     this.desired = undefined;
     this.queued.clear();
+    this.queuedStyles.clear();
+    this.authoredProfile = false;
     this.queuedMove = undefined;
     this.hasMove = false;
     this.values.clear();
@@ -293,7 +347,10 @@ function validMoveWrites(writes: PreviewCell[] | undefined) {
 function validResult(result: PreviewResult) {
   return (
     result &&
-    result.schema_version === 1 &&
+    ((result.schema_version === 1 && result.normalized_authored_state_hash === undefined) ||
+      (result.schema_version === 2 &&
+        typeof result.normalized_authored_state_hash === 'string' &&
+        /^[0-9a-f]{64}$/.test(result.normalized_authored_state_hash))) &&
     result.preview === true &&
     result.complete === true &&
     typeof result.full === 'boolean' &&

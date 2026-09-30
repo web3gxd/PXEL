@@ -13,6 +13,9 @@ mod range_codec;
 #[cfg(test)]
 mod range_tests;
 mod snapshot_codec;
+mod style_codec;
+#[cfg(test)]
+mod style_tests;
 use prost::Message;
 use sha2::{Digest, Sha256};
 pub use snapshot_codec::{MAX_SNAPSHOT_BYTES, decode_snapshot, encode_snapshot};
@@ -183,6 +186,22 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
     use v1::operation::Kind;
     Ok(v1::Operation {
         kind: Some(match o {
+            Operation::StyleWrite { kind, writes } => {
+                Kind::StyleWrite(style_codec::encode_write(*kind, writes)?)
+            }
+            Operation::StyleCompensation {
+                kind,
+                writes,
+                undoes,
+                undoes_version,
+            } => {
+                style_codec::validate(o, None)?;
+                Kind::StyleCompensation(v1::StyleCompensation {
+                    write: Some(style_codec::encode_write(*kind, writes)?),
+                    undoes_operation_id: undoes.as_bytes().to_vec(),
+                    undoes_version: undoes_version.get(),
+                })
+            }
             Operation::AxisEdit { change } => {
                 axis_codec::validate(o, None)?;
                 Kind::AxisEdit(axis_codec::encode_change(change)?)
@@ -398,6 +417,22 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
 fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
     use v1::operation::Kind;
     Ok(match o.kind.ok_or(CodecError::Invalid)? {
+        Kind::StyleWrite(write) => {
+            let (kind, writes) = style_codec::decode_write(write)?;
+            Operation::StyleWrite { kind, writes }
+        }
+        Kind::StyleCompensation(compensation) => {
+            let (kind, writes) =
+                style_codec::decode_write(compensation.write.ok_or(CodecError::Invalid)?)?;
+            Operation::StyleCompensation {
+                kind,
+                writes,
+                undoes: OperationId::from_bytes(id(&compensation.undoes_operation_id)?)
+                    .map_err(|_| CodecError::Invalid)?,
+                undoes_version: DocumentVersion::new(compensation.undoes_version)
+                    .map_err(|_| CodecError::Invalid)?,
+            }
+        }
         Kind::AxisEdit(change) => Operation::AxisEdit {
             change: axis_codec::decode_change(change)?,
         },
@@ -734,6 +769,8 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::StyleWrite { .. } => 23,
+        Operation::StyleCompensation { .. } => 24,
         Operation::AxisEdit { .. } => 21,
         Operation::AxisCompensation { .. } => 22,
         Operation::MoveCompensation { .. } => 20,
@@ -770,6 +807,7 @@ pub fn schema_version(operation: &Operation) -> u32 {
     }
 }
 pub fn encode(event: &CommittedEvent) -> Result<Vec<u8>, CodecError> {
+    style_codec::validate(&event.operation, Some(event.version))?;
     axis_codec::validate(&event.operation, Some(event.version))?;
     move_codec::validate(&event.operation, Some(event.version))?;
     range_codec::validate(&event.operation, Some(event.version))?;
@@ -817,13 +855,22 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=22) {
+    if !matches!(e.schema_version, 1..=24) {
         return Err(CodecError::UnsupportedSchema);
+    }
+    // New style families accept the frozen Rust writer's normalized encoding.
+    // This rejects unknown fields; it is not a general protobuf canonicalization rule.
+    if matches!(e.schema_version, 23 | 24) && e.encode_to_vec() != bytes {
+        return Err(CodecError::Invalid);
     }
     if e.committed_version == 0 {
         return Err(CodecError::Invalid);
     }
     let operation = decode_operation(e.operation.ok_or(CodecError::Invalid)?)?;
+    style_codec::validate(
+        &operation,
+        Some(DocumentVersion::new(e.committed_version).map_err(|_| CodecError::Invalid)?),
+    )?;
     axis_codec::validate(
         &operation,
         Some(DocumentVersion::new(e.committed_version).map_err(|_| CodecError::Invalid)?),
@@ -847,7 +894,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
     ) {
         (
             1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-            | 21 | 22,
+            | 21 | 22 | 23 | 24,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -857,7 +904,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         }
         (
             1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-            | 21 | 22,
+            | 21 | 22 | 23 | 24,
             0,
             actor,
             _,
@@ -900,6 +947,9 @@ fn field(h: &mut Sha256, b: &[u8]) {
 }
 fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
     match o {
+        Operation::StyleWrite { .. } | Operation::StyleCompensation { .. } => {
+            style_codec::hash(h, o)?
+        }
         Operation::AdvanceCalculationEpoch { context } => {
             h.update([4]);
             h.update(context.context_id().as_bytes());
@@ -1114,6 +1164,15 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
     h.update(c.base_version.get().to_le_bytes());
     h.update(c.client_sequence.to_le_bytes());
     match &c.operation {
+        CommandPayload::SetCellStyle { address, changes } => style_codec::hash_command(
+            &mut h,
+            StyleWriteKind::Cell,
+            std::slice::from_ref(address),
+            changes,
+        )?,
+        CommandPayload::SetRangeStyle { addresses, changes } => {
+            style_codec::hash_command(&mut h, StyleWriteKind::Range, addresses, changes)?
+        }
         CommandPayload::CreateWorkbook { sheet } => semantic_operation(
             &mut h,
             &Operation::CreateWorkbook {
@@ -1264,6 +1323,7 @@ pub fn system_trigger_fingerprint(
     h.finalize().into()
 }
 pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
+    style_codec::validate(&e.operation, Some(e.version))?;
     axis_codec::validate(&e.operation, Some(e.version))?;
     move_codec::validate(&e.operation, Some(e.version))?;
     range_codec::validate(&e.operation, Some(e.version))?;
@@ -1287,6 +1347,8 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::MoveCompensation { .. })
         | (EventPrincipal::System, Operation::AxisEdit { .. })
         | (EventPrincipal::System, Operation::AxisCompensation { .. })
+        | (EventPrincipal::System, Operation::StyleWrite { .. })
+        | (EventPrincipal::System, Operation::StyleCompensation { .. })
         | (EventPrincipal::System, Operation::CellWrite { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),

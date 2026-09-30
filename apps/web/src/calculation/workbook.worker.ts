@@ -12,12 +12,17 @@ let serial = Promise.resolve();
 scope.onmessage = (event) => {
   serial = serial.then(async () => {
     const request = event.data;
-    let phase: 'init' | 'apply' | 'move' | 'calculate' = request.kind;
+    let phase: 'init' | 'apply' | 'patch' | 'move' | 'calculate' = request.kind;
     try {
       await ready;
       if (request.kind === 'init') {
         workbook?.free();
         workbook = new WasmWorkbook(JSON.stringify(request.data));
+      } else if (request.kind === 'patch') {
+        if (!workbook) throw new Error('Uninitialized');
+        const result = JSON.parse(workbook.patch(JSON.stringify(request.data))) as PreviewResult;
+        scope.postMessage({ id: request.id, result });
+        return;
       } else if (request.kind === 'move') {
         if (!workbook) throw new Error('Uninitialized');
         const result = JSON.parse(

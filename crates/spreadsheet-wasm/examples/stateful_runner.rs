@@ -26,8 +26,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             spreadsheet_wasm::PreviewWorkbook::from_json(&serde_json::to_string(&request.init)?)?;
         let mut steps = vec![RawValue::from_string(workbook.calculate_json()?)?];
         for patch in request.patches {
-            workbook.apply_json(&serde_json::to_string(&patch)?)?;
-            steps.push(RawValue::from_string(workbook.calculate_json()?)?);
+            let output = if patch
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(2)
+            {
+                workbook.patch_json(&serde_json::to_string(&patch)?)?
+            } else {
+                workbook.apply_json(&serde_json::to_string(&patch)?)?;
+                workbook.calculate_json()?
+            };
+            steps.push(RawValue::from_string(output)?);
         }
         results.push(steps);
     }

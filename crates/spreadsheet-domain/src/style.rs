@@ -186,6 +186,35 @@ pub struct CellStyle {
     number_format: Option<NumberFormat>,
 }
 impl CellStyle {
+    /// Exact property preimage, retaining Reset for an inherited default.
+    pub fn change(&self, property: StyleProperty) -> StyleChange {
+        if let Some(change) = self
+            .normalized_changes()
+            .into_iter()
+            .find(|c| c.property() == property)
+        {
+            return change;
+        }
+        match property {
+            StyleProperty::FontFamily => StyleChange::FontFamily(Change::Reset),
+            StyleProperty::FontSize => StyleChange::FontSize(Change::Reset),
+            StyleProperty::FontBold => StyleChange::FontBold(Change::Reset),
+            StyleProperty::FontItalic => StyleChange::FontItalic(Change::Reset),
+            StyleProperty::FontUnderline => StyleChange::FontUnderline(Change::Reset),
+            StyleProperty::FontStrike => StyleChange::FontStrike(Change::Reset),
+            StyleProperty::FontColor => StyleChange::FontColor(Change::Reset),
+            StyleProperty::Fill => StyleChange::Fill(Change::Reset),
+            StyleProperty::BorderTop => StyleChange::BorderTop(Change::Reset),
+            StyleProperty::BorderRight => StyleChange::BorderRight(Change::Reset),
+            StyleProperty::BorderBottom => StyleChange::BorderBottom(Change::Reset),
+            StyleProperty::BorderLeft => StyleChange::BorderLeft(Change::Reset),
+            StyleProperty::Horizontal => StyleChange::Horizontal(Change::Reset),
+            StyleProperty::Vertical => StyleChange::Vertical(Change::Reset),
+            StyleProperty::Wrap => StyleChange::Wrap(Change::Reset),
+            StyleProperty::NumberFormat => StyleChange::NumberFormat(Change::Reset),
+        }
+    }
+
     pub fn font_family(&self) -> &str {
         self.font_family
             .as_ref()

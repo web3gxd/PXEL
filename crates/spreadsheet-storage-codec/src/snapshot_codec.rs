@@ -1,3 +1,4 @@
+use super::style_codec;
 use super::{
     CodecError, addr, decode_addr, decode_content, decode_operation, decode_sheet, encode_content,
     encode_sheet, id, operation, v1,
@@ -11,7 +12,7 @@ use spreadsheet_domain::workbook::{
 /// The first reader is deliberately bounded; a larger snapshot needs a new
 /// streaming decoder or a measured increase to this cap before activation.
 pub const MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 4;
 
 fn encode_cells(
     cells: &[(
@@ -106,6 +107,14 @@ pub fn encode_snapshot(
                 Ok(v1::SnapshotSheet {
                     sheet: Some(encode_sheet(&sheet.sheet)),
                     cells: encode_cells(&sheet.cells)?,
+                    styles: sheet
+                        .styles
+                        .iter()
+                        .map(|(address, style)| v1::SnapshotStyle {
+                            address: Some(addr(address)),
+                            style: Some(style_codec::encode_style(style)),
+                        })
+                        .collect(),
                 })
             })
             .collect::<Result<_, CodecError>>()?,
@@ -168,9 +177,13 @@ pub fn decode_snapshot(
     let envelope = v1::SnapshotEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
     if !matches!(
         envelope.snapshot_schema_version,
-        1 | 2 | SNAPSHOT_SCHEMA_VERSION
+        1 | 2 | 3 | SNAPSHOT_SCHEMA_VERSION
     ) {
         return Err(CodecError::UnsupportedSchema);
+    }
+    // Schema 4 is a writer-normalized profile, not arbitrary protobuf ordering.
+    if envelope.snapshot_schema_version == 4 && envelope.encode_to_vec() != bytes {
+        return Err(CodecError::Invalid);
     }
     if envelope.document_id.as_slice() != expected_document.as_bytes()
         || envelope.document_version != expected_version.get()
@@ -185,9 +198,17 @@ pub fn decode_snapshot(
         || envelope.retired_columns.len() > MAX_RETIRED_COLUMNS
         || envelope.row_activation_floors.len() > MAX_RETIRED_ROWS
         || envelope.column_activation_floors.len() > MAX_RETIRED_COLUMNS
+        || envelope
+            .sheets
+            .iter()
+            .map(|sheet| sheet.styles.len())
+            .sum::<usize>()
+            > spreadsheet_domain::style_write::MAX_STYLED_CELLS
         || (envelope.snapshot_schema_version < 3
             && (!envelope.row_activation_floors.is_empty()
                 || !envelope.column_activation_floors.is_empty()))
+        || (envelope.snapshot_schema_version < 4
+            && envelope.sheets.iter().any(|sheet| !sheet.styles.is_empty()))
     {
         return Err(CodecError::Invalid);
     }
@@ -198,6 +219,7 @@ pub fn decode_snapshot(
         vec![SnapshotSheetImage {
             sheet: decode_sheet(envelope.sheet.ok_or(CodecError::Invalid)?)?,
             cells: decode_cells(envelope.cells)?,
+            styles: Vec::new(),
         }]
     } else {
         if envelope.sheet.is_some()
@@ -211,14 +233,33 @@ pub fn decode_snapshot(
             .sheets
             .into_iter()
             .map(|entry| {
+                if entry.cells.len() > MAX_CELLS
+                    || entry.styles.len() > spreadsheet_domain::style_write::MAX_STYLED_CELLS
+                {
+                    return Err(CodecError::Invalid);
+                }
                 Ok(SnapshotSheetImage {
                     sheet: decode_sheet(entry.sheet.ok_or(CodecError::Invalid)?)?,
                     cells: decode_cells(entry.cells)?,
+                    styles: entry
+                        .styles
+                        .into_iter()
+                        .map(|entry| {
+                            Ok((
+                                decode_addr(entry.address.ok_or(CodecError::Invalid)?)?,
+                                style_codec::decode_style(entry.style.ok_or(CodecError::Invalid)?)?,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, CodecError>>()?,
                 })
             })
             .collect::<Result<Vec<_>, CodecError>>()?
     };
-    if sheets.iter().map(|sheet| sheet.cells.len()).sum::<usize>() > MAX_CELLS {
+    if (envelope.snapshot_schema_version < 4
+        && sheets.iter().map(|sheet| sheet.cells.len()).sum::<usize>() > MAX_CELLS)
+        || sheets.iter().map(|sheet| sheet.styles.len()).sum::<usize>()
+            > spreadsheet_domain::style_write::MAX_STYLED_CELLS
+    {
         return Err(CodecError::Invalid);
     }
     let image = SnapshotImage {
@@ -333,7 +374,7 @@ mod tests {
         )?;
         let bytes = encode_snapshot(&book, "engine-v1", "pxel-excel-subset-v1")?;
         let encoded = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-        assert_eq!(encoded.snapshot_schema_version, 3);
+        assert_eq!(encoded.snapshot_schema_version, 4);
         assert_eq!(encoded.sheets.len(), 2);
         let restored = decode_snapshot(
             &bytes,
@@ -493,7 +534,7 @@ mod tests {
             .hash(),
             expected_hash
         );
-        envelope.snapshot_schema_version = 4;
+        envelope.snapshot_schema_version = 5;
         assert!(matches!(
             decode_snapshot(
                 &envelope.encode_to_vec(),
