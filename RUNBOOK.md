@@ -7611,3 +7611,9 @@ fmt/native/wasm32/proto/WASM generation/Prettier/ESLint/TypeScript,
 только этого standalone guest-boundary среза, не deployment/public-upload gate.
 Vite >500kB chunk warning сохранён. Private workspace/regression logs:
 .local/csv-acceptance-WiBJqQ/{workspace,regression}-check.log.
+
+После commit03fe768/rebase main(up to date): just xlsx-wasi-check повторно PASS,
+10/10 capability/protocol/native-parity cases(2.87s). Worker4/4, real child
+CLI5/5, fmt и strict all-feature server Clippy повторно PASS. Исходники после
+проверок не менялись; добавлена только запись результатов. Post-rebase log:
+.local/reports/xlsx-wasi-post-rebase.log.
