@@ -1,3 +1,5 @@
+import { createBookFromUi } from './create-book';
+import { cutSelection } from './clipboard';
 import { expect, test, type Page, type WebSocketRoute } from '@playwright/test';
 import { fromBinary } from '@bufbuild/protobuf';
 import {
@@ -13,8 +15,9 @@ const preview = (page: Page) => page.getByTestId('calculation-preview');
 async function createDocument(page: Page) {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
 }
 async function select(page: Page, row: number, column: number) {
@@ -41,7 +44,7 @@ async function state(page: Page) {
 async function cutPaste(page: Page, from: [number, number], to: [number, number], columns = 1) {
   await select(page, ...from);
   for (let index = 1; index < columns; index++) await page.keyboard.press('Shift+ArrowRight');
-  await page.keyboard.press('ControlOrMeta+X');
+  await cutSelection(page);
   await expect(page.getByTestId('cut-status')).toContainText('Исходные ячейки пока сохранены');
   await select(page, ...to);
   await page.keyboard.press('ControlOrMeta+V');

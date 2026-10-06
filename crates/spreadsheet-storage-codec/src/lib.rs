@@ -1,8 +1,15 @@
 //! Versioned durable envelope. Hashes use explicit semantic encoding, never protobuf bytes.
 mod axis_codec;
+mod axis_size_codec;
 #[cfg(test)]
 mod axis_tests;
+#[cfg(test)]
+mod cell_batch_tests;
 mod formula_codec;
+#[cfg(test)]
+mod frozen_rows_tests;
+#[cfg(test)]
+mod merge_tests;
 mod move_codec;
 mod move_compensation_codec;
 #[cfg(test)]
@@ -13,12 +20,18 @@ mod range_codec;
 #[cfg(test)]
 mod range_tests;
 mod snapshot_codec;
+mod sort_codec;
+#[cfg(test)]
+mod sort_tests;
 mod style_codec;
 #[cfg(test)]
 mod style_tests;
 use prost::Message;
 use sha2::{Digest, Sha256};
-pub use snapshot_codec::{MAX_SNAPSHOT_BYTES, decode_snapshot, encode_snapshot};
+pub use snapshot_codec::{
+    MAX_SNAPSHOT_BYTES, SNAPSHOT_SCHEMA_VERSION, decode_snapshot, encode_snapshot,
+    snapshot_schema_version,
+};
 use spreadsheet_domain::workbook::*;
 use thiserror::Error;
 pub mod v1 {
@@ -182,10 +195,48 @@ fn decode_sheet(sheet: v1::CreateWorkbook) -> Result<SheetSeed, CodecError> {
             .collect::<Result<_, _>>()?,
     })
 }
+fn encode_merge_range(range: spreadsheet_domain::merge::MergeRange) -> v1::MergeRange {
+    v1::MergeRange {
+        first_row_id: range.first_row().as_bytes().to_vec(),
+        last_row_id: range.last_row().as_bytes().to_vec(),
+        first_column_id: range.first_column().as_bytes().to_vec(),
+        last_column_id: range.last_column().as_bytes().to_vec(),
+    }
+}
+fn decode_merge_range(
+    range: v1::MergeRange,
+) -> Result<spreadsheet_domain::merge::MergeRange, CodecError> {
+    Ok(spreadsheet_domain::merge::MergeRange::new(
+        RowId::from_bytes(id(&range.first_row_id)?).map_err(|_| CodecError::Invalid)?,
+        RowId::from_bytes(id(&range.last_row_id)?).map_err(|_| CodecError::Invalid)?,
+        ColumnId::from_bytes(id(&range.first_column_id)?).map_err(|_| CodecError::Invalid)?,
+        ColumnId::from_bytes(id(&range.last_column_id)?).map_err(|_| CodecError::Invalid)?,
+    ))
+}
 fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
     use v1::operation::Kind;
     Ok(v1::Operation {
         kind: Some(match o {
+            Operation::FrozenRowsWrite {
+                sheet,
+                rows,
+                previous,
+            } => {
+                if *rows > spreadsheet_domain::axis_size::MAX_FROZEN_ROWS
+                    || *previous > spreadsheet_domain::axis_size::MAX_FROZEN_ROWS
+                    || rows == previous
+                {
+                    return Err(CodecError::Invalid);
+                }
+                Kind::FrozenRowsWrite(v1::FrozenRowsWrite {
+                    sheet_id: sheet.as_bytes().to_vec(),
+                    rows: *rows,
+                    previous: *previous,
+                })
+            }
+            Operation::AxisSizeWrite { sheet, writes } => {
+                Kind::AxisSizeWrite(axis_size_codec::encode(*sheet, writes)?)
+            }
             Operation::StyleWrite { kind, writes } => {
                 Kind::StyleWrite(style_codec::encode_write(*kind, writes)?)
             }
@@ -352,6 +403,93 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                     Kind::AuthoredRangeWrite(range)
                 }
             }
+            Operation::CellBatchWrite {
+                intent,
+                content_writes,
+                style_writes,
+                undoes,
+                undoes_version,
+            } => {
+                let styles = if style_writes.is_empty() {
+                    None
+                } else {
+                    Some(if matches!(intent, CellBatchIntent::SortRange { .. }) {
+                        style_codec::encode_sort(style_writes)?
+                    } else {
+                        style_codec::encode_write(StyleWriteKind::Range, style_writes)?
+                    })
+                };
+                Kind::CellBatchWrite(v1::CellBatchWrite {
+                    content_writes: content_writes
+                        .iter()
+                        .map(|write| {
+                            Ok(v1::GuardedContentWrite {
+                                address: Some(addr(&write.address)),
+                                content: encode_optional_content(&write.content)?,
+                                previous: encode_optional_content(&write.previous)?,
+                            })
+                        })
+                        .collect::<Result<_, CodecError>>()?,
+                    styles,
+                    undoes_operation_id: undoes.map_or_else(Vec::new, |id| id.as_bytes().to_vec()),
+                    undoes_version: undoes_version.map_or(0, DocumentVersion::get),
+                    copy_intent: match intent {
+                        CellBatchIntent::SetValues | CellBatchIntent::SortRange { .. } => None,
+                        CellBatchIntent::CopyRange {
+                            source,
+                            destination,
+                            rows,
+                            columns,
+                        } => Some(v1::CellBatchCopyIntent {
+                            source: Some(addr(source)),
+                            destination: Some(addr(destination)),
+                            rows: *rows,
+                            columns: *columns,
+                            is_move: false,
+                        }),
+                        CellBatchIntent::MoveRange {
+                            source,
+                            destination,
+                            rows,
+                            columns,
+                        } => Some(v1::CellBatchCopyIntent {
+                            source: Some(addr(source)),
+                            destination: Some(addr(destination)),
+                            rows: *rows,
+                            columns: *columns,
+                            is_move: true,
+                        }),
+                    },
+                    sort_intent: match intent {
+                        CellBatchIntent::SortRange { range, order } => {
+                            Some(v1::CellBatchSortIntent {
+                                range: Some(sort_codec::encode_range(range)?),
+                                order: order.iter().map(|row| row.as_bytes().to_vec()).collect(),
+                            })
+                        }
+                        _ => None,
+                    },
+                })
+            }
+            Operation::MergeWrite {
+                sheet,
+                change,
+                undoes,
+                undoes_version,
+            } => {
+                if change.merged == change.previous || undoes.is_some() != undoes_version.is_some()
+                {
+                    return Err(CodecError::Invalid);
+                }
+                Kind::MergeWrite(v1::MergeWrite {
+                    sheet_id: sheet.as_bytes().to_vec(),
+                    range: Some(encode_merge_range(change.range)),
+                    merged: change.merged,
+                    previous: change.previous,
+                    undoes_operation_id: undoes.map_or_else(Vec::new, |id| id.as_bytes().to_vec()),
+                    undoes_version: undoes_version.map_or(0, DocumentVersion::get),
+                })
+            }
             Operation::CopyRange { writes } => {
                 validate_copy_writes(writes)?;
                 Kind::CopyRange(v1::CopyRange {
@@ -417,6 +555,24 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
 fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
     use v1::operation::Kind;
     Ok(match o.kind.ok_or(CodecError::Invalid)? {
+        Kind::FrozenRowsWrite(write) => {
+            if write.rows > spreadsheet_domain::axis_size::MAX_FROZEN_ROWS
+                || write.previous > spreadsheet_domain::axis_size::MAX_FROZEN_ROWS
+                || write.rows == write.previous
+            {
+                return Err(CodecError::Invalid);
+            }
+            Operation::FrozenRowsWrite {
+                sheet: SheetId::from_bytes(id(&write.sheet_id)?)
+                    .map_err(|_| CodecError::Invalid)?,
+                rows: write.rows,
+                previous: write.previous,
+            }
+        }
+        Kind::AxisSizeWrite(write) => {
+            let (sheet, writes) = axis_size_codec::decode(write)?;
+            Operation::AxisSizeWrite { sheet, writes }
+        }
         Kind::StyleWrite(write) => {
             let (kind, writes) = style_codec::decode_write(write)?;
             Operation::StyleWrite { kind, writes }
@@ -447,6 +603,135 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
         Kind::MoveCompensation(comp) => move_compensation_codec::decode(comp)?,
         Kind::AuthoredRangeWrite(range) => range_codec::decode(range, false)?,
         Kind::CompensatingRangeWrite(range) => range_codec::decode(range, true)?,
+        Kind::CellBatchWrite(batch) => {
+            if batch.copy_intent.is_some() && batch.sort_intent.is_some() {
+                return Err(CodecError::Invalid);
+            }
+            let undoes = if batch.undoes_operation_id.is_empty() {
+                if batch.undoes_version != 0 {
+                    return Err(CodecError::Invalid);
+                }
+                None
+            } else {
+                Some(
+                    OperationId::from_bytes(id(&batch.undoes_operation_id)?)
+                        .map_err(|_| CodecError::Invalid)?,
+                )
+            };
+            let undoes_version = if batch.undoes_version == 0 {
+                None
+            } else {
+                Some(DocumentVersion::new(batch.undoes_version).map_err(|_| CodecError::Invalid)?)
+            };
+            if undoes.is_some() != undoes_version.is_some() {
+                return Err(CodecError::Invalid);
+            }
+            let content_writes = batch
+                .content_writes
+                .into_iter()
+                .map(|write| {
+                    let address = decode_addr(write.address.ok_or(CodecError::Invalid)?)?;
+                    Ok(GuardedContentWrite {
+                        address,
+                        content: write
+                            .content
+                            .map(|value| decode_content(value, address))
+                            .transpose()?,
+                        previous: write
+                            .previous
+                            .map(|value| decode_content(value, address))
+                            .transpose()?,
+                    })
+                })
+                .collect::<Result<Vec<_>, CodecError>>()?;
+            let style_writes = match batch.styles {
+                Some(styles) => {
+                    let (kind, writes) = if batch.sort_intent.is_some() {
+                        style_codec::decode_sort(styles)?
+                    } else {
+                        style_codec::decode_write(styles)?
+                    };
+                    if kind != StyleWriteKind::Range {
+                        return Err(CodecError::Invalid);
+                    }
+                    writes
+                }
+                None => Vec::new(),
+            };
+            let intent = if let Some(sort) = batch.sort_intent {
+                CellBatchIntent::SortRange {
+                    range: sort_codec::decode_range(sort.range.ok_or(CodecError::Invalid)?)?,
+                    order: sort
+                        .order
+                        .iter()
+                        .map(|row| RowId::from_bytes(id(row)?).map_err(|_| CodecError::Invalid))
+                        .collect::<Result<_, _>>()?,
+                }
+            } else {
+                match batch.copy_intent {
+                    Some(copy) => {
+                        let source = decode_addr(copy.source.ok_or(CodecError::Invalid)?)?;
+                        let destination =
+                            decode_addr(copy.destination.ok_or(CodecError::Invalid)?)?;
+                        if copy.is_move {
+                            CellBatchIntent::MoveRange {
+                                source,
+                                destination,
+                                rows: copy.rows,
+                                columns: copy.columns,
+                            }
+                        } else {
+                            CellBatchIntent::CopyRange {
+                                source,
+                                destination,
+                                rows: copy.rows,
+                                columns: copy.columns,
+                            }
+                        }
+                    }
+                    None => CellBatchIntent::SetValues,
+                }
+            };
+            Operation::CellBatchWrite {
+                intent,
+                content_writes,
+                style_writes,
+                undoes,
+                undoes_version,
+            }
+        }
+        Kind::MergeWrite(write) => {
+            let undoes = if write.undoes_operation_id.is_empty() {
+                if write.undoes_version != 0 {
+                    return Err(CodecError::Invalid);
+                }
+                None
+            } else {
+                Some(
+                    OperationId::from_bytes(id(&write.undoes_operation_id)?)
+                        .map_err(|_| CodecError::Invalid)?,
+                )
+            };
+            let undoes_version = if write.undoes_version == 0 {
+                None
+            } else {
+                Some(DocumentVersion::new(write.undoes_version).map_err(|_| CodecError::Invalid)?)
+            };
+            if undoes.is_some() != undoes_version.is_some() || write.merged == write.previous {
+                return Err(CodecError::Invalid);
+            }
+            Operation::MergeWrite {
+                sheet: SheetId::from_bytes(id(&write.sheet_id)?)
+                    .map_err(|_| CodecError::Invalid)?,
+                change: spreadsheet_domain::merge::MergeChange {
+                    range: decode_merge_range(write.range.ok_or(CodecError::Invalid)?)?,
+                    merged: write.merged,
+                    previous: write.previous,
+                },
+                undoes,
+                undoes_version,
+            }
+        }
         Kind::AdvanceCalculationEpoch(c) => Operation::AdvanceCalculationEpoch {
             context: CalculationContext::new(
                 CalculationContextId::from_bytes(id(&c.context_id)?)
@@ -769,10 +1054,59 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::CellBatchWrite {
+            intent: CellBatchIntent::SortRange { .. },
+            undoes: Some(_),
+            ..
+        } => 38,
+        Operation::CellBatchWrite {
+            intent: CellBatchIntent::SortRange { .. },
+            ..
+        } => 37,
+        Operation::FrozenRowsWrite { .. } => 36,
+        Operation::AxisSizeWrite { .. } => 25,
+        Operation::MergeWrite {
+            undoes: Some(_), ..
+        } => 35,
+        Operation::MergeWrite { .. } => 34,
         Operation::StyleWrite { .. } => 23,
         Operation::StyleCompensation { .. } => 24,
-        Operation::AxisEdit { .. } => 21,
-        Operation::AxisCompensation { .. } => 22,
+        Operation::AxisEdit { change } => {
+            if change.style_writes.is_empty() {
+                21
+            } else {
+                26
+            }
+        }
+        Operation::AxisCompensation { change, .. } => {
+            if change.style_writes.is_empty() {
+                22
+            } else {
+                27
+            }
+        }
+        Operation::CellBatchWrite {
+            intent: CellBatchIntent::MoveRange { .. },
+            undoes: Some(_),
+            ..
+        } => 33,
+        Operation::CellBatchWrite {
+            intent: CellBatchIntent::MoveRange { .. },
+            ..
+        } => 32,
+        Operation::CellBatchWrite {
+            intent: CellBatchIntent::CopyRange { .. },
+            undoes: Some(_),
+            ..
+        } => 31,
+        Operation::CellBatchWrite {
+            intent: CellBatchIntent::CopyRange { .. },
+            ..
+        } => 30,
+        Operation::CellBatchWrite {
+            undoes: Some(_), ..
+        } => 29,
+        Operation::CellBatchWrite { .. } => 28,
         Operation::MoveCompensation { .. } => 20,
         Operation::MoveRange { .. } => 19,
         Operation::RangeWrite {
@@ -811,6 +1145,7 @@ pub fn encode(event: &CommittedEvent) -> Result<Vec<u8>, CodecError> {
     axis_codec::validate(&event.operation, Some(event.version))?;
     move_codec::validate(&event.operation, Some(event.version))?;
     range_codec::validate(&event.operation, Some(event.version))?;
+    validate_cell_batch(&event.operation, Some(event.version))?;
     if let Operation::CellWrite {
         kind: Some(CellWriteKind::SetFormula),
         content,
@@ -850,17 +1185,137 @@ fn encode_envelope(envelope: v1::EventEnvelope) -> Result<Vec<u8>, CodecError> {
     }
     Ok(envelope.encode_to_vec())
 }
+fn validate_cell_batch(
+    operation: &Operation,
+    version: Option<DocumentVersion>,
+) -> Result<(), CodecError> {
+    let Operation::CellBatchWrite {
+        intent,
+        content_writes,
+        style_writes,
+        undoes,
+        undoes_version,
+    } = operation
+    else {
+        return Ok(());
+    };
+    if !operation.is_inverse_target()
+        || content_writes.is_empty()
+        || content_writes.len()
+            > if matches!(intent, CellBatchIntent::SortRange { .. }) {
+                spreadsheet_domain::sort::MAX_SORT_CELLS as usize
+            } else if matches!(intent, CellBatchIntent::MoveRange { .. }) {
+                10_000
+            } else {
+                1_000
+            }
+        || style_writes.len()
+            > if matches!(intent, CellBatchIntent::SortRange { .. }) {
+                spreadsheet_domain::sort::MAX_SORT_CELLS as usize
+            } else if matches!(intent, CellBatchIntent::MoveRange { .. }) {
+                2_000
+            } else {
+                1_000
+            }
+        || (undoes.is_none() != undoes_version.is_none())
+        || undoes_version
+            .is_some_and(|v| v == DocumentVersion::ZERO || version.is_some_and(|n| v >= n))
+    {
+        return Err(CodecError::Invalid);
+    }
+    let mut addresses = std::collections::BTreeSet::new();
+    for write in content_writes {
+        if !addresses.insert(write.address) {
+            return Err(CodecError::Invalid);
+        }
+        if [&write.content, &write.previous]
+            .into_iter()
+            .flatten()
+            .any(|c| matches!(c, CellContent::Value(CellValue::Blank)))
+        {
+            return Err(CodecError::Invalid);
+        }
+    }
+    if style_writes
+        .iter()
+        .any(|write| !addresses.contains(&write.address))
+    {
+        return Err(CodecError::Invalid);
+    }
+    if let CellBatchIntent::CopyRange {
+        source,
+        destination,
+        rows,
+        columns,
+    } = intent
+        && (source.sheet != destination.sheet
+            || *rows == 0
+            || *columns == 0
+            || rows.checked_mul(*columns).map(|n| n as usize) != Some(content_writes.len()))
+    {
+        return Err(CodecError::Invalid);
+    }
+    if let CellBatchIntent::SortRange { range, order } = intent {
+        range.validate_shape().map_err(|_| CodecError::Invalid)?;
+        let rows = order
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let columns = content_writes
+            .iter()
+            .map(|w| w.address.column)
+            .collect::<std::collections::BTreeSet<_>>();
+        if order.len() != (range.rows - range.header_rows) as usize
+            || rows.len() != order.len()
+            || content_writes.len() != order.len() * range.columns as usize
+            || columns.len() != range.columns as usize
+            || !columns.contains(&range.source.column)
+            || range.keys.iter().any(|key| !columns.contains(&key.column))
+            || content_writes.iter().any(|write| {
+                write.address.sheet != range.source.sheet || !rows.contains(&write.address.row)
+            })
+        {
+            return Err(CodecError::Invalid);
+        }
+    }
+    if let CellBatchIntent::MoveRange {
+        source,
+        destination,
+        rows,
+        columns,
+    } = intent
+        && (source.sheet != destination.sheet
+            || source == destination
+            || *rows == 0
+            || *columns == 0
+            || rows.checked_mul(*columns).is_none_or(|count| count > 1_000))
+    {
+        return Err(CodecError::Invalid);
+    }
+    if !style_writes.is_empty() {
+        for chunk in style_writes.chunks(1_000) {
+            style_codec::validate(
+                &Operation::StyleWrite {
+                    kind: StyleWriteKind::Range,
+                    writes: chunk.to_vec(),
+                },
+                None,
+            )?;
+        }
+    }
+    Ok(())
+}
 pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
     if bytes.len() > 4 * 1024 * 1024 {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=24) {
+    if !matches!(e.schema_version, 1..=38) {
         return Err(CodecError::UnsupportedSchema);
     }
     // New style families accept the frozen Rust writer's normalized encoding.
     // This rejects unknown fields; it is not a general protobuf canonicalization rule.
-    if matches!(e.schema_version, 23 | 24) && e.encode_to_vec() != bytes {
+    if matches!(e.schema_version, 23..=38) && e.encode_to_vec() != bytes {
         return Err(CodecError::Invalid);
     }
     if e.committed_version == 0 {
@@ -883,6 +1338,10 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         &operation,
         Some(DocumentVersion::new(e.committed_version).map_err(|_| CodecError::Invalid)?),
     )?;
+    validate_cell_batch(
+        &operation,
+        Some(DocumentVersion::new(e.committed_version).map_err(|_| CodecError::Invalid)?),
+    )?;
     if schema_version(&operation) != e.schema_version {
         return Err(CodecError::UnsupportedSchema);
     }
@@ -894,7 +1353,8 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
     ) {
         (
             1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-            | 21 | 22 | 23 | 24,
+            | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
+            | 38,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -904,7 +1364,8 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         }
         (
             1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
-            | 21 | 22 | 23 | 24,
+            | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
+            | 38,
             0,
             actor,
             _,
@@ -924,6 +1385,10 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     if matches!(&operation, Operation::CellWrite { undoes_version: Some(version), .. } if version.get() >= e.committed_version)
+    {
+        return Err(CodecError::Invalid);
+    }
+    if matches!(&operation, Operation::MergeWrite { undoes_version: Some(version), .. } if version.get() >= e.committed_version)
     {
         return Err(CodecError::Invalid);
     }
@@ -947,6 +1412,38 @@ fn field(h: &mut Sha256, b: &[u8]) {
 }
 fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
     match o {
+        Operation::FrozenRowsWrite {
+            sheet,
+            rows,
+            previous,
+        } => {
+            h.update([36]);
+            h.update(sheet.as_bytes());
+            h.update(rows.to_be_bytes());
+            h.update(previous.to_be_bytes());
+        }
+        Operation::AxisSizeWrite { sheet, writes } => axis_size_codec::hash(h, *sheet, writes)?,
+        Operation::MergeWrite {
+            sheet,
+            change,
+            undoes,
+            undoes_version,
+        } => {
+            if change.merged == change.previous || undoes.is_some() != undoes_version.is_some() {
+                return Err(CodecError::Invalid);
+            }
+            h.update([if undoes.is_some() { 35 } else { 34 }]);
+            h.update(sheet.as_bytes());
+            h.update(change.range.first_row().as_bytes());
+            h.update(change.range.last_row().as_bytes());
+            h.update(change.range.first_column().as_bytes());
+            h.update(change.range.last_column().as_bytes());
+            h.update([u8::from(change.merged), u8::from(change.previous)]);
+            if let (Some(id), Some(version)) = (undoes, undoes_version) {
+                h.update(id.as_bytes());
+                h.update(version.get().to_le_bytes());
+            }
+        }
         Operation::StyleWrite { .. } | Operation::StyleCompensation { .. } => {
             style_codec::hash(h, o)?
         }
@@ -1115,6 +1612,81 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
         Operation::MoveRange { .. } => move_codec::hash(h, o)?,
         Operation::MoveCompensation { .. } => move_compensation_codec::hash(h, o)?,
         Operation::RangeWrite { .. } => range_codec::hash(h, o)?,
+        Operation::CellBatchWrite {
+            intent,
+            content_writes,
+            style_writes,
+            undoes,
+            undoes_version,
+        } => {
+            validate_cell_batch(o, None)?;
+            h.update([match (intent, undoes.is_some()) {
+                (CellBatchIntent::SetValues, false) => 28,
+                (CellBatchIntent::SetValues, true) => 29,
+                (CellBatchIntent::CopyRange { .. }, false) => 30,
+                (CellBatchIntent::CopyRange { .. }, true) => 31,
+                (CellBatchIntent::MoveRange { .. }, false) => 32,
+                (CellBatchIntent::MoveRange { .. }, true) => 33,
+                (CellBatchIntent::SortRange { .. }, false) => 37,
+                (CellBatchIntent::SortRange { .. }, true) => 38,
+            }]);
+            if let CellBatchIntent::SortRange { range, order } = intent {
+                sort_codec::hash_range(h, range)?;
+                h.update((order.len() as u32).to_le_bytes());
+                for row in order {
+                    h.update(row.as_bytes());
+                }
+            }
+            if let CellBatchIntent::CopyRange {
+                source,
+                destination,
+                rows,
+                columns,
+            } = intent
+            {
+                for address in [source, destination] {
+                    h.update(address.sheet.as_bytes());
+                    h.update(address.row.as_bytes());
+                    h.update(address.column.as_bytes());
+                }
+                h.update(rows.to_le_bytes());
+                h.update(columns.to_le_bytes());
+            }
+            if let CellBatchIntent::MoveRange {
+                source,
+                destination,
+                rows,
+                columns,
+            } = intent
+            {
+                move_codec::hash_geometry(h, *source, *destination, *rows, *columns);
+            }
+            h.update((content_writes.len() as u64).to_le_bytes());
+            for write in content_writes {
+                h.update(write.address.sheet.as_bytes());
+                h.update(write.address.row.as_bytes());
+                h.update(write.address.column.as_bytes());
+                hash_content(h, &write.content)?;
+                hash_content(h, &write.previous)?;
+            }
+            if !style_writes.is_empty() && matches!(intent, CellBatchIntent::SortRange { .. }) {
+                style_codec::hash_sort(h, style_writes)?;
+            } else if !style_writes.is_empty() {
+                style_codec::hash(
+                    h,
+                    &Operation::StyleWrite {
+                        kind: StyleWriteKind::Range,
+                        writes: style_writes.clone(),
+                    },
+                )?;
+            } else {
+                h.update([0]);
+            }
+            if let (Some(id), Some(version)) = (undoes, undoes_version) {
+                h.update(id.as_bytes());
+                h.update(version.get().to_le_bytes());
+            }
+        }
         Operation::CopyRange { writes } => {
             validate_copy_writes(writes)?;
             h.update([15]);
@@ -1164,6 +1736,34 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
     h.update(c.base_version.get().to_le_bytes());
     h.update(c.client_sequence.to_le_bytes());
     match &c.operation {
+        CommandPayload::SortRange { range } => {
+            h.update([37]);
+            sort_codec::hash_range(&mut h, range)?;
+        }
+        CommandPayload::SetFrozenRows { sheet, rows } => {
+            if *rows > spreadsheet_domain::axis_size::MAX_FROZEN_ROWS {
+                return Err(CodecError::Invalid);
+            }
+            h.update([36]);
+            h.update(sheet.as_bytes());
+            h.update(rows.to_be_bytes());
+        }
+        CommandPayload::SetAxisSizes { sheet, writes } => {
+            axis_size_codec::hash_command(&mut h, *sheet, writes)?
+        }
+        CommandPayload::SetMergeRange {
+            sheet,
+            range,
+            merged,
+        } => {
+            h.update([31]);
+            h.update(sheet.as_bytes());
+            h.update(range.first_row().as_bytes());
+            h.update(range.last_row().as_bytes());
+            h.update(range.first_column().as_bytes());
+            h.update(range.last_column().as_bytes());
+            h.update([u8::from(*merged)]);
+        }
         CommandPayload::SetCellStyle { address, changes } => style_codec::hash_command(
             &mut h,
             StyleWriteKind::Cell,
@@ -1243,6 +1843,24 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
                 writes: writes.clone(),
             },
         )?,
+        CommandPayload::SetCellBatch { writes, styles } => {
+            semantic_operation(
+                &mut h,
+                &Operation::SetCellValues {
+                    writes: writes.clone(),
+                },
+            )?;
+            h.update([30]);
+            h.update((styles.len() as u64).to_le_bytes());
+            for (address, changes) in styles {
+                style_codec::hash_command(
+                    &mut h,
+                    StyleWriteKind::Cell,
+                    std::slice::from_ref(address),
+                    changes,
+                )?;
+            }
+        }
         CommandPayload::CopyRange {
             source,
             destination,
@@ -1343,6 +1961,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::SetCellValues { .. })
         | (EventPrincipal::System, Operation::CopyRange { .. })
         | (EventPrincipal::System, Operation::RangeWrite { .. })
+        | (EventPrincipal::System, Operation::CellBatchWrite { .. })
         | (EventPrincipal::System, Operation::MoveRange { .. })
         | (EventPrincipal::System, Operation::MoveCompensation { .. })
         | (EventPrincipal::System, Operation::AxisEdit { .. })
@@ -1350,6 +1969,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::StyleWrite { .. })
         | (EventPrincipal::System, Operation::StyleCompensation { .. })
         | (EventPrincipal::System, Operation::CellWrite { .. })
+        | (EventPrincipal::System, Operation::MergeWrite { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),
         (EventPrincipal::System, _) => h.update(b"PXEL-EVENT-SYSTEM-1"),

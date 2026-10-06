@@ -49,6 +49,7 @@ pub(super) async fn scan(
     let mut expected = head;
     let mut bytes = 0usize;
     let mut entries = Vec::new();
+    let mut keys = crate::crypto::ReadKeyCache::default();
     let mut truncation = (floor > 1).then_some(HistoryTruncation::VersionWindow);
     let mut byte_limit = false;
     while expected >= floor && head != 0 {
@@ -62,28 +63,33 @@ pub(super) async fn scan(
             if version(row.committed_version)?.get() != expected {
                 return Err(JournalError::Corrupt);
             }
-            if row.payload.len() > MAX_EVENT_BYTES {
+            if row.payload.len() > MAX_EVENT_BYTES + crate::crypto::ENVELOPE_OVERHEAD {
                 return Err(JournalError::Corrupt);
             }
             let next_bytes = bytes
-                .checked_add(row.payload.len())
+                .checked_add(encrypted_plaintext_length(row.payload.len())?)
                 .ok_or(JournalError::Corrupt)?;
             if next_bytes > MAX_UNDO_TAIL_BYTES {
                 truncation = Some(HistoryTruncation::ByteBudget);
                 byte_limit = true;
                 break;
             }
-            let event = verified_event(StoredEventRow {
-                document,
-                committed_version: row.committed_version,
-                operation_id: row.operation_id,
-                actor_id: row.actor_id,
-                principal_kind: &row.principal_kind,
-                schema_version: row.schema_version,
-                payload: &row.payload,
-                payload_checksum: &row.payload_checksum,
-                canonical_event_hash: &row.canonical_event_hash,
-            })?;
+            let event = verified_event_cached(
+                db,
+                &mut keys,
+                StoredEventRow {
+                    document,
+                    committed_version: row.committed_version,
+                    operation_id: row.operation_id,
+                    actor_id: row.actor_id,
+                    principal_kind: &row.principal_kind,
+                    schema_version: row.schema_version,
+                    payload: &row.payload,
+                    payload_checksum: &row.payload_checksum,
+                    canonical_event_hash: &row.canonical_event_hash,
+                },
+            )
+            .await?;
             entries.push(history::describe(&event, identity.actor_id)?);
             bytes = next_bytes;
             expected = expected.checked_sub(1).ok_or(JournalError::Corrupt)?;

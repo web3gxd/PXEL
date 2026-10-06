@@ -28,7 +28,7 @@ const context = {
   utc_offset_minutes: 180,
   civil_day_since_unix_epoch: 1,
   random_seed: '07'.repeat(32),
-  engine_version: 'pxel-formula-0.14.0',
+  engine_version: 'pxel-formula-0.16.0',
   compatibility_profile: 'pxel-excel-subset-v1',
   reason: 'explicit',
 };
@@ -279,7 +279,7 @@ for (const { index, at, restore, verify } of checks) {
     assert.equal(output.complete, true);
     assert.equal(output.input_version, '9');
     assert.equal(output.pending_revision, String(step));
-    assert.equal(output.formula_engine_version, 'pxel-formula-0.14.0');
+    assert.equal(output.formula_engine_version, 'pxel-formula-0.16.0');
     assert.match(output.normalized_result_hash, /^[0-9a-f]{64}$/);
     if (step) assert.ok(output.move_writes.length >= 2);
   }
@@ -369,7 +369,7 @@ try {
   const report = {
     schema_version: 1,
     seed,
-    engine_version: 'pxel-formula-0.14.0',
+    engine_version: 'pxel-formula-0.16.0',
     workbooks: requests.length,
     moves: requests.reduce((sum, item) => sum + item.moves.length, 0),
     native_wasm_parity: true,

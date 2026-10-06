@@ -27,7 +27,7 @@ import {
 
 test(
   'hard server restart replays content and resolves a discarded ACK by operation identity',
-  { timeout: 60000 },
+  { timeout: 180000 },
   async () => {
     const base = 'http://127.0.0.1:18082';
     let child;

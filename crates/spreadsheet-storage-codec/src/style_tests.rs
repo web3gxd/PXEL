@@ -309,7 +309,7 @@ fn snapshot_four_retains_styles_and_refuses_old_profiles_and_default_entries() -
     let book = book.candidate(&event.operation, event.version)?;
     let bytes = encode_snapshot(&book, "engine-v1", "pxel-v1")?;
     let raw = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-    assert_eq!(raw.snapshot_schema_version, 4);
+    assert_eq!(raw.snapshot_schema_version, 7);
     assert_eq!(raw.sheets[0].styles.len(), 4);
     let decoded = restored(&bytes, &book)?;
     assert_eq!(decoded.hash(), book.hash());
@@ -336,7 +336,7 @@ fn snapshot_four_retains_styles_and_refuses_old_profiles_and_default_entries() -
         .style
         .as_mut()
         .ok_or("style")?
-        .profile_version = 2;
+        .profile_version = 3;
     assert!(matches!(
         restored(&unknown.encode_to_vec(), &book),
         Err(CodecError::UnsupportedSchema)
@@ -372,7 +372,7 @@ fn style_all_sixteen_leaves_roundtrip_in_event_and_snapshot() -> TestResult {
         StyleChange::BorderLeft(Change::Set(border)),
         StyleChange::Horizontal(Change::Set(HorizontalAlignment::Right)),
         StyleChange::Vertical(Change::Set(VerticalAlignment::Top)),
-        StyleChange::Wrap(Change::Set(true)),
+        StyleChange::TextOverflow(Change::Set(TextOverflow::Wrap)),
         StyleChange::NumberFormat(Change::Set(NumberFormat::DateIso)),
     ];
     let operation = prepare_style_write(&book, &[address], &patch, StyleWriteKind::Cell)?;
@@ -390,6 +390,79 @@ fn style_all_sixteen_leaves_roundtrip_in_event_and_snapshot() -> TestResult {
     let decoded = restored(&bytes, &candidate)?;
     assert_eq!(decoded.sheets()[0].styles(), candidate.sheets()[0].styles());
     assert_eq!(decoded.hash(), candidate.hash());
+    Ok(())
+}
+
+#[test]
+fn overflow_profile_event_and_snapshot_roundtrip_while_legacy_wrap_stays_readable() -> TestResult {
+    let (book, _) = fixture()?;
+    let sheet = &book.sheets()[0];
+    let address = CellAddress {
+        sheet: sheet.id(),
+        row: sheet.rows()[0],
+        column: sheet.columns()[0],
+    };
+    let operation = prepare_style_write(
+        &book,
+        &[address],
+        &[StyleChange::TextOverflow(Change::Set(
+            TextOverflow::Overflow,
+        ))],
+        StyleWriteKind::Cell,
+    )?;
+    let candidate = book.candidate(&operation, DocumentVersion::new(3)?)?;
+    let event = CommittedEvent {
+        document_id: book.document_id(),
+        operation_id: OperationId::from_bytes([18; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([3; 16])?),
+        version: candidate.version(),
+        operation,
+        state_hash: candidate.hash(),
+    };
+    let mut raw = envelope(&event)?;
+    let stored = raw_write(&mut raw)?;
+    assert_eq!(stored.profile_version, 2);
+    assert!(matches!(
+        stored.writes[0].changes[0].kind,
+        Some(v1::style_change::Kind::Enumeration(2))
+    ));
+    assert_eq!(decode(&raw.encode_to_vec())?, event);
+
+    let snapshot = encode_snapshot(&candidate, "engine-v1", "pxel-v1")?;
+    let snapshot = v1::SnapshotEnvelope::decode(snapshot.as_slice())?;
+    assert!(snapshot.sheets[0].styles.iter().any(|entry| {
+        entry
+            .style
+            .as_ref()
+            .is_some_and(|style| style.profile_version == 2)
+    }));
+    let snapshot_bytes = snapshot.encode_to_vec();
+    let decoded = restored(&snapshot_bytes, &candidate)?;
+    assert_eq!(decoded.hash(), candidate.hash());
+    assert_eq!(decoded.sheets()[0].styles(), candidate.sheets()[0].styles());
+
+    let wrap = prepare_style_write(
+        &book,
+        &[address],
+        &[StyleChange::TextOverflow(Change::Set(TextOverflow::Wrap))],
+        StyleWriteKind::Cell,
+    )?;
+    let wrap_book = book.candidate(&wrap, DocumentVersion::new(3)?)?;
+    let wrap_event = CommittedEvent {
+        operation_id: OperationId::from_bytes([19; 16])?,
+        operation: wrap,
+        state_hash: wrap_book.hash(),
+        ..event
+    };
+    let mut legacy = envelope(&wrap_event)?;
+    let stored = raw_write(&mut legacy)?;
+    assert_eq!(stored.profile_version, 1);
+    assert!(matches!(
+        stored.writes[0].changes[0].kind,
+        Some(v1::style_change::Kind::Boolean(true))
+    ));
+    stored.profile_version = 0; // Old event payloads omitted this field.
+    assert_eq!(decode(&legacy.encode_to_vec())?, wrap_event);
     Ok(())
 }
 

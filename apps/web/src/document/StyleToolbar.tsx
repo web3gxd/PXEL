@@ -1,4 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  PaintBucket,
+  TextAa,
+  TextAlignCenter,
+  TextAlignJustify,
+  TextAlignLeft,
+  TextAlignRight,
+  TextB,
+  TextItalic,
+  TextStrikethrough,
+  TextUnderline,
+  X,
+} from '@phosphor-icons/react';
 import type { DocumentStore } from './store';
 import {
   colorCss,
@@ -31,8 +44,10 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
   }, [expanded]);
   const style = document.style(document.selected),
     disabled = !online || !document.canFormat;
+  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  const mod = mac ? '⌘' : 'Ctrl+';
   const send = (change: StyleChange) => document.setStyle([change]);
-  const toggle = (property: 'font_bold' | 'font_italic' | 'font_strike' | 'wrap') =>
+  const toggle = (property: 'font_bold' | 'font_italic' | 'font_strike') =>
     send({ property, value: !style[property] });
   return (
     <>
@@ -83,26 +98,86 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
           type="button"
           className="tool"
           aria-label="Полужирный"
-          aria-pressed={style.font_bold}
-          title="Полужирный"
+          aria-pressed={
+            document.selectionStyle('font_bold') === 'mixed' ? 'mixed' : style.font_bold
+          }
+          title={`Полужирный (${mod}B)`}
           disabled={disabled}
           onClick={() => toggle('font_bold')}
         >
-          <strong>B</strong>
+          <TextB size={18} weight="bold" aria-hidden="true" />
         </button>
         <button
           type="button"
           className="tool"
           aria-label="Курсив"
-          aria-pressed={style.font_italic}
-          title="Курсив"
+          aria-pressed={
+            document.selectionStyle('font_italic') === 'mixed' ? 'mixed' : style.font_italic
+          }
+          title={`Курсив (${mod}I)`}
           disabled={disabled}
           onClick={() => toggle('font_italic')}
         >
-          <em>I</em>
+          <TextItalic size={18} aria-hidden="true" />
         </button>
+        <button
+          type="button"
+          className="tool"
+          aria-label="Подчёркивание"
+          aria-pressed={
+            document.selectionStyle('font_underline') === 'mixed'
+              ? 'mixed'
+              : style.font_underline !== 'none'
+          }
+          title={`Подчёркивание (${mod}U)`}
+          disabled={disabled}
+          onClick={() =>
+            send({
+              property: 'font_underline',
+              value: style.font_underline === 'single' ? 'none' : 'single',
+            })
+          }
+        >
+          <TextUnderline size={18} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="tool"
+          aria-label="Зачёркивание"
+          aria-pressed={
+            document.selectionStyle('font_strike') === 'mixed' ? 'mixed' : style.font_strike
+          }
+          title={mac ? 'Зачёркивание (⌘⇧X)' : 'Зачёркивание (Alt+Shift+5)'}
+          disabled={disabled}
+          onClick={() => toggle('font_strike')}
+        >
+          <TextStrikethrough size={18} aria-hidden="true" />
+        </button>
+        <label className="style-overflow" title="Режим текста">
+          <TextAlignJustify size={18} aria-hidden="true" />
+          <select
+            className="style-select"
+            aria-label="Режим текста"
+            value={
+              document.selectionStyle('text_overflow') === 'mixed' ? 'mixed' : style.text_overflow
+            }
+            disabled={disabled}
+            onChange={(event) =>
+              event.target.value !== 'mixed' &&
+              send({
+                property: 'text_overflow',
+                value: event.target.value as CellStyle['text_overflow'],
+              })
+            }
+          >
+            <option value="mixed">Смешанный</option>
+            <option value="clip">Обрезать</option>
+            <option value="wrap">Переносить</option>
+            <option value="overflow">Выходить в пустые ячейки</option>
+          </select>
+        </label>
         <label className="style-color" title="Цвет текста">
-          <span aria-hidden="true">A</span>
+          <TextAa size={18} aria-hidden="true" />
           <input
             type="color"
             aria-label="Цвет текста"
@@ -112,7 +187,7 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
           />
         </label>
         <label className="style-color" title="Цвет заливки">
-          <span aria-hidden="true">▧</span>
+          <PaintBucket size={18} aria-hidden="true" />
           <input
             type="color"
             aria-label="Цвет заливки"
@@ -121,20 +196,30 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
             onChange={(event) => send({ property: 'fill', value: color(event.target.value) })}
           />
         </label>
-        <select
-          className="style-select style-alignment"
-          aria-label="Выравнивание"
-          value={style.horizontal}
-          disabled={disabled}
-          onChange={(event) =>
-            send({ property: 'horizontal', value: event.target.value as CellStyle['horizontal'] })
-          }
-        >
-          <option value="general">Авто</option>
-          <option value="left">Слева</option>
-          <option value="center">По центру</option>
-          <option value="right">Справа</option>
-        </select>
+        {(
+          [
+            ['left', TextAlignLeft],
+            ['center', TextAlignCenter],
+            ['right', TextAlignRight],
+          ] as const
+        ).map(([alignment, AlignmentIcon]) => (
+          <button
+            key={alignment}
+            type="button"
+            className="tool"
+            aria-label={`Выравнивание: ${alignment === 'left' ? 'слева' : alignment === 'center' ? 'по центру' : 'справа'}`}
+            aria-pressed={
+              document.selectionStyle('horizontal') === 'mixed'
+                ? 'mixed'
+                : style.horizontal === alignment
+            }
+            title={`Выравнивание ${alignment === 'left' ? 'слева' : alignment === 'center' ? 'по центру' : 'справа'} (${mod}Shift+${alignment === 'left' ? 'L' : alignment === 'center' ? 'E' : 'R'})`}
+            disabled={disabled}
+            onClick={() => send({ property: 'horizontal', value: alignment })}
+          >
+            <AlignmentIcon size={18} aria-hidden="true" />
+          </button>
+        ))}
         <select
           className="style-select style-format"
           aria-label="Числовой формат"
@@ -176,11 +261,11 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
               <h2 id="style-dialog-title">Оформление ячеек</h2>
               <button
                 type="button"
-                className="tool"
+                className="tool sharing-close"
                 aria-label="Закрыть оформление"
                 onClick={() => dialog.current?.close()}
               >
-                ×
+                <X size={18} aria-hidden="true" />
               </button>
             </div>
             <p>Параметры применяются к выделенному диапазону.</p>
@@ -258,14 +343,28 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
                 />
                 Зачёркнутый
               </label>
-              <label className="style-check">
-                <input
-                  type="checkbox"
-                  checked={style.wrap}
+              <label>
+                Режим отображения текста
+                <select
+                  value={
+                    document.selectionStyle('text_overflow') === 'mixed'
+                      ? 'mixed'
+                      : style.text_overflow
+                  }
                   disabled={disabled}
-                  onChange={() => toggle('wrap')}
-                />
-                Перенос текста
+                  onChange={(event) =>
+                    event.target.value !== 'mixed' &&
+                    send({
+                      property: 'text_overflow',
+                      value: event.target.value as CellStyle['text_overflow'],
+                    })
+                  }
+                >
+                  <option value="mixed">Смешанный</option>
+                  <option value="clip">Обрезать</option>
+                  <option value="wrap">Переносить</option>
+                  <option value="overflow">Выходить в пустые ячейки</option>
+                </select>
               </label>
               {(['top', 'right', 'bottom', 'left'] as const).map((edge, index) => {
                 const property = `border_${edge}` as const,

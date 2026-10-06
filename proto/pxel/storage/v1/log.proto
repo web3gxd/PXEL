@@ -41,10 +41,54 @@ message Operation {
   AxisCompensation axis_compensation = 22;
   StyleWrite style_write = 23;
   StyleCompensation style_compensation = 24;
+  AxisSizeWrite axis_size_write = 25;
+  CellBatchWrite cell_batch_write = 26;
+  MergeWrite merge_write = 27;
+  FrozenRowsWrite frozen_rows_write = 28;
  }
 }
-// Profile 1 uses the frozen sixteen leaf-property tags. A value kind must match
-// its property; reset is represented by true, never by a missing value.
+message AxisSizeWrite { bytes sheet_id = 1; repeated AxisSizeChange writes = 2; }
+message FrozenRowsWrite { bytes sheet_id = 1; uint32 rows = 2; uint32 previous = 3; }
+message AxisSizeChange {
+  uint32 axis_kind = 1; // 1=row, 2=column
+  bytes axis_id = 2;
+  optional uint32 size_css_px = 3; // absent resets to default
+  optional uint32 previous_css_px = 4;
+}
+message CellBatchWrite {
+ repeated GuardedContentWrite content_writes = 1;
+ StyleWrite styles = 2;
+ bytes undoes_operation_id = 3;
+ uint64 undoes_version = 4;
+ CellBatchCopyIntent copy_intent = 5;
+ CellBatchSortIntent sort_intent = 6;
+}
+message CellBatchSortIntent { SortRangeIntent range = 1; repeated bytes order = 2; }
+message SortRangeIntent { CellAddress source = 1; uint32 rows = 2; uint32 columns = 3; uint32 header_rows = 4; repeated SortKey keys = 5; }
+message SortKey { bytes column_id = 1; bool descending = 2; }
+message CellBatchCopyIntent {
+ CellAddress source = 1;
+ CellAddress destination = 2;
+ uint32 rows = 3;
+ uint32 columns = 4;
+ bool is_move = 5;
+}
+message MergeRange {
+ bytes first_row_id = 1;
+ bytes last_row_id = 2;
+ bytes first_column_id = 3;
+ bytes last_column_id = 4;
+}
+message MergeWrite {
+ bytes sheet_id = 1;
+ MergeRange range = 2;
+ bool merged = 3;
+ bool previous = 4;
+ bytes undoes_operation_id = 5;
+ uint64 undoes_version = 6;
+}
+// Style payload profile 1 uses wrap as a bool; profile 2 adds overflow as enum 2
+// at the same property tag. Missing profile_version is legacy profile 1.
 message StyleChange {
  uint32 property = 1;
  oneof kind {
@@ -64,7 +108,11 @@ message GuardedStyleWrite {
  repeated StyleChange previous = 2;
  repeated StyleChange changes = 3;
 }
-message StyleWrite { uint32 kind = 1; repeated GuardedStyleWrite writes = 2; }
+message StyleWrite {
+ uint32 kind = 1;
+ repeated GuardedStyleWrite writes = 2;
+ uint32 profile_version = 3;
+}
 message StyleCompensation {
  StyleWrite write = 1;
  bytes undoes_operation_id = 2;
@@ -147,6 +195,12 @@ message AxisChange {
  repeated GuardedContentWrite writes = 4;
  bytes before_order_hash = 5;
  bytes after_order_hash = 6;
+ repeated GuardedAxisStyleWrite style_writes = 7;
+}
+message GuardedAxisStyleWrite {
+ CellAddress address = 1;
+ CellStyle previous = 2;
+ CellStyle style = 3;
 }
 message AxisDelta {
  oneof kind {

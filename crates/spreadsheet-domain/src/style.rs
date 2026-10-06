@@ -1,9 +1,10 @@
-//! Profile1 sparse formatting overrides, independent of authored cell content.
+//! Sparse formatting overrides, independent of authored cell content.
 //! Sizes are hundredths of a point. Fonts are names, never font-loading URLs.
 use std::fmt;
 use thiserror::Error;
 
 pub const DEFAULT_PROFILE_VERSION: u16 = 1;
+pub const OVERFLOW_PROFILE_VERSION: u16 = 2;
 pub const STYLE_PROPERTY_COUNT: usize = 16;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub enum StyleError {
@@ -86,6 +87,7 @@ macro_rules! closed_enum {
     };
 }
 closed_enum!(Underline { None=0, Single=1, Double=2 });
+closed_enum!(TextOverflow { Clip=0, Wrap=1, Overflow=2 });
 closed_enum!(HorizontalAlignment { General=0, Left=1, Center=2, Right=3 });
 closed_enum!(VerticalAlignment { Top=0, Center=1, Bottom=2 });
 closed_enum!(BorderLine { Thin=1, Medium=2, Thick=3, Dashed=4, Dotted=5, Double=6 });
@@ -122,7 +124,8 @@ closed_enum!(StyleProperty {
     BorderLeft=12,
     Horizontal=13,
     Vertical=14,
-    Wrap=15,
+    // Tag 15 was the v1 boolean `wrap`; v2 extends it to clip/wrap/overflow.
+    TextOverflow=15,
     NumberFormat=16,
 });
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -141,7 +144,7 @@ pub enum StyleChange {
     BorderLeft(Change<Border>),
     Horizontal(Change<HorizontalAlignment>),
     Vertical(Change<VerticalAlignment>),
-    Wrap(Change<bool>),
+    TextOverflow(Change<TextOverflow>),
     NumberFormat(Change<NumberFormat>),
 }
 impl StyleChange {
@@ -161,7 +164,7 @@ impl StyleChange {
             Self::BorderLeft(..) => StyleProperty::BorderLeft,
             Self::Horizontal(..) => StyleProperty::Horizontal,
             Self::Vertical(..) => StyleProperty::Vertical,
-            Self::Wrap(..) => StyleProperty::Wrap,
+            Self::TextOverflow(..) => StyleProperty::TextOverflow,
             Self::NumberFormat(..) => StyleProperty::NumberFormat,
         }
     }
@@ -182,7 +185,7 @@ pub struct CellStyle {
     border_left: Option<Border>,
     horizontal: Option<HorizontalAlignment>,
     vertical: Option<VerticalAlignment>,
-    wrap: Option<bool>,
+    text_overflow: Option<TextOverflow>,
     number_format: Option<NumberFormat>,
 }
 impl CellStyle {
@@ -210,7 +213,7 @@ impl CellStyle {
             StyleProperty::BorderLeft => StyleChange::BorderLeft(Change::Reset),
             StyleProperty::Horizontal => StyleChange::Horizontal(Change::Reset),
             StyleProperty::Vertical => StyleChange::Vertical(Change::Reset),
-            StyleProperty::Wrap => StyleChange::Wrap(Change::Reset),
+            StyleProperty::TextOverflow => StyleChange::TextOverflow(Change::Reset),
             StyleProperty::NumberFormat => StyleChange::NumberFormat(Change::Reset),
         }
     }
@@ -259,8 +262,11 @@ impl CellStyle {
     pub fn vertical(&self) -> VerticalAlignment {
         self.vertical.unwrap_or(VerticalAlignment::Bottom)
     }
+    pub fn text_overflow(&self) -> TextOverflow {
+        self.text_overflow.unwrap_or(TextOverflow::Clip)
+    }
     pub fn wrap(&self) -> bool {
-        self.wrap.unwrap_or(false)
+        self.text_overflow() == TextOverflow::Wrap
     }
     pub fn number_format(&self) -> NumberFormat {
         self.number_format.unwrap_or(NumberFormat::General)
@@ -345,7 +351,9 @@ impl CellStyle {
                 StyleChange::Vertical(change) => {
                     candidate.vertical = override_value(change, VerticalAlignment::Bottom)
                 }
-                StyleChange::Wrap(change) => candidate.wrap = override_value(change, false),
+                StyleChange::TextOverflow(change) => {
+                    candidate.text_overflow = override_value(change, TextOverflow::Clip)
+                }
                 StyleChange::NumberFormat(change) => {
                     candidate.number_format = override_value(change, NumberFormat::General)
                 }
@@ -399,18 +407,23 @@ impl CellStyle {
         if let Some(value) = self.vertical {
             changes.push(StyleChange::Vertical(Change::Set(value)));
         }
-        if let Some(value) = self.wrap {
-            changes.push(StyleChange::Wrap(Change::Set(value)));
+        if let Some(value) = self.text_overflow {
+            changes.push(StyleChange::TextOverflow(Change::Set(value)));
         }
         if let Some(value) = self.number_format {
             changes.push(StyleChange::NumberFormat(Change::Set(value)));
         }
         changes
     }
-    /// Profile1 canonical semantic bytes, independent of protobuf and platform.
+    /// Canonical semantic bytes, independent of protobuf and platform. Existing
+    /// clip/wrap styles retain v1 bytes; overflow uses the profile2 prefix.
     /// Prefix, u16 BE override count, then fixed property tags and typed values.
     pub fn append_to(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(b"PXEL-STYLE-1\0");
+        out.extend_from_slice(if self.text_overflow == Some(TextOverflow::Overflow) {
+            b"PXEL-STYLE-2\0"
+        } else {
+            b"PXEL-STYLE-1\0"
+        });
         let count = [
             self.font_family.is_some(),
             self.font_size.is_some(),
@@ -426,7 +439,7 @@ impl CellStyle {
             self.border_left.is_some(),
             self.horizontal.is_some(),
             self.vertical.is_some(),
-            self.wrap.is_some(),
+            self.text_overflow.is_some(),
             self.number_format.is_some(),
         ]
         .into_iter()
@@ -494,9 +507,9 @@ impl CellStyle {
             out.push(14);
             out.push(*value as u8);
         }
-        if let Some(value) = &self.wrap {
+        if let Some(value) = &self.text_overflow {
             out.push(15);
-            out.push(u8::from(*value));
+            out.push(*value as u8);
         }
         if let Some(value) = &self.number_format {
             out.push(16);

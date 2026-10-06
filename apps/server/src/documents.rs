@@ -7,14 +7,20 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use spreadsheet_application::journal::{JournalError, OperationJournal};
+use spreadsheet_application::journal::{AuthenticatedActor, JournalError, OperationJournal};
 use spreadsheet_collab::{SessionDirectory, SessionError, Submission};
+use spreadsheet_domain::style::{
+    BorderLine, Change, HorizontalAlignment, NumberFormat, StyleChange, Underline,
+    VerticalAlignment,
+};
 use spreadsheet_domain::workbook::*;
 use spreadsheet_storage::{ExportAuditError, PermissionError, PermissionRole, SnapshotError};
 use spreadsheet_wire_protocol::{self as wire, v1};
 use spreadsheet_xlsx::{NormalizedCell, NormalizedCellValue, NormalizedSheet, NormalizedWorkbook};
 use std::sync::Arc;
 use uuid::Uuid;
+
+const DOCUMENT_STYLE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,8 +31,8 @@ pub struct CreateRequest {
 
 #[derive(Serialize)]
 pub struct Created {
-    document_id: String,
-    version: String,
+    pub(crate) document_id: String,
+    pub(crate) version: String,
 }
 
 #[derive(Deserialize)]
@@ -196,7 +202,7 @@ async fn principal(state: &AppState, headers: &HeaderMap) -> Result<auth::Princi
         .ok_or(ApiError(StatusCode::UNAUTHORIZED, "unauthorized"))
 }
 
-fn parse_id(value: &str) -> Result<[u8; 16], ApiError> {
+pub(crate) fn parse_id(value: &str) -> Result<[u8; 16], ApiError> {
     let id = Uuid::parse_str(value)
         .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid_identity"))?;
     if id.get_version_num() != 7 {
@@ -208,7 +214,7 @@ fn parse_id(value: &str) -> Result<[u8; 16], ApiError> {
 fn domain_error(_: DomainError) -> ApiError {
     ApiError(StatusCode::BAD_REQUEST, "invalid_command")
 }
-fn journal_error(error: JournalError) -> ApiError {
+pub(crate) fn journal_error(error: JournalError) -> ApiError {
     match error {
         JournalError::Unauthorized => ApiError(StatusCode::FORBIDDEN, "unauthorized"),
         JournalError::NotFound => ApiError(StatusCode::NOT_FOUND, "not_found"),
@@ -288,6 +294,103 @@ pub struct DocumentView {
     column_activation_floors: Vec<ColumnActivationFloorView>,
     calculation_context: Option<CalculationContextView>,
     sheets: Vec<SheetView>,
+    capabilities: Option<DocumentCapabilitiesView>,
+    encryption: EncryptionMetadataView,
+}
+/// Independently versioned value-only projection. No authored hash or context.
+#[derive(Serialize)]
+pub(crate) struct RedactedView {
+    redacted_projection_schema_version: u32,
+    style_schema_version: u32,
+    style_profile_version: u32,
+    document_id: String,
+    version: String,
+    privacy_revision: u64,
+    sheets: Vec<SheetView>,
+    capabilities: DocumentCapabilitiesView,
+    encryption: EncryptionMetadataView,
+}
+impl RedactedView {
+    pub(crate) fn stamp(&self) -> spreadsheet_storage::DisclosureStamp {
+        self.capabilities.disclosure_stamp
+    }
+}
+pub(crate) struct RedactedCapabilities {
+    pub can_copy: bool,
+    pub can_export: bool,
+    pub can_export_pxel: bool,
+    pub can_comment: bool,
+    pub can_share: bool,
+    pub is_guest: bool,
+    pub stamp: spreadsheet_storage::DisclosureStamp,
+}
+pub(crate) fn redacted_view(
+    book: &Workbook,
+    policy: &spreadsheet_storage::PrivacyPolicy,
+    analysis: &crate::privacy_api::Analysis,
+    caps: RedactedCapabilities,
+) -> Result<RedactedView, ApiError> {
+    let original = document_view(book.document_id(), book)?.0;
+    let mut sheets = original.sheets;
+    for (sheet, source) in sheets.iter_mut().zip(book.sheets()) {
+        sheet.name = crate::privacy_api::text_mask(&sheet.name, &policy.rules)?;
+        for (cell, (address, _)) in sheet.cells.iter_mut().zip(source.cells()) {
+            cell.value = match analysis.values.get(address).ok_or(ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "privacy_projection",
+            ))? {
+                CellValue::Blank => JsonValue::Blank,
+                CellValue::Number(n) => JsonValue::Number(*n),
+                CellValue::Text(t) => JsonValue::Text(t.clone()),
+                CellValue::Boolean(b) => JsonValue::Boolean(*b),
+            };
+        }
+        for cell in &mut sheet.styles {
+            cell.style.font_family =
+                crate::privacy_api::text_mask(&cell.style.font_family, &policy.rules)?;
+        }
+    }
+    Ok(RedactedView {
+        redacted_projection_schema_version: 1,
+        style_schema_version: original.style_schema_version,
+        style_profile_version: original.style_profile_version,
+        document_id: original.document_id,
+        version: original.version,
+        privacy_revision: policy.revision,
+        sheets,
+        capabilities: DocumentCapabilitiesView {
+            schema_version: 2,
+            can_edit: false,
+            can_comment: caps.can_comment,
+            can_share: caps.can_share,
+            can_copy: caps.can_copy,
+            can_export: caps.can_export,
+            can_export_pxel: caps.can_export_pxel,
+            anonymized: true,
+            disclosure_stamp: caps.stamp,
+            is_guest: caps.is_guest,
+        },
+        encryption: original.encryption,
+    })
+}
+#[derive(Serialize)]
+struct DocumentCapabilitiesView {
+    schema_version: u32,
+    can_edit: bool,
+    can_comment: bool,
+    can_share: bool,
+    can_export: bool,
+    can_export_pxel: bool,
+    can_copy: bool,
+    anonymized: bool,
+    disclosure_stamp: spreadsheet_storage::DisclosureStamp,
+    is_guest: bool,
+}
+#[derive(Serialize)]
+struct EncryptionMetadataView {
+    encrypted: bool,
+    algorithm: &'static str,
+    kek_rotated_at: Option<i64>,
 }
 #[derive(Serialize)]
 struct RowActivationFloorView {
@@ -314,12 +417,28 @@ struct CalculationContextView {
 }
 #[derive(Serialize)]
 struct SheetView {
+    frozen_rows: u32,
     id: String,
     name: String,
     rows: Vec<String>,
     columns: Vec<String>,
     cells: Vec<CellView>,
     styles: Vec<StyledCellView>,
+    row_heights: Vec<AxisSizeView>,
+    column_widths: Vec<AxisSizeView>,
+    merges: Vec<MergeRangeView>,
+}
+#[derive(Serialize)]
+struct MergeRangeView {
+    first_row_id: String,
+    last_row_id: String,
+    first_column_id: String,
+    last_column_id: String,
+}
+#[derive(Serialize)]
+struct AxisSizeView {
+    axis_id: String,
+    size_css_px: u32,
 }
 #[derive(Serialize)]
 struct StyledCellView {
@@ -327,8 +446,9 @@ struct StyledCellView {
     column_id: String,
     style: CellStyleView,
 }
-#[derive(Serialize)]
-struct CellStyleView {
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CellStyleView {
     font_family: String,
     font_size_hundredth_points: u16,
     font_bold: bool,
@@ -343,23 +463,27 @@ struct CellStyleView {
     border_left: Option<BorderView>,
     horizontal: HorizontalView,
     vertical: VerticalView,
-    wrap: bool,
+    text_overflow: TextOverflowView,
     number_format: NumberFormatView,
 }
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct BorderView {
     line: BorderLineView,
     color: [u8; 3],
 }
 macro_rules! style_json_enum {
     ($view:ident, $domain:ident, $($variant:ident),+ $(,)?) => {
-        #[derive(Serialize)]
+        #[derive(Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
         enum $view { $($variant),+ }
         impl From<spreadsheet_domain::style::$domain> for $view {
             fn from(value: spreadsheet_domain::style::$domain) -> Self {
                 match value { $(spreadsheet_domain::style::$domain::$variant => Self::$variant),+ }
             }
+        }
+        impl From<$view> for spreadsheet_domain::style::$domain {
+            fn from(value: $view) -> Self { match value { $($view::$variant => Self::$variant),+ } }
         }
     };
 }
@@ -383,6 +507,7 @@ style_json_enum!(
     Right
 );
 style_json_enum!(VerticalView, VerticalAlignment, Top, Center, Bottom);
+style_json_enum!(TextOverflowView, TextOverflow, Clip, Wrap, Overflow);
 style_json_enum!(
     NumberFormatView,
     NumberFormat,
@@ -419,9 +544,40 @@ impl From<&spreadsheet_domain::style::CellStyle> for CellStyleView {
             border_left: value.border_left().map(Into::into),
             horizontal: value.horizontal().into(),
             vertical: value.vertical().into(),
-            wrap: value.wrap(),
+            text_overflow: value.text_overflow().into(),
             number_format: value.number_format().into(),
         }
+    }
+}
+impl TryFrom<CellStyleView> for spreadsheet_domain::style::CellStyle {
+    type Error = spreadsheet_domain::style::StyleError;
+    fn try_from(value: CellStyleView) -> Result<Self, Self::Error> {
+        use spreadsheet_domain::style::{Border, CellStyle, FontFamily, FontSize, Rgb};
+        let border = |value: Option<BorderView>| {
+            value.map_or(Change::Reset, |b| {
+                Change::Set(Border::new(b.line.into(), Rgb::new(b.color)))
+            })
+        };
+        CellStyle::default().apply(&[
+            StyleChange::FontFamily(Change::Set(FontFamily::new(value.font_family)?)),
+            StyleChange::FontSize(Change::Set(FontSize::new(
+                value.font_size_hundredth_points,
+            )?)),
+            StyleChange::FontBold(Change::Set(value.font_bold)),
+            StyleChange::FontItalic(Change::Set(value.font_italic)),
+            StyleChange::FontUnderline(Change::Set(value.font_underline.into())),
+            StyleChange::FontStrike(Change::Set(value.font_strike)),
+            StyleChange::FontColor(Change::Set(Rgb::new(value.font_color))),
+            StyleChange::Fill(Change::Set(Rgb::new(value.fill))),
+            StyleChange::BorderTop(border(value.border_top)),
+            StyleChange::BorderRight(border(value.border_right)),
+            StyleChange::BorderBottom(border(value.border_bottom)),
+            StyleChange::BorderLeft(border(value.border_left)),
+            StyleChange::Horizontal(Change::Set(value.horizontal.into())),
+            StyleChange::Vertical(Change::Set(value.vertical.into())),
+            StyleChange::TextOverflow(Change::Set(value.text_overflow.into())),
+            StyleChange::NumberFormat(Change::Set(value.number_format.into())),
+        ])
     }
 }
 #[derive(Serialize)]
@@ -470,7 +626,115 @@ pub async fn get_document(
         .read(principal.identity)
         .await
         .map_err(session_api_error)?;
-    document_view(id, &workbook)
+    let mut response = document_view(id, &workbook)?;
+    let role = state
+        .database
+        .document_role_name(principal.identity, id)
+        .await
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "unavailable"))?;
+    let (can_copy, can_export, _requires_anonymization, disclosure_stamp) = state
+        .database
+        .disclosure_capabilities(principal.identity, id, None)
+        .await
+        .map_err(crate::disclosure_api::error)?;
+    response.0.capabilities = Some(DocumentCapabilitiesView {
+        schema_version: 2,
+        can_edit: role.as_deref().is_some_and(|role| role != "viewer"),
+        can_comment: role.as_deref().is_some_and(|role| role != "viewer"),
+        can_share: role.as_deref() == Some("owner"),
+        can_export,
+        can_export_pxel: state
+            .database
+            .can_export_pxel(principal.identity, id, None)
+            .await
+            .map_err(crate::disclosure_api::error)?,
+        can_copy,
+        anonymized: false,
+        disclosure_stamp,
+        is_guest: false,
+    });
+    response.0.encryption.kek_rotated_at = state
+        .database
+        .key_rotation_timestamp()
+        .await
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "unavailable"))?;
+    Ok(response)
+}
+
+pub async fn guest_document_view(
+    state: &AppState,
+    identity: AuthenticatedActor,
+    document: DocumentId,
+    role: spreadsheet_storage::ShareRole,
+    link_id: Uuid,
+) -> Result<Json<DocumentView>, ApiError> {
+    let session = state
+        .sessions
+        .session(identity, document)
+        .await
+        .map_err(session_api_error)?;
+    let workbook = session.read(identity).await.map_err(session_api_error)?;
+    let mut response = document_view(document, &workbook)?;
+    response.0.last_axis_change_version = "0".into();
+    response.0.retired_row_ids.clear();
+    response.0.retired_column_ids.clear();
+    response.0.row_activation_floors.clear();
+    response.0.column_activation_floors.clear();
+    let (can_copy, can_export, _requires_anonymization, disclosure_stamp) = state
+        .database
+        .disclosure_capabilities(identity, document, Some(link_id))
+        .await
+        .map_err(crate::disclosure_api::error)?;
+    response.0.capabilities = Some(DocumentCapabilitiesView {
+        schema_version: 2,
+        can_edit: role == spreadsheet_storage::ShareRole::Edit,
+        can_comment: role != spreadsheet_storage::ShareRole::View,
+        can_share: false,
+        can_export,
+        can_export_pxel: state
+            .database
+            .can_export_pxel(identity, document, Some(link_id))
+            .await
+            .map_err(crate::disclosure_api::error)?,
+        can_copy,
+        anonymized: false,
+        disclosure_stamp,
+        is_guest: true,
+    });
+    response.0.encryption.kek_rotated_at = state
+        .database
+        .key_rotation_timestamp()
+        .await
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "unavailable"))?;
+    Ok(response)
+}
+
+pub async fn guest_calculation_context(
+    state: &AppState,
+    identity: AuthenticatedActor,
+    document: DocumentId,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = state
+        .sessions
+        .session(identity, document)
+        .await
+        .map_err(session_api_error)?;
+    let workbook = session.read(identity).await.map_err(session_api_error)?;
+    let context=workbook.calculation_context().map(|context|serde_json::json!({
+        "schema_version":1,
+        "context_id":id_string(context.context_id().as_bytes()),
+        "epoch":context.epoch().to_string(),
+        "effective_timestamp_utc_ms":context.effective_timestamp_utc_ms().to_string(),
+        "utc_offset_minutes":context.utc_offset_minutes(),
+        "civil_day_since_unix_epoch":context.civil_day_since_unix_epoch(),
+        "random_seed":context.random_seed().iter().map(|byte|format!("{byte:02x}")).collect::<String>(),
+        "engine_version":context.engine_version(),
+        "compatibility_profile":context.compatibility_profile(),
+        "reason":match context.reason(){CalculationReason::Open=>"open",CalculationReason::Explicit=>"explicit",CalculationReason::Timer=>"timer",CalculationReason::VolatileDependency=>"volatile_dependency",CalculationReason::EngineUpgrade=>"engine_upgrade"}
+    }));
+    Ok(Json(
+        serde_json::json!({"document_id":id_string(document.as_bytes()),"calculation_context":context}),
+    ))
 }
 
 #[derive(Serialize)]
@@ -555,21 +819,74 @@ pub async fn undo_history(
     }))
 }
 
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ExportQuery {
+    #[serde(default)]
+    anonymized: bool,
+}
 pub async fn export_xlsx(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(query): Query<ExportQuery>,
 ) -> Result<Response, ApiError> {
     if !crate::rate_allowed(&state).await {
         return Err(ApiError(StatusCode::TOO_MANY_REQUESTS, "rate_limit"));
     }
     let principal = principal(&state, &headers).await?;
     let document = DocumentId::from_bytes(parse_id(&id)?).map_err(domain_error)?;
-    state
-        .database
-        .authorize_export(principal.identity, document)
+    export_for_principal(state, principal, document, None, query.anonymized).await
+}
+
+pub async fn export_shared_xlsx(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(link): Path<String>,
+    Query(query): Query<ExportQuery>,
+) -> Result<Response, ApiError> {
+    let link = Uuid::from_bytes(parse_id(&link)?);
+    let principal = state
+        .auth
+        .authenticate_share(&headers, link)
         .await
-        .map_err(export_audit_api_error)?;
+        .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "unavailable"))?
+        .ok_or(ApiError(StatusCode::UNAUTHORIZED, "unauthorized"))?;
+    let auth::PrincipalScope::ShareGuest { session, .. } = &principal.scope else {
+        return Err(ApiError(StatusCode::FORBIDDEN, "unauthorized"));
+    };
+    let doc = session.document_id;
+    export_for_principal(state, principal, doc, Some(link), query.anonymized).await
+}
+
+async fn export_for_principal(
+    state: Arc<AppState>,
+    principal: auth::Principal,
+    document: DocumentId,
+    link: Option<Uuid>,
+    anonymized: bool,
+) -> Result<Response, ApiError> {
+    let action = if anonymized {
+        spreadsheet_storage::DisclosureAction::ExportXlsxAnonymized
+    } else {
+        spreadsheet_storage::DisclosureAction::ExportXlsx
+    };
+    let start = if link.is_none() && !anonymized {
+        state
+            .database
+            .authorize_export(principal.identity, document)
+            .await
+            .map_err(export_audit_api_error)?
+    } else {
+        state
+            .database
+            .authorize_disclosure(principal.identity, document, link, action, None)
+            .await
+            .map_err(crate::disclosure_api::error)?
+    };
+    if !start.allowed {
+        return Err(ApiError(StatusCode::FORBIDDEN, "disclosure_denied"));
+    }
     let permit = state
         .exports
         .clone()
@@ -585,9 +902,29 @@ pub async fn export_xlsx(
         .await
         .map_err(session_api_error)?;
     let version = workbook.version();
-    let bytes = tokio::task::spawn_blocking(move || {
+    if version.get() != start.stamp.document_version {
+        return Err(ApiError(StatusCode::CONFLICT, "version_changed"));
+    }
+    let privacy = if start.anonymized {
+        Some(
+            state
+                .database
+                .privacy_policy(principal.identity, document, link)
+                .await
+                .map_err(crate::disclosure_api::error)?
+                .rules,
+        )
+    } else {
+        None
+    };
+    let prepared = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let normalized = export_projection(&workbook)?;
+        let analysis = privacy
+            .as_ref()
+            .map(|rules| crate::privacy_api::analyze(&workbook, rules))
+            .transpose()?;
+        let normalized =
+            export_projection_redacted(&workbook, analysis.as_ref(), privacy.as_ref())?;
         spreadsheet_xlsx::export_scalar_xlsx(&normalized).map_err(|_| {
             ApiError(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -596,53 +933,70 @@ pub async fn export_xlsx(
         })
     })
     .await
-    .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "export_unavailable"))??;
-    let checksum: [u8; 32] = Sha256::digest(&bytes).into();
-    state
-        .database
-        .record_export(principal.identity, document, version, checksum, bytes.len())
-        .await
-        .map_err(export_audit_api_error)?;
-    Ok((
-        [
-            (
-                axum::http::header::CONTENT_TYPE,
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ),
-            (
-                axum::http::header::CONTENT_DISPOSITION,
-                "attachment; filename=PXEL.xlsx",
-            ),
-            (axum::http::header::CACHE_CONTROL, "no-store"),
-        ],
-        bytes,
+    .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "export_unavailable"))?;
+    let bytes = match prepared {
+        Ok(bytes) => bytes,
+        Err(failure) => {
+            state
+                .database
+                .record_disclosure_failure(principal.identity, document, link, action, start.stamp)
+                .await
+                .map_err(crate::disclosure_api::error)?;
+            return Err(failure);
+        }
+    };
+    let (final_decision, lease, guard) = crate::disclosure_api::prepare_delivery(
+        &state,
+        &principal,
+        document,
+        link,
+        action,
+        Some(start.stamp),
     )
-        .into_response())
+    .await?;
+    if !final_decision.allowed {
+        return Err(ApiError(StatusCode::FORBIDDEN, "disclosure_changed"));
+    }
+    if link.is_none() {
+        let checksum: [u8; 32] = Sha256::digest(&bytes).into();
+        state
+            .database
+            .record_export(principal.identity, document, version, checksum, bytes.len())
+            .await
+            .map_err(export_audit_api_error)?;
+    }
+    crate::disclosure_api::protected_response(
+        bytes,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Some("attachment; filename=PXEL.xlsx"),
+        lease,
+        guard,
+        true,
+    )
 }
 
 fn export_audit_api_error(error: ExportAuditError) -> ApiError {
     match error {
         ExportAuditError::Unauthorized => ApiError(StatusCode::FORBIDDEN, "unauthorized"),
-        ExportAuditError::Unavailable => {
+        ExportAuditError::Unavailable | ExportAuditError::Crypto(_) => {
             ApiError(StatusCode::SERVICE_UNAVAILABLE, "export_audit_unavailable")
         }
     }
 }
 
+#[cfg(test)]
 fn export_projection(workbook: &Workbook) -> Result<NormalizedWorkbook, ApiError> {
-    if workbook
-        .sheets()
-        .iter()
-        .any(|sheet| !sheet.styles().is_empty())
-    {
-        return Err(ApiError(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "xlsx_styles_not_supported",
-        ));
-    }
+    export_projection_redacted(workbook, None, None)
+}
+fn export_projection_redacted(
+    workbook: &Workbook,
+    analysis: Option<&crate::privacy_api::Analysis>,
+    privacy: Option<&spreadsheet_storage::PrivacyRules>,
+) -> Result<NormalizedWorkbook, ApiError> {
     let mut sheets = Vec::with_capacity(workbook.sheets().len());
     for sheet in workbook.sheets() {
         let mut cells = Vec::with_capacity(sheet.cells().len());
+        let mut styles = Vec::with_capacity(sheet.styles().len());
         for (address, content) in sheet.cells() {
             let row = sheet
                 .row_position(address.row)
@@ -658,6 +1012,10 @@ fn export_projection(workbook: &Workbook) -> Result<NormalizedWorkbook, ApiError
                     StatusCode::SERVICE_UNAVAILABLE,
                     "export_projection",
                 ))?;
+            let redacted = analysis
+                .and_then(|a| a.values.get(address))
+                .map(|v| CellContent::Value(v.clone()));
+            let content = redacted.as_ref().unwrap_or(content);
             let value = match content {
                 CellContent::Value(CellValue::Blank) => continue,
                 CellContent::Value(CellValue::Number(value)) => NormalizedCellValue::Number(*value),
@@ -685,12 +1043,198 @@ fn export_projection(workbook: &Workbook) -> Result<NormalizedWorkbook, ApiError
             cells.push(NormalizedCell { row, column, value });
         }
         cells.sort_unstable_by_key(|cell| (cell.row, cell.column));
+        for (address, style) in sheet.styles() {
+            let row = sheet
+                .row_position(address.row)
+                .and_then(|position| position.checked_add(1))
+                .ok_or(ApiError(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "export_projection",
+                ))?;
+            let column = sheet
+                .column_position(address.column)
+                .and_then(|position| position.checked_add(1))
+                .ok_or(ApiError(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "export_projection",
+                ))?;
+            let mut normalized = spreadsheet_xlsx::NormalizedStyle {
+                row,
+                column,
+                font_family: None,
+                font_size_hundredth_points: None,
+                bold: None,
+                italic: None,
+                underline: None,
+                strike: None,
+                font_color: None,
+                fill: None,
+                border_top: None,
+                border_right: None,
+                border_bottom: None,
+                border_left: None,
+                horizontal: None,
+                vertical: None,
+                wrap: None,
+                number_format: None,
+            };
+            for change in style.normalized_changes() {
+                match change {
+                    StyleChange::FontFamily(Change::Set(value)) => {
+                        normalized.font_family = Some(value.as_str().to_owned())
+                    }
+                    StyleChange::FontSize(Change::Set(value)) => {
+                        normalized.font_size_hundredth_points = Some(value.get())
+                    }
+                    StyleChange::FontBold(Change::Set(value)) => normalized.bold = Some(value),
+                    StyleChange::FontItalic(Change::Set(value)) => normalized.italic = Some(value),
+                    StyleChange::FontUnderline(Change::Set(value)) => {
+                        normalized.underline = Some(match value {
+                            Underline::Single => spreadsheet_xlsx::NormalizedUnderline::Single,
+                            Underline::Double => spreadsheet_xlsx::NormalizedUnderline::Double,
+                            Underline::None => continue,
+                        })
+                    }
+                    StyleChange::FontStrike(Change::Set(value)) => normalized.strike = Some(value),
+                    StyleChange::FontColor(Change::Set(value)) => {
+                        normalized.font_color = Some(value.channels())
+                    }
+                    StyleChange::Fill(Change::Set(value)) => {
+                        normalized.fill = Some(value.channels())
+                    }
+                    StyleChange::BorderTop(Change::Set(value)) => {
+                        normalized.border_top = Some(normalized_border(value))
+                    }
+                    StyleChange::BorderRight(Change::Set(value)) => {
+                        normalized.border_right = Some(normalized_border(value))
+                    }
+                    StyleChange::BorderBottom(Change::Set(value)) => {
+                        normalized.border_bottom = Some(normalized_border(value))
+                    }
+                    StyleChange::BorderLeft(Change::Set(value)) => {
+                        normalized.border_left = Some(normalized_border(value))
+                    }
+                    StyleChange::Horizontal(Change::Set(value)) => {
+                        normalized.horizontal = Some(match value {
+                            HorizontalAlignment::General => {
+                                spreadsheet_xlsx::NormalizedHorizontal::General
+                            }
+                            HorizontalAlignment::Left => {
+                                spreadsheet_xlsx::NormalizedHorizontal::Left
+                            }
+                            HorizontalAlignment::Center => {
+                                spreadsheet_xlsx::NormalizedHorizontal::Center
+                            }
+                            HorizontalAlignment::Right => {
+                                spreadsheet_xlsx::NormalizedHorizontal::Right
+                            }
+                        })
+                    }
+                    StyleChange::Vertical(Change::Set(value)) => {
+                        normalized.vertical = Some(match value {
+                            VerticalAlignment::Top => spreadsheet_xlsx::NormalizedVertical::Top,
+                            VerticalAlignment::Center => {
+                                spreadsheet_xlsx::NormalizedVertical::Center
+                            }
+                            VerticalAlignment::Bottom => {
+                                spreadsheet_xlsx::NormalizedVertical::Bottom
+                            }
+                        })
+                    }
+                    StyleChange::TextOverflow(Change::Set(value)) => {
+                        normalized.wrap =
+                            Some(value == spreadsheet_domain::style::TextOverflow::Wrap)
+                    }
+                    StyleChange::NumberFormat(Change::Set(value)) => {
+                        normalized.number_format = Some(match value {
+                            NumberFormat::General => {
+                                spreadsheet_xlsx::NormalizedNumberFormat::General
+                            }
+                            NumberFormat::Integer => {
+                                spreadsheet_xlsx::NormalizedNumberFormat::Integer
+                            }
+                            NumberFormat::Decimal2 => {
+                                spreadsheet_xlsx::NormalizedNumberFormat::Decimal2
+                            }
+                            NumberFormat::Percent0 => {
+                                spreadsheet_xlsx::NormalizedNumberFormat::Percent0
+                            }
+                            NumberFormat::Percent2 => {
+                                spreadsheet_xlsx::NormalizedNumberFormat::Percent2
+                            }
+                            NumberFormat::Scientific2 => {
+                                spreadsheet_xlsx::NormalizedNumberFormat::Scientific2
+                            }
+                            NumberFormat::DateIso => {
+                                spreadsheet_xlsx::NormalizedNumberFormat::DateIso
+                            }
+                        })
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(rules) = privacy
+                && let Some(font) = normalized.font_family.as_mut()
+            {
+                *font = crate::privacy_api::text_mask(font, rules)?;
+            }
+            styles.push(normalized);
+        }
+        styles.sort_unstable();
+        let merges = sheet
+            .merges()
+            .iter()
+            .map(|merge| {
+                Ok(spreadsheet_xlsx::NormalizedMerge {
+                    first_row: sheet
+                        .row_position(merge.first_row())
+                        .and_then(|index| index.checked_add(1))
+                        .ok_or(ApiError(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "export_projection",
+                        ))?,
+                    last_row: sheet
+                        .row_position(merge.last_row())
+                        .and_then(|index| index.checked_add(1))
+                        .ok_or(ApiError(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "export_projection",
+                        ))?,
+                    first_column: sheet
+                        .column_position(merge.first_column())
+                        .and_then(|index| index.checked_add(1))
+                        .ok_or(ApiError(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "export_projection",
+                        ))?,
+                    last_column: sheet
+                        .column_position(merge.last_column())
+                        .and_then(|index| index.checked_add(1))
+                        .ok_or(ApiError(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "export_projection",
+                        ))?,
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
         sheets.push(NormalizedSheet {
-            name: sheet.name().to_owned(),
+            name: if let Some(rules) = privacy {
+                let name = crate::privacy_api::text_mask(sheet.name(), rules)?;
+                if name.contains("[СКРЫТО]") {
+                    format!("Лист {}", sheets.len() + 1)
+                } else {
+                    name
+                }
+            } else {
+                sheet.name().to_owned()
+            },
             cells,
+            styles,
+            merges,
         });
     }
     let normalized = NormalizedWorkbook {
+        schema_version: 3,
         sheets,
         issues: vec![],
     };
@@ -701,6 +1245,22 @@ fn export_projection(workbook: &Workbook) -> Result<NormalizedWorkbook, ApiError
         )
     })?;
     Ok(normalized)
+}
+
+fn normalized_border(
+    value: spreadsheet_domain::style::Border,
+) -> spreadsheet_xlsx::NormalizedBorder {
+    spreadsheet_xlsx::NormalizedBorder {
+        line: match value.line() {
+            BorderLine::Thin => spreadsheet_xlsx::NormalizedBorderLine::Thin,
+            BorderLine::Medium => spreadsheet_xlsx::NormalizedBorderLine::Medium,
+            BorderLine::Thick => spreadsheet_xlsx::NormalizedBorderLine::Thick,
+            BorderLine::Dashed => spreadsheet_xlsx::NormalizedBorderLine::Dashed,
+            BorderLine::Dotted => spreadsheet_xlsx::NormalizedBorderLine::Dotted,
+            BorderLine::Double => spreadsheet_xlsx::NormalizedBorderLine::Double,
+        },
+        color: value.color().channels(),
+    }
 }
 
 pub async fn get_document_version(
@@ -735,7 +1295,7 @@ pub async fn get_document_version(
     document_view(id, &recovered.workbook)
 }
 
-fn snapshot_api_error(error: SnapshotError) -> ApiError {
+pub(crate) fn snapshot_api_error(error: SnapshotError) -> ApiError {
     match error {
         SnapshotError::VersionNotCommitted => {
             ApiError(StatusCode::NOT_FOUND, "version_not_committed")
@@ -745,12 +1305,16 @@ fn snapshot_api_error(error: SnapshotError) -> ApiError {
     }
 }
 
-fn document_view(id: DocumentId, workbook: &Workbook) -> Result<Json<DocumentView>, ApiError> {
+pub(crate) fn document_view(
+    id: DocumentId,
+    workbook: &Workbook,
+) -> Result<Json<DocumentView>, ApiError> {
     let sheets = workbook
         .sheets()
         .iter()
         .map(|sheet| -> Result<SheetView, ApiError> {
             Ok(SheetView {
+                frozen_rows: sheet.frozen_rows(),
                 id: id_string(sheet.id().as_bytes()),
                 name: sheet.name().to_owned(),
                 rows: sheet
@@ -770,6 +1334,32 @@ fn document_view(id: DocumentId, workbook: &Workbook) -> Result<Json<DocumentVie
                         row_id: id_string(address.row.as_bytes()),
                         column_id: id_string(address.column.as_bytes()),
                         style: style.into(),
+                    })
+                    .collect(),
+                row_heights: sheet
+                    .row_heights()
+                    .iter()
+                    .map(|(axis_id, size_css_px)| AxisSizeView {
+                        axis_id: id_string(axis_id.as_bytes()),
+                        size_css_px: *size_css_px,
+                    })
+                    .collect(),
+                column_widths: sheet
+                    .column_widths()
+                    .iter()
+                    .map(|(axis_id, size_css_px)| AxisSizeView {
+                        axis_id: id_string(axis_id.as_bytes()),
+                        size_css_px: *size_css_px,
+                    })
+                    .collect(),
+                merges: sheet
+                    .merges()
+                    .iter()
+                    .map(|merge| MergeRangeView {
+                        first_row_id: id_string(merge.first_row().as_bytes()),
+                        last_row_id: id_string(merge.last_row().as_bytes()),
+                        first_column_id: id_string(merge.first_column().as_bytes()),
+                        last_column_id: id_string(merge.last_column().as_bytes()),
                     })
                     .collect(),
                 cells: sheet
@@ -816,8 +1406,8 @@ fn document_view(id: DocumentId, workbook: &Workbook) -> Result<Json<DocumentVie
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
     Ok(Json(DocumentView {
-        authored_projection_schema_version: 4,
-        style_schema_version: wire::style::STYLE_SCHEMA_VERSION,
+        authored_projection_schema_version: 7,
+        style_schema_version: DOCUMENT_STYLE_SCHEMA_VERSION,
         style_profile_version: wire::style::STYLE_PROFILE_VERSION,
         document_id: id_string(id.as_bytes()),
         version: workbook.version().get().to_string(),
@@ -874,10 +1464,16 @@ fn document_view(id: DocumentId, workbook: &Workbook) -> Result<Json<DocumentVie
                 },
             }),
         sheets,
+        capabilities: None,
+        encryption: EncryptionMetadataView {
+            encrypted: true,
+            algorithm: "XChaCha20-Poly1305",
+            kek_rotated_at: None,
+        },
     }))
 }
 
-fn session_api_error(error: SessionError) -> ApiError {
+pub(crate) fn session_api_error(error: SessionError) -> ApiError {
     match error {
         SessionError::Journal(error) => journal_error(error),
         SessionError::QueueFull => ApiError(StatusCode::TOO_MANY_REQUESTS, "queue_full"),
@@ -908,7 +1504,7 @@ struct CalculatedCellView {
 }
 #[derive(Serialize)]
 #[serde(tag = "type", content = "value", rename_all = "lowercase")]
-enum CalculatedValue {
+pub(crate) enum CalculatedValue {
     Blank,
     Number(f64),
     Text(String),
@@ -1015,6 +1611,7 @@ pub async fn get_calculation(
                 results,
                 hash,
                 evaluated_cells,
+                ..
             } => {
                 view.status = "complete";
                 view.calculated_state_hash =
@@ -1068,6 +1665,26 @@ fn bytes_id(bytes: &[u8]) -> Result<[u8; 16], SessionError> {
     bytes.try_into().map_err(|_| SessionError::InvalidCommand)
 }
 
+fn decode_wire_merge_range(
+    value: v1::MergeRange,
+) -> Result<spreadsheet_domain::merge::MergeRange, SessionError> {
+    Ok(spreadsheet_domain::merge::MergeRange::new(
+        RowId::from_bytes(bytes_id(&value.first_row_id)?)?,
+        RowId::from_bytes(bytes_id(&value.last_row_id)?)?,
+        ColumnId::from_bytes(bytes_id(&value.first_column_id)?)?,
+        ColumnId::from_bytes(bytes_id(&value.last_column_id)?)?,
+    ))
+}
+
+fn encode_wire_merge_range(value: spreadsheet_domain::merge::MergeRange) -> v1::MergeRange {
+    v1::MergeRange {
+        first_row_id: value.first_row().as_bytes().to_vec(),
+        last_row_id: value.last_row().as_bytes().to_vec(),
+        first_column_id: value.first_column().as_bytes().to_vec(),
+        last_column_id: value.last_column().as_bytes().to_vec(),
+    }
+}
+
 fn address(input: Option<v1::CellAddress>) -> Result<CellAddress, SessionError> {
     let input = input.ok_or(SessionError::InvalidCommand)?;
     Ok(CellAddress {
@@ -1085,11 +1702,78 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
         + usize::from(input.move_range.is_some())
         + usize::from(input.set_cell_style.is_some())
         + usize::from(input.set_range_style.is_some())
+        + usize::from(input.set_axis_sizes.is_some())
+        + usize::from(input.set_cell_batch.is_some())
+        + usize::from(input.set_merge_range.is_some())
+        + usize::from(input.set_frozen_rows.is_some())
+        + usize::from(input.sort_range.is_some())
         != 1
     {
         return Err(SessionError::InvalidCommand);
     }
-    let operation = if let Some(style) = input.set_cell_style {
+    let operation = if let Some(sort) = input.sort_range {
+        if sort.schema_version != 1 {
+            return Err(SessionError::InvalidCommand);
+        }
+        let range = spreadsheet_domain::sort::SortRange {
+            source: address(sort.source)?,
+            rows: sort.rows,
+            columns: sort.columns,
+            header_rows: sort.header_rows,
+            keys: sort
+                .keys
+                .into_iter()
+                .map(|key| {
+                    Ok(spreadsheet_domain::sort::SortKey {
+                        column: ColumnId::from_bytes(bytes_id(&key.column_id)?)?,
+                        descending: key.descending,
+                    })
+                })
+                .collect::<Result<_, SessionError>>()?,
+        };
+        range
+            .validate_shape()
+            .map_err(|_| SessionError::InvalidCommand)?;
+        CommandPayload::SortRange { range }
+    } else if let Some(batch) = input.set_cell_batch {
+        if batch.writes.is_empty() || batch.writes.len() > 1_000 || batch.styles.len() > 1_000 {
+            return Err(SessionError::InvalidCommand);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let mut writes = Vec::with_capacity(batch.writes.len());
+        for write in batch.writes {
+            let cell = address(write.address)?;
+            if !seen.insert(cell) {
+                return Err(SessionError::InvalidCommand);
+            }
+            let value = match write
+                .value
+                .and_then(|value| value.kind)
+                .ok_or(SessionError::InvalidCommand)?
+            {
+                v1::cell_value::Kind::Blank(true) => CellValue::Blank,
+                v1::cell_value::Kind::Blank(false) => return Err(SessionError::InvalidCommand),
+                v1::cell_value::Kind::Number(n) => CellValue::Number(n),
+                v1::cell_value::Kind::Text(s) => CellValue::Text(s),
+                v1::cell_value::Kind::Boolean(b) => CellValue::Boolean(b),
+            }
+            .normalized()?;
+            writes.push(CellWrite {
+                address: cell,
+                value,
+            });
+        }
+        let mut style_seen = std::collections::BTreeSet::new();
+        let mut styles = Vec::with_capacity(batch.styles.len());
+        for style in batch.styles {
+            let target = address(style.address)?;
+            if !seen.contains(&target) || !style_seen.insert(target) {
+                return Err(SessionError::InvalidCommand);
+            }
+            styles.push((target, style_patch(style.patch)?));
+        }
+        CommandPayload::SetCellBatch { writes, styles }
+    } else if let Some(style) = input.set_cell_style {
         CommandPayload::SetCellStyle {
             address: address(style.address).map_err(|_| SessionError::InvalidCommand)?,
             changes: style_patch(style.patch)?,
@@ -1112,6 +1796,49 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
         CommandPayload::SetRangeStyle {
             addresses,
             changes: style_patch(style.patch)?,
+        }
+    } else if let Some(frozen) = input.set_frozen_rows {
+        if frozen.rows > spreadsheet_domain::axis_size::MAX_FROZEN_ROWS {
+            return Err(SessionError::InvalidCommand);
+        }
+        CommandPayload::SetFrozenRows {
+            sheet: SheetId::from_bytes(bytes_id(&frozen.sheet_id)?)?,
+            rows: frozen.rows,
+        }
+    } else if let Some(sizes) = input.set_axis_sizes {
+        if sizes.sheet_id.len() != 16 || sizes.writes.is_empty() || sizes.writes.len() > 1000 {
+            return Err(SessionError::InvalidCommand);
+        }
+        let sheet = SheetId::from_bytes(bytes_id(&sizes.sheet_id)?)?;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut writes = Vec::with_capacity(sizes.writes.len());
+        for write in sizes.writes {
+            let raw = bytes_id(&write.axis_id)?;
+            let target = match write.axis_kind {
+                1 => spreadsheet_domain::workbook::AxisSizeTarget::Row(RowId::from_bytes(raw)?),
+                2 => {
+                    spreadsheet_domain::workbook::AxisSizeTarget::Column(ColumnId::from_bytes(raw)?)
+                }
+                _ => return Err(SessionError::InvalidCommand),
+            };
+            if !seen.insert(target)
+                || write
+                    .size_css_px
+                    .is_some_and(|size| !spreadsheet_domain::axis_size::valid_size(target, size))
+            {
+                return Err(SessionError::InvalidCommand);
+            }
+            writes.push((target, write.size_css_px));
+        }
+        CommandPayload::SetAxisSizes { sheet, writes }
+    } else if let Some(merge) = input.set_merge_range {
+        if merge.sheet_id.len() != 16 {
+            return Err(SessionError::InvalidCommand);
+        }
+        CommandPayload::SetMergeRange {
+            sheet: SheetId::from_bytes(bytes_id(&merge.sheet_id)?)?,
+            range: decode_wire_merge_range(merge.range.ok_or(SessionError::InvalidCommand)?)?,
+            merged: merge.merged,
         }
     } else if let Some(formula) = input.formula_command {
         CommandPayload::SetCellFormula {
@@ -1302,6 +2029,55 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
                     columns.push(column);
                 }
                 CommandPayload::DeleteColumns { sheet, columns }
+            }
+            v1::canonical_operation::Kind::FrozenRowsWrite(frozen) => {
+                if frozen.rows > spreadsheet_domain::axis_size::MAX_FROZEN_ROWS {
+                    return Err(SessionError::InvalidCommand);
+                }
+                CommandPayload::SetFrozenRows {
+                    sheet: SheetId::from_bytes(bytes_id(&frozen.sheet_id)?)?,
+                    rows: frozen.rows,
+                }
+            }
+            v1::canonical_operation::Kind::AxisSizeWrite(sizes) => {
+                if sizes.sheet_id.len() != 16
+                    || sizes.writes.is_empty()
+                    || sizes.writes.len() > 1000
+                {
+                    return Err(SessionError::InvalidCommand);
+                }
+                let sheet = SheetId::from_bytes(bytes_id(&sizes.sheet_id)?)?;
+                let mut seen = std::collections::BTreeSet::new();
+                let mut writes = Vec::with_capacity(sizes.writes.len());
+                for write in sizes.writes {
+                    let raw = bytes_id(&write.axis_id)?;
+                    let target = match write.axis_kind {
+                        1 => AxisSizeTarget::Row(RowId::from_bytes(raw)?),
+                        2 => AxisSizeTarget::Column(ColumnId::from_bytes(raw)?),
+                        _ => return Err(SessionError::InvalidCommand),
+                    };
+                    if !seen.insert(target)
+                        || write.size_css_px.is_some_and(|size| {
+                            !spreadsheet_domain::axis_size::valid_size(target, size)
+                        })
+                    {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    writes.push((target, write.size_css_px));
+                }
+                CommandPayload::SetAxisSizes { sheet, writes }
+            }
+            v1::canonical_operation::Kind::MergeWrite(merge) => {
+                if merge.sheet_id.len() != 16 {
+                    return Err(SessionError::InvalidCommand);
+                }
+                CommandPayload::SetMergeRange {
+                    sheet: SheetId::from_bytes(bytes_id(&merge.sheet_id)?)?,
+                    range: decode_wire_merge_range(
+                        merge.range.ok_or(SessionError::InvalidCommand)?,
+                    )?,
+                    merged: merge.merged,
+                }
             }
             v1::canonical_operation::Kind::AddSheet(input) => {
                 if input.rows.is_empty()
@@ -1530,6 +2306,38 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
                 columns: columns.iter().map(|id| id.as_bytes().to_vec()).collect(),
             })
         }
+        Operation::AxisSizeWrite { sheet, writes } => {
+            v1::canonical_operation::Kind::AxisSizeWrite(v1::AxisSizeWrite {
+                sheet_id: sheet.as_bytes().to_vec(),
+                writes: writes
+                    .into_iter()
+                    .map(|write| {
+                        let (axis_kind, axis_id) = match write.target {
+                            AxisSizeTarget::Row(id) => (1, id.as_bytes().to_vec()),
+                            AxisSizeTarget::Column(id) => (2, id.as_bytes().to_vec()),
+                        };
+                        v1::AxisSizeSet {
+                            axis_kind,
+                            axis_id,
+                            size_css_px: write.size,
+                        }
+                    })
+                    .collect(),
+            })
+        }
+        Operation::FrozenRowsWrite { sheet, rows, .. } => {
+            v1::canonical_operation::Kind::FrozenRowsWrite(v1::FrozenRowsWrite {
+                sheet_id: sheet.as_bytes().to_vec(),
+                rows,
+            })
+        }
+        Operation::MergeWrite { sheet, change, .. } => {
+            v1::canonical_operation::Kind::MergeWrite(v1::MergeWrite {
+                sheet_id: sheet.as_bytes().to_vec(),
+                range: Some(encode_wire_merge_range(change.range)),
+                merged: change.merged,
+            })
+        }
         Operation::AddSheet { sheet } => v1::canonical_operation::Kind::AddSheet(v1::AddSheet {
             sheet_id: sheet.id.as_bytes().to_vec(),
             name: sheet.name,
@@ -1544,6 +2352,7 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
         | Operation::AdvanceCalculationEpoch { .. }
         | Operation::CopyRange { .. }
         | Operation::RangeWrite { .. }
+        | Operation::CellBatchWrite { .. }
         | Operation::MoveRange { .. }
         | Operation::MoveCompensation { .. }
         | Operation::AxisEdit { .. }
@@ -1603,8 +2412,10 @@ pub async fn handle_command(
 ) -> v1::ServerEnvelope {
     let document_id = input.document_id.clone();
     let operation_id = input.operation_id.clone();
+    let parsed = command(input);
+    let receipt_command = parsed.as_ref().ok().cloned();
     let result = async {
-        let command = command(input)?;
+        let command = parsed?;
         let session = state
             .sessions
             .session(principal.identity, command.document_id)
@@ -1613,13 +2424,41 @@ pub async fn handle_command(
     }
     .await;
     let payload = match result {
-        Ok(Submission::Committed { event, .. }) => match committed_message(&event) {
-            Some(message) => v1::server_envelope::Payload::Committed(message),
-            None => v1::server_envelope::Payload::Error(v1::ProtocolError {
-                code: v1::ErrorCode::ServerBusy.into(),
-                supported_protocol_version: wire::PROTOCOL_VERSION,
-            }),
-        },
+        Ok(Submission::Committed { event, .. }) => {
+            if matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. }) {
+                let receipt = if let Some(command) = receipt_command.as_ref() {
+                    state
+                        .database
+                        .receipt(principal.identity, command)
+                        .await
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                };
+                match receipt {
+                    Some(receipt) => v1::server_envelope::Payload::Receipt(v1::OperationReceipt {
+                        document_id: event.document_id.as_bytes().to_vec(),
+                        operation_id: event.operation_id.as_bytes().to_vec(),
+                        committed_version: receipt.committed_version.get(),
+                        canonical_event_hash: receipt.canonical_event_hash.to_vec(),
+                        current_head_version: receipt.current_head_version.get(),
+                    }),
+                    None => v1::server_envelope::Payload::Error(v1::ProtocolError {
+                        code: v1::ErrorCode::ServerBusy.into(),
+                        supported_protocol_version: wire::PROTOCOL_VERSION,
+                    }),
+                }
+            } else {
+                match committed_message(&event) {
+                    Some(message) => v1::server_envelope::Payload::Committed(message),
+                    None => v1::server_envelope::Payload::Error(v1::ProtocolError {
+                        code: v1::ErrorCode::ServerBusy.into(),
+                        supported_protocol_version: wire::PROTOCOL_VERSION,
+                    }),
+                }
+            }
+        }
         Ok(Submission::AlreadyCommitted(receipt)) => {
             v1::server_envelope::Payload::Receipt(v1::OperationReceipt {
                 document_id,
@@ -1630,6 +2469,21 @@ pub async fn handle_command(
             })
         }
         Err(error) => {
+            let error_category = match &error {
+                SessionError::QueueFull => "queue_full",
+                SessionError::Unavailable => "session_unavailable",
+                SessionError::ActorMismatch => "actor_mismatch",
+                SessionError::BaseVersionAhead => "base_version_ahead",
+                SessionError::InvalidCommand => "invalid_command",
+                SessionError::RebaseWindowExceeded => "rebase_window_exceeded",
+                SessionError::SourceVersionChanged => "source_version_changed",
+                SessionError::CalculationUnavailable => "calculation_unavailable",
+                SessionError::UnsupportedMoveDependency => "unsupported_move_dependency",
+                SessionError::InvalidFormula => "invalid_formula",
+                SessionError::Domain(_) => "domain_rejected",
+                SessionError::Journal(_) => "journal_rejected",
+            };
+            tracing::warn!(event = "document_command_failed", error_category);
             let code = match error {
                 SessionError::ActorMismatch | SessionError::Journal(JournalError::Unauthorized) => {
                     v1::RejectionCode::Unauthorized
@@ -1637,6 +2491,7 @@ pub async fn handle_command(
                 SessionError::BaseVersionAhead => v1::RejectionCode::BaseVersionAhead,
                 SessionError::RebaseWindowExceeded => v1::RejectionCode::RebaseWindowExceeded,
                 SessionError::SourceVersionChanged => v1::RejectionCode::SourceVersionChanged,
+                SessionError::CalculationUnavailable => v1::RejectionCode::CalculationUnavailable,
                 SessionError::UnsupportedMoveDependency => {
                     v1::RejectionCode::UnsupportedMoveDependency
                 }
@@ -1672,6 +2527,10 @@ pub async fn handle_command(
                 }
                 _ => v1::RejectionCode::Unavailable,
             };
+            tracing::warn!(
+                event = "document_command_rejected",
+                rejection_code = code.as_str_name()
+            );
             v1::server_envelope::Payload::Rejected(v1::OperationRejected {
                 document_id,
                 operation_id,
@@ -1727,6 +2586,54 @@ mod undo_wire_tests {
                 })),
             }],
         }
+    }
+
+    #[test]
+    fn sort_command_validates_its_own_version_keys_and_single_intent() -> Result<(), SessionError> {
+        let sort = v1::SortRangeCommand {
+            schema_version: 1,
+            source: Some(v1::CellAddress {
+                sheet_id: id(),
+                row_id: id(),
+                column_id: id(),
+            }),
+            rows: 3,
+            columns: 2,
+            header_rows: 1,
+            keys: vec![v1::SortKey {
+                column_id: id(),
+                descending: true,
+            }],
+        };
+        let mut input = envelope();
+        input.sort_range = Some(sort.clone());
+        assert!(matches!(
+            command(input)?.operation,
+            CommandPayload::SortRange { .. }
+        ));
+        let mut invalid = sort.clone();
+        invalid.schema_version = 2;
+        let mut input = envelope();
+        input.sort_range = Some(invalid);
+        assert!(matches!(command(input), Err(SessionError::InvalidCommand)));
+        let mut invalid = sort.clone();
+        invalid.keys.push(invalid.keys[0].clone());
+        let mut input = envelope();
+        input.sort_range = Some(invalid);
+        assert!(matches!(command(input), Err(SessionError::InvalidCommand)));
+        let mut invalid = sort.clone();
+        invalid.rows = u32::MAX;
+        let mut input = envelope();
+        input.sort_range = Some(invalid);
+        assert!(matches!(command(input), Err(SessionError::InvalidCommand)));
+        let mut input = envelope();
+        input.sort_range = Some(sort);
+        input.set_frozen_rows = Some(v1::SetFrozenRowsCommand {
+            sheet_id: id(),
+            rows: 1,
+        });
+        assert!(matches!(command(input), Err(SessionError::InvalidCommand)));
+        Ok(())
     }
 
     #[test]
@@ -1927,21 +2834,20 @@ mod undo_wire_tests {
             StyleWriteKind::Cell,
         )?;
         let styled = book.candidate(&operation, DocumentVersion::new(2)?)?;
-        assert!(matches!(
-            export_projection(&styled),
-            Err(ApiError(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "xlsx_styles_not_supported"
-            ))
-        ));
+        let export = export_projection(&styled).map_err(|_| "export projection failed")?;
+        assert_eq!(export.sheets[0].cells.len(), 0);
+        assert_eq!(export.sheets[0].styles.len(), 1);
+        assert_eq!(export.sheets[0].styles[0].row, 1);
+        assert_eq!(export.sheets[0].styles[0].column, 1);
+        assert_eq!(export.sheets[0].styles[0].bold, Some(true));
         let view = serde_json::to_value(
             document_view(document, &styled)
                 .map_err(|_| "projection failed")?
                 .0,
         )?;
-        assert_eq!(view["authored_projection_schema_version"], 4);
-        assert_eq!(view["style_schema_version"], 1);
-        assert_eq!(view["style_profile_version"], 1);
+        assert_eq!(view["authored_projection_schema_version"], 7);
+        assert_eq!(view["style_schema_version"], 2);
+        assert_eq!(view["style_profile_version"], 2);
         assert_eq!(view["last_axis_change_version"], "1");
         assert_eq!(view["retired_row_ids"], serde_json::json!([]));
         assert_eq!(view["row_activation_floors"], serde_json::json!([]));

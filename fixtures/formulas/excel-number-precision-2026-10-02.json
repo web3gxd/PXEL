@@ -1,0 +1,198 @@
+{
+  "schema_version": 1,
+  "verified_in_excel": true,
+  "observed_at": "2026-10-02",
+  "verifier": "Repository Excel COM capture script",
+  "excel_environment": {
+    "edition": "Microsoft Excel for Microsoft 365",
+    "version": "16.0",
+    "build": "16.0.20430.20092",
+    "operating_system": "10.0.26100.0",
+    "locale": "en-US",
+    "date_system": 1900
+  },
+  "cases": [
+    {
+      "formula": "=ROUND(2.15,1)",
+      "excel_formula": "=ROUND(2.15,1)",
+      "result_type": "number",
+      "result": 2.2,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(2.149,1)",
+      "excel_formula": "=ROUND(2.149,1)",
+      "result_type": "number",
+      "result": 2.1,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(-1.475,2)",
+      "excel_formula": "=ROUND(-1.475,2)",
+      "result_type": "number",
+      "result": -1.48,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(1.005,2)",
+      "excel_formula": "=ROUND(1.005,2)",
+      "result_type": "number",
+      "result": 1.01,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(0.49999999999999994,0)",
+      "excel_formula": "=ROUND(0.499999999999999,0)",
+      "result_type": "number",
+      "result": 0.0,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUNDUP(-3.14159,3)",
+      "excel_formula": "=ROUNDUP(-3.14159,3)",
+      "result_type": "number",
+      "result": -3.142,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUNDDOWN(-3.14159,3)",
+      "excel_formula": "=ROUNDDOWN(-3.14159,3)",
+      "result_type": "number",
+      "result": -3.141,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(123.45,-1.9)",
+      "excel_formula": "=ROUND(123.45,-1.9)",
+      "result_type": "number",
+      "result": 120.0,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUNDUP(1,-309)",
+      "excel_formula": "=ROUNDUP(1,-309)",
+      "result_type": "error",
+      "result": "#NUM!",
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(1,-309)",
+      "excel_formula": "=ROUND(1,-309)",
+      "result_type": "number",
+      "result": 0.0,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(2.675,2)",
+      "excel_formula": "=ROUND(2.675,2)",
+      "result_type": "number",
+      "result": 2.68,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(-2.675,2)",
+      "excel_formula": "=ROUND(-2.675,2)",
+      "result_type": "number",
+      "result": -2.68,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(1.2345,3)",
+      "excel_formula": "=ROUND(1.2345,3)",
+      "result_type": "number",
+      "result": 1.235,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(-1.2345,3)",
+      "excel_formula": "=ROUND(-1.2345,3)",
+      "result_type": "number",
+      "result": -1.235,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(1.25,1)",
+      "excel_formula": "=ROUND(1.25,1)",
+      "result_type": "number",
+      "result": 1.3,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUND(-1.25,1)",
+      "excel_formula": "=ROUND(-1.25,1)",
+      "result_type": "number",
+      "result": -1.3,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUNDUP(1.0000000000000002,0)",
+      "excel_formula": "=ROUNDUP(1,0)",
+      "result_type": "number",
+      "result": 1.0,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUNDUP(1.0000000000000008,0)",
+      "excel_formula": "=ROUNDUP(1,0)",
+      "result_type": "number",
+      "result": 1.0,
+      "tolerance": null
+    },
+    {
+      "formula": "=1.234567890123456",
+      "excel_formula": "=1.23456789012345",
+      "result_type": "number",
+      "result": 1.23456789012345,
+      "tolerance": null
+    },
+    {
+      "formula": "=1.2345678901234567",
+      "excel_formula": "=1.23456789012345",
+      "result_type": "number",
+      "result": 1.23456789012345,
+      "tolerance": null
+    },
+    {
+      "formula": "=1234567890123456",
+      "excel_formula": "=1234567890123450",
+      "result_type": "number",
+      "result": 1234567890123450.0,
+      "tolerance": null
+    },
+    {
+      "formula": "=9999999999999999",
+      "excel_formula": "=9999999999999990",
+      "result_type": "number",
+      "result": 9999999999999990.0,
+      "tolerance": null
+    },
+    {
+      "formula": "=0.00000000000000012345678901234567",
+      "excel_formula": "=1.23456789012345E-16",
+      "result_type": "number",
+      "result": 1.23456789012345e-16,
+      "tolerance": 1e-30
+    },
+    {
+      "formula": "=1.2345678901234567E+30",
+      "excel_formula": "=1.23456789012345E+30",
+      "result_type": "number",
+      "result": 1.23456789012345e30,
+      "tolerance": null
+    },
+    {
+      "formula": "=ROUNDUP(1.2345678901234567,0)",
+      "excel_formula": "=ROUNDUP(1.23456789012345,0)",
+      "result_type": "number",
+      "result": 2.0,
+      "tolerance": null
+    },
+    {
+      "formula": "=123456789012345",
+      "excel_formula": "=123456789012345",
+      "result_type": "number",
+      "result": 123456789012345.0,
+      "tolerance": null
+    }
+  ]
+}

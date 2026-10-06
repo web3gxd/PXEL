@@ -25,7 +25,7 @@ async fn persisted_snapshot_plus_ten_thousand_tail_events(pool: sqlx::PgPool) ->
 }
 
 async fn run_benchmark(pool: sqlx::PgPool) -> BenchResult<()> {
-    let db = PgDatabase { pool };
+    let db = PgDatabase::for_test(pool)?;
     db.migrate().await?;
     db.readiness().await?;
     let identity = AuthenticatedActor {

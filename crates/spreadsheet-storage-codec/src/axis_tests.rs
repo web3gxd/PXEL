@@ -1,4 +1,5 @@
 use super::*;
+use spreadsheet_domain::style::{CellStyle, Change, StyleChange};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 fn fixture(compensating: bool) -> Result<CommittedEvent, Box<dyn std::error::Error>> {
@@ -26,6 +27,7 @@ fn fixture(compensating: bool) -> Result<CommittedEvent, Box<dyn std::error::Err
             content: None,
             previous: Some(CellContent::Value(CellValue::Number(7.0))),
         }],
+        style_writes: vec![],
         before_order_hash: [6; 32],
         after_order_hash: [7; 32],
     };
@@ -56,7 +58,7 @@ fn change(operation: &mut Operation) -> Result<&mut AxisChange, Box<dyn std::err
 fn axis_event_schemas_roundtrip_and_bind_order_delta_preimage_and_inverse_identity() -> TestResult {
     for compensating in [false, true] {
         let event = fixture(compensating)?;
-        let bytes = encode(&event)?;
+        let bytes = encode(&event).map_err(|error| format!("encode: {error}"))?;
         assert_eq!(
             v1::EventEnvelope::decode(bytes.as_slice())?.schema_version,
             if compensating { 22 } else { 21 }
@@ -78,6 +80,46 @@ fn axis_event_schemas_roundtrip_and_bind_order_delta_preimage_and_inverse_identi
             }
             assert_ne!(event_hash(&changed)?, original_hash);
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn styled_axis_events_use_additive_schemas_and_roundtrip_full_style_preimages() -> TestResult {
+    for compensating in [false, true] {
+        let mut event = fixture(compensating)?;
+        let address = change(&mut event.operation)?.writes[0].address;
+        let style = CellStyle::default()
+            .apply(&[
+                StyleChange::FontBold(Change::Set(true)),
+                StyleChange::FontColor(Change::Set(spreadsheet_domain::style::Rgb::new([
+                    12, 34, 56,
+                ]))),
+            ])
+            .map_err(|error| format!("style apply: {error}"))?;
+        change(&mut event.operation)?
+            .style_writes
+            .push(GuardedAxisStyleWrite {
+                address,
+                previous: Some(style.clone()),
+                style: None,
+            });
+        let bytes = encode(&event).map_err(|error| format!("styled encode: {error}"))?;
+        assert_eq!(
+            v1::EventEnvelope::decode(bytes.as_slice())?.schema_version,
+            if compensating { 27 } else { 26 }
+        );
+        assert_eq!(
+            decode(&bytes).map_err(|error| format!("decode: {error}"))?,
+            event
+        );
+        let hash = event_hash(&event).map_err(|error| format!("hash: {error}"))?;
+        let mut changed = event.clone();
+        if let Some(next) = change(&mut changed.operation)?.style_writes.first_mut() {
+            next.previous =
+                Some(CellStyle::default().apply(&[StyleChange::FontItalic(Change::Set(true))])?);
+        }
+        assert_ne!(event_hash(&changed)?, hash);
     }
     Ok(())
 }
@@ -452,10 +494,54 @@ fn snapshot_axis_fixture() -> Result<(Workbook, CellAddress), Box<dyn std::error
     )?;
     Ok((book, address))
 }
+#[test]
+fn snapshot_v5_roundtrips_sparse_row_and_column_sizes() -> TestResult {
+    let (mut book, address) = snapshot_axis_fixture()?;
+    let row = AxisSizeTarget::Row(address.row);
+    let column = AxisSizeTarget::Column(address.column);
+    let event = commit_axis_fixture(
+        &mut book,
+        Operation::AxisSizeWrite {
+            sheet: address.sheet,
+            writes: vec![
+                AxisSizeChange {
+                    target: row,
+                    previous: None,
+                    size: Some(44),
+                },
+                AxisSizeChange {
+                    target: column,
+                    previous: None,
+                    size: Some(176),
+                },
+            ],
+        },
+    )?;
+    assert_eq!(decode(&encode(&event)?)?, event);
+    let envelope = snapshot_envelope(&book)?;
+    let encoded = envelope.sheets.first().ok_or("missing snapshot sheet")?;
+    assert_eq!(encoded.axis_sizes.len(), 2);
+    assert_eq!(snapshot_restore(&book, &envelope)?.hash(), book.hash());
+    let mut downgraded = envelope.clone();
+    downgraded.snapshot_schema_version = 4;
+    assert!(matches!(
+        decode_snapshot(
+            &downgraded.encode_to_vec(),
+            book.document_id(),
+            book.version(),
+            book.last_axis_change_version(),
+            book.hash(),
+            "engine-v1",
+            "pxel-excel-subset-v1"
+        ),
+        Err(CodecError::Invalid)
+    ));
+    Ok(())
+}
 fn snapshot_envelope(book: &Workbook) -> Result<v1::SnapshotEnvelope, Box<dyn std::error::Error>> {
     let bytes = encode_snapshot(book, "engine-v1", "pxel-excel-subset-v1")?;
     let envelope = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-    assert_eq!(envelope.snapshot_schema_version, 4);
+    assert_eq!(envelope.snapshot_schema_version, 7);
     assert_eq!(snapshot_restore(book, &envelope)?.hash(), book.hash());
     Ok(envelope)
 }

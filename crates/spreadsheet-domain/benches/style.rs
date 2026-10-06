@@ -19,7 +19,7 @@ fn run(c: &mut Criterion) -> Result<(), Box<dyn std::error::Error>> {
         StyleChange::BorderLeft(Change::Set(border)),
         StyleChange::Horizontal(Change::Set(HorizontalAlignment::Center)),
         StyleChange::Vertical(Change::Set(VerticalAlignment::Top)),
-        StyleChange::Wrap(Change::Set(true)),
+        StyleChange::TextOverflow(Change::Set(TextOverflow::Wrap)),
         StyleChange::NumberFormat(Change::Set(NumberFormat::Decimal2)),
     ];
     let default = CellStyle::default();

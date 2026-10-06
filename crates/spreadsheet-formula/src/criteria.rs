@@ -135,11 +135,12 @@ impl Criterion {
             },
             Operand::Empty => match value {
                 Value::Blank => Some(Ordering::Equal),
-                Value::Text(text) => Some(if text.is_empty() {
-                    Ordering::Equal
-                } else {
-                    Ordering::Greater
-                }),
+                Value::Text(text)
+                    if text.is_empty() && !matches!(self.comparison, Comparison::Ne) =>
+                {
+                    Some(Ordering::Equal)
+                }
+                Value::Text(_) => Some(Ordering::Greater),
                 _ => None,
             },
             Operand::Error(code) => match value {
@@ -152,7 +153,9 @@ impl Criterion {
                 };
                 let value = lookup::folded(value, budget)?;
                 if matches!(self.comparison, Comparison::Eq | Comparison::Ne) {
-                    let matched = lookup::wildcard(tokens, &value, budget)?;
+                    let all_stars = tokens.iter().all(|token| matches!(token, Token::Star));
+                    let wildcard_match = lookup::wildcard(tokens, &value, budget)?;
+                    let matched = wildcard_match && !(value.is_empty() && all_stars);
                     return Ok(if matches!(self.comparison, Comparison::Ne) {
                         !matched
                     } else {

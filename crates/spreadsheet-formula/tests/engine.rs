@@ -122,6 +122,35 @@ fn decimal_rounding_profile() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[test]
+fn excel_verified_number_precision_and_rounding_golden() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fixtures/formulas/excel-number-precision-2026-10-02.json"
+    ))?;
+    assert_eq!(fixture["verified_in_excel"], true);
+    for case in fixture["cases"].as_array().ok_or("missing Excel cases")? {
+        let formula = case["formula"].as_str().ok_or("missing formula")?;
+        let expected = match case["result_type"].as_str().ok_or("missing result type")? {
+            "number" => Value::Number(case["result"].as_f64().ok_or("missing numeric result")?),
+            "error" if case["result"] == "#NUM!" => Value::Error(FormulaError::Num),
+            _ => return Err("unsupported Excel fixture result".into()),
+        };
+        let actual = eval(formula)?;
+        if let Some(tolerance) = case["tolerance"].as_f64() {
+            match (&actual, &expected) {
+                (Value::Number(actual), Value::Number(expected)) => assert!(
+                    (actual - expected).abs() <= tolerance,
+                    "Excel COM observation: {formula}; actual={actual:.17e}, expected={expected:.17e}, tolerance={tolerance:.1e}"
+                ),
+                _ => assert_eq!(actual, expected, "Excel COM observation: {formula}"),
+            }
+        } else {
+            assert_eq!(actual, expected, "Excel COM observation: {formula}");
+        }
+    }
+    Ok(())
+}
+
 proptest! {
     #[test]
     fn rounding_thousandths_matches_integer_quantization(n in -1_000_000i64..1_000_000, digits in 0u32..=3) {

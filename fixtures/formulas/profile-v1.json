@@ -12205,11 +12205,11 @@
       },
       "expected": {
         "type": "number",
-        "value": 6
+        "value": 7
       },
       "provenance": {
         "sources": ["sumif", "countif"],
-        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "basis": "Derived ADR074 profile; verified Excel golden confirms formula-empty text counts for <> while criteria coercion and collation remain provisional.",
         "verified_in_excel": false
       }
     },
@@ -12500,11 +12500,11 @@
       },
       "expected": {
         "type": "number",
-        "value": 4
+        "value": 3
       },
       "provenance": {
         "sources": ["sumif", "countif"],
-        "basis": "Derived ADR074 bounded criteria profile; coercion, blank/error and collation rules provisional.",
+        "basis": "Derived ADR074 profile; verified Excel golden confirms * excludes empty text while criteria coercion and collation remain provisional.",
         "verified_in_excel": false
       }
     },

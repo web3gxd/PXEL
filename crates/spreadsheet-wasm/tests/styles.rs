@@ -1,5 +1,6 @@
 use prost::Message;
 use serde_json::{Value, json};
+use spreadsheet_domain::style::TextOverflow;
 use spreadsheet_domain::workbook::*;
 use spreadsheet_wasm::{PreviewError, PreviewWorkbook};
 const DOC: &str = "00000000-0000-0000-0000-000000000001";
@@ -7,13 +8,43 @@ const SHEET: &str = "00000000-0000-0000-0000-000000000002";
 const ROW: &str = "00000000-0000-0000-0000-000000000003";
 const COL: &str = "00000000-0000-0000-0000-000000000004";
 fn style() -> Value {
-    json!({"font_family":"Arial","font_size_hundredth_points":1000,"font_bold":true,"font_italic":false,"font_underline":"none","font_strike":false,"font_color":[0,0,0],"fill":[255,255,255],"border_top":null,"border_right":null,"border_bottom":null,"border_left":null,"horizontal":"general","vertical":"bottom","wrap":false,"number_format":"general"})
+    json!({"font_family":"Arial","font_size_hundredth_points":1000,"font_bold":true,"font_italic":false,"font_underline":"none","font_strike":false,"font_color":[0,0,0],"fill":[255,255,255],"border_top":null,"border_right":null,"border_bottom":null,"border_left":null,"horizontal":"general","vertical":"bottom","text_overflow":"clip","number_format":"general"})
 }
 fn init() -> Value {
     json!({"schema_version":4,"document_id":DOC,"input_version":"3","pending_revision":"0","last_axis_change_version":"1","retired_row_ids":[],"retired_column_ids":[],"row_activation_floors":[],"column_activation_floors":[],"sheets":[{"id":SHEET,"name":"Sheet1","rows":[ROW],"columns":[COL],"cells":[],"styles":[{"row_id":ROW,"column_id":COL,"style":style()}]}]})
 }
 fn patch() -> Value {
     json!({"schema_version":2,"document_id":DOC,"expected_input_version":"3","input_version":"3","expected_pending_revision":"0","pending_revision":"1","cells":[],"styles":[{"sheet_id":SHEET,"row_id":ROW,"column_id":COL,"changes":[{"property":"font_italic","value":true}]}]})
+}
+#[test]
+fn init_five_preserves_layout_metadata_and_rejects_downgrades()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut input = init();
+    input["schema_version"] = json!(5);
+    input["sheets"][0]["frozen_rows"] = json!(1);
+    input["sheets"][0]["row_heights"] = json!([{"axis_id":ROW,"size_css_px":42}]);
+    input["sheets"][0]["column_widths"] = json!([]);
+    input["sheets"][0]["merges"] = json!([]);
+    let mut worker = PreviewWorkbook::from_json(&input.to_string())?;
+    let sheet = &worker.workbook().sheets()[0];
+    assert_eq!(sheet.frozen_rows(), 1);
+    assert_eq!(
+        sheet.row_heights().values().copied().collect::<Vec<_>>(),
+        [42]
+    );
+    let before: Value = serde_json::from_str(&worker.calculate_json()?)?;
+    let after: Value = serde_json::from_str(&worker.patch_json(&patch().to_string())?)?;
+    assert_eq!(worker.workbook().sheets()[0].frozen_rows(), 1);
+    assert_eq!(
+        after["normalized_result_hash"],
+        before["normalized_result_hash"]
+    );
+    input["schema_version"] = json!(4);
+    assert!(PreviewWorkbook::from_json(&input.to_string()).is_err());
+    input["schema_version"] = json!(5);
+    input["sheets"][0]["frozen_rows"] = json!(1001);
+    assert!(PreviewWorkbook::from_json(&input.to_string()).is_err());
+    Ok(())
 }
 #[test]
 fn init_four_style_hash_is_authored_independent_of_calculation()
@@ -54,6 +85,30 @@ fn invalid_style_patch_and_cancellation_are_atomic() -> Result<(), Box<dyn std::
         before["normalized_authored_state_hash"]
     );
     worker.patch_json(&patch().to_string())?;
+    Ok(())
+}
+
+#[test]
+fn overflow_style_change_is_hashed_by_the_preview_worker() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut worker = PreviewWorkbook::from_json(&init().to_string())?;
+    let before: Value = serde_json::from_str(&worker.calculate_json()?)?;
+    let mut input = patch();
+    input["styles"][0]["changes"] = json!([{"property":"text_overflow","value":"overflow"}]);
+    let after: Value = serde_json::from_str(&worker.patch_json(&input.to_string())?)?;
+    assert_ne!(
+        before["normalized_authored_state_hash"],
+        after["normalized_authored_state_hash"]
+    );
+    assert_eq!(
+        worker.workbook().sheets()[0]
+            .styles()
+            .values()
+            .next()
+            .map(|style| style.text_overflow()),
+        Some(TextOverflow::Overflow)
+    );
+    assert_eq!(after["evaluated_cells"], 0);
     Ok(())
 }
 

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "verified_in_excel": true,
+  "observed_at": "2026-10-02",
+  "verifier": "Codex local isolated Excel COM harness",
+  "excel_environment": {
+    "edition": "Microsoft Excel 16.0.20326.20158",
+    "os": "Microsoft Windows 11 Pro build 26100",
+    "locale": "en-US",
+    "date_system": 1900
+  },
+  "workbook": {
+    "cells": [
+      { "row": 1, "column": 1, "type": "number", "value": 1 },
+      { "row": 1, "column": 2, "type": "number", "value": 10 },
+      { "row": 2, "column": 1, "type": "text", "value": "2" },
+      { "row": 2, "column": 2, "type": "number", "value": 20 },
+      { "row": 3, "column": 2, "type": "number", "value": 30 },
+      { "row": 4, "column": 1, "type": "text", "value": "", "input_formula": "=\"\"" },
+      { "row": 4, "column": 2, "type": "number", "value": 40 },
+      { "row": 5, "column": 1, "type": "boolean", "value": true },
+      { "row": 5, "column": 2, "type": "number", "value": 50 },
+      { "row": 6, "column": 1, "type": "error", "value": "#DIV/0!", "input_formula": "=1/0" },
+      { "row": 6, "column": 2, "type": "number", "value": 60 }
+    ]
+  },
+  "cases": [
+    { "formula": "=COUNTIF(A1:A6,2)", "result": 1 },
+    { "formula": "=COUNTIF(A1:A6,\"2\")", "result": 1 },
+    { "formula": "=COUNTIF(A1:A6,\"\")", "result": 2 },
+    { "formula": "=COUNTIF(A1:A6,\"<>\")", "result": 5 },
+    { "formula": "=COUNTIF(A1:A6,TRUE)", "result": 1 },
+    { "formula": "=COUNTIF(A1:A6,\"#DIV/0!\")", "result": 1 },
+    { "formula": "=COUNTIF(A1:A6,\"*\")", "result": 1 },
+    { "formula": "=COUNTIF(A1:A6,\"<>2\")", "result": 5 },
+    { "formula": "=COUNTIF(A1:A6,\">1\")", "result": 1 },
+    { "formula": "=SUMIF(A1:A6,\"2\",B1:B6)", "result": 20 },
+    { "formula": "=SUMIF(A1:A6,\"\",B1:B6)", "result": 70 },
+    { "formula": "=SUMIFS(B1:B6,A1:A6,\"2\")", "result": 20 },
+    { "formula": "=COUNTIFS(A1:A6,\"2\")", "result": 1 },
+    { "formula": "=SUMIFS(B1:B6,A1:A6,\">1\",B1:B6,\">20\")", "result": 0 },
+    { "formula": "=COUNTIFS(A1:A6,\">1\",B1:B6,\">20\")", "result": 0 }
+  ]
+}

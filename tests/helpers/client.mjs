@@ -156,8 +156,8 @@ export function sendPresence(client, snapshot, row = 0, column = 0) {
     ),
   );
 }
-export async function connect(base, cookie) {
-  const socket = new WebSocket(base.replace(/^http/, 'ws') + '/api/ws', {
+export async function connect(base, cookie, path = '/api/ws') {
+  const socket = new WebSocket(base.replace(/^http/, 'ws') + path, {
     headers: { Origin: origin, Cookie: cookie },
     handshakeTimeout: 5000,
   });
@@ -339,6 +339,39 @@ export function batchValuesCommand(
           })),
         },
       },
+    },
+  };
+}
+
+export function mergeRangeCommand(
+  client,
+  snapshot,
+  {
+    firstRow,
+    lastRow,
+    firstColumn,
+    lastColumn,
+    merged = true,
+    sequence = 1,
+    operationId = uuid7(),
+  },
+) {
+  const sheet = snapshot.sheets[0];
+  return {
+    operationId: bytes(operationId),
+    documentId: bytes(snapshot.document_id),
+    actorId: client.actorId,
+    baseVersion: BigInt(snapshot.version),
+    clientSequence: BigInt(sequence),
+    setMergeRange: {
+      sheetId: bytes(sheet.id),
+      range: {
+        firstRowId: bytes(sheet.rows[firstRow]),
+        lastRowId: bytes(sheet.rows[lastRow]),
+        firstColumnId: bytes(sheet.columns[firstColumn]),
+        lastColumnId: bytes(sheet.columns[lastColumn]),
+      },
+      merged,
     },
   };
 }

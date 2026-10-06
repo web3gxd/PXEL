@@ -36,8 +36,10 @@ pub(super) fn encode_change(change: &StyleChange) -> v1::StyleChange {
         StyleChange::FontSize(Change::Set(value)) => Kind::FontSize(u32::from(value.get())),
         StyleChange::FontBold(Change::Set(value))
         | StyleChange::FontItalic(Change::Set(value))
-        | StyleChange::FontStrike(Change::Set(value))
-        | StyleChange::Wrap(Change::Set(value)) => Kind::Boolean(*value),
+        | StyleChange::FontStrike(Change::Set(value)) => Kind::Boolean(*value),
+        StyleChange::TextOverflow(Change::Set(TextOverflow::Clip)) => Kind::Boolean(false),
+        StyleChange::TextOverflow(Change::Set(TextOverflow::Wrap)) => Kind::Boolean(true),
+        StyleChange::TextOverflow(Change::Set(TextOverflow::Overflow)) => Kind::Enumeration(2),
         StyleChange::FontUnderline(Change::Set(value)) => Kind::Enumeration(*value as u32),
         StyleChange::Horizontal(Change::Set(value)) => Kind::Enumeration(*value as u32),
         StyleChange::Vertical(Change::Set(value)) => Kind::Enumeration(*value as u32),
@@ -66,7 +68,7 @@ pub(super) fn encode_change(change: &StyleChange) -> v1::StyleChange {
         | StyleChange::BorderLeft(Change::Reset)
         | StyleChange::Horizontal(Change::Reset)
         | StyleChange::Vertical(Change::Reset)
-        | StyleChange::Wrap(Change::Reset)
+        | StyleChange::TextOverflow(Change::Reset)
         | StyleChange::NumberFormat(Change::Reset) => Kind::Reset(true),
     };
     v1::StyleChange {
@@ -100,7 +102,16 @@ pub(super) fn decode_change(change: v1::StyleChange) -> Result<StyleChange, Code
         (StyleProperty::FontStrike, Kind::Boolean(value)) => {
             StyleChange::FontStrike(Change::Set(value))
         }
-        (StyleProperty::Wrap, Kind::Boolean(value)) => StyleChange::Wrap(Change::Set(value)),
+        (StyleProperty::TextOverflow, Kind::Boolean(false)) => {
+            StyleChange::TextOverflow(Change::Set(TextOverflow::Clip))
+        }
+        (StyleProperty::TextOverflow, Kind::Boolean(true)) => {
+            StyleChange::TextOverflow(Change::Set(TextOverflow::Wrap))
+        }
+        (StyleProperty::TextOverflow, Kind::Enumeration(2)) => {
+            StyleChange::TextOverflow(Change::Set(TextOverflow::Overflow))
+        }
+        (StyleProperty::TextOverflow, Kind::Enumeration(_)) => return Err(CodecError::Invalid),
         (StyleProperty::FontUnderline, Kind::Enumeration(value)) => {
             StyleChange::FontUnderline(Change::Set(
                 Underline::try_from(u8::try_from(value).map_err(|_| CodecError::Invalid)?)
@@ -149,8 +160,22 @@ pub(super) fn decode_change(change: v1::StyleChange) -> Result<StyleChange, Code
     };
     Ok(value)
 }
-fn decode_patch(changes: Vec<v1::StyleChange>) -> Result<Vec<StyleChange>, CodecError> {
+fn decode_patch(
+    changes: Vec<v1::StyleChange>,
+    profile_version: u32,
+) -> Result<Vec<StyleChange>, CodecError> {
     if changes.is_empty() || changes.len() > STYLE_PROPERTY_COUNT {
+        return Err(CodecError::Invalid);
+    }
+    if !matches!(profile_version, 1 | 2) {
+        return Err(CodecError::UnsupportedSchema);
+    }
+    if profile_version == 1
+        && changes.iter().any(|change| {
+            change.property == StyleProperty::TextOverflow as u32
+                && matches!(change.kind, Some(v1::style_change::Kind::Enumeration(_)))
+        })
+    {
         return Err(CodecError::Invalid);
     }
     let changes = changes
@@ -162,7 +187,11 @@ fn decode_patch(changes: Vec<v1::StyleChange>) -> Result<Vec<StyleChange>, Codec
 }
 pub(super) fn encode_style(style: &CellStyle) -> v1::CellStyle {
     v1::CellStyle {
-        profile_version: u32::from(DEFAULT_PROFILE_VERSION),
+        profile_version: if style.text_overflow() == TextOverflow::Overflow {
+            u32::from(OVERFLOW_PROFILE_VERSION)
+        } else {
+            u32::from(DEFAULT_PROFILE_VERSION)
+        },
         changes: style
             .normalized_changes()
             .iter()
@@ -171,10 +200,12 @@ pub(super) fn encode_style(style: &CellStyle) -> v1::CellStyle {
     }
 }
 pub(super) fn decode_style(style: v1::CellStyle) -> Result<CellStyle, CodecError> {
-    if style.profile_version != u32::from(DEFAULT_PROFILE_VERSION) {
+    if style.profile_version != u32::from(DEFAULT_PROFILE_VERSION)
+        && style.profile_version != u32::from(OVERFLOW_PROFILE_VERSION)
+    {
         return Err(CodecError::UnsupportedSchema);
     }
-    let changes = decode_patch(style.changes)?;
+    let changes = decode_patch(style.changes, style.profile_version)?;
     let value = CellStyle::default()
         .apply(&changes)
         .map_err(|_| CodecError::Invalid)?;
@@ -184,8 +215,15 @@ pub(super) fn decode_style(style: v1::CellStyle) -> Result<CellStyle, CodecError
     Ok(value)
 }
 fn validate_writes(kind: StyleWriteKind, writes: &[GuardedStyleWrite]) -> Result<(), CodecError> {
+    validate_bounded_writes(kind, writes, MAX_STYLE_TARGETS)
+}
+fn validate_bounded_writes(
+    kind: StyleWriteKind,
+    writes: &[GuardedStyleWrite],
+    max_targets: usize,
+) -> Result<(), CodecError> {
     if writes.is_empty()
-        || writes.len() > MAX_STYLE_TARGETS
+        || writes.len() > max_targets
         || (kind == StyleWriteKind::Cell && writes.len() != 1)
         || writes
             .windows(2)
@@ -240,9 +278,39 @@ pub(super) fn encode_write(
     kind: StyleWriteKind,
     writes: &[GuardedStyleWrite],
 ) -> Result<v1::StyleWrite, CodecError> {
-    validate_writes(kind, writes)?;
+    encode_bounded_write(kind, writes, MAX_STYLE_TARGETS)
+}
+pub(super) fn encode_sort(writes: &[GuardedStyleWrite]) -> Result<v1::StyleWrite, CodecError> {
+    encode_bounded_write(
+        StyleWriteKind::Range,
+        writes,
+        spreadsheet_domain::sort::MAX_SORT_CELLS as usize,
+    )
+}
+fn encode_bounded_write(
+    kind: StyleWriteKind,
+    writes: &[GuardedStyleWrite],
+    max_targets: usize,
+) -> Result<v1::StyleWrite, CodecError> {
+    validate_bounded_writes(kind, writes, max_targets)?;
     Ok(v1::StyleWrite {
         kind: kind as u32,
+        profile_version: if writes.iter().any(|write| {
+            write
+                .previous
+                .iter()
+                .chain(write.changes.iter())
+                .any(|change| {
+                    matches!(
+                        change,
+                        StyleChange::TextOverflow(Change::Set(TextOverflow::Overflow))
+                    )
+                })
+        }) {
+            u32::from(OVERFLOW_PROFILE_VERSION)
+        } else {
+            u32::from(DEFAULT_PROFILE_VERSION)
+        },
         writes: writes
             .iter()
             .map(|write| v1::GuardedStyleWrite {
@@ -256,12 +324,28 @@ pub(super) fn encode_write(
 pub(super) fn decode_write(
     write: v1::StyleWrite,
 ) -> Result<(StyleWriteKind, Vec<GuardedStyleWrite>), CodecError> {
+    decode_bounded_write(write, MAX_STYLE_TARGETS)
+}
+pub(super) fn decode_sort(
+    write: v1::StyleWrite,
+) -> Result<(StyleWriteKind, Vec<GuardedStyleWrite>), CodecError> {
+    decode_bounded_write(write, spreadsheet_domain::sort::MAX_SORT_CELLS as usize)
+}
+fn decode_bounded_write(
+    write: v1::StyleWrite,
+    max_targets: usize,
+) -> Result<(StyleWriteKind, Vec<GuardedStyleWrite>), CodecError> {
+    let profile_version = match write.profile_version {
+        0 | 1 => u32::from(DEFAULT_PROFILE_VERSION),
+        2 => u32::from(OVERFLOW_PROFILE_VERSION),
+        _ => return Err(CodecError::UnsupportedSchema),
+    };
     let kind = match write.kind {
         1 => StyleWriteKind::Cell,
         2 => StyleWriteKind::Range,
         _ => return Err(CodecError::Invalid),
     };
-    if write.writes.is_empty() || write.writes.len() > MAX_STYLE_TARGETS {
+    if write.writes.is_empty() || write.writes.len() > max_targets {
         return Err(CodecError::Invalid);
     }
     let writes = write
@@ -270,12 +354,12 @@ pub(super) fn decode_write(
         .map(|write| {
             Ok(GuardedStyleWrite {
                 address: decode_addr(write.address.ok_or(CodecError::Invalid)?)?,
-                previous: decode_patch(write.previous)?,
-                changes: decode_patch(write.changes)?,
+                previous: decode_patch(write.previous, profile_version)?,
+                changes: decode_patch(write.changes, profile_version)?,
             })
         })
         .collect::<Result<Vec<_>, CodecError>>()?;
-    validate_writes(kind, &writes)?;
+    validate_bounded_writes(kind, &writes, max_targets)?;
     Ok((kind, writes))
 }
 fn hash_patch(hash: &mut Sha256, patch: &[StyleChange]) -> Result<(), CodecError> {
@@ -290,6 +374,23 @@ fn hash_patch(hash: &mut Sha256, patch: &[StyleChange]) -> Result<(), CodecError
     let mut bytes = Vec::new();
     style.append_to(&mut bytes);
     field(hash, &bytes);
+    Ok(())
+}
+pub(super) fn hash_sort(hash: &mut Sha256, writes: &[GuardedStyleWrite]) -> Result<(), CodecError> {
+    validate_bounded_writes(
+        StyleWriteKind::Range,
+        writes,
+        spreadsheet_domain::sort::MAX_SORT_CELLS as usize,
+    )?;
+    hash.update([25, StyleWriteKind::Range as u8]);
+    hash.update((writes.len() as u32).to_le_bytes());
+    for write in writes {
+        hash.update(write.address.sheet.as_bytes());
+        hash.update(write.address.row.as_bytes());
+        hash.update(write.address.column.as_bytes());
+        hash_patch(hash, &write.previous)?;
+        hash_patch(hash, &write.changes)?;
+    }
     Ok(())
 }
 pub(super) fn hash(hash: &mut Sha256, operation: &Operation) -> Result<(), CodecError> {

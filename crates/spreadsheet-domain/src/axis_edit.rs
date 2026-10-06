@@ -1,4 +1,5 @@
 //! Frozen authored axis edits. Journal admission independently proves inverse ownership.
+use crate::style::CellStyle;
 use crate::workbook::*;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -31,8 +32,15 @@ pub struct AxisChange {
     pub delta: AxisDelta,
     pub inverse_delta: AxisDelta,
     pub writes: Vec<GuardedContentWrite>,
+    pub style_writes: Vec<GuardedAxisStyleWrite>,
     pub before_order_hash: [u8; 32],
     pub after_order_hash: [u8; 32],
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct GuardedAxisStyleWrite {
+    pub address: CellAddress,
+    pub previous: Option<CellStyle>,
+    pub style: Option<CellStyle>,
 }
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum AxisEditError {
@@ -171,9 +179,6 @@ fn transformed(
         .ok_or(DomainError::MissingSheet)?;
     let inverse = match delta {
         AxisDelta::Rows { removed, inserted } => {
-            if original.styles.keys().any(|a| removed.contains(&a.row)) {
-                return Err(DomainError::UnsupportedStructuralDependency);
-            }
             if removed
                 .iter()
                 .any(|row| !original.row_positions.contains_key(row))
@@ -212,6 +217,7 @@ fn transformed(
                 .map(|(i, id)| (*id, i as u32))
                 .collect();
             target.cells.retain(|a, _| !removed.contains(&a.row));
+            target.styles.retain(|a, _| !removed.contains(&a.row));
             candidate.retired_row_ids.extend(removed.iter().copied());
             if candidate.retired_row_ids.len() > MAX_RETIRED_ROWS {
                 return Err(DomainError::LimitExceeded);
@@ -230,9 +236,6 @@ fn transformed(
             }
         }
         AxisDelta::Columns { removed, inserted } => {
-            if original.styles.keys().any(|a| removed.contains(&a.column)) {
-                return Err(DomainError::UnsupportedStructuralDependency);
-            }
             if removed
                 .iter()
                 .any(|column| !original.column_positions.contains_key(column))
@@ -271,6 +274,7 @@ fn transformed(
                 .map(|(i, id)| (*id, i as u32))
                 .collect();
             target.cells.retain(|a, _| !removed.contains(&a.column));
+            target.styles.retain(|a, _| !removed.contains(&a.column));
             candidate.retired_column_ids.extend(removed.iter().copied());
             if candidate.retired_column_ids.len() > MAX_RETIRED_COLUMNS {
                 return Err(DomainError::LimitExceeded);
@@ -449,6 +453,75 @@ fn diff(before: &Workbook, after: &Workbook) -> Result<Vec<GuardedContentWrite>,
     validate_writes_budget(&writes)?;
     Ok(writes)
 }
+fn diff_styles(
+    before: &Workbook,
+    after: &Workbook,
+) -> Result<Vec<GuardedAxisStyleWrite>, DomainError> {
+    let mut changes = BTreeMap::new();
+    let mut work = 0;
+    for sheet in &before.sheets {
+        for (address, previous) in &sheet.styles {
+            charge(&mut work, 1 + previous.normalized_changes().len())?;
+            let style = after
+                .sheets
+                .iter()
+                .find(|s| s.id == address.sheet)
+                .and_then(|s| s.styles.get(address));
+            if style != Some(previous) {
+                changes.insert(
+                    *address,
+                    GuardedAxisStyleWrite {
+                        address: *address,
+                        previous: Some(previous.clone()),
+                        style: style.cloned(),
+                    },
+                );
+            }
+        }
+    }
+    for sheet in &after.sheets {
+        for (address, style) in &sheet.styles {
+            charge(&mut work, 1 + style.normalized_changes().len())?;
+            let previous = before
+                .sheets
+                .iter()
+                .find(|s| s.id == address.sheet)
+                .and_then(|s| s.styles.get(address));
+            if previous.is_none() {
+                changes.insert(
+                    *address,
+                    GuardedAxisStyleWrite {
+                        address: *address,
+                        previous: None,
+                        style: Some(style.clone()),
+                    },
+                );
+            }
+        }
+    }
+    let writes: Vec<_> = changes.into_values().collect();
+    validate_style_writes_budget(&writes)?;
+    Ok(writes)
+}
+fn validate_style_writes_budget(writes: &[GuardedAxisStyleWrite]) -> Result<(), DomainError> {
+    if writes.len() > 10_000
+        || writes
+            .windows(2)
+            .any(|pair| pair[0].address >= pair[1].address)
+    {
+        return Err(DomainError::LimitExceeded);
+    }
+    let mut work = 0;
+    for write in writes {
+        for style in [&write.previous, &write.style].into_iter().flatten() {
+            if style.is_default() {
+                return Err(DomainError::InvalidStyle);
+            }
+            charge(&mut work, 1 + style.normalized_changes().len())?;
+        }
+    }
+    Ok(())
+}
 fn validate_writes_budget(writes: &[GuardedContentWrite]) -> Result<(), DomainError> {
     if writes.len() > 10000 {
         return Err(DomainError::LimitExceeded);
@@ -522,6 +595,7 @@ fn change_from(
         before_order_hash: axis_order_hash(book, id, &delta)?,
         after_order_hash: axis_order_hash(&candidate, id, &delta)?,
         writes: diff(book, &candidate)?,
+        style_writes: diff_styles(book, &candidate)?,
         delta,
         inverse_delta,
     })
@@ -632,6 +706,29 @@ pub fn prepare_axis_inverse(
             }
         }
     }
+    for write in &change.style_writes {
+        let current = book
+            .sheets
+            .iter()
+            .find(|s| s.id == write.address.sheet)
+            .and_then(|s| s.styles.get(&write.address));
+        if current != write.style.as_ref() {
+            return Err(DomainError::PreimageConflict.into());
+        }
+        let target = candidate
+            .sheets
+            .iter_mut()
+            .find(|s| s.id == write.address.sheet)
+            .ok_or(DomainError::MissingSheet)?;
+        match &write.previous {
+            Some(style) => {
+                target.styles.insert(write.address, style.clone());
+            }
+            None => {
+                target.styles.remove(&write.address);
+            }
+        }
+    }
     finish(&mut candidate)?;
     let result = AxisChange {
         sheet: change.sheet,
@@ -640,6 +737,7 @@ pub fn prepare_axis_inverse(
         before_order_hash: change.after_order_hash,
         after_order_hash: change.before_order_hash,
         writes: diff(book, &candidate)?,
+        style_writes: diff_styles(book, &candidate)?,
     };
     if axis_order_hash(&candidate, result.sheet, &result.delta)? != result.after_order_hash {
         return Err(DomainError::InvalidAxis.into());
@@ -658,6 +756,7 @@ pub(crate) fn candidate(
     compensation: bool,
 ) -> Result<Workbook, DomainError> {
     validate_writes_budget(&change.writes)?;
+    validate_style_writes_budget(&change.style_writes)?;
     if axis_order_hash(book, change.sheet, &change.delta)? != change.before_order_hash {
         return Err(DomainError::PreimageConflict);
     }
@@ -719,9 +818,52 @@ pub(crate) fn candidate(
             }
         }
     }
+    for write in &change.style_writes {
+        let previous = book
+            .sheets
+            .iter()
+            .find(|s| s.id == write.address.sheet)
+            .and_then(|s| s.styles.get(&write.address));
+        if previous != write.previous.as_ref() {
+            return Err(DomainError::PreimageConflict);
+        }
+        let derived = candidate
+            .sheets
+            .iter()
+            .find(|s| s.id == write.address.sheet)
+            .and_then(|s| s.styles.get(&write.address));
+        let restored_address = write.address.sheet == change.sheet
+            && match &change.delta {
+                AxisDelta::Rows { inserted, .. } => {
+                    inserted.iter().any(|p| p.row == write.address.row)
+                }
+                AxisDelta::Columns { inserted, .. } => {
+                    inserted.iter().any(|p| p.column == write.address.column)
+                }
+            };
+        if compensation && !restored_address && derived != write.style.as_ref() {
+            return Err(DomainError::InvalidAxis);
+        }
+        let target = candidate
+            .sheets
+            .iter_mut()
+            .find(|s| s.id == write.address.sheet)
+            .ok_or(DomainError::MissingSheet)?;
+        match &write.style {
+            Some(style) => {
+                target.styles.insert(write.address, style.clone());
+            }
+            None => {
+                target.styles.remove(&write.address);
+            }
+        }
+    }
     // Derived deletion/offset changes cannot be omitted. Restored frozen ASTs
     // deliberately override lossy transformations; journal proves exact inverse.
     if diff(book, &candidate)? != change.writes {
+        return Err(DomainError::InvalidAxis);
+    }
+    if diff_styles(book, &candidate)? != change.style_writes {
         return Err(DomainError::InvalidAxis);
     }
     finish(&mut candidate)?;

@@ -64,6 +64,20 @@ fn uuid(bytes: &[u8; 16]) -> Uuid {
 }
 
 impl PgDatabase {
+    pub async fn document_role_name(
+        &self,
+        identity: AuthenticatedActor,
+        document: DocumentId,
+    ) -> Result<Option<String>, PermissionError> {
+        sqlx::query_scalar::<_, String>("SELECT p.role FROM memberships m JOIN document_permissions p ON p.workspace_id=m.workspace_id AND p.user_id=m.user_id WHERE m.user_id=$1 AND m.workspace_id=$2 AND p.document_id=$3 AND EXISTS(SELECT 1 FROM users u WHERE u.user_id=m.user_id AND u.identity_kind='member')")
+            .bind(uuid(identity.actor_id.as_bytes()))
+            .bind(uuid(identity.workspace_id.as_bytes()))
+            .bind(uuid(document.as_bytes()))
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_error)
+    }
+
     /// Called while the server holds the document's outbound write gate.
     /// Every accepted intent is one atomic ACL + epoch + append-only audit transaction.
     pub async fn change_permission(
@@ -74,7 +88,7 @@ impl PgDatabase {
         change_id: AuthorizationChangeId,
         role: Option<PermissionRole>,
     ) -> Result<PermissionReceipt, PermissionError> {
-        let mut tx = self.pool.begin().await.map_err(map_error)?;
+        let mut tx = self.begin_guarded().await.map_err(map_error)?;
         let member = sqlx::query!(
             "SELECT role FROM memberships WHERE workspace_id=$1 AND user_id=$2 FOR SHARE",
             uuid(identity.workspace_id.as_bytes()),
@@ -259,7 +273,7 @@ mod tests {
     async fn acl_mutation_is_atomic_audited_idempotent_and_revokes_access(
         pool: sqlx::PgPool,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let db = PgDatabase { pool };
+        let db = PgDatabase::for_test(pool)?;
         db.migrate().await?;
         let owner = ActorId::from_bytes([1; 16])?;
         let target = ActorId::from_bytes([2; 16])?;

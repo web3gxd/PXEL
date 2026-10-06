@@ -1,0 +1,664 @@
+/* PXEL editor chrome: compact controls, quiet surfaces, consistent interaction states. */
+:root {
+  --control-hover: #e5eee7;
+  --control-pressed: #d3e5d9;
+  --control-radius: 6px;
+  --popover-radius: 10px;
+  --popover-shadow: 0 8px 28px #183b2520, 0 1px 4px #183b2510;
+  --focus: #17664b;
+}
+.workspace .app-header {
+  align-items: flex-start;
+  padding: 12px 16px 4px;
+  min-height: 88px;
+  gap: 12px;
+}
+.document-heading {
+  flex: 1;
+}
+.workspace .document-title-row {
+  flex-wrap: nowrap;
+  gap: 8px;
+  height: 36px;
+}
+.workspace .document-title-row h1 {
+  max-width: min(420px, 35vw);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  font-size: 18px;
+  letter-spacing: -0.4px;
+}
+.editor-brand {
+  width: 32px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.workspace .document-title-row > button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  min-width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--accent);
+}
+.workspace .document-title-row .create-document {
+  background: var(--control-hover);
+}
+.workspace .document-menu {
+  gap: 0;
+  flex-wrap: nowrap;
+  padding-top: 4px;
+}
+.editor-menu {
+  position: relative;
+}
+.workspace .document-menu .editor-menu-trigger {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--control-radius);
+  color: var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace .document-menu button:not(:disabled):hover,
+.workspace .document-title-row button:not(:disabled):hover {
+  background: var(--control-hover);
+}
+.workspace .document-menu .editor-menu-trigger[aria-expanded='true'] {
+  background: var(--control-pressed);
+  color: var(--accent);
+}
+.editor-menu-popup {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  width: 280px;
+  max-width: calc(100vw - 24px);
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--popover-radius);
+  background: var(--surface-raised);
+  box-shadow: var(--popover-shadow);
+}
+.workspace .document-menu .editor-menu-popup button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  text-align: left;
+  border-radius: var(--control-radius);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.editor-menu-popup svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.editor-menu-popup kbd {
+  margin-left: auto;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+}
+.workspace button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.workspace .editor-menu-popup button:disabled {
+  opacity: 0.4;
+}
+.workspace button:not(:disabled):active {
+  background: var(--control-pressed);
+}
+.workspace button:focus-visible,
+.workspace summary:focus-visible,
+.workspace select:focus-visible,
+.workspace input:focus-visible,
+.workspace textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.workspace .sharing-header-actions {
+  gap: 8px;
+  padding-top: 2px;
+}
+.workspace .sharing-share-button {
+  height: 34px;
+  padding: 0 16px;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  font-weight: 600;
+}
+.workspace .sharing-share-button:not(:disabled):hover {
+  background: #12553f;
+}
+.workspace .sharing-share-button:not(:disabled):active {
+  background: #0e4433;
+}
+.workspace .sharing-notifications summary {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--control-radius);
+  color: var(--accent);
+}
+.sharing-notifications summary:hover {
+  background: var(--control-hover);
+}
+.sharing-notification-count {
+  position: absolute;
+  right: -3px;
+  top: -5px;
+}
+.workspace .connection-area {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  margin: 0;
+}
+.connection-square {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+.connection-square .connection-dot {
+  width: 8px;
+  height: 8px;
+}
+.connection-square.connection-online {
+  color: var(--accent);
+}
+.connection-square.connection-offline,
+.connection-square.connection-closed,
+.connection-square.connection-unauthorized,
+.connection-square.connection-incompatible {
+  color: var(--danger);
+}
+.connection-popover {
+  position: absolute;
+  z-index: 45;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 280px;
+  padding: 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--popover-radius);
+  box-shadow: var(--popover-shadow);
+  font-size: 12px;
+}
+.connection-dashboard::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 10px;
+}
+.connection-popover strong {
+  font-size: 14px;
+  color: var(--accent);
+}
+.connection-popover p,
+.connection-popover small {
+  color: var(--muted);
+}
+.connection-popover dl {
+  margin: 16px 0;
+}
+.connection-popover dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+.connection-popover dt {
+  color: var(--muted);
+}
+.connection-popover dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.connection-popover small {
+  font-size: 11px;
+}
+.workspace .toolbar {
+  height: 44px;
+  min-height: 44px;
+  margin: 0 12px 8px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: #eaf0e9;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.workspace .toolbar::-webkit-scrollbar,
+.workspace .style-toolbar::-webkit-scrollbar {
+  display: none;
+}
+.workspace .style-toolbar {
+  overflow: visible;
+  flex: 0 0 auto;
+  scrollbar-width: none;
+}
+.workspace .tool {
+  height: 32px;
+  min-width: 32px;
+  border-radius: var(--control-radius);
+}
+.workspace .tool-group,
+.workspace .zoom-display,
+.workspace .tool-separator,
+.workspace .view-mode {
+  flex-shrink: 0;
+}
+.workspace .style-select {
+  height: 30px;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: #ffffff60;
+}
+.workspace .style-font {
+  width: 112px;
+  max-width: 112px;
+}
+.workspace .style-font,
+.workspace .style-size,
+.workspace .style-format {
+  display: block;
+}
+.workspace .style-size {
+  width: 56px;
+  max-width: 56px;
+}
+.workspace .style-alignment,
+.workspace .style-overflow {
+  display: flex;
+}
+.workspace .view-mode {
+  margin-left: auto;
+}
+.editor-status {
+  font-size: 11px;
+  color: var(--muted);
+}
+/* Shared surface and controls across feature dialogs, including earlier additions. */
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: var(--popover-shadow);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog)::backdrop {
+  background: #17332540;
+  backdrop-filter: blur(2px);
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) h2 {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) h3 {
+  font-size: 14px;
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) button,
+.connection-popover button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  padding: 7px 12px;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background 120ms,
+    border-color 120ms;
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) button:not(:disabled):hover,
+.connection-popover button:hover {
+  background: var(--control-hover);
+  border-color: #adc5b5;
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog)
+  button[aria-pressed='true'] {
+  background: var(--control-pressed);
+  border-color: #adc5b5;
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) button.sharing-primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog)
+  input:not([type='checkbox']):not([type='radio']):not([type='color']),
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) select,
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) textarea {
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  padding: 8px 10px;
+  font: inherit;
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) input[type='checkbox'],
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) input[type='radio'] {
+  accent-color: var(--accent);
+}
+input[type='checkbox'] {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  margin: 0;
+  border: 1.5px solid #a1b5a8;
+  border-radius: 5px;
+  background: var(--surface-raised);
+  vertical-align: middle;
+  cursor: pointer;
+  transition:
+    background 120ms,
+    border-color 120ms;
+}
+input[type='checkbox']:checked,
+input[type='checkbox']:indeterminate {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-position: center;
+  background-repeat: no-repeat;
+}
+input[type='checkbox']:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 4 4 10-10'/%3E%3C/svg%3E");
+}
+input[type='checkbox']:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' stroke='white' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 12h12'/%3E%3C/svg%3E");
+}
+input[type='checkbox']:not(:disabled):hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px #17664b12;
+}
+input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+input[type='checkbox']:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.sharing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+:is(.workspace dialog, .sharing-dialog) .privacy-bulk h3 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) .sharing-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+}
+@media (forced-colors: active) {
+  input[type='checkbox'] {
+    appearance: auto;
+  }
+  input[type='checkbox']:checked,
+  input[type='checkbox']:indeterminate {
+    background-image: none;
+  }
+}
+@media (max-width: 1100px) {
+  .document-title-row .sharing-lock span {
+    display: none;
+  }
+  .workspace .document-title-row h1 {
+    max-width: 32vw;
+  }
+  .editor-menu:nth-last-child(-n + 3) .editor-menu-popup {
+    left: auto;
+    right: 0;
+  }
+}
+@media (max-width: 700px) {
+  .workspace .app-header {
+    padding: 8px 12px 4px;
+    min-height: 84px;
+    position: relative;
+  }
+  .workspace .document-title-row h1 {
+    max-width: calc(100vw - 280px);
+    font-size: 16px;
+  }
+  .workspace .document-title-row {
+    gap: 4px;
+  }
+  .workspace .sharing-header-actions {
+    position: absolute;
+    right: 12px;
+    top: 10px;
+  }
+  .workspace .document-menu {
+    padding-top: 2px;
+  }
+  .workspace .document-menu .editor-menu-trigger {
+    padding: 0 8px;
+    font-size: 12px;
+  }
+  .workspace .toolbar {
+    margin: 0 8px 6px;
+  }
+}
+@media (max-width: 480px) {
+  .workspace .document-title-row h1 {
+    max-width: calc(100vw - 270px);
+  }
+  .workspace .document-title-row > .create-document {
+    display: none;
+  }
+  .workspace .sharing-share-button {
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .workspace .document-menu .editor-menu-trigger {
+    padding: 0 6px;
+    font-size: 11px;
+  }
+  .editor-menu-popup {
+    position: fixed;
+    left: 12px !important;
+    right: auto !important;
+    top: 82px;
+  }
+  :is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) {
+    padding: 16px;
+    max-width: calc(100vw - 24px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) button {
+    transition: none;
+  }
+}
+
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.workspace .style-select {
+  appearance: none;
+  padding-right: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2355685b' stroke-width='1.8'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  background-position: right 6px center;
+  background-repeat: no-repeat;
+}
+
+/* Cell operations use nested disclosures so touch and narrow screens keep one panel. */
+.editor-menu-popup {
+  max-height: min(580px, calc(100dvh - 130px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.editor-submenu-content {
+  margin: 4px 0 8px 12px;
+  padding: 4px 0 4px 8px;
+  border-left: 2px solid var(--control-pressed);
+  background: #f5f8f5;
+  border-radius: 0 6px 6px 0;
+}
+.editor-submenu > button[aria-expanded='true'] {
+  background: var(--control-hover);
+  color: var(--accent);
+}
+.editor-menu-popup .submenu-caret {
+  margin-left: auto;
+  transition: transform 120ms;
+}
+.editor-menu-popup button[aria-expanded='true'] > .submenu-caret {
+  transform: rotate(90deg);
+}
+.menu-unavailable {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+}
+.editor-menu-popup button span {
+  flex: 1;
+}
+:is(.sharing-dialog-header, .command-heading, .style-dialog-heading) {
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.sharing-dialog-header h2 {
+  flex: 1;
+}
+.modal-title-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--control-hover);
+  border-radius: 10px;
+  color: var(--accent);
+}
+.modal-body {
+  min-width: 0;
+}
+.modal-body > p:first-child {
+  margin-top: 0;
+}
+.modal-body > p {
+  line-height: 1.6;
+}
+.modal-body > label:not(:has(input[type='checkbox'], input[type='radio'])) {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  font-weight: 500;
+}
+.modal-body > label > :is(input:not([type='checkbox']):not([type='radio']), select) {
+  width: 100%;
+  box-sizing: border-box;
+}
+.modal-body > label:has(input[type='checkbox'], input[type='radio']) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.modal-body [role='alert'] {
+  padding: 12px 16px;
+  border: 1px solid #d7a5a0;
+  border-radius: 8px;
+  color: #873e36;
+  background: #fdf3f1;
+}
+.modal-body > button + button {
+  margin-left: 8px;
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) footer button:last-child {
+  margin-left: auto;
+}
+:is(.workspace dialog, .sharing-dialog, .command-dialog, .style-dialog) input[type='radio'] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+:is(.command-heading, .style-dialog-heading) > button:last-child {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+}
+@media (max-width: 480px) {
+  .modal-title-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+  .sharing-dialog-header {
+    gap: 8px;
+  }
+  .sharing-dialog-header h2 {
+    font-size: 17px;
+  }
+}

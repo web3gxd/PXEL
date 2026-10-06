@@ -87,6 +87,24 @@ pub fn describe(event: &CommittedEvent, actor: ActorId) -> Result<HistoryEntry, 
             (_, None, None) => None,
             _ => return Err(JournalError::Corrupt),
         },
+        Operation::CellBatchWrite {
+            undoes,
+            undoes_version,
+            ..
+        } => match (undoes, undoes_version) {
+            (Some(id), Some(version)) => Some((*id, *version)),
+            (None, None) => None,
+            _ => return Err(JournalError::Corrupt),
+        },
+        Operation::MergeWrite {
+            undoes,
+            undoes_version,
+            ..
+        } => match (undoes, undoes_version) {
+            (Some(id), Some(version)) => Some((*id, *version)),
+            (None, None) => None,
+            _ => return Err(JournalError::Corrupt),
+        },
         Operation::MoveCompensation {
             undoes,
             undoes_version,

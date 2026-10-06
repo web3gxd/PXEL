@@ -141,6 +141,405 @@ async fn collaborator(
 }
 
 #[sqlx::test(migrations = false)]
+async fn atomic_cell_batch_commits_and_undoes_values_with_styles(pool: sqlx::PgPool) -> TestResult {
+    let (db, identity, mut book) = super::tests::fixture(pool).await?;
+    let target = address(&book);
+    let change = StyleChange::Horizontal(Change::Set(HorizontalAlignment::Center));
+    let Operation::StyleWrite {
+        writes: style_writes,
+        ..
+    } = prepare_style_write(
+        &book,
+        &[target],
+        std::slice::from_ref(&change),
+        StyleWriteKind::Cell,
+    )?
+    else {
+        return Err("missing style preimage".into());
+    };
+    let authored = Operation::CellBatchWrite {
+        intent: spreadsheet_domain::workbook::CellBatchIntent::SetValues,
+        content_writes: vec![GuardedContentWrite {
+            address: target,
+            content: Some(CellContent::Value(CellValue::Text("header\nvalue".into()))),
+            previous: book.cell_content(target)?.cloned(),
+        }],
+        style_writes,
+        undoes: None,
+        undoes_version: None,
+    };
+    let command = CommandPayload::SetCellBatch {
+        writes: vec![CellWrite {
+            address: target,
+            value: CellValue::Text("header\nvalue".into()),
+        }],
+        styles: vec![(target, vec![change])],
+    };
+    let original = request(&db, identity, &book, 180, authored, command).await?;
+    db.commit(&original)
+        .await
+        .map_err(|error| format!("authored batch commit failed: {error:?}"))?;
+    book.apply_event(&original.event)?;
+    assert!(book.sheets()[0].styles()[&target].horizontal() == HorizontalAlignment::Center);
+
+    let Operation::CellBatchWrite {
+        content_writes,
+        style_writes,
+        ..
+    } = &original.event.operation
+    else {
+        return Err("wrong durable event".into());
+    };
+    let inverse = Operation::CellBatchWrite {
+        intent: spreadsheet_domain::workbook::CellBatchIntent::SetValues,
+        content_writes: content_writes
+            .iter()
+            .map(|write| GuardedContentWrite {
+                address: write.address,
+                content: write.previous.clone(),
+                previous: write.content.clone(),
+            })
+            .collect(),
+        style_writes: style_writes
+            .iter()
+            .map(|write| GuardedStyleWrite {
+                address: write.address,
+                previous: write.changes.clone(),
+                changes: write.previous.clone(),
+            })
+            .collect(),
+        undoes: Some(original.event.operation_id),
+        undoes_version: Some(original.event.version),
+    };
+    let undo = request(
+        &db,
+        identity,
+        &book,
+        181,
+        inverse,
+        CommandPayload::UndoCell {
+            target_operation_id: original.event.operation_id,
+        },
+    )
+    .await?;
+    codec::encode(&undo.event)?;
+    codec::event_hash(&undo.event)?;
+    let mut tx = db.pool.begin().await?;
+    let target_event = undo_target_locked(
+        &db,
+        &mut tx,
+        book.document_id(),
+        original.event.operation_id,
+        identity.actor_id,
+        book.version(),
+    )
+    .await?;
+    style_guard::validate(&db, &mut tx, &undo, book.version(), Some(&target_event))
+        .await
+        .map_err(|error| format!("batch style undo guard failed: {error:?}"))?;
+    guard_undo_tail(
+        &db,
+        &mut tx,
+        book.document_id(),
+        &target_event,
+        book.version(),
+    )
+    .await
+    .map_err(|error| format!("batch content undo guard failed: {error:?}"))?;
+    tx.rollback().await?;
+    let mut canonical_command = undo.command.clone();
+    canonical_command.operation = CommandPayload::UndoCell {
+        target_operation_id: original.event.operation_id,
+    };
+    assert_eq!(
+        codec::command_fingerprint(&undo.command)?,
+        codec::command_fingerprint(&canonical_command)?
+    );
+    let original_writes = target_writes(&target_event, identity.actor_id)?;
+    let inverse_writes = target_writes(&undo.event, identity.actor_id)?;
+    assert!(inverse_shape_matches(
+        &target_event.operation,
+        &undo.event.operation
+    ));
+    assert_eq!(original_writes.len(), inverse_writes.len());
+    assert!(
+        original_writes
+            .iter()
+            .zip(&inverse_writes)
+            .all(|(a, b)| a.address == b.address
+                && a.content == b.previous
+                && a.previous == b.content)
+    );
+    db.commit(&undo)
+        .await
+        .map_err(|error| format!("batch undo commit failed: {error:?}"))?;
+    book.apply_event(&undo.event)?;
+    assert!(book.cell_content(target)?.is_none());
+    assert!(book.sheets()[0].styles().is_empty());
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn styled_range_copy_commits_and_undoes_content_and_all_style_leaves(
+    pool: sqlx::PgPool,
+) -> TestResult {
+    let (db, identity, mut book) = super::tests::fixture(pool).await?;
+    let sheet_id = book.sheets()[0].id();
+    let added_row = RowId::from_bytes([188; 16])?;
+    let extend = request(
+        &db,
+        identity,
+        &book,
+        181,
+        Operation::ExtendRows {
+            sheet: sheet_id,
+            rows: vec![added_row],
+        },
+        CommandPayload::ExtendRows {
+            sheet: sheet_id,
+            rows: vec![added_row],
+        },
+    )
+    .await?;
+    commit(&db, &mut book, &extend).await?;
+    let sheet = &book.sheets()[0];
+    let source = CellAddress {
+        sheet: sheet_id,
+        row: sheet.rows()[0],
+        column: sheet.columns()[0],
+    };
+    let destination = CellAddress {
+        sheet: sheet_id,
+        row: sheet.rows()[1],
+        column: sheet.columns()[0],
+    };
+    let source_style_change = StyleChange::Horizontal(Change::Set(HorizontalAlignment::Right));
+    let Operation::StyleWrite { writes, .. } = prepare_style_write(
+        &book,
+        &[source],
+        std::slice::from_ref(&source_style_change),
+        StyleWriteKind::Cell,
+    )?
+    else {
+        return Err("missing source style".into());
+    };
+    let source_style_request = request(
+        &db,
+        identity,
+        &book,
+        182,
+        Operation::StyleWrite {
+            kind: StyleWriteKind::Cell,
+            writes,
+        },
+        CommandPayload::SetCellStyle {
+            address: source,
+            changes: vec![source_style_change],
+        },
+    )
+    .await?;
+    commit(&db, &mut book, &source_style_request).await?;
+    let destination_style_change = StyleChange::Fill(Change::Set(Rgb::new([10, 20, 30])));
+    let Operation::StyleWrite { writes, .. } = prepare_style_write(
+        &book,
+        &[destination],
+        std::slice::from_ref(&destination_style_change),
+        StyleWriteKind::Cell,
+    )?
+    else {
+        return Err("missing destination style".into());
+    };
+    let destination_style_request = request(
+        &db,
+        identity,
+        &book,
+        183,
+        Operation::StyleWrite {
+            kind: StyleWriteKind::Cell,
+            writes,
+        },
+        CommandPayload::SetCellStyle {
+            address: destination,
+            changes: vec![destination_style_change],
+        },
+    )
+    .await?;
+    commit(&db, &mut book, &destination_style_request).await?;
+    let value_request = request(
+        &db,
+        identity,
+        &book,
+        184,
+        Operation::SetCellValue {
+            address: source,
+            value: CellValue::Text("rich source".into()),
+        },
+        CommandPayload::SetCellValue {
+            address: source,
+            value: CellValue::Text("rich source".into()),
+        },
+    )
+    .await?;
+    commit(&db, &mut book, &value_request).await?;
+    let old_destination_request = request(
+        &db,
+        identity,
+        &book,
+        185,
+        Operation::SetCellValue {
+            address: destination,
+            value: CellValue::Text("old destination".into()),
+        },
+        CommandPayload::SetCellValue {
+            address: destination,
+            value: CellValue::Text("old destination".into()),
+        },
+    )
+    .await?;
+    commit(&db, &mut book, &old_destination_request).await?;
+
+    let properties = [
+        StyleProperty::FontFamily,
+        StyleProperty::FontSize,
+        StyleProperty::FontBold,
+        StyleProperty::FontItalic,
+        StyleProperty::FontUnderline,
+        StyleProperty::FontStrike,
+        StyleProperty::FontColor,
+        StyleProperty::Fill,
+        StyleProperty::BorderTop,
+        StyleProperty::BorderRight,
+        StyleProperty::BorderBottom,
+        StyleProperty::BorderLeft,
+        StyleProperty::Horizontal,
+        StyleProperty::Vertical,
+        StyleProperty::TextOverflow,
+        StyleProperty::NumberFormat,
+    ];
+    let default = CellStyle::default();
+    let source_style = book.sheets()[0].styles().get(&source).unwrap_or(&default);
+    let destination_style = book.sheets()[0]
+        .styles()
+        .get(&destination)
+        .unwrap_or(&default);
+    let content = book.cell_content(source)?.cloned();
+    let copy = Operation::CellBatchWrite {
+        intent: CellBatchIntent::CopyRange {
+            source,
+            destination,
+            rows: 1,
+            columns: 1,
+        },
+        content_writes: vec![GuardedContentWrite {
+            address: destination,
+            content,
+            previous: book.cell_content(destination)?.cloned(),
+        }],
+        style_writes: vec![GuardedStyleWrite {
+            address: destination,
+            previous: properties
+                .iter()
+                .map(|property| destination_style.change(*property))
+                .collect(),
+            changes: properties
+                .iter()
+                .map(|property| source_style.change(*property))
+                .collect(),
+        }],
+        undoes: None,
+        undoes_version: None,
+    };
+    let copy_request = request(
+        &db,
+        identity,
+        &book,
+        186,
+        copy,
+        CommandPayload::CopyRange {
+            source,
+            destination,
+            rows: 1,
+            columns: 1,
+        },
+    )
+    .await?;
+    db.commit(&copy_request)
+        .await
+        .map_err(|error| format!("styled copy commit failed: {error:?}"))?;
+    assert!(matches!(
+        db.commit(&copy_request).await?,
+        CommitOutcome::AlreadyCommitted(_)
+    ));
+    book.apply_event(&copy_request.event)?;
+    assert_eq!(book.cell_content(destination)?, book.cell_content(source)?);
+    assert_eq!(
+        book.sheets()[0].styles().get(&destination),
+        book.sheets()[0].styles().get(&source)
+    );
+    assert_eq!(codec::schema_version(&copy_request.event.operation), 30);
+
+    let Operation::CellBatchWrite {
+        intent,
+        content_writes,
+        style_writes,
+        ..
+    } = &copy_request.event.operation
+    else {
+        return Err("copy did not persist as composite batch".into());
+    };
+    let inverse = Operation::CellBatchWrite {
+        intent: intent.clone(),
+        content_writes: content_writes
+            .iter()
+            .map(|write| GuardedContentWrite {
+                address: write.address,
+                content: write.previous.clone(),
+                previous: write.content.clone(),
+            })
+            .collect(),
+        style_writes: style_writes
+            .iter()
+            .map(|write| GuardedStyleWrite {
+                address: write.address,
+                previous: write.changes.clone(),
+                changes: write.previous.clone(),
+            })
+            .collect(),
+        undoes: Some(copy_request.event.operation_id),
+        undoes_version: Some(copy_request.event.version),
+    };
+    let undo = request(
+        &db,
+        identity,
+        &book,
+        187,
+        inverse,
+        CommandPayload::UndoCell {
+            target_operation_id: copy_request.event.operation_id,
+        },
+    )
+    .await?;
+    db.commit(&undo)
+        .await
+        .map_err(|error| format!("styled copy undo failed: {error:?}"))?;
+    book.apply_event(&undo.event)?;
+    assert_eq!(
+        book.cell_content(destination)?,
+        Some(&CellContent::Value(CellValue::Text(
+            "old destination".into()
+        )))
+    );
+    assert!(
+        book.sheets()[0]
+            .styles()
+            .get(&destination)
+            .is_some_and(|style| style.fill() == Rgb::new([10, 20, 30]))
+    );
+    assert_eq!(codec::schema_version(&undo.event.operation), 31);
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
 async fn foreign_equal_default_and_foreign_target_are_hard_barriers(
     pool: sqlx::PgPool,
 ) -> TestResult {

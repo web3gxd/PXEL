@@ -1,6 +1,6 @@
 # ADR-087: independent sparse cell formatting
 
-Status: IMPLEMENTATION IN PROGRESS — core contract frozen (2026-09-30).
+Status: Core profile implemented; broader XLSX, cross-platform and production gates remain.
 
 ## Context and intended slice
 
@@ -11,8 +11,10 @@ become a durable independent property, including on cells without content.
 
 This decision prepares a complete path: typed styles, guarded scalar/range writes,
 versioned journal/snapshots, server authorization, confirmed and optimistic client
-state, Canvas rendering, history and native/browser state parity. Merges and XLSX
-formatting round-trip follow after that path is verified. Neither is already done.
+state, Canvas rendering, history and native/browser state parity. The core profile
+is implemented and locally verified. Bounded profile-1 XLSX formatting round-trip
+is completed under [ADR-088](088-xlsx-cell-style-profile.md); merges, broader XLSX
+compatibility, and structural style preservation remain follow-up work.
 
 ## Pre-planning review
 
@@ -55,10 +57,8 @@ identity and recovery. No new libraries or services are needed.
 - Preserve legacy content-only event semantics. New UI copy/paste/move behavior
   that carries formatting requires an explicit new versioned operation; do not
   silently upgrade previously stored Copy/Move events or erase source formatting.
-- Axis deletion/restoration must capture formatting preimages. Until that path
-  is implemented, reject a structural change that would lose formatting before
-  commit with a typed unsupported-feature response; this is a temporary gate,
-  not final MVP acceptance.
+- Axis deletion/restoration captures exact formatting preimages in additive
+  schema 26/27 events. See [ADR-092](092-structural-style-preimages.md).
 - New style state participates in canonical domain hashing and snapshot encoding.
   Existing style-free hash fixtures and snapshot readers remain compatible.
   Worker hydration/patch adapters must represent the same authored style state
@@ -151,23 +151,54 @@ style payloads. Private candidate
 and serialization failure rollback remains atomic; styles create no new dirty
 formula dependencies or volatile epochs.
 
+## Profile 2 text overflow extension (2026-10-02)
+
+The original style profile used durable property tag 15 for the boolean `wrap`.
+Keep that reader intact: absent `StyleWrite.profile_version` means profile 1,
+and its boolean continues to decode as Clip or Wrap. Durable profile 2 reuses tag
+15 as the closed Clip/Wrap/Overflow enum and is chosen when Overflow needs to be
+represented. The independent public wire profile adds a distinct enum oneof
+while retaining the old boolean oneof. Style snapshot and projection schemas
+accept both durable versions; old authored hashes for Clip and Wrap stay
+byte-compatible, and Overflow uses the profile-2 hash prefix.
+
+`CellStyle` carries one canonical `TextOverflow` leaf, defaulting to Clip. The
+browser accepts old projection objects containing `wrap` and normalizes them to
+Clip or Wrap. New projections and operations use `text_overflow`; range style
+aggregation includes mixed state and the existing guarded style operation
+provides durable Undo/Redo.
+
+Canvas Overflow applies to text with left/general alignment and extends across
+visible, default-style empty cells. It stops at content, formatting or a merge,
+including formulas whose displayed result is empty. Both the authored value and
+the optimistic display are considered so a draft value blocks text before
+confirmation. Incremental invalidation includes both old and new spans, clears
+downstream cells before repainting their source, and does not change the
+confirmed calculation projection. A DPR1/DPR2 browser regression checks actual
+Canvas pixels across adjacent cells, a value blocker, an empty-result formula,
+Undo, style Undo and reload. Wrap and Clip continue to paint within their cell
+bounds.
+
+The bounded XLSX style profile still represents only OOXML `wrapText`; it does
+not preserve PXEL's distinct Clip versus Overflow mode. This does not change
+the XLSX profile contract or claim broader OOXML round-trip support.
+
 ## Remaining implementation checks
 
-The core type increment owns only domain/style.rs, its tests and the module export.
-Workbook/journal/codec/Worker/UI integration follows with coordinated separate
-file ownership. Exact public DTOs, history descriptors and richer structural
-events need implementation review before those files change. No missing user
-preference blocks work.
+The typed style contract, journal and snapshot codecs, Worker hydration, client
+optimistic state, Canvas rendering, formatting history, native/browser parity,
+clip/overflow/wrap and bounded profile-1 XLSX import/export/reimport are
+implemented and locally verified. The specific XLSX evidence and its limits are recorded in ADR-088 and
+the linked handoff.
 
-The first measurable slice must demonstrate scalar and rectangular formatting,
-content/style concurrency, reload/reconnect, exact retry, guarded Undo/Redo and
-native/browser hashes. Follow-up acceptance requires structural preservation,
-rich copy/move, styles-aware XLSX import/export/reimport and measured sparse memory.
-Benchmarks must record real machine/configuration; no latency result is assumed.
+Rich formatting copy/move and a Windows sparse-style memory reference measurement
+are recorded in ADR-094/095 and the roadmap. Broader XLSX compatibility and
+cross-platform memory measurements remain open; benchmarks must record the real
+machine/configuration.
 
 ## Consequences
 
 Domain, storage codec, wire adapter, actor/application, snapshot mapping, Worker,
-projection decoder and Canvas will change together in tested increments. No
-empty crate is introduced. RUNBOOK records every increment. This in-progress ADR
-does not accept the full style feature or close any remaining MVP gate.
+projection decoder and Canvas changed together in tested increments. No empty
+crate was introduced. RUNBOOK records each increment. This ADR accepts the core
+formatting profile; it does not close the broader XLSX or deployment gates.

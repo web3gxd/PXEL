@@ -13,7 +13,9 @@ numeric text and blank to0; booleans remain distinct. Other-type inequality matc
 unequal types; ordered comparisons require compatible types. Error-string criteria
 can match error cells; error-valued criteria propagate. Numeric-text/blank/boolean,
 error precedence, Unicode collation and255-scalar criterion cap are explicit
-provisional rules, requiring manual Excel goldens. Longer criteria are typed
+provisional rules, requiring manual Excel goldens. ADR-097 adds a verified
+exception for formula-empty text: it matches `<>`, while genuinely blank cells
+do not; `*` does not match formula-empty text. Longer criteria are typed
 unsupported, oversized text/work/arrays/cancellation remain typed failures.
 
 SUMIF adds selected finite numbers/date serials in fixed row-major order; ignores

@@ -10,7 +10,8 @@ rectangle cap. Existing conservative dependencies cover every source and criteri
 
 Criteria reuse ADR074 comparison/coercion/wildcard rules, including blank scalar
 criterion0. Numeric-text/blank/error/Unicode/255-character rules remain provisional
-until manually checked Excel fixtures. Each corresponding cell must match every
+until manually checked Excel fixtures; ADR-097 verifies empty-text wildcard and
+inequality behavior. Each corresponding cell must match every
 criterion. Traversal is fixed row-major, with one bounded boolean mask intersected
 for each criteria range; source values are not retained. Even already-unmatched
 cells retain scalar boundaries, cardinality checks and charged matching work.
@@ -20,7 +21,8 @@ serials and selected booleans as1/0 (Microsoft's documented SUMIFS rule). Text a
 blank sums are ignored. Selected spreadsheet errors propagate in traversal order;
 unselected errors are ignored. Typed work/text/array/cardinality/cancellation errors
 are never spreadsheet fallback values. No new dependencies or persisted schemas.
-Engine identity is0.14.0.
+Engine identity is now0.15.0 per ADR-097; the original0.14.0 criteria slice used
+the previous provisional empty-text behavior.
 
 Local verification: four new native argument/shape/coercion/error/resource/property
 tests (11criteria total), three dependency/structural tests,554expected/native/

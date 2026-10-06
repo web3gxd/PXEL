@@ -1,7 +1,21 @@
 import { create, toBinary } from '@bufbuild/protobuf';
-import { PreviewClient, type PreviewStatus } from '../calculation/client';
+import { FORMULA_ENGINE_VERSION, PreviewClient, type PreviewStatus } from '../calculation/client';
 import { copyFormulaInWorker } from '../calculation/formula-copy';
 import { readHistory } from './history';
+import { authorizeClipboard } from '../sharing/disclosure';
+import { filteredRows, type PersonalFilters } from './filters';
+import { readPersonalView, savePersonalView, type PersonalView } from './personal-view';
+import { validSortBounds, type SortBounds, type SortKey } from './sort-range';
+import type { HardcodeReport } from './diagnostics';
+import {
+  decodeCapabilities,
+  decodeEncryption,
+  guestPath,
+  type Capabilities,
+  type EncryptionInfo,
+  type GuestSession,
+} from '../sharing/api';
+import { parseDelimited, serializeDelimited, type CellMatrix } from '../clipboard/tabular';
 import {
   DEFAULT_STYLE,
   applyStyle,
@@ -55,20 +69,34 @@ export type Value =
   | { type: 'formula'; value: FormulaDescriptor };
 export type CalculatedValue =
   Exclude<Value, { type: 'formula' }> | { type: 'error'; value: string };
+export type MergeRange = {
+  first_row_id: string;
+  last_row_id: string;
+  first_column_id: string;
+  last_column_id: string;
+};
 export type Sheet = {
+  frozen_rows?: number;
   id: string;
   name: string;
   rows: string[];
   columns: string[];
   cells: { row_id: string; column_id: string; value: Value }[];
   styles?: StyledCell[];
+  row_heights?: { axis_id: string; size_css_px: number }[];
+  column_widths?: { axis_id: string; size_css_px: number }[];
+  merges?: MergeRange[];
 };
 export type Projection = AuthoredMetadata & {
+  representation?: 'anonymized';
+  privacy_revision?: number;
   document_id: string;
   version: string;
   state_hash: string;
   calculation_context?: PreviewContext | null;
   sheets: Sheet[];
+  capabilities?: Capabilities;
+  encryption?: EncryptionInfo;
 };
 export type Position = { row: number; column: number };
 export type RemotePresence = {
@@ -90,6 +118,7 @@ type PendingBatch = {
   kind: 'batch';
   id: string;
   writes: { row: string; column: string; value: Value }[];
+  styles?: { row: string; column: string; changes: StyleChange[] }[];
   bytes: Uint8Array;
   attempts: number;
 };
@@ -160,6 +189,9 @@ type PendingStyle = {
   bytes: Uint8Array;
   attempts: number;
 };
+type PendingAxisSize = { kind: 'axisSize'; id: string; bytes: Uint8Array; attempts: number };
+type PendingMerge = { kind: 'merge'; id: string; bytes: Uint8Array; attempts: number };
+type PendingSort = { kind: 'sortRange'; id: string; bytes: Uint8Array; attempts: number };
 type Pending =
   | PendingCell
   | PendingBatch
@@ -172,7 +204,10 @@ type Pending =
   | PendingUndo
   | PendingRangeCopy
   | PendingRangeMove
-  | PendingStyle;
+  | PendingStyle
+  | PendingAxisSize
+  | PendingMerge
+  | PendingSort;
 export function uuidBytes(id: string) {
   return Uint8Array.from(id.replaceAll('-', '').match(/../g) ?? [], (pair) => parseInt(pair, 16));
 }
@@ -211,6 +246,11 @@ export function displayValue(value: Value | CalculatedValue | undefined) {
       : String(value.value);
 }
 const key = (row: string, column: string) => `${row}/${column}`;
+const EMPTY_FILTER_STATE = {
+  hidden: new Set<number>() as ReadonlySet<number>,
+  adjusted_merges: 0,
+  waiting: false,
+};
 const rejectionText: Record<number, string> = {
   1: 'Нет прав на изменение таблицы.',
   2: 'Таблица не найдена.',
@@ -294,7 +334,10 @@ function decodeCalculatedValue(input: unknown): CalculatedValue {
 export function decodeProjection(input: unknown): Projection {
   const invalid = () => new Error('Ответ сервера не соответствует формату таблицы');
   if (!input || typeof input !== 'object') throw invalid();
+  if ('redacted_projection_schema_version' in input) return decodeRedactedProjection(input);
   const p = input as Partial<Projection>;
+  if (p.capabilities !== undefined) decodeCapabilities(p.capabilities);
+  if (p.encryption !== undefined) decodeEncryption(p.encryption);
   if (
     !isUuid(p.document_id) ||
     typeof p.version !== 'string' ||
@@ -342,6 +385,7 @@ export function decodeProjection(input: unknown): Projection {
   const columnIds = new Set<string>();
   let totalCells = 0;
   let totalStyles = 0;
+  let totalAxisSizes = 0;
   let styleBytes = 0;
   for (const sheet of p.sheets) {
     if (
@@ -369,7 +413,7 @@ export function decodeProjection(input: unknown): Projection {
     sheetIds.add(sheet.id);
     sheetNames.add(foldedName);
     totalCells += sheet.cells.length;
-    if (p.authored_projection_schema_version !== 4 && totalCells > 100000) throw invalid();
+    if ((p.authored_projection_schema_version ?? 1) < 4 && totalCells > 100000) throw invalid();
     if (
       !sheet.rows.every(isUuid) ||
       !sheet.columns.every(isUuid) ||
@@ -395,7 +439,7 @@ export function decodeProjection(input: unknown): Projection {
       cells.add(key(cell.row_id, cell.column_id));
       const v = cell.value;
       if (v?.type === 'formula') {
-        v.value = decodeFormula(v.value, p.authored_projection_schema_version === 4);
+        v.value = decodeFormula(v.value, (p.authored_projection_schema_version ?? 1) >= 4);
         continue;
       }
       if (
@@ -409,7 +453,7 @@ export function decodeProjection(input: unknown): Projection {
       )
         throw invalid();
     }
-    if (p.authored_projection_schema_version === 4) {
+    if ((p.authored_projection_schema_version ?? 1) >= 4) {
       if (!Array.isArray(sheet.styles) || sheet.styles.length > 100000) throw invalid();
       const styled = new Set<string>();
       for (const cell of sheet.styles) {
@@ -432,12 +476,543 @@ export function decodeProjection(input: unknown): Projection {
       if (cells.size > 100000 || totalStyles > 100000 || styleBytes > 64 * 1024 * 1024)
         throw invalid();
     } else if (sheet.styles !== undefined) throw invalid();
+    if ((p.authored_projection_schema_version ?? 1) >= 5) {
+      if (!Array.isArray(sheet.row_heights) || !Array.isArray(sheet.column_widths)) throw invalid();
+      const rowsSized = new Set<string>(),
+        columnsSized = new Set<string>();
+      for (const entry of sheet.row_heights) {
+        if (
+          !entry ||
+          !rows.has(entry.axis_id) ||
+          rowsSized.has(entry.axis_id) ||
+          !Number.isInteger(entry.size_css_px) ||
+          entry.size_css_px < 12 ||
+          entry.size_css_px > 1000 ||
+          entry.size_css_px === 28
+        )
+          throw invalid();
+        rowsSized.add(entry.axis_id);
+        totalAxisSizes++;
+      }
+      for (const entry of sheet.column_widths) {
+        if (
+          !entry ||
+          !columns.has(entry.axis_id) ||
+          columnsSized.has(entry.axis_id) ||
+          !Number.isInteger(entry.size_css_px) ||
+          entry.size_css_px < 24 ||
+          entry.size_css_px > 2000 ||
+          entry.size_css_px === 112
+        )
+          throw invalid();
+        columnsSized.add(entry.axis_id);
+        totalAxisSizes++;
+      }
+    } else if (sheet.row_heights !== undefined || sheet.column_widths !== undefined)
+      throw invalid();
+    if (totalAxisSizes > 1_000_000) throw invalid();
+    if ((p.authored_projection_schema_version ?? 0) >= 6) {
+      if (!Array.isArray(sheet.merges) || sheet.merges.length > 10_000) throw invalid();
+      const mergeCells = new Set<string>();
+      let mergedCellCount = 0;
+      for (const merge of sheet.merges) {
+        if (
+          !merge ||
+          !rows.has(merge.first_row_id) ||
+          !rows.has(merge.last_row_id) ||
+          !columns.has(merge.first_column_id) ||
+          !columns.has(merge.last_column_id)
+        )
+          throw invalid();
+        const firstRow = sheet.rows.indexOf(merge.first_row_id),
+          lastRow = sheet.rows.indexOf(merge.last_row_id),
+          firstColumn = sheet.columns.indexOf(merge.first_column_id),
+          lastColumn = sheet.columns.indexOf(merge.last_column_id),
+          area = (lastRow - firstRow + 1) * (lastColumn - firstColumn + 1);
+        if (firstRow > lastRow || firstColumn > lastColumn || area < 2 || area > 10_000)
+          throw invalid();
+        mergedCellCount += area;
+        if (mergedCellCount > 100_000) throw invalid();
+        for (let row = firstRow; row <= lastRow; row++)
+          for (let column = firstColumn; column <= lastColumn; column++) {
+            const cell = key(sheet.rows[row]!, sheet.columns[column]!);
+            if (mergeCells.has(cell)) throw invalid();
+            mergeCells.add(cell);
+            if ((row !== firstRow || column !== firstColumn) && cells.has(cell)) throw invalid();
+          }
+      }
+    } else if (sheet.merges !== undefined) throw invalid();
+    if (p.authored_projection_schema_version === 7) {
+      if (
+        !Number.isInteger(sheet.frozen_rows) ||
+        sheet.frozen_rows! < 0 ||
+        sheet.frozen_rows! > 1000
+      )
+        throw invalid();
+    } else if (sheet.frozen_rows !== undefined) throw invalid();
   }
   decodeAuthoredMetadata(p, rowIds, columnIds);
   return p as Projection;
 }
+export function decodeRedactedProjection(input: unknown): Projection {
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    throw new Error('Некорректная обезличенная проекция.');
+  const p = input as Record<string, unknown>;
+  const allowed = [
+    'redacted_projection_schema_version',
+    'style_schema_version',
+    'style_profile_version',
+    'document_id',
+    'version',
+    'privacy_revision',
+    'sheets',
+    'capabilities',
+    'encryption',
+  ];
+  if (
+    p.redacted_projection_schema_version !== 1 ||
+    Object.keys(p).some((k) => !allowed.includes(k)) ||
+    !Number.isSafeInteger(p.privacy_revision) ||
+    (p.privacy_revision as number) < 0 ||
+    !Array.isArray(p.sheets)
+  )
+    throw new Error('Неподдерживаемая обезличенная проекция.');
+  const caps = decodeCapabilities(p.capabilities);
+  if (!caps.anonymized || caps.can_edit)
+    throw new Error('Некорректные права обезличенного представления.');
+  for (const s of p.sheets) {
+    if (
+      !s ||
+      typeof s !== 'object' ||
+      !Array.isArray((s as Sheet).cells) ||
+      (s as Sheet).cells.some(
+        (c) =>
+          !c.value ||
+          !['blank', 'number', 'text', 'boolean'].includes(c.value.type) ||
+          Object.keys(c).some((k) => !['row_id', 'column_id', 'value'].includes(k)) ||
+          Object.keys(c.value).some((k) => !['type', 'value'].includes(k)),
+      )
+    )
+      throw new Error('В обезличенном представлении допустимы только значения.');
+  }
+  const result = decodeProjection({
+    authored_projection_schema_version: 7,
+    style_schema_version: p.style_schema_version,
+    style_profile_version: p.style_profile_version,
+    document_id: p.document_id,
+    version: p.version,
+    state_hash: '0'.repeat(64),
+    last_axis_change_version: '0',
+    retired_row_ids: [],
+    retired_column_ids: [],
+    row_activation_floors: [],
+    column_activation_floors: [],
+    sheets: p.sheets,
+    capabilities: caps,
+    encryption: p.encryption,
+  });
+  return {
+    ...result,
+    representation: 'anonymized',
+    privacy_revision: p.privacy_revision as number,
+  };
+}
 
 export class DocumentStore {
+  constructor(readonly transport: { guest?: GuestSession } = {}) {}
+  personalView: PersonalView = { schema_version: 1, revision: 0, settings: { filters: [] } };
+  viewLoading = false;
+  viewError = '';
+  private viewGeneration = 0;
+  private viewDocument: string | undefined;
+  private filterCache:
+    | {
+        sheet: Sheet;
+        version: string;
+        calculated: string | undefined;
+        settings: PersonalFilters;
+        value: { hidden: ReadonlySet<number>; adjusted_merges: number; waiting: boolean };
+      }
+    | undefined;
+  confirmedScalar(position: Position): CalculatedValue | undefined {
+    const row = this.sheet?.rows[position.row],
+      column = this.sheet?.columns[position.column];
+    if (!row || !column) return undefined;
+    const value = this.confirmed.get(key(row, column));
+    return value?.type === 'formula'
+      ? this.calculatedVersion === this.projection?.version
+        ? this.calculated.get(key(row, column))
+        : undefined
+      : value;
+  }
+  get filterState() {
+    const sheet = this.sheet,
+      version = this.projection?.version ?? '0',
+      settings = this.personalView.settings;
+    if (!sheet) return { hidden: new Set<number>(), adjusted_merges: 0, waiting: false };
+    if (!settings.filters.some((filter) => filter.sheet_id === sheet.id)) return EMPTY_FILTER_STATE;
+    const cached = this.filterCache;
+    if (
+      cached?.sheet === sheet &&
+      cached.version === version &&
+      cached.calculated === this.calculatedVersion &&
+      cached.settings === settings
+    )
+      return cached.value;
+    const filteredColumns = new Set(
+      settings.filters
+        .filter((f) => f.sheet_id === sheet.id)
+        .flatMap((f) => f.conditions.map((c) => c.column_id)),
+    );
+    const waiting =
+      this.calculatedVersion !== version &&
+      sheet.cells.some((c) => filteredColumns.has(c.column_id) && c.value.type === 'formula');
+    const result = waiting
+      ? { hidden: new Set<number>(), adjusted_merges: 0 }
+      : filteredRows(sheet, settings, (r, c) => this.confirmedScalar({ row: r, column: c }));
+    const value = { ...result, waiting };
+    this.filterCache = { sheet, version, calculated: this.calculatedVersion, settings, value };
+    return value;
+  }
+  async reloadPersonalView() {
+    const doc = this.projection?.document_id;
+    if (!doc || !this.projection?.capabilities || this.guestAccessClosed) return;
+    const generation = ++this.viewGeneration;
+    this.viewDocument = doc;
+    this.viewLoading = true;
+    this.viewError = '';
+    this.notify();
+    try {
+      const view = await readPersonalView(this.documentUrl(doc, '/personal-view'));
+      if (
+        this.viewGeneration === generation &&
+        this.projection?.document_id === doc &&
+        !this.guestAccessClosed
+      )
+        this.personalView = view;
+    } catch (error) {
+      if (this.viewGeneration === generation)
+        this.viewError =
+          error instanceof Error ? error.message : 'Не удалось загрузить личные фильтры.';
+    } finally {
+      if (this.viewGeneration === generation) {
+        this.viewLoading = false;
+        this.notify();
+      }
+    }
+  }
+  async saveFilters(settings: PersonalFilters) {
+    const doc = this.projection?.document_id,
+      version = Number(this.projection?.version);
+    if (
+      !doc ||
+      !Number.isSafeInteger(version) ||
+      this.viewLoading ||
+      this.pending.length ||
+      this.editing ||
+      this.guestAccessClosed
+    )
+      throw new Error('Дождитесь сохранения книги.');
+    const generation = ++this.viewGeneration;
+    this.viewLoading = true;
+    this.viewError = '';
+    this.notify();
+    try {
+      const view = await savePersonalView(
+        this.documentUrl(doc, '/personal-view'),
+        this.personalView.revision,
+        version,
+        { ...this.personalView.settings, ...settings },
+      );
+      if (
+        this.projection?.document_id !== doc ||
+        this.viewGeneration !== generation ||
+        this.guestAccessClosed
+      )
+        throw new Error('Книга изменилась.');
+      this.personalView = view;
+    } finally {
+      if (this.viewGeneration === generation) {
+        this.viewLoading = false;
+        this.notify();
+      }
+    }
+  }
+  setFrozenRows(rows: number) {
+    const sheet = this.sheet,
+      projection = this.projection,
+      actor = this.actor;
+    if (
+      !this.canEdit ||
+      !sheet ||
+      !projection ||
+      !actor ||
+      !this.sender ||
+      this.pending.length ||
+      this.editing ||
+      !Number.isInteger(rows) ||
+      rows < 0 ||
+      rows > Math.min(1000, sheet.rows.length)
+    )
+      return false;
+    if (rows === (sheet.frozen_rows ?? 0)) return true;
+    const id = uuidV7();
+    const bytes = toBinary(
+      ClientEnvelopeSchema,
+      create(ClientEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'command',
+          value: {
+            operationId: uuidBytes(id),
+            documentId: uuidBytes(projection.document_id),
+            actorId: actor,
+            baseVersion: BigInt(projection.version),
+            clientSequence: ++this.sequence,
+            setFrozenRows: { sheetId: uuidBytes(sheet.id), rows },
+          },
+        },
+      }),
+    );
+    this.pending.push({ kind: 'axisSize', id, bytes, attempts: 0 });
+    this.notify();
+    this.flush();
+    return true;
+  }
+  guestAccessClosed = false;
+  private accessListeners = new Set<() => void>();
+  get isGuest() {
+    return this.transport.guest !== undefined;
+  }
+  get allRowsHidden() {
+    return !!this.sheet?.rows.length && this.filterState.hidden.size === this.sheet.rows.length;
+  }
+  get canEdit() {
+    return this.canAuthor && !this.allRowsHidden;
+  }
+  get canAuthor() {
+    return (
+      !this.creating &&
+      this.projection?.representation !== 'anonymized' &&
+      !this.guestAccessClosed &&
+      (!this.isGuest || this.transport.guest?.permission === 'edit') &&
+      (this.projection?.capabilities?.can_edit ?? true)
+    );
+  }
+  get canComment() {
+    return (
+      !this.guestAccessClosed &&
+      (!this.isGuest || this.transport.guest?.permission !== 'view') &&
+      (this.projection?.capabilities?.can_comment ?? true)
+    );
+  }
+  get canShare() {
+    return !this.isGuest && this.projection?.capabilities?.can_share === true;
+  }
+  get canExport() {
+    return !this.guestAccessClosed && (this.projection?.capabilities?.can_export ?? false);
+  }
+  get canCopy() {
+    return (
+      !this.guestAccessClosed &&
+      !this.allRowsHidden &&
+      (this.projection?.capabilities?.can_copy ?? !this.isGuest)
+    );
+  }
+  sortRangePreview: SortBounds | undefined;
+  hardcodeReport: HardcodeReport | undefined;
+  get selectedHardcodeWarning() {
+    if (this.allRowsHidden) return undefined;
+    if (this.hardcodeReport?.document_version !== this.projection?.version) return undefined;
+    const sheet = this.sheet,
+      dismissed = new Set(this.personalView.settings.hardcode_dismissals ?? []);
+    return this.hardcodeReport?.warnings.find(
+      (warning) =>
+        warning.sheet_id === sheet?.id &&
+        warning.row_id === sheet.rows[this.selected.row] &&
+        warning.column_id === sheet.columns[this.selected.column] &&
+        !dismissed.has(warning.fingerprint),
+    );
+  }
+  confirmedCells(sheet: Sheet): Sheet['cells'] {
+    const rows = new Set(sheet.rows),
+      columns = new Set(sheet.columns);
+    return [...this.confirmed].flatMap(([address, value]) => {
+      const [row_id = '', column_id = ''] = address.split('/');
+      return rows.has(row_id) && columns.has(column_id) ? [{ row_id, column_id, value }] : [];
+    });
+  }
+  previewSortBounds(bounds?: SortBounds) {
+    const preview =
+      this.sheet && bounds && validSortBounds(this.sheet, bounds) ? { ...bounds } : undefined;
+    if (JSON.stringify(preview) === JSON.stringify(this.sortRangePreview)) return;
+    this.sortRangePreview = preview;
+    this.notify();
+  }
+  sortRange(
+    bounds: SortBounds,
+    headerRows: number,
+    keys: readonly SortKey[],
+    expectedVersion: string,
+  ) {
+    const sheet = this.sheet,
+      projection = this.projection,
+      actor = this.actor;
+    if (
+      !this.canAuthor ||
+      !sheet ||
+      !projection ||
+      !actor ||
+      this.pending.length ||
+      this.editing ||
+      projection.version !== expectedVersion ||
+      !validSortBounds(sheet, bounds) ||
+      !Number.isInteger(headerRows) ||
+      headerRows < 0 ||
+      headerRows > bounds.endRow - bounds.startRow ||
+      !keys.length ||
+      keys.length > 50 ||
+      new Set(keys.map((k) => k.column)).size !== keys.length ||
+      keys.some(
+        (k) =>
+          !Number.isInteger(k.column) ||
+          k.column < bounds.startColumn ||
+          k.column > bounds.endColumn,
+      )
+    )
+      return false;
+    const keyColumns = new Set(keys.map((key) => sheet.columns[key.column]));
+    const rowPositions = new Map(sheet.rows.map((row, index) => [row, index]));
+    const formulaKey = this.confirmedCells(sheet).some(
+      (cell) =>
+        cell.value.type === 'formula' &&
+        keyColumns.has(cell.column_id) &&
+        (rowPositions.get(cell.row_id) ?? -1) >= bounds.startRow + headerRows &&
+        (rowPositions.get(cell.row_id) ?? -1) <= bounds.endRow,
+    );
+    if (formulaKey && this.calculatedVersion !== projection.version) return false;
+    const id = uuidV7();
+    const bytes = toBinary(
+      ClientEnvelopeSchema,
+      create(ClientEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'command',
+          value: {
+            operationId: uuidBytes(id),
+            documentId: uuidBytes(projection.document_id),
+            actorId: actor,
+            baseVersion: BigInt(projection.version),
+            clientSequence: ++this.sequence,
+            sortRange: {
+              schemaVersion: 1,
+              source: {
+                sheetId: uuidBytes(sheet.id),
+                rowId: uuidBytes(sheet.rows[bounds.startRow]!),
+                columnId: uuidBytes(sheet.columns[bounds.startColumn]!),
+              },
+              rows: bounds.endRow - bounds.startRow + 1,
+              columns: bounds.endColumn - bounds.startColumn + 1,
+              headerRows,
+              keys: keys.map((key) => ({
+                columnId: uuidBytes(sheet.columns[key.column]!),
+                descending: key.descending,
+              })),
+            },
+          },
+        },
+      }),
+    );
+    if (bytes.byteLength > 1_048_576) return false;
+    this.pending.push({ kind: 'sortRange', id, bytes, attempts: 0 });
+    this.error = '';
+    this.notify();
+    this.flush();
+    return true;
+  }
+  async authorizeClipboard(action: 'copy' | 'cut', anonymize = false, text?: string) {
+    const projection = this.projection;
+    const policyStamp = projection?.capabilities?.disclosure_stamp;
+    if (!projection || !policyStamp) throw new Error('Дождитесь загрузки прав копирования.');
+    const documentVersion = Number(projection.version);
+    if (!Number.isSafeInteger(documentVersion))
+      throw new Error('Версия недоступна для копирования.');
+    const stamp = { ...policyStamp, document_version: documentVersion };
+    const version = projection.version;
+    const receipt = await authorizeClipboard(
+      this.documentUrl(projection.document_id, '/clipboard/authorize'),
+      anonymize || this.privacyMask ? 'copy_anonymized' : action,
+      stamp,
+      text,
+    );
+    if (
+      this.projection?.document_id !== projection.document_id ||
+      this.projection.version !== version ||
+      this.pending.length ||
+      this.guestAccessClosed
+    )
+      throw new Error('Версия таблицы изменилась. Повторите копирование.');
+    if (!this.canCopy || (action === 'cut' && !this.canEdit))
+      throw new Error('Копирование запрещено владельцем.');
+    const { projection: raw, ...rest } = receipt;
+    return { ...rest, ...(raw === undefined ? {} : { projection: decodeRedactedProjection(raw) }) };
+  }
+  documentUrl(documentId: string, suffix = '') {
+    const guest = this.transport.guest;
+    if (guest) {
+      if (documentId !== guest.documentId) throw new Error('Ответ относится к другой таблице');
+      return `${guestPath(guest.linkId)}${suffix || '/document'}`;
+    }
+    return `/api/documents/${encodeURIComponent(documentId)}${suffix}`;
+  }
+  onGuestAccessClosed(listener: () => void) {
+    this.accessListeners.add(listener);
+    return () => this.accessListeners.delete(listener);
+  }
+  closeGuestAccess() {
+    if (!this.isGuest || this.guestAccessClosed) return;
+    this.guestAccessClosed = true;
+    this.dispose();
+    this.actor = undefined;
+    this.projection = undefined;
+    this.activeSheetId = undefined;
+    this.confirmed.clear();
+    this.confirmedStyles.clear();
+    this.calculated.clear();
+    this.lastDisplayedResults.clear();
+    this.calculatedVersion = undefined;
+    this.calculationStatus = 'idle';
+    this.calculationError = '';
+    this.pending = [];
+    this.quarantinedPending = undefined;
+    this.undoHistory = [];
+    this.redoHistory = [];
+    this.historyVersions.clear();
+    this.historyDirty = false;
+    this.historyLoading = false;
+    this.editing = undefined;
+    this.cutIntent = undefined;
+    this.movePreview = undefined;
+    this.previewOverlay.clear();
+    this.previewDirty.clear();
+    this.previewStyleOverlay.clear();
+    this.previewSheetByRow.clear();
+    this.authoredPreviewHash = undefined;
+    this.submittedAt.clear();
+    this.mergeCache.clear();
+    this.loading = false;
+    this.recalculating = false;
+    this.exporting = false;
+    this.error = 'Доступ по ссылке закрыт. Обратитесь к владельцу таблицы.';
+    this.notify();
+    this.accessListeners.forEach((listener) => listener());
+  }
+  private async fetchDocument(path: string, init?: RequestInit) {
+    if (this.guestAccessClosed) throw new Error('Доступ по ссылке закрыт.');
+    const response = await fetch(path, { ...init, credentials: 'same-origin' });
+    if (this.isGuest && [401, 403, 404].includes(response.status)) this.closeGuestAccess();
+    return response;
+  }
   previewStatus: PreviewStatus = 'idle';
   private previewValues: ReadonlyMap<string, CalculatedValue> = new Map();
   private previewStamp: Stamp | undefined;
@@ -490,6 +1065,101 @@ export class DocumentStore {
     this.notify();
   });
   projection: Projection | undefined;
+  privacyAnalysisPending = false;
+  privacyAnalysisError = '';
+  privacyReport: import('./privacy').PrivacyReport | undefined;
+  privacyPolicy: import('./privacy').PrivacyPolicy | undefined;
+  private privacyMaskProjection: Projection | undefined;
+  private privacyMaskEnabled = true;
+  private privacyMaskCells = new Map<string, Value>();
+  get privacyMask() {
+    return this.privacyMaskProjection;
+  }
+  set privacyMask(value: Projection | undefined) {
+    this.privacyMaskProjection = value;
+    this.privacyMaskCells = new Map(
+      value?.sheets.flatMap((s) =>
+        s.cells.map((c) => [`${s.id}/${c.row_id}/${c.column_id}`, c.value] as const),
+      ) ?? [],
+    );
+  }
+  displaySheetName(sheetId = this.activeSheetId) {
+    return (
+      this.privacyMask?.sheets.find((s) => s.id === sheetId)?.name ??
+      this.projection?.sheets.find((s) => s.id === sheetId)?.name ??
+      'Пустой лист'
+    );
+  }
+  private privacyFindingList: { sheet_id: string; row_id: string; column_id: string }[] = [];
+  private privacyFindingKeys = new Set<string>();
+  privacyFindingRevision = 0;
+  get privacyFindings() {
+    return this.privacyFindingList;
+  }
+  set privacyFindings(value: { sheet_id: string; row_id: string; column_id: string }[]) {
+    this.privacyFindingList = value;
+    this.privacyFindingKeys = new Set(value.map((f) => `${f.sheet_id}/${f.row_id}/${f.column_id}`));
+    this.privacyFindingRevision++;
+  }
+  setPrivacyMask(projection: Projection | undefined) {
+    if (this.pending.length || this.editing) throw new Error('Сначала завершите изменения.');
+    this.validatePrivacyMask(projection);
+    this.privacyMaskEnabled = !!projection;
+    this.privacyMask = projection;
+    this.notify();
+  }
+  private validatePrivacyMask(projection: Projection | undefined) {
+    if (
+      projection &&
+      (projection.representation !== 'anonymized' ||
+        projection.document_id !== this.projection?.document_id ||
+        projection.version !== this.projection.version)
+    )
+      throw new Error('Локальная маска устарела.');
+  }
+  refreshPrivacyMask(projection: Projection | undefined) {
+    this.validatePrivacyMask(projection);
+    this.privacyMask = this.privacyMaskEnabled ? projection : undefined;
+    this.notify();
+  }
+  privacyFindingAt(position: Position) {
+    const sheet = this.sheet;
+    return this.privacyFindingKeys.has(
+      `${sheet?.id}/${sheet?.rows[position.row]}/${sheet?.columns[position.column]}`,
+    );
+  }
+  privacyVeilAt(position: Position) {
+    if (
+      !this.privacyMask ||
+      this.isGuest ||
+      !this.canShare ||
+      this.projection?.representation === 'anonymized' ||
+      this.projection?.capabilities?.is_guest
+    )
+      return false;
+    const value = this.value(position);
+    return (
+      this.privacyMask.version === this.projection?.version &&
+      value?.type === 'text' &&
+      value.value.includes('[СКРЫТО')
+    );
+  }
+  privacyOriginalDisplay(position: Position) {
+    if (!this.privacyVeilAt(position)) return undefined;
+    const row = this.sheet?.rows[position.row],
+      column = this.sheet?.columns[position.column];
+    if (!row || !column) return undefined;
+    const original = this.confirmed.get(key(row, column));
+    if (original?.type === 'formula') {
+      if (
+        this.calculatedVersion !== this.projection?.version ||
+        this.calculationStatus !== 'complete'
+      )
+        return undefined;
+      return displayValue(this.calculated.get(key(row, column)));
+    }
+    return displayValue(original);
+  }
   activeSheetId: string | undefined;
   confirmed = new Map<string, Value>();
   confirmedStyles = new Map<string, CellStyle>();
@@ -516,22 +1186,55 @@ export class DocumentStore {
   private historyTimer: ReturnType<typeof setTimeout> | undefined;
   selected: Position = { row: 0, column: 0 };
   selectionAnchor: Position = { row: 0, column: 0 };
+  private selectionAxis: { kind: 'column'; index: number } | undefined;
   remotePresence: RemotePresence[] = [];
   editing: { position: Position; text: string; source: 'cell' | 'bar' } | undefined;
+  // Opening the leave-confirmation dialog must not implicitly submit a draft.
+  navigationGuardActive = false;
   error = '';
   loading = false;
   exporting = false;
   recalculating = false;
   calculated = new Map<string, CalculatedValue>();
+  // Presentation fallback only: never a calculated projection of the new head.
+  private lastDisplayedResults = new Map<string, CalculatedValue>();
   calculatedVersion: string | undefined;
   calculationStatus: 'idle' | 'pending' | 'complete' | 'failed' = 'idle';
   calculationError = '';
+  readonly performanceMetrics = {
+    optimisticUpdateMs: 0,
+    serverConfirmationMs: 0,
+    calculationPatchMs: 0,
+    recalculatedCells: 0,
+    dirtyCells: 0,
+  };
+  private readonly submittedAt = new Map<string, number>();
+  private calculationStartedAt = 0;
   private calculationTimer: ReturnType<typeof setTimeout> | undefined;
   private calculationRequestedVersion: string | undefined;
   private calculationAssembly:
-    { nextSequence: number; bytes: number; values: Map<string, CalculatedValue> } | undefined;
+    | {
+        nextSequence: number;
+        bytes: number;
+        values: Map<string, CalculatedValue>;
+        seen: Set<string>;
+        patchCells: number;
+        fullSnapshot: boolean;
+        baseInputVersion: bigint | undefined;
+        expectedFormulaCount: number;
+        evaluatedCells: number;
+        dirtyCells: number;
+      }
+    | undefined;
   private revision = 0;
   private listeners = new Set<() => void>();
+  private mergeCacheSheetId = '';
+  private mergeCacheVersion = '';
+  private mergeCacheMerges: MergeRange[] | undefined;
+  private mergeCache = new Map<
+    string,
+    { startRow: number; endRow: number; startColumn: number; endColumn: number }
+  >();
   private actor: Uint8Array | undefined;
   private sender: ((bytes: Uint8Array) => boolean) | undefined;
   private subscribedDocument: string | undefined;
@@ -547,6 +1250,7 @@ export class DocumentStore {
   private connectionGeneration = 0;
   private syncing = false;
   private creation: { document_id: string; operation_id: string } | undefined;
+  private creating = false;
   private recalculationRequest: { document_id: string; operation_id: string } | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   subscribe = (listener: () => void) => {
@@ -555,6 +1259,16 @@ export class DocumentStore {
   };
   snapshot = () => this.revision;
   notify = () => {
+    const hidden = this.filterState.hidden;
+    if (hidden.has(this.selected.row) && this.sheet) {
+      let row = this.selected.row;
+      while (row < this.sheet.rows.length - 1 && hidden.has(row)) row++;
+      while (row > 0 && hidden.has(row)) row--;
+      if (!hidden.has(row)) {
+        this.selected = { ...this.selected, row };
+        this.selectionAnchor = { ...this.selected };
+      }
+    }
     this.revision++;
     this.listeners.forEach((fn) => fn());
   };
@@ -578,6 +1292,7 @@ export class DocumentStore {
   }
   private scheduleHistory(delay = 0) {
     clearTimeout(this.historyTimer);
+    if (!this.canEdit) return;
     if (
       !this.historyDirty ||
       this.historyDenied ||
@@ -609,6 +1324,7 @@ export class DocumentStore {
   }
   private async discoverHistory() {
     clearTimeout(this.historyTimer);
+    if (!this.canEdit) return;
     const document = this.projection?.document_id;
     const actor = this.actor && bytesUuid(this.actor);
     if (
@@ -638,7 +1354,7 @@ export class DocumentStore {
     let retry = 0;
     let denied = false;
     try {
-      const response = await fetch(`/api/documents/${encodeURIComponent(document)}/undo-history`, {
+      const response = await this.fetchDocument(this.documentUrl(document, '/undo-history'), {
         signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]),
       });
       if (!response.ok) {
@@ -696,6 +1412,7 @@ export class DocumentStore {
     this.activeSheetId = sheetId;
     this.selected = { row: 0, column: 0 };
     this.selectionAnchor = { row: 0, column: 0 };
+    this.selectionAxis = undefined;
     this.remotePresence = [];
     this.syncPreview(true);
     this.schedulePresence();
@@ -703,6 +1420,17 @@ export class DocumentStore {
     return true;
   }
   value(position: Position) {
+    const row = this.sheet?.rows[position.row],
+      column = this.sheet?.columns[position.column];
+    if (!row || !column) return undefined;
+    if (this.privacyMask) {
+      if (this.privacyMask.version !== this.projection?.version)
+        return { type: 'text' as const, value: '[МАСКА УСТАРЕЛА]' };
+      return this.privacyMaskCells.get(`${this.sheet?.id}/${row}/${column}`);
+    }
+    return this.authoredValue(position);
+  }
+  private authoredValue(position: Position) {
     const row = this.sheet?.rows[position.row],
       column = this.sheet?.columns[position.column];
     if (!row || !column) return undefined;
@@ -729,6 +1457,13 @@ export class DocumentStore {
     for (const pending of this.pending)
       if (pending.kind === 'style' && pending.sheet === sheetId && pending.targets.has(cellKey))
         result = applyStyle(result, pending.changes);
+      else if (
+        pending.kind === 'batch' &&
+        pending.styles?.some((write) => key(write.row, write.column) === cellKey)
+      ) {
+        const write = pending.styles.find((item) => key(item.row, item.column) === cellKey);
+        if (write) result = applyStyle(result, write.changes);
+      }
     return result;
   }
   display(position: Position) {
@@ -738,6 +1473,7 @@ export class DocumentStore {
       : displayValue(value);
   }
   displayContent(position: Position): Value | CalculatedValue | undefined {
+    if (this.privacyMask) return this.value(position);
     const row = this.sheet?.rows[position.row],
       column = this.sheet?.columns[position.column];
     const value = row && column ? this.previewValue(row, column) : this.value(position);
@@ -763,12 +1499,12 @@ export class DocumentStore {
             pending.writes.some((item) => item.row === row && item.column === column)),
       )
     )
-      return value;
+      return row && column ? this.lastDisplayedResults.get(key(row, column)) : undefined;
     if (
       this.calculatedVersion !== this.projection?.version ||
       this.calculationStatus !== 'complete'
     )
-      return value;
+      return this.lastDisplayedResults.get(key(row, column));
     return this.calculated.get(key(row, column));
   }
   get previewVisible() {
@@ -838,6 +1574,10 @@ export class DocumentStore {
     );
   }
   private syncPreview(reset = false) {
+    if (this.projection?.representation === 'anonymized') {
+      this.previewStatus = 'idle';
+      return;
+    }
     // A move mutates only the Worker's private candidate. Any later ordinary
     // preview must rebuild from confirmed content, never from that candidate.
     if (this.movePreview) {
@@ -873,6 +1613,13 @@ export class DocumentStore {
           for (const change of pending.changes) leaves.add(change.property);
           styleOverlay.set(address, leaves);
         }
+      else if (pending.kind === 'batch')
+        for (const write of pending.styles ?? []) {
+          const address = `${sheet.id}/${key(write.row, write.column)}`;
+          const leaves = styleOverlay.get(address) ?? new Set<keyof CellStyle>();
+          for (const change of write.changes) leaves.add(change.property);
+          styleOverlay.set(address, leaves);
+        }
     const styleTouched = new Map<string, Set<keyof CellStyle>>(
       [...this.previewStyleOverlay].map(([address, leaves]) => [address, new Set(leaves)]),
     );
@@ -891,7 +1638,7 @@ export class DocumentStore {
       pending_revision: String(++this.previewRevision),
     };
     const styleMutations = (targets: Map<string, Set<keyof CellStyle>>): PreviewStyleMutation[] =>
-      projection.authored_projection_schema_version === 4
+      (projection.authored_projection_schema_version ?? 1) >= 4
         ? [...targets].flatMap(([address, leaves]) => {
             const [sheet_id = '', row_id = '', column_id = ''] = address.split('/');
             const owner = projection.sheets.find((s) => s.id === sheet_id);
@@ -916,7 +1663,7 @@ export class DocumentStore {
     if (reset) {
       const keys = new Set([
         ...this.confirmed.keys(),
-        ...(projection.authored_projection_schema_version === 4 ? [] : overlay),
+        ...((projection.authored_projection_schema_version ?? 1) >= 4 ? [] : overlay),
       ]);
       const cellsBySheet = new Map(
         projection.sheets.map((item) => [item.id, [] as Sheet['cells']]),
@@ -929,7 +1676,7 @@ export class DocumentStore {
           row_id,
           column_id,
           value:
-            projection.authored_projection_schema_version === 4
+            (projection.authored_projection_schema_version ?? 1) >= 4
               ? this.confirmed.get(cellKey)!
               : this.previewValue(row_id, column_id),
         });
@@ -940,7 +1687,7 @@ export class DocumentStore {
         );
         const rows = new Set(item.rows),
           columns = new Set(item.columns);
-        for (const address of projection.authored_projection_schema_version === 4
+        for (const address of (projection.authored_projection_schema_version ?? 1) >= 4
           ? []
           : styleOverlay.keys()) {
           const [owner, row = '', column = ''] = address.split('/');
@@ -952,12 +1699,12 @@ export class DocumentStore {
         return {
           ...item,
           cells: cellsBySheet.get(item.id) ?? [],
-          ...(projection.authored_projection_schema_version === 4
+          ...((projection.authored_projection_schema_version ?? 1) >= 4
             ? { styles: [...styles.values()] }
             : {}),
         };
       });
-      if (projection.authored_projection_schema_version === 4) {
+      if ((projection.authored_projection_schema_version ?? 1) >= 4) {
         if (
           projection.last_axis_change_version === undefined ||
           !projection.retired_row_ids ||
@@ -971,7 +1718,7 @@ export class DocumentStore {
         }
         this.preview.reset({
           ...stamp,
-          schema_version: 4,
+          schema_version: (projection.authored_projection_schema_version ?? 0) >= 7 ? 5 : 4,
           sheets,
           last_axis_change_version: projection.last_axis_change_version,
           retired_row_ids: projection.retired_row_ids,
@@ -1025,8 +1772,6 @@ export class DocumentStore {
     clearTimeout(this.calculationTimer);
     this.calculationAssembly = undefined;
     this.calculationRequestedVersion = undefined;
-    this.calculated.clear();
-    this.calculatedVersion = undefined;
     this.calculationError = '';
     this.calculationStatus = [...this.confirmed.values()].some((value) => value.type === 'formula')
       ? 'pending'
@@ -1050,6 +1795,8 @@ export class DocumentStore {
           value: {
             documentId: uuidBytes(this.projection.document_id),
             inputVersion: BigInt(this.projection.version),
+            baseInputVersion:
+              this.calculatedVersion === undefined ? undefined : BigInt(this.calculatedVersion),
           },
         },
       }),
@@ -1059,6 +1806,9 @@ export class DocumentStore {
       return;
     }
     this.calculationRequestedVersion = this.projection.version;
+    this.calculationStartedAt = performance.now();
+    this.performanceMetrics.recalculatedCells = 0;
+    this.performanceMetrics.dirtyCells = 0;
     this.calculationTimer = setTimeout(() => {
       this.failCalculation();
       this.notify();
@@ -1082,6 +1832,7 @@ export class DocumentStore {
       this.calculationRequestedVersion !== this.projection.version
     )
       return;
+    let shouldNotify = false;
     try {
       const bytes = toBinary(CalculationCommittedSchema, message).byteLength;
       if (
@@ -1090,11 +1841,12 @@ export class DocumentStore {
         bytesUuid(message.contextId) !==
           (this.projection.calculation_context?.context_id ?? this.projection.document_id) ||
         message.calculationEpoch !== BigInt(this.projection.calculation_context?.epoch ?? '0') ||
-        message.formulaEngineVersion !== 'pxel-formula-0.14.0' ||
+        message.formulaEngineVersion !== FORMULA_ENGINE_VERSION ||
         message.compatibilityProfile !== formulaProfile ||
-        !message.fullSnapshot ||
         bytes > 256 * 1024 ||
-        message.patchSequence > 4096
+        message.patchSequence > 4096 ||
+        message.evaluatedCells > 100_000 ||
+        message.dirtyCells > 200_000
       )
         throw new Error('Invalid calculation metadata');
       if (message.errorCode !== 0) {
@@ -1104,23 +1856,63 @@ export class DocumentStore {
           !message.isFinal ||
           message.patchSequence !== 0 ||
           message.cells.length !== 0 ||
-          message.calculatedStateHash.length !== 0
+          message.calculatedStateHash.length !== 0 ||
+          message.baseInputVersion !== undefined ||
+          message.evaluatedCells !== 0 ||
+          message.dirtyCells !== 0
         )
           throw new Error('Invalid calculation failure');
         this.failCalculation();
+        shouldNotify = true;
         return;
       }
       if (message.calculatedStateHash.length !== (message.isFinal ? 32 : 0))
         throw new Error('Invalid calculation hash');
+      const formulaCount =
+        this.calculationAssembly?.expectedFormulaCount ??
+        [...this.confirmed.values()].filter((value) => value.type === 'formula').length;
+      if (formulaCount > 100_000) throw new Error('Calculation exceeds limit');
+      const baseInputVersion = message.baseInputVersion;
+      if (
+        (message.fullSnapshot && baseInputVersion !== undefined) ||
+        (!message.fullSnapshot &&
+          (baseInputVersion === undefined ||
+            this.calculatedVersion === undefined ||
+            baseInputVersion !== BigInt(this.calculatedVersion) ||
+            baseInputVersion >= message.inputVersion))
+      )
+        throw new Error('Invalid calculation base');
       const assembly = this.calculationAssembly ?? {
         nextSequence: 0,
         bytes: 0,
-        values: new Map<string, CalculatedValue>(),
+        values: message.fullSnapshot
+          ? new Map<string, CalculatedValue>()
+          : new Map(this.calculated),
+        seen: new Set<string>(),
+        patchCells: 0,
+        fullSnapshot: message.fullSnapshot,
+        baseInputVersion,
+        expectedFormulaCount: formulaCount,
+        evaluatedCells: message.evaluatedCells,
+        dirtyCells: message.dirtyCells,
       };
+      if (
+        assembly.fullSnapshot !== message.fullSnapshot ||
+        assembly.baseInputVersion !== baseInputVersion ||
+        assembly.expectedFormulaCount !== formulaCount ||
+        assembly.evaluatedCells !== message.evaluatedCells ||
+        assembly.dirtyCells !== message.dirtyCells
+      )
+        throw new Error('Inconsistent calculation chunks');
       if (message.patchSequence !== assembly.nextSequence)
         throw new Error('Invalid calculation sequence');
       assembly.bytes += bytes;
-      if (assembly.bytes > 32 * 1024 * 1024 || assembly.values.size + message.cells.length > 100000)
+      assembly.patchCells += message.cells.length;
+      if (
+        assembly.bytes > 32 * 1024 * 1024 ||
+        assembly.patchCells > (message.fullSnapshot ? 100_000 : 200_000) ||
+        (message.fullSnapshot && assembly.values.size + message.cells.length > formulaCount)
+      )
         throw new Error('Calculation exceeds limit');
       const axesBySheet = new Map(
         this.projection.sheets.map(
@@ -1140,13 +1932,21 @@ export class DocumentStore {
           address.columnId.length !== 16 ||
           !targetAxes ||
           !targetAxes.rows.has(bytesUuid(address.rowId)) ||
-          !targetAxes.columns.has(bytesUuid(address.columnId)) ||
-          !value?.case
+          !targetAxes.columns.has(bytesUuid(address.columnId))
         )
           throw new Error('Invalid calculation cell');
         const cellKey = key(bytesUuid(address.rowId), bytesUuid(address.columnId));
-        if (assembly.values.has(cellKey) || this.confirmed.get(cellKey)?.type !== 'formula')
-          throw new Error('Invalid calculation set');
+        if (assembly.seen.has(cellKey)) throw new Error('Duplicate calculation cell');
+        assembly.seen.add(cellKey);
+        const isFormula = this.confirmed.get(cellKey)?.type === 'formula';
+        if (!cell.value) {
+          if (message.fullSnapshot || isFormula || !assembly.values.has(cellKey))
+            throw new Error('Invalid calculation clear');
+          assembly.values.delete(cellKey);
+          continue;
+        }
+        if (!value?.case) throw new Error('Invalid calculated value');
+        if (!isFormula) throw new Error('Invalid calculation result');
         const errors = [
           '#NULL!',
           '#DIV/0!',
@@ -1168,24 +1968,35 @@ export class DocumentStore {
       this.calculationAssembly = assembly;
       if (message.isFinal) {
         if (
-          assembly.values.size !==
-          [...this.confirmed.values()].filter((value) => value.type === 'formula').length
+          assembly.values.size !== formulaCount ||
+          [...assembly.values.keys()].some(
+            (cellKey) => this.confirmed.get(cellKey)?.type !== 'formula',
+          )
         )
           throw new Error('Incomplete calculation');
         clearTimeout(this.calculationTimer);
         this.calculated = assembly.values;
+        this.performanceMetrics.calculationPatchMs = performance.now() - this.calculationStartedAt;
+        this.performanceMetrics.recalculatedCells = assembly.evaluatedCells;
+        this.performanceMetrics.dirtyCells = assembly.dirtyCells;
+        this.lastDisplayedResults = new Map(assembly.values);
         this.calculatedVersion = this.projection.version;
         this.calculationStatus = 'complete';
         this.calculationError = '';
         this.calculationAssembly = undefined;
+        shouldNotify = true;
       }
     } catch {
       this.failCalculation();
+      shouldNotify = true;
     } finally {
-      this.notify();
+      if (shouldNotify) this.notify();
     }
   }
   load(projection: Projection) {
+    if (this.guestAccessClosed) return;
+    if (this.transport.guest && projection.document_id !== this.transport.guest.documentId)
+      throw new Error('Ответ относится к другой таблице');
     const previousSheet = this.sheet;
     const documentChanged = this.projection?.document_id !== projection.document_id;
     const nextSheet =
@@ -1207,6 +2018,21 @@ export class DocumentStore {
       this.remotePresence = [];
     }
     if (documentChanged) {
+      this.privacyMask = undefined;
+      this.privacyMaskEnabled = true;
+      this.privacyFindings = [];
+      this.privacyReport = undefined;
+      this.privacyPolicy = undefined;
+      this.privacyAnalysisPending = false;
+      this.privacyAnalysisError = '';
+      this.personalView = { schema_version: 1, revision: 0, settings: { filters: [] } };
+      this.viewDocument = undefined;
+      this.viewGeneration++;
+      this.viewLoading = false;
+      this.viewError = '';
+      this.lastDisplayedResults.clear();
+      this.calculated.clear();
+      this.calculatedVersion = undefined;
       clearTimeout(this.headRefreshTimer);
       this.headRefreshVersion = 0n;
       this.headRefreshAttempts = 0;
@@ -1238,6 +2064,7 @@ export class DocumentStore {
     const nextSelected = remap(this.selected);
     const nextAnchor = remap(this.selectionAnchor);
     this.projection = projection;
+    if (documentChanged && this.actor && projection.capabilities) void this.reloadPersonalView();
     this.pruneHistory();
     this.activeSheetId = nextSheet?.id;
     this.selected = nextSelected;
@@ -1331,7 +2158,11 @@ export class DocumentStore {
     this.headRefreshTimer = setTimeout(() => void this.refreshHead(), delay);
   }
   async refresh(minimumVersion = 0n): Promise<boolean> {
-    const id = this.projection?.document_id ?? new URL(location.href).searchParams.get('document');
+    if (this.guestAccessClosed) return false;
+    const id =
+      this.transport.guest?.documentId ??
+      this.projection?.document_id ??
+      new URL(location.href).searchParams.get('document');
     if (!id) return true;
     if (this.movePreview) this.syncPreview(true);
     const generation = ++this.syncGeneration;
@@ -1342,7 +2173,7 @@ export class DocumentStore {
       let response: Response | undefined;
       for (const delay of [200, 400, 800, 1600, 3200, 0]) {
         if (generation !== this.syncGeneration) return false;
-        response = await fetch(`/api/documents/${encodeURIComponent(id)}`, {
+        response = await this.fetchDocument(this.documentUrl(id), {
           signal: AbortSignal.timeout(10000),
         });
         if (response.status !== 429 || delay === 0) break;
@@ -1359,6 +2190,12 @@ export class DocumentStore {
       const currentVersion =
         this.projection?.document_id === id ? BigInt(this.projection.version) : -1n;
       if (BigInt(projection.version) > currentVersion) this.load(projection);
+      else if (BigInt(projection.version) === currentVersion && this.projection) {
+        if (projection.capabilities) this.projection.capabilities = projection.capabilities;
+        else delete this.projection.capabilities;
+        if (projection.encryption) this.projection.encryption = projection.encryption;
+        else delete this.projection.encryption;
+      }
       if (!this.projection || BigInt(this.projection.version) < minimumVersion)
         throw new Error('Сервер еще не подтвердил актуальное состояние таблицы');
       this.error = '';
@@ -1377,8 +2214,10 @@ export class DocumentStore {
     }
   }
   async createDocument() {
+    if (this.isGuest) return;
     if (this.loading) return;
     this.loading = true;
+    this.creating = true;
     this.notify();
     try {
       this.creation ??= { document_id: uuidV7(), operation_id: uuidV7() };
@@ -1392,17 +2231,19 @@ export class DocumentStore {
       if (!response.ok) throw new Error('Не удалось создать таблицу');
       const url = new URL(location.href);
       url.searchParams.set('document', id);
-      history.replaceState(null, '', url);
       this.creation = undefined;
-      await this.refresh();
+      this.projection = undefined;
+      location.assign(url);
     } catch (error) {
       this.error = error instanceof Error ? error.message : 'Не удалось создать таблицу';
     } finally {
+      this.creating = false;
       this.loading = false;
       this.notify();
     }
   }
   async recalculate() {
+    if (!this.canEdit) return;
     const id = this.projection?.document_id;
     if (!id || !this.sender || this.recalculating || this.pending.length) return;
     if (this.recalculationRequest?.document_id !== id)
@@ -1412,7 +2253,7 @@ export class DocumentStore {
     this.error = '';
     this.notify();
     try {
-      const response = await fetch(`/api/documents/${encodeURIComponent(id)}/recalculate`, {
+      const response = await this.fetchDocument(this.documentUrl(id, '/recalculate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ operation_id: request.operation_id }),
@@ -1449,20 +2290,27 @@ export class DocumentStore {
       this.notify();
     }
   }
-  async exportXlsx() {
+  async exportXlsx(anonymize = false) {
+    if (!this.canExport) return;
     const id = this.projection?.document_id;
     if (!id || this.exporting || this.pending.length) return;
     this.exporting = true;
     this.error = '';
     this.notify();
     try {
-      const response = await fetch(`/api/documents/${encodeURIComponent(id)}/export.xlsx`, {
-        signal: AbortSignal.timeout(30_000),
-      });
+      const response = await fetch(
+        this.documentUrl(
+          id,
+          `/export.xlsx${anonymize || this.privacyMask ? '?anonymized=true' : ''}`,
+        ),
+        {
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
       if (!response.ok) {
         throw new Error(
           response.status === 403
-            ? 'Экспорт доступен только владельцу таблицы.'
+            ? 'Экспорт запрещён политикой выдачи или права изменились.'
             : response.status === 422
               ? 'Эта таблица содержит данные вне поддерживаемого XLSX-профиля.'
               : 'Не удалось скачать XLSX.',
@@ -1484,6 +2332,11 @@ export class DocumentStore {
     }
   }
   async connected(actor: Uint8Array, sender: (bytes: Uint8Array) => boolean) {
+    if (this.guestAccessClosed) return false;
+    if (this.transport.guest && bytesUuid(actor) !== this.transport.guest.actorId) {
+      this.closeGuestAccess();
+      return false;
+    }
     const generation = ++this.connectionGeneration;
     const previousActor = this.actor && bytesUuid(this.actor),
       nextActor = bytesUuid(actor);
@@ -1521,6 +2374,10 @@ export class DocumentStore {
       op.attempts = 0;
     });
     this.actor = actor;
+    if (previousActor !== nextActor)
+      this.personalView = { schema_version: 1, revision: 0, settings: { filters: [] } };
+    if (previousActor !== nextActor || this.viewDocument !== document)
+      void this.reloadPersonalView();
     this.sender = undefined;
     this.inflight = undefined;
     const synced = await this.refresh();
@@ -1567,12 +2424,62 @@ export class DocumentStore {
     this.movePreview = undefined;
   }
   select(position: Position, extend = false) {
+    if (this.allRowsHidden) return;
+    this.selectionAxis = undefined;
+    const merged = this.mergeAt(position);
+    if (merged) position = { row: merged.startRow, column: merged.startColumn };
     if (!extend) this.selectionAnchor = { ...position };
     this.selected = position;
     this.schedulePresence();
     this.notify();
   }
+  mergeAt(position: Position) {
+    const sheet = this.sheet;
+    if (!sheet) return undefined;
+    const mergeVersion = this.projection?.version ?? '';
+    if (
+      sheet.id !== this.mergeCacheSheetId ||
+      mergeVersion !== this.mergeCacheVersion ||
+      sheet.merges !== this.mergeCacheMerges
+    ) {
+      this.mergeCacheSheetId = sheet.id;
+      this.mergeCacheVersion = mergeVersion;
+      this.mergeCacheMerges = sheet.merges;
+      this.mergeCache = new Map();
+      for (const merge of sheet.merges ?? []) {
+        const startRow = sheet.rows.indexOf(merge.first_row_id),
+          endRow = sheet.rows.indexOf(merge.last_row_id),
+          startColumn = sheet.columns.indexOf(merge.first_column_id),
+          endColumn = sheet.columns.indexOf(merge.last_column_id),
+          bounds = { startRow, endRow, startColumn, endColumn };
+        for (let row = startRow; row <= endRow; row++)
+          for (let column = startColumn; column <= endColumn; column++)
+            this.mergeCache.set(key(sheet.rows[row]!, sheet.columns[column]!), bounds);
+      }
+    }
+    const rowId = sheet.rows[position.row],
+      columnId = sheet.columns[position.column];
+    if (!rowId || !columnId) return undefined;
+    return this.mergeCache.get(key(rowId, columnId));
+  }
+  selectColumn(column: number) {
+    const sheet = this.sheet;
+    if (!sheet || !Number.isInteger(column) || column < 0 || column >= sheet.columns.length) return;
+    this.selected = { row: 0, column };
+    this.selectionAnchor = { row: 0, column };
+    this.selectionAxis = { kind: 'column', index: column };
+    this.schedulePresence();
+    this.notify();
+  }
   get selectionBounds() {
+    if (this.selectionAxis?.kind === 'column') {
+      return {
+        startRow: 0,
+        endRow: Math.max(0, (this.sheet?.rows.length ?? 1) - 1),
+        startColumn: this.selectionAxis.index,
+        endColumn: this.selectionAxis.index,
+      };
+    }
     return {
       startRow: Math.min(this.selectionAnchor.row, this.selected.row),
       endRow: Math.max(this.selectionAnchor.row, this.selected.row),
@@ -1580,11 +2487,122 @@ export class DocumentStore {
       endColumn: Math.max(this.selectionAnchor.column, this.selected.column),
     };
   }
+  get canMergeSelection() {
+    if (!this.canEdit) return false;
+    const sheet = this.sheet;
+    if (!sheet || this.editing || this.syncing || this.pendingCount >= 128) return false;
+    const bounds = this.selectionBounds;
+    return bounds.endRow > bounds.startRow || bounds.endColumn > bounds.startColumn;
+  }
+  get canUnmergeSelection() {
+    if (!this.canEdit) return false;
+    const sheet = this.sheet;
+    if (!sheet || this.editing || this.syncing || this.pendingCount >= 128) return false;
+    const bounds = this.selectionBounds;
+    return (sheet.merges ?? []).some((merge) => {
+      const firstRow = sheet.rows.indexOf(merge.first_row_id),
+        lastRow = sheet.rows.indexOf(merge.last_row_id),
+        firstColumn = sheet.columns.indexOf(merge.first_column_id),
+        lastColumn = sheet.columns.indexOf(merge.last_column_id);
+      const exact =
+        firstRow === bounds.startRow &&
+        lastRow === bounds.endRow &&
+        firstColumn === bounds.startColumn &&
+        lastColumn === bounds.endColumn;
+      const anchor =
+        bounds.startRow === bounds.endRow &&
+        bounds.startColumn === bounds.endColumn &&
+        firstRow === this.selected.row &&
+        firstColumn === this.selected.column;
+      return exact || anchor;
+    });
+  }
+  setMergeSelected(merged: boolean) {
+    if (!this.canEdit) return false;
+    const sheet = this.sheet,
+      projection = this.projection,
+      actor = this.actor;
+    if (
+      !sheet ||
+      !projection ||
+      !actor ||
+      (merged ? !this.canMergeSelection : !this.canUnmergeSelection)
+    )
+      return false;
+    const selectedBounds = this.selectionBounds;
+    const bounds = merged
+      ? selectedBounds
+      : (() => {
+          const range = (sheet.merges ?? []).find((item) => {
+            const firstRow = sheet.rows.indexOf(item.first_row_id),
+              lastRow = sheet.rows.indexOf(item.last_row_id),
+              firstColumn = sheet.columns.indexOf(item.first_column_id),
+              lastColumn = sheet.columns.indexOf(item.last_column_id);
+            return (
+              (firstRow === selectedBounds.startRow &&
+                lastRow === selectedBounds.endRow &&
+                firstColumn === selectedBounds.startColumn &&
+                lastColumn === selectedBounds.endColumn) ||
+              (selectedBounds.startRow === selectedBounds.endRow &&
+                selectedBounds.startColumn === selectedBounds.endColumn &&
+                firstRow === this.selected.row &&
+                firstColumn === this.selected.column)
+            );
+          });
+          if (!range) return selectedBounds;
+          return {
+            startRow: sheet.rows.indexOf(range.first_row_id),
+            endRow: sheet.rows.indexOf(range.last_row_id),
+            startColumn: sheet.columns.indexOf(range.first_column_id),
+            endColumn: sheet.columns.indexOf(range.last_column_id),
+          };
+        })();
+    const range = {
+      firstRowId: uuidBytes(sheet.rows[bounds.startRow]!),
+      lastRowId: uuidBytes(sheet.rows[bounds.endRow]!),
+      firstColumnId: uuidBytes(sheet.columns[bounds.startColumn]!),
+      lastColumnId: uuidBytes(sheet.columns[bounds.endColumn]!),
+    };
+    const id = uuidV7();
+    const bytes = toBinary(
+      ClientEnvelopeSchema,
+      create(ClientEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'command',
+          value: {
+            operationId: uuidBytes(id),
+            documentId: uuidBytes(projection.document_id),
+            actorId: actor,
+            baseVersion: BigInt(projection.version),
+            clientSequence: ++this.sequence,
+            operation: {
+              kind: {
+                case: 'mergeWrite',
+                value: {
+                  sheetId: uuidBytes(sheet.id),
+                  range,
+                  merged,
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+    if (bytes.byteLength > 1_048_576) return false;
+    this.pending.push({ kind: 'merge', id, bytes, attempts: 0 });
+    this.error = '';
+    this.notify();
+    this.flush();
+    return true;
+  }
   get pasteOrigin(): Position {
     const { startRow, startColumn } = this.selectionBounds;
     return { row: startRow, column: startColumn };
   }
   copySelectionTsv() {
+    if (!this.canCopy) return undefined;
     const sheet = this.sheet;
     if (!sheet) return undefined;
     const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
@@ -1594,20 +2612,16 @@ export class DocumentStore {
       this.notify();
       return undefined;
     }
-    const lines: string[] = [];
+    const lines: CellMatrix = [];
     let bytes = 0;
     for (let row = startRow; row <= endRow; row++) {
+      if (this.filterState.hidden.has(row)) continue;
       const fields: string[] = [];
       for (let column = startColumn; column <= endColumn; column++) {
         const value = this.value({ row, column });
         const text = value?.type === 'formula' ? value.value.current_text : displayValue(value);
         if (text === undefined) {
           this.error = 'Формула ещё не готова для копирования.';
-          this.notify();
-          return undefined;
-        }
-        if (/\r|\n|\t/.test(text) || (value?.type === 'text' && text.startsWith('='))) {
-          this.error = 'Эту ячейку нельзя без потерь скопировать как TSV.';
           this.notify();
           return undefined;
         }
@@ -1619,19 +2633,48 @@ export class DocumentStore {
         }
         fields.push(text);
       }
-      lines.push(fields.join('\t'));
+      lines.push(fields);
     }
     this.error = '';
     this.notify();
-    return lines.join('\n');
+    return serializeDelimited(lines);
   }
-  begin(text = displayValue(this.value(this.selected)), source: 'cell' | 'bar' = 'cell') {
+  copyRedactedSelectionTsv(projection: Projection) {
+    if (
+      projection.representation !== 'anonymized' ||
+      projection.document_id !== this.projection?.document_id ||
+      projection.version !== this.projection.version
+    )
+      throw new Error('Безопасная копия устарела.');
+    const sheet = projection.sheets.find((s) => s.id === this.activeSheetId);
+    if (!sheet) throw new Error('Лист копии недоступен.');
+    const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
+    if ((endRow - startRow + 1) * (endColumn - startColumn + 1) > 1000)
+      throw new Error('Можно скопировать не более 1000 ячеек.');
+    const cells = new Map(sheet.cells.map((c) => [key(c.row_id, c.column_id), c.value]));
+    const lines: CellMatrix = [];
+    for (let row = startRow; row <= endRow; row++) {
+      if (this.filterState.hidden.has(row)) continue;
+      const fields: string[] = [];
+      for (let column = startColumn; column <= endColumn; column++)
+        fields.push(
+          displayValue(cells.get(key(sheet.rows[row] ?? '', sheet.columns[column] ?? ''))),
+        );
+      lines.push(fields);
+    }
+    const text = serializeDelimited(lines);
+    if (byteLength(text) > 512 * 1024) throw new Error('Текст выделения превышает 512 КБ.');
+    return text;
+  }
+  begin(text = displayValue(this.authoredValue(this.selected)), source: 'cell' | 'bar' = 'cell') {
+    if (!this.canEdit) return;
     if (!this.sheet) return;
     this.editing = { position: { ...this.selected }, text, source };
     this.syncPreview();
     this.notify();
   }
   draft(text: string) {
+    if (!this.canEdit) return;
     if (this.editing) {
       this.editing = { ...this.editing, text };
       this.syncPreview();
@@ -1644,6 +2687,7 @@ export class DocumentStore {
     this.notify();
   }
   commit() {
+    if (!this.canEdit) return;
     const edit = this.editing;
     if (!edit) return;
     this.editing = undefined;
@@ -1651,6 +2695,8 @@ export class DocumentStore {
     this.notify();
   }
   set(position: Position, value: Value) {
+    if (!this.canEdit) return false;
+    const optimisticStartedAt = performance.now();
     const sheet = this.sheet,
       projection = this.projection,
       actor = this.actor;
@@ -1728,12 +2774,14 @@ export class DocumentStore {
     }
     this.pending.push({ kind: 'cell', id, row, column, value, bytes, attempts: 0 });
     this.syncPreview();
+    this.performanceMetrics.optimisticUpdateMs = performance.now() - optimisticStartedAt;
     this.error = '';
     this.notify();
     this.flush();
     return true;
   }
   get canFormat() {
+    if (!this.canEdit) return false;
     return Boolean(
       this.sheet &&
       this.actor &&
@@ -1741,6 +2789,31 @@ export class DocumentStore {
       !this.syncing &&
       !this.editing &&
       this.pendingCount < 128,
+    );
+  }
+  selectionStyle<K extends keyof CellStyle>(property: K): CellStyle[K] | 'mixed' {
+    const b = this.selectionBounds;
+    if ((b.endRow - b.startRow + 1) * (b.endColumn - b.startColumn + 1) > 1000) return 'mixed';
+    const first = this.style({ row: b.startRow, column: b.startColumn })[property];
+    for (let row = b.startRow; row <= b.endRow; row++)
+      for (let column = b.startColumn; column <= b.endColumn; column++)
+        if (JSON.stringify(this.style({ row, column })[property]) !== JSON.stringify(first))
+          return 'mixed';
+    return first;
+  }
+  clearSelection() {
+    if (!this.canEdit) return false;
+    const b = this.selectionBounds;
+    if ((b.endRow - b.startRow + 1) * (b.endColumn - b.startColumn + 1) > 1000) {
+      this.error = 'Можно очистить не более 1000 ячеек за один раз.';
+      this.notify();
+      return false;
+    }
+    return this.pasteMatrix(
+      Array.from({ length: b.endRow - b.startRow + 1 }, () =>
+        Array<string>(b.endColumn - b.startColumn + 1).fill(''),
+      ),
+      this.pasteOrigin,
     );
   }
   setStyle(changes: readonly StyleChange[]) {
@@ -1813,7 +2886,59 @@ export class DocumentStore {
       return false;
     }
   }
+  setAxisSize(axis: 'row' | 'column', index: number, size: number | undefined) {
+    if (!this.canEdit) return false;
+    const sheet = this.sheet,
+      projection = this.projection,
+      actor = this.actor;
+    const axisId = axis === 'row' ? sheet?.rows[index] : sheet?.columns[index];
+    const minimum = axis === 'row' ? 12 : 24,
+      maximum = axis === 'row' ? 1000 : 2000;
+    if (
+      !sheet ||
+      !projection ||
+      !actor ||
+      !axisId ||
+      !this.sender ||
+      this.syncing ||
+      this.pendingCount >= 128
+    )
+      return false;
+    if (size !== undefined && (!Number.isInteger(size) || size < minimum || size > maximum)) {
+      this.error = `Размер должен быть от ${minimum} до ${maximum} пикселей.`;
+      this.notify();
+      return false;
+    }
+    const id = uuidV7();
+    const writes = [
+      { axisKind: axis === 'row' ? 1 : 2, axisId: uuidBytes(axisId), sizeCssPx: size },
+    ];
+    const bytes = toBinary(
+      ClientEnvelopeSchema,
+      create(ClientEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'command',
+          value: {
+            operationId: uuidBytes(id),
+            documentId: uuidBytes(projection.document_id),
+            actorId: actor,
+            baseVersion: BigInt(projection.version),
+            clientSequence: ++this.sequence,
+            setAxisSizes: { sheetId: uuidBytes(sheet.id), writes },
+          },
+        },
+      }),
+    );
+    if (bytes.length > 1_048_576) return false;
+    this.pending.push({ kind: 'axisSize', id, bytes, attempts: 0 });
+    this.error = '';
+    this.notify();
+    this.flush();
+    return true;
+  }
   get canUndo() {
+    if (!this.canEdit) return false;
     return Boolean(
       this.undoHistory.length &&
       this.pendingCount < 128 &&
@@ -1825,6 +2950,7 @@ export class DocumentStore {
     );
   }
   get canRedo() {
+    if (!this.canEdit) return false;
     return Boolean(
       this.redoHistory.length &&
       this.pendingCount < 128 &&
@@ -1878,6 +3004,7 @@ export class DocumentStore {
     return true;
   }
   copyFormulaPayload() {
+    if (!this.canCopy) return undefined;
     if (this.pending.length || !this.projection) return undefined;
     if (
       this.selectionAnchor.row !== this.selected.row ||
@@ -1919,6 +3046,7 @@ export class DocumentStore {
     return false;
   }
   private canPrepareMove() {
+    if (!this.canEdit) return false;
     if (!this.projection || !this.sheet || !this.actor || !this.sender)
       return this.moveError('Для перемещения подключитесь к таблице. Исходные ячейки не изменены.');
     if (
@@ -1932,7 +3060,9 @@ export class DocumentStore {
       return this.moveError('Завершите ввод и дождитесь сохранения перед перемещением.');
     return true;
   }
-  cutRangePayload() {
+  cutRangePayload(activate = true) {
+    if (this.privacyMask) return undefined;
+    if (!this.canCopy) return undefined;
     if (!this.canPrepareMove()) return undefined;
     const sheet = this.sheet,
       projection = this.projection;
@@ -1940,6 +3070,10 @@ export class DocumentStore {
     const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
     const rows = endRow - startRow + 1,
       columns = endColumn - startColumn + 1;
+    if ([...this.filterState.hidden].some((row) => row >= startRow && row <= endRow)) {
+      this.moveError('Сначала снимите фильтр перед вырезанием диапазона со скрытыми строками.');
+      return undefined;
+    }
     if (
       ![startRow, endRow, startColumn, endColumn].every(Number.isSafeInteger) ||
       startRow < 0 ||
@@ -1963,10 +3097,15 @@ export class DocumentStore {
       rows,
       columns,
     });
-    this.cutIntent = { raw, version: projection.version, stale: false };
+    if (activate) this.cutIntent = { raw, version: projection.version, stale: false };
     this.error = '';
     this.notify();
     return raw;
+  }
+  activateCutClipboard(raw: string) {
+    if (!this.projection || !this.canCopy || !this.canEdit) return;
+    this.cutIntent = { raw, version: this.projection.version, stale: false };
+    this.notify();
   }
   pasteCutRange(raw: string, position: Position = this.pasteOrigin) {
     if (!this.canPrepareMove()) return false;
@@ -2072,10 +3211,14 @@ export class DocumentStore {
     return true;
   }
   copyRangePayload() {
+    if (this.privacyMask || this.projection?.representation === 'anonymized') return undefined;
+    if (!this.canCopy) return undefined;
     const sheet = this.sheet,
       projection = this.projection;
     if (!sheet || !projection || this.pending.length || this.editing) return undefined;
     const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
+    if ([...this.filterState.hidden].some((row) => row >= startRow && row <= endRow))
+      return undefined;
     const rows = endRow - startRow + 1,
       columns = endColumn - startColumn + 1;
     if (rows * columns <= 1 || rows * columns > 1_000) return undefined;
@@ -2102,6 +3245,7 @@ export class DocumentStore {
     });
   }
   pasteRangeCopy(raw: string, position: Position = this.pasteOrigin) {
+    if (!this.canEdit) return false;
     const projection = this.projection,
       sheet = this.sheet,
       actor = this.actor;
@@ -2197,6 +3341,7 @@ export class DocumentStore {
     return true;
   }
   async pasteFormulaCopy(raw: string, position: Position = this.selected) {
+    if (!this.canEdit) return false;
     const projection = this.projection;
     if (!projection || byteLength(raw) > 64 * 1024 || this.formulaCopyInFlight) return false;
     let payload: unknown;
@@ -2258,14 +3403,26 @@ export class DocumentStore {
     }
   }
   pasteTsv(text: string, position: Position = this.selected, preserveTrailingBlank = false) {
+    if (!this.canEdit) return false;
+    try {
+      return this.pasteMatrix(parseDelimited(text, '\t', preserveTrailingBlank), position);
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'Не удалось разобрать вставку.';
+      this.notify();
+      return false;
+    }
+  }
+  pasteMatrix(
+    rows: CellMatrix,
+    position: Position = this.selected,
+    literal = false,
+    alignment: readonly (string | null)[] = [],
+  ) {
+    if (!this.canEdit) return false;
     const sheet = this.sheet,
       projection = this.projection,
       actor = this.actor;
     if (!sheet || !projection || !actor) return false;
-    const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const rows = (preserveTrailingBlank ? normalizedText : normalizedText.replace(/\n$/, ''))
-      .split('\n')
-      .map((line) => line.split('\t'));
     const count = rows.reduce((total, row) => total + row.length, 0);
     if (
       count < 1 ||
@@ -2283,11 +3440,15 @@ export class DocumentStore {
     }
     const writes: PendingBatch['writes'] = [];
     const wireWrites = [];
+    const optimisticStyles: NonNullable<PendingBatch['styles']> = [];
+    const wireStyles = [];
     let textBytes = 0;
     for (let r = 0; r < rows.length; r++) {
       const fields = rows[r] ?? [];
       for (let c = 0; c < fields.length; c++) {
-        const value = parseInput(fields[c] ?? '');
+        const field = fields[c] ?? '';
+        const value: Value =
+          literal && field !== '' ? { type: 'text', value: field } : parseInput(field);
         if (value.type === 'formula') {
           this.error = 'Массовая вставка формул пока не поддерживается. Введите формулу в ячейку.';
           this.notify();
@@ -2324,6 +3485,19 @@ export class DocumentStore {
             }),
           }),
         );
+        const horizontal = alignment[c];
+        if (horizontal === 'left' || horizontal === 'center' || horizontal === 'right') {
+          const changes: StyleChange[] = [{ property: 'horizontal', value: horizontal }];
+          optimisticStyles.push({ row, column, changes });
+          wireStyles.push({
+            address: {
+              sheetId: uuidBytes(sheet.id),
+              rowId: uuidBytes(row),
+              columnId: uuidBytes(column),
+            },
+            patch: encodeStylePatch(changes),
+          });
+        }
       }
     }
     const id = uuidV7();
@@ -2337,12 +3511,13 @@ export class DocumentStore {
           actorId: actor,
           baseVersion: BigInt(projection.version),
           clientSequence: ++this.sequence,
-          operation: create(CanonicalOperationSchema, {
-            kind: {
-              case: 'setCellValues',
-              value: { writes: wireWrites },
-            },
-          }),
+          ...(wireStyles.length > 0
+            ? { setCellBatch: { writes: wireWrites, styles: wireStyles } }
+            : {
+                operation: create(CanonicalOperationSchema, {
+                  kind: { case: 'setCellValues', value: { writes: wireWrites } },
+                }),
+              }),
         },
       },
     });
@@ -2352,7 +3527,14 @@ export class DocumentStore {
       this.notify();
       return false;
     }
-    this.pending.push({ kind: 'batch', id, writes, bytes, attempts: 0 });
+    this.pending.push({
+      kind: 'batch',
+      id,
+      writes,
+      ...(optimisticStyles.length > 0 ? { styles: optimisticStyles } : {}),
+      bytes,
+      attempts: 0,
+    });
     this.syncPreview();
     this.error = '';
     this.notify();
@@ -2360,6 +3542,7 @@ export class DocumentStore {
     return true;
   }
   addSheet() {
+    if (!this.canEdit) return false;
     const projection = this.projection,
       actor = this.actor;
     if (!projection || !actor || projection.sheets.length >= 64 || this.pendingCount >= 128)
@@ -2402,6 +3585,7 @@ export class DocumentStore {
     return true;
   }
   extendRows() {
+    if (!this.canEdit) return false;
     const sheet = this.sheet,
       projection = this.projection,
       actor = this.actor;
@@ -2410,6 +3594,7 @@ export class DocumentStore {
       !projection ||
       !actor ||
       sheet.rows.length >= 100_000 ||
+      this.personalView.settings.filters.some((filter) => filter.sheet_id === sheet.id) ||
       this.pending.some((pending) => pending.kind === 'extendRows') ||
       this.pendingCount >= 128
     )
@@ -2443,6 +3628,7 @@ export class DocumentStore {
     return true;
   }
   insertRowBeforeSelection() {
+    if (!this.canEdit) return false;
     const sheet = this.sheet,
       projection = this.projection,
       actor = this.actor;
@@ -2489,6 +3675,7 @@ export class DocumentStore {
     return true;
   }
   insertColumnBeforeSelection() {
+    if (!this.canEdit) return false;
     const sheet = this.sheet,
       projection = this.projection,
       actor = this.actor;
@@ -2535,6 +3722,7 @@ export class DocumentStore {
     return true;
   }
   deleteSelectedColumn() {
+    if (!this.canEdit) return false;
     const sheet = this.sheet,
       projection = this.projection,
       actor = this.actor;
@@ -2577,6 +3765,7 @@ export class DocumentStore {
     return true;
   }
   deleteSelectedRow() {
+    if (!this.canEdit) return false;
     const sheet = this.sheet,
       projection = this.projection,
       actor = this.actor;
@@ -2619,6 +3808,7 @@ export class DocumentStore {
     return true;
   }
   private flush() {
+    if (!this.canEdit) return;
     if (this.inflight || !this.sender || this.syncing) return;
     const op = this.pending[0];
     if (!op) return;
@@ -2630,6 +3820,7 @@ export class DocumentStore {
     if (this.sender(op.bytes)) {
       op.attempts++;
       this.inflight = op.id;
+      this.submittedAt.set(op.id, performance.now());
       this.timer = setTimeout(
         () => {
           this.inflight = undefined;
@@ -2640,14 +3831,132 @@ export class DocumentStore {
     }
   }
   private apply(operation: CanonicalOperation) {
+    if (operation.kind.case === 'mergeWrite') {
+      const update = operation.kind.value,
+        sheet = this.projection?.sheets.find((item) => item.id === bytesUuid(update.sheetId));
+      const range = update.range;
+      if (
+        !sheet ||
+        update.sheetId.length !== 16 ||
+        !range ||
+        [range.firstRowId, range.lastRowId, range.firstColumnId, range.lastColumnId].some(
+          (id) => id.length !== 16,
+        )
+      )
+        throw new Error('Invalid canonical merged range');
+      const next: MergeRange = {
+        first_row_id: bytesUuid(range.firstRowId),
+        last_row_id: bytesUuid(range.lastRowId),
+        first_column_id: bytesUuid(range.firstColumnId),
+        last_column_id: bytesUuid(range.lastColumnId),
+      };
+      const existing = sheet.merges ?? [],
+        index = existing.findIndex(
+          (item) =>
+            item.first_row_id === next.first_row_id &&
+            item.last_row_id === next.last_row_id &&
+            item.first_column_id === next.first_column_id &&
+            item.last_column_id === next.last_column_id,
+        );
+      if ((update.merged && index >= 0) || (!update.merged && index < 0))
+        throw new Error('Canonical merge membership preimage mismatch');
+      if (update.merged) sheet.merges = [...existing, next];
+      else sheet.merges = existing.filter((_, i) => i !== index);
+      return;
+    }
+    if (operation.kind.case === 'frozenRowsWrite') {
+      const update = operation.kind.value;
+      const sheet = this.projection?.sheets.find((item) => item.id === bytesUuid(update.sheetId));
+      if (!sheet || update.sheetId.length !== 16 || update.rows > Math.min(1000, sheet.rows.length))
+        throw new Error('Invalid canonical frozen rows');
+      sheet.frozen_rows = update.rows;
+      return;
+    }
+    if (operation.kind.case === 'axisSizeWrite') {
+      const update = operation.kind.value;
+      const sheet = this.projection?.sheets.find((item) => item.id === bytesUuid(update.sheetId));
+      if (
+        !sheet ||
+        update.sheetId.length !== 16 ||
+        update.writes.length < 1 ||
+        update.writes.length > 1000
+      )
+        throw new Error('Invalid canonical axis-size change');
+      const rows = new Map(
+        (sheet.row_heights ?? []).map((item) => [item.axis_id, item.size_css_px]),
+      );
+      const columns = new Map(
+        (sheet.column_widths ?? []).map((item) => [item.axis_id, item.size_css_px]),
+      );
+      const seen = new Set<string>();
+      for (const write of update.writes) {
+        if (write.axisId.length !== 16 || (write.axisKind !== 1 && write.axisKind !== 2))
+          throw new Error('Invalid canonical axis-size target');
+        const id = bytesUuid(write.axisId);
+        const target = write.axisKind === 1 ? rows : columns;
+        const ids = write.axisKind === 1 ? sheet.rows : sheet.columns;
+        const minimum = write.axisKind === 1 ? 12 : 24,
+          maximum = write.axisKind === 1 ? 1000 : 2000;
+        if (
+          !ids.includes(id) ||
+          seen.has(`${write.axisKind}/${id}`) ||
+          (write.sizeCssPx !== undefined &&
+            (!Number.isInteger(write.sizeCssPx) ||
+              write.sizeCssPx < minimum ||
+              write.sizeCssPx > maximum))
+        )
+          throw new Error('Invalid canonical axis-size value');
+        seen.add(`${write.axisKind}/${id}`);
+        if (write.sizeCssPx === undefined || write.sizeCssPx === (write.axisKind === 1 ? 28 : 112))
+          target.delete(id);
+        else target.set(id, write.sizeCssPx);
+      }
+      sheet.row_heights = [...rows].map(([axis_id, size_css_px]) => ({ axis_id, size_css_px }));
+      sheet.column_widths = [...columns].map(([axis_id, size_css_px]) => ({
+        axis_id,
+        size_css_px,
+      }));
+      return;
+    }
+    if (operation.kind.case === 'setCellValues') {
+      const next = new Map(this.confirmed);
+      const touched = new Set<string>();
+      if (!operation.kind.value.writes.length || operation.kind.value.writes.length > 1000)
+        throw new Error('Invalid canonical batch');
+      for (const write of operation.kind.value.writes) {
+        const address = write.address,
+          value = write.value?.kind;
+        const sheet =
+          address &&
+          this.projection?.sheets.find((sheet) => sheet.id === bytesUuid(address.sheetId));
+        if (
+          !address ||
+          address.sheetId.length !== 16 ||
+          address.rowId.length !== 16 ||
+          address.columnId.length !== 16 ||
+          !sheet?.rows.includes(bytesUuid(address.rowId)) ||
+          !sheet.columns.includes(bytesUuid(address.columnId)) ||
+          !value?.case ||
+          (value.case === 'number' && !Number.isFinite(value.value))
+        )
+          throw new Error('Invalid canonical batch');
+        const cellKey = key(bytesUuid(address.rowId), bytesUuid(address.columnId));
+        if (touched.has(cellKey)) throw new Error('Duplicate canonical batch cell');
+        touched.add(cellKey);
+        if (value.case === 'blank') next.delete(cellKey);
+        else next.set(cellKey, { type: value.case, value: value.value } as Value);
+      }
+      this.confirmed = next;
+      for (const address of touched) this.previewDirty.add(address);
+      return;
+    }
     if (
       operation.kind.case === 'extendRows' ||
       operation.kind.case === 'insertRows' ||
       operation.kind.case === 'deleteRows' ||
       operation.kind.case === 'insertColumns' ||
       operation.kind.case === 'deleteColumns' ||
-      operation.kind.case === 'addSheet' ||
-      operation.kind.case === 'setCellValues'
+      operation.kind.case === 'addSheet'
     )
       throw new Error('Structural operation requires a canonical projection refresh');
     const entry = operation.kind.value;
@@ -2711,7 +4020,14 @@ export class DocumentStore {
     throw new Error('Unknown canonical operation');
   }
   async receive(envelope: ServerEnvelope) {
+    if (this.guestAccessClosed) return;
     const payload = envelope.payload;
+    if (
+      this.isGuest &&
+      (payload.case === 'committed' ||
+        (payload.case === 'documentHeadChanged' && payload.value.latestOperation))
+    )
+      throw new Error('Гостевое соединение получило историю вместо текущего состояния');
     if (payload.case === 'presenceSnapshot') {
       const snapshot = payload.value;
       if (snapshot.documentId.length !== 16 || snapshot.peers.length > 64)
@@ -2818,8 +4134,7 @@ export class DocumentStore {
           event.canonicalOperation?.kind.case !== 'deleteRows' &&
           event.canonicalOperation?.kind.case !== 'insertColumns' &&
           event.canonicalOperation?.kind.case !== 'deleteColumns' &&
-          event.canonicalOperation?.kind.case !== 'addSheet' &&
-          event.canonicalOperation?.kind.case !== 'setCellValues'
+          event.canonicalOperation?.kind.case !== 'addSheet'
         ) {
           if (
             event.documentId.length !== 16 ||
@@ -2870,7 +4185,10 @@ export class DocumentStore {
     if (payload.case === 'rejected') {
       const rejection = payload.value;
       const sourceChanged =
-        rejection.code === 17 && (pending?.kind === 'copyRange' || pending?.kind === 'moveRange');
+        rejection.code === 17 &&
+        (pending?.kind === 'copyRange' ||
+          pending?.kind === 'moveRange' ||
+          pending?.kind === 'sortRange');
       const unsupportedMove = pending?.kind === 'moveRange' && rejection.code === 18;
       if (rejection.retryable && !sourceChanged && !unsupportedMove) {
         // An admission failure can follow a committed move whose ACK was lost.
@@ -2910,7 +4228,22 @@ export class DocumentStore {
       }
       this.error = `Изменение отклонено. ${rejectionText[rejection.code] ?? 'Неизвестная причина; обновите страницу.'}`;
       if (rejection.resyncRequired) await this.refresh();
+      if (pending?.kind === 'sortRange')
+        this.error =
+          rejection.code === 19
+            ? 'Подтверждённый расчёт ещё не готов. Дождитесь результатов и повторите сортировку.'
+            : rejection.code === 17
+              ? 'Книга изменилась. Проверьте границы и повторите сортировку.'
+              : rejection.code === 16
+                ? 'Сортировка превышает предел события 4 МиБ; книга не изменена.'
+                : 'Сортировка отклонена. Проверьте границы, предел 100 000 ячеек и объединения в теле диапазона.';
     } else {
+      if (payload.case === 'committed') {
+        const submittedAt = this.submittedAt.get(id);
+        if (submittedAt !== undefined)
+          this.performanceMetrics.serverConfirmationMs = performance.now() - submittedAt;
+        this.submittedAt.delete(id);
+      }
       this.observeHistoryVersion(payload.value.committedVersion);
       if (
         payload.case === 'receipt' &&
@@ -2928,8 +4261,7 @@ export class DocumentStore {
         payload.value.canonicalOperation.kind.case !== 'deleteRows' &&
         payload.value.canonicalOperation.kind.case !== 'insertColumns' &&
         payload.value.canonicalOperation.kind.case !== 'deleteColumns' &&
-        payload.value.canonicalOperation.kind.case !== 'addSheet' &&
-        payload.value.canonicalOperation.kind.case !== 'setCellValues'
+        payload.value.canonicalOperation.kind.case !== 'addSheet'
       ) {
         if (payload.value.confirmedStateHash.length !== 32) throw new Error('Invalid state hash');
         this.apply(payload.value.canonicalOperation);
@@ -2978,6 +4310,7 @@ export class DocumentStore {
           completed?.kind === 'cell' ||
           completed?.kind === 'batch' ||
           completed?.kind === 'copyRange' ||
+          completed?.kind === 'sortRange' ||
           completed?.kind === 'moveRange' ||
           completed?.kind === 'insertRows' ||
           completed?.kind === 'deleteRows' ||

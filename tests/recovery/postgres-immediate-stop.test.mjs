@@ -9,6 +9,7 @@ import {
   createDocument,
   getDocument,
   login,
+  mergeRangeCommand,
   releaseSessions,
   setCommand,
 } from '../helpers/client.mjs';
@@ -89,11 +90,25 @@ test(
         assert.equal(receipt.case, 'committed');
         assert.equal(receipt.value.committedVersion, 2n);
         const atTwo = await getDocument(base, cookie, snapshot.document_id);
-        const source = await writer.send(
-          setCommand(writer, atTwo, 'snapshot source 2', { sequence: 2 }),
+        const merged = await writer.send(
+          mergeRangeCommand(writer, atTwo, {
+            firstRow: 1,
+            lastRow: 2,
+            firstColumn: 1,
+            lastColumn: 2,
+            sequence: 2,
+          }),
         );
-        assert.equal(source.case, 'committed');
-        assert.equal(source.value.committedVersion, 3n);
+        assert.equal(merged.case, 'committed');
+        assert.equal(merged.value.committedVersion, 3n);
+        const atThree = await getDocument(base, cookie, snapshot.document_id);
+        const expectedMerge = {
+          first_row_id: atThree.sheets[0].rows[1],
+          last_row_id: atThree.sheets[0].rows[2],
+          first_column_id: atThree.sheets[0].columns[1],
+          last_column_id: atThree.sheets[0].columns[2],
+        };
+        assert.deepEqual(atThree.sheets[0].merges, [expectedMerge]);
         const activeQuery = `SELECT count(*) FROM document_snapshots WHERE document_id='${snapshot.document_id}' AND snapshot_version=3 AND state='ACTIVE'`;
         let active = false;
         for (let attempt = 0; attempt < 100; attempt++) {
@@ -140,6 +155,7 @@ test(
         assert.equal(restored.version, '4');
         assert.equal(restored.state_hash, expectedHash);
         assert.equal(restored.sheets[0].cells[0].value.value, 'committed tail');
+        assert.deepEqual(restored.sheets[0].merges, [expectedMerge]);
         const recoveries = readFileSync(join(root, 'server.log'), 'utf8')
           .split('\n')
           .filter(Boolean)
@@ -149,13 +165,15 @@ test(
           recoveries.some(
             (line) => line.fields.snapshot_version === 3 && line.fields.replayed_events === 1,
           ),
-          'actor did not report snapshot v3 plus one tail event',
+          'actor did not restore merge snapshot v3 plus one committed tail event',
         );
         const historical = await fetch(base + `/api/documents/${snapshot.document_id}/versions/3`, {
           headers: { Origin: 'http://127.0.0.1:5173', Cookie: cookie },
         });
         assert.equal(historical.status, 200);
-        assert.equal((await historical.json()).state_hash, atSnapshot.state_hash);
+        const restoredVersionThree = await historical.json();
+        assert.equal(restoredVersionThree.state_hash, atThree.state_hash);
+        assert.deepEqual(restoredVersionThree.sheets[0].merges, [expectedMerge]);
       } finally {
         writer.socket.terminate();
       }

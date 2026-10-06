@@ -19,6 +19,7 @@ enums!(
     Right
 );
 enums!(VerticalInput, VerticalAlignment, Top, Center, Bottom);
+enums!(TextOverflowInput, TextOverflow, Clip, Wrap, Overflow);
 enums!(
     LineInput, BorderLine, Thin, Medium, Thick, Dashed, Dotted, Double
 );
@@ -61,7 +62,10 @@ pub(crate) struct StyleInput {
     border_left: Required<BorderInput>,
     horizontal: HorizontalInput,
     vertical: VerticalInput,
-    wrap: bool,
+    #[serde(default)]
+    wrap: Option<bool>,
+    #[serde(default)]
+    text_overflow: Option<TextOverflowInput>,
     number_format: NumberInput,
 }
 fn change<T>(v: Option<T>) -> Change<T> {
@@ -72,6 +76,17 @@ fn change<T>(v: Option<T>) -> Change<T> {
 }
 impl StyleInput {
     pub(crate) fn decode(self) -> Result<CellStyle, PreviewError> {
+        let text_overflow = match (self.wrap, self.text_overflow) {
+            (Some(value), None) => {
+                if value {
+                    TextOverflow::Wrap
+                } else {
+                    TextOverflow::Clip
+                }
+            }
+            (None, Some(value)) => value.into(),
+            _ => return Err(PreviewError::InvalidProjection),
+        };
         let patch = vec![
             StyleChange::FontFamily(Change::Set(
                 FontFamily::new(self.font_family).map_err(|_| PreviewError::InvalidProjection)?,
@@ -92,7 +107,7 @@ impl StyleInput {
             StyleChange::BorderLeft(change(self.border_left.0.map(Into::into))),
             StyleChange::Horizontal(Change::Set(self.horizontal.into())),
             StyleChange::Vertical(Change::Set(self.vertical.into())),
-            StyleChange::Wrap(Change::Set(self.wrap)),
+            StyleChange::TextOverflow(Change::Set(text_overflow)),
             StyleChange::NumberFormat(Change::Set(self.number_format.into())),
         ];
         CellStyle::default()
@@ -125,6 +140,7 @@ pub(crate) enum ChangeInput {
     Horizontal(Required<HorizontalInput>),
     Vertical(Required<VerticalInput>),
     Wrap(Required<bool>),
+    TextOverflow(Required<TextOverflowInput>),
     NumberFormat(Required<NumberInput>),
 }
 impl ChangeInput {
@@ -154,7 +170,14 @@ impl ChangeInput {
             Self::BorderLeft(Required(v)) => StyleChange::BorderLeft(change(v.map(Into::into))),
             Self::Horizontal(Required(v)) => StyleChange::Horizontal(change(v.map(Into::into))),
             Self::Vertical(Required(v)) => StyleChange::Vertical(change(v.map(Into::into))),
-            Self::Wrap(Required(v)) => StyleChange::Wrap(change(v)),
+            Self::Wrap(Required(v)) => StyleChange::TextOverflow(change(v.map(|value| {
+                if value {
+                    TextOverflow::Wrap
+                } else {
+                    TextOverflow::Clip
+                }
+            }))),
+            Self::TextOverflow(Required(v)) => StyleChange::TextOverflow(change(v.map(Into::into))),
             Self::NumberFormat(Required(v)) => StyleChange::NumberFormat(change(v.map(Into::into))),
         })
     }

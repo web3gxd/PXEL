@@ -1,7 +1,7 @@
 use super::style_codec;
 use super::{
-    CodecError, addr, decode_addr, decode_content, decode_operation, decode_sheet, encode_content,
-    encode_sheet, id, operation, v1,
+    CodecError, addr, decode_addr, decode_content, decode_merge_range, decode_operation,
+    decode_sheet, encode_content, encode_merge_range, encode_sheet, id, operation, v1,
 };
 use prost::Message;
 use spreadsheet_domain::workbook::{
@@ -12,7 +12,20 @@ use spreadsheet_domain::workbook::{
 /// The first reader is deliberately bounded; a larger snapshot needs a new
 /// streaming decoder or a measured increase to this cap before activation.
 pub const MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 4;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 7;
+
+/// Inspects the bounded persisted envelope before binding its version to AAD.
+/// Callers still validate its workbook and expected metadata with decode_snapshot.
+pub fn snapshot_schema_version(bytes: &[u8]) -> Result<u32, CodecError> {
+    if bytes.len() > MAX_SNAPSHOT_BYTES {
+        return Err(CodecError::SnapshotTooLarge);
+    }
+    let envelope = v1::SnapshotEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
+    if !(1..=SNAPSHOT_SCHEMA_VERSION).contains(&envelope.snapshot_schema_version) {
+        return Err(CodecError::UnsupportedSchema);
+    }
+    Ok(envelope.snapshot_schema_version)
+}
 
 fn encode_cells(
     cells: &[(
@@ -93,66 +106,90 @@ pub fn encode_snapshot(
     }) {
         return Err(CodecError::Invalid);
     }
-    let envelope = v1::SnapshotEnvelope {
-        snapshot_schema_version: SNAPSHOT_SCHEMA_VERSION,
-        document_id: image.document_id.as_bytes().to_vec(),
-        document_version: image.version.get(),
-        last_axis_change_version: image.last_axis_change_version.get(),
-        sheet: None,
-        cells: Vec::new(),
-        sheets: image
-            .sheets
-            .iter()
-            .map(|sheet| {
-                Ok(v1::SnapshotSheet {
-                    sheet: Some(encode_sheet(&sheet.sheet)),
-                    cells: encode_cells(&sheet.cells)?,
-                    styles: sheet
-                        .styles
-                        .iter()
-                        .map(|(address, style)| v1::SnapshotStyle {
-                            address: Some(addr(address)),
-                            style: Some(style_codec::encode_style(style)),
-                        })
-                        .collect(),
+    let envelope =
+        v1::SnapshotEnvelope {
+            snapshot_schema_version: SNAPSHOT_SCHEMA_VERSION,
+            document_id: image.document_id.as_bytes().to_vec(),
+            document_version: image.version.get(),
+            last_axis_change_version: image.last_axis_change_version.get(),
+            sheet: None,
+            cells: Vec::new(),
+            sheets: image
+                .sheets
+                .iter()
+                .map(|sheet| {
+                    Ok(v1::SnapshotSheet {
+                        frozen_rows: sheet.frozen_rows,
+                        sheet: Some(encode_sheet(&sheet.sheet)),
+                        cells: encode_cells(&sheet.cells)?,
+                        styles: sheet
+                            .styles
+                            .iter()
+                            .map(|(address, style)| v1::SnapshotStyle {
+                                address: Some(addr(address)),
+                                style: Some(style_codec::encode_style(style)),
+                            })
+                            .collect(),
+                        axis_sizes: sheet
+                            .row_heights
+                            .iter()
+                            .map(|(id, size)| v1::AxisSizeOverride {
+                                axis_kind: 1,
+                                axis_id: id.as_bytes().to_vec(),
+                                size_css_px: *size,
+                            })
+                            .chain(sheet.column_widths.iter().map(|(id, size)| {
+                                v1::AxisSizeOverride {
+                                    axis_kind: 2,
+                                    axis_id: id.as_bytes().to_vec(),
+                                    size_css_px: *size,
+                                }
+                            }))
+                            .collect(),
+                        merges: sheet
+                            .merges
+                            .iter()
+                            .copied()
+                            .map(encode_merge_range)
+                            .collect(),
+                    })
                 })
-            })
-            .collect::<Result<_, CodecError>>()?,
-        retired_rows: image
-            .retired_rows
-            .iter()
-            .map(|id| id.as_bytes().to_vec())
-            .collect(),
-        retired_columns: image
-            .retired_columns
-            .iter()
-            .map(|id| id.as_bytes().to_vec())
-            .collect(),
-        row_activation_floors: image
-            .row_activation_floors
-            .iter()
-            .map(|(row, version)| v1::RowActivationFloor {
-                row_id: row.as_bytes().to_vec(),
-                document_version: version.get(),
-            })
-            .collect(),
-        column_activation_floors: image
-            .column_activation_floors
-            .iter()
-            .map(|(column, version)| v1::ColumnActivationFloor {
-                column_id: column.as_bytes().to_vec(),
-                document_version: version.get(),
-            })
-            .collect(),
-        calculation_context: image
-            .calculation_context
-            .as_ref()
-            .map(encode_context)
-            .transpose()?,
-        state_hash: workbook.hash().to_vec(),
-        writer_engine_version: writer_engine_version.into(),
-        writer_compatibility_profile: writer_compatibility_profile.into(),
-    };
+                .collect::<Result<_, CodecError>>()?,
+            retired_rows: image
+                .retired_rows
+                .iter()
+                .map(|id| id.as_bytes().to_vec())
+                .collect(),
+            retired_columns: image
+                .retired_columns
+                .iter()
+                .map(|id| id.as_bytes().to_vec())
+                .collect(),
+            row_activation_floors: image
+                .row_activation_floors
+                .iter()
+                .map(|(row, version)| v1::RowActivationFloor {
+                    row_id: row.as_bytes().to_vec(),
+                    document_version: version.get(),
+                })
+                .collect(),
+            column_activation_floors: image
+                .column_activation_floors
+                .iter()
+                .map(|(column, version)| v1::ColumnActivationFloor {
+                    column_id: column.as_bytes().to_vec(),
+                    document_version: version.get(),
+                })
+                .collect(),
+            calculation_context: image
+                .calculation_context
+                .as_ref()
+                .map(encode_context)
+                .transpose()?,
+            state_hash: workbook.hash().to_vec(),
+            writer_engine_version: writer_engine_version.into(),
+            writer_compatibility_profile: writer_compatibility_profile.into(),
+        };
     if envelope.encoded_len() > MAX_SNAPSHOT_BYTES {
         return Err(CodecError::SnapshotTooLarge);
     }
@@ -177,12 +214,12 @@ pub fn decode_snapshot(
     let envelope = v1::SnapshotEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
     if !matches!(
         envelope.snapshot_schema_version,
-        1 | 2 | 3 | SNAPSHOT_SCHEMA_VERSION
+        1 | 2 | 3 | 4 | 5 | 6 | SNAPSHOT_SCHEMA_VERSION
     ) {
         return Err(CodecError::UnsupportedSchema);
     }
     // Schema 4 is a writer-normalized profile, not arbitrary protobuf ordering.
-    if envelope.snapshot_schema_version == 4 && envelope.encode_to_vec() != bytes {
+    if envelope.snapshot_schema_version >= 4 && envelope.encode_to_vec() != bytes {
         return Err(CodecError::Invalid);
     }
     if envelope.document_id.as_slice() != expected_document.as_bytes()
@@ -209,6 +246,15 @@ pub fn decode_snapshot(
                 || !envelope.column_activation_floors.is_empty()))
         || (envelope.snapshot_schema_version < 4
             && envelope.sheets.iter().any(|sheet| !sheet.styles.is_empty()))
+        || (envelope.snapshot_schema_version < 5
+            && envelope
+                .sheets
+                .iter()
+                .any(|sheet| !sheet.axis_sizes.is_empty()))
+        || (envelope.snapshot_schema_version < 6
+            && envelope.sheets.iter().any(|sheet| !sheet.merges.is_empty()))
+        || (envelope.snapshot_schema_version < 7
+            && envelope.sheets.iter().any(|sheet| sheet.frozen_rows != 0))
     {
         return Err(CodecError::Invalid);
     }
@@ -220,6 +266,10 @@ pub fn decode_snapshot(
             sheet: decode_sheet(envelope.sheet.ok_or(CodecError::Invalid)?)?,
             cells: decode_cells(envelope.cells)?,
             styles: Vec::new(),
+            row_heights: Vec::new(),
+            column_widths: Vec::new(),
+            merges: Vec::new(),
+            frozen_rows: 0,
         }]
     } else {
         if envelope.sheet.is_some()
@@ -235,10 +285,36 @@ pub fn decode_snapshot(
             .map(|entry| {
                 if entry.cells.len() > MAX_CELLS
                     || entry.styles.len() > spreadsheet_domain::style_write::MAX_STYLED_CELLS
+                    || entry.merges.len() > spreadsheet_domain::merge::MAX_MERGE_RANGES_PER_SHEET
                 {
                     return Err(CodecError::Invalid);
                 }
+                let mut row_heights = Vec::new();
+                let mut column_widths = Vec::new();
+                let mut seen_sizes = std::collections::BTreeSet::new();
+                for size in entry.axis_sizes {
+                    let raw: [u8; 16] = id(&size.axis_id)?;
+                    match size.axis_kind {
+                        1 => {
+                            let axis = RowId::from_bytes(raw).map_err(|_| CodecError::Invalid)?;
+                            if !seen_sizes.insert((1u8, raw)) {
+                                return Err(CodecError::Invalid);
+                            }
+                            row_heights.push((axis, size.size_css_px));
+                        }
+                        2 => {
+                            let axis =
+                                ColumnId::from_bytes(raw).map_err(|_| CodecError::Invalid)?;
+                            if !seen_sizes.insert((2u8, raw)) {
+                                return Err(CodecError::Invalid);
+                            }
+                            column_widths.push((axis, size.size_css_px));
+                        }
+                        _ => return Err(CodecError::Invalid),
+                    }
+                }
                 Ok(SnapshotSheetImage {
+                    frozen_rows: entry.frozen_rows,
                     sheet: decode_sheet(entry.sheet.ok_or(CodecError::Invalid)?)?,
                     cells: decode_cells(entry.cells)?,
                     styles: entry
@@ -251,6 +327,13 @@ pub fn decode_snapshot(
                             ))
                         })
                         .collect::<Result<Vec<_>, CodecError>>()?,
+                    row_heights,
+                    column_widths,
+                    merges: entry
+                        .merges
+                        .into_iter()
+                        .map(decode_merge_range)
+                        .collect::<Result<Vec<_>, _>>()?,
                 })
             })
             .collect::<Result<Vec<_>, CodecError>>()?
@@ -374,7 +457,7 @@ mod tests {
         )?;
         let bytes = encode_snapshot(&book, "engine-v1", "pxel-excel-subset-v1")?;
         let encoded = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-        assert_eq!(encoded.snapshot_schema_version, 4);
+        assert_eq!(encoded.snapshot_schema_version, 7);
         assert_eq!(encoded.sheets.len(), 2);
         let restored = decode_snapshot(
             &bytes,
@@ -534,7 +617,7 @@ mod tests {
             .hash(),
             expected_hash
         );
-        envelope.snapshot_schema_version = 5;
+        envelope.snapshot_schema_version = SNAPSHOT_SCHEMA_VERSION + 1;
         assert!(matches!(
             decode_snapshot(
                 &envelope.encode_to_vec(),

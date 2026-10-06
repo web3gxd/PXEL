@@ -327,13 +327,13 @@ fn text_blank_boolean_and_error_criteria() -> Result<(), Box<dyn std::error::Err
         ("=COUNTIF(A1:A8,\"apple*\")", Value::Number(2.)),
         ("=COUNTIF(A1:A8,\"apple~*\")", Value::Number(1.)),
         ("=COUNTIF(A1:A8,\"\")", Value::Number(2.)),
-        ("=COUNTIF(A1:A8,\"<>\")", Value::Number(6.)),
+        ("=COUNTIF(A1:A8,\"<>\")", Value::Number(7.)),
         ("=COUNTIF(A1:A8,0)", Value::Number(3.)),
         ("=COUNTIF(A1:A8,C1)", Value::Number(3.)),
         ("=COUNTIF(A1:A8,TRUE)", Value::Number(1.)),
         ("=COUNTIF(A1:A8,\"#DIV/0!\")", Value::Number(1.)),
         ("=COUNTIF(A1:A8,1/0)", Value::Error(FormulaError::Div0)),
-        ("=COUNTIF(A1:A8,\"*\")", Value::Number(4.)),
+        ("=COUNTIF(A1:A8,\"*\")", Value::Number(3.)),
         ("=SUMIF(A1:A3,\"apple*\",B1)", Value::Number(30.)),
         ("=SUMIF(A1:A3,\"\",B1)", Value::Number(30.)),
     ] {
@@ -345,6 +345,54 @@ fn text_blank_boolean_and_error_criteria() -> Result<(), Box<dyn std::error::Err
             )?,
             expected,
             "{source}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn verified_excel_criteria_profile_2026_10_02() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fixtures/formulas/excel-criteria-2026-10-02.json"
+    ))?;
+    assert_eq!(fixture["verified_in_excel"], true);
+    let mut values = BTreeMap::new();
+    for cell in fixture["workbook"]["cells"]
+        .as_array()
+        .ok_or("Excel golden workbook cells missing")?
+    {
+        let row = u32::try_from(cell["row"].as_u64().ok_or("cell row missing")?)? - 1;
+        let column = u32::try_from(cell["column"].as_u64().ok_or("cell column missing")?)? - 1;
+        let value = match cell["type"].as_str().ok_or("cell type missing")? {
+            "number" => Value::Number(cell["value"].as_f64().ok_or("number missing")?),
+            "text" => Value::Text(
+                cell["value"]
+                    .as_str()
+                    .ok_or("text value missing")?
+                    .to_owned(),
+            ),
+            "boolean" => Value::Boolean(cell["value"].as_bool().ok_or("boolean missing")?),
+            "error" if cell["value"] == "#DIV/0!" => Value::Error(FormulaError::Div0),
+            "blank" => Value::Blank,
+            _ => return Err("unsupported Excel fixture cell type".into()),
+        };
+        values.insert((row, column), value);
+    }
+    let cells = Cells(values);
+    for case in fixture["cases"]
+        .as_array()
+        .ok_or("Excel golden formula cases missing")?
+    {
+        let source = case["formula"].as_str().ok_or("formula missing")?;
+        let expected = case["result"].as_f64().ok_or("result missing")?;
+        assert_eq!(
+            evaluate(
+                &parse(source)?.ast,
+                &cells,
+                &mut EvaluationBudget::default()
+            )?,
+            Value::Number(expected),
+            "Excel 16.0.20326.20158: {source}"
         );
     }
     Ok(())

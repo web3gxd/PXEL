@@ -1,3 +1,6 @@
+import { editorButton } from './editor-menu';
+import { createBookFromUi } from './create-book';
+import { cutSelection } from './clipboard';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { GRID } from '../src/grid/viewport';
 import { uuidV7, type Projection } from '../src/document/store';
@@ -26,11 +29,17 @@ async function state(page: Page): Promise<Projection> {
   expect(response.ok()).toBe(true);
   return response.json();
 }
+function workbookState(projection: Projection) {
+  const result = { ...projection };
+  delete result.capabilities;
+  return result;
+}
 async function createDocument(page: Page) {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
 }
 async function reload(page: Page, direction: 'undo' | 'redo') {
@@ -67,7 +76,7 @@ for (const family of ['scalar', 'formula', 'range', 'move', 'axis'] as const) {
       await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
     } else if (family === 'move') {
       await select(page, 0, 0);
-      await page.keyboard.press('ControlOrMeta+X');
+      await cutSelection(page);
       await expect(page.getByTestId('cut-status')).toContainText('Исходные ячейки пока сохранены');
       await select(page, 0, 2);
       await page.keyboard.press('ControlOrMeta+V');
@@ -75,7 +84,7 @@ for (const family of ['scalar', 'formula', 'range', 'move', 'axis'] as const) {
       await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
     } else {
       await select(page, 0, 0);
-      await page.getByRole('button', { name: 'Строка −', exact: true }).click();
+      await (await editorButton(page, 'Строка −')).click();
       await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
     }
     const changed = await state(page);
@@ -196,15 +205,20 @@ test('restored own history still refuses a foreign same-value overwrite without 
     await editor.bringToFront();
     await write(editor, 0, 0, '7');
     const canonical = await state(editor);
+    expect(canonical.capabilities).toMatchObject({ can_edit: true, can_share: false });
     await page.bringToFront();
     await reload(page, 'undo');
     await undo(page).click();
     await expect(page.getByRole('alert')).toContainText('Отмена невозможна');
     await expect(undo(page)).toBeDisabled();
-    expect(await state(page)).toEqual(canonical);
+    const ownerState = await state(page);
+    expect(ownerState.capabilities).toMatchObject({ can_edit: true, can_share: true });
+    expect(workbookState(ownerState)).toEqual(workbookState(canonical));
     // A refusal is not durable history: reload rediscovers the guarded candidate.
     await reload(page, 'undo');
-    expect(await state(page)).toEqual(canonical);
+    const reloadedOwnerState = await state(page);
+    expect(reloadedOwnerState.capabilities).toMatchObject({ can_edit: true, can_share: true });
+    expect(workbookState(reloadedOwnerState)).toEqual(workbookState(canonical));
   } finally {
     await close();
   }

@@ -225,6 +225,29 @@ fn describes_verified_events_without_retaining_document_contents() -> TestResult
         describe(&event, actor),
         Err(JournalError::Corrupt)
     ));
+    event.operation = Operation::CellBatchWrite {
+        intent: CellBatchIntent::MoveRange {
+            source: address,
+            destination: CellAddress {
+                column: ColumnId::from_bytes([6; 16])?,
+                ..address
+            },
+            rows: 1,
+            columns: 1,
+        },
+        content_writes: vec![GuardedContentWrite {
+            address,
+            content: None,
+            previous: None,
+        }],
+        style_writes: Vec::new(),
+        undoes: Some(target(1)?.operation_id),
+        undoes_version: Some(DocumentVersion::new(1)?),
+    };
+    assert_eq!(
+        describe(&event, actor)?.kind,
+        HistoryEntryKind::Compensation { target: target(1)? }
+    );
     event.operation = Operation::StyleWrite {
         kind: StyleWriteKind::Cell,
         writes: vec![GuardedStyleWrite {

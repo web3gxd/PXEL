@@ -5,6 +5,14 @@ import { setTimeout } from 'node:timers/promises';
 
 const webRequire = createRequire(resolve('apps/web/package.json'));
 const playwright = join(dirname(webRequire.resolve('@playwright/test/package.json')), 'cli.js');
+const serverBinary = resolve(
+  process.env.PXEL_TEST_SERVER_BINARY ??
+    join(
+      process.env.CARGO_TARGET_DIR ?? 'target',
+      'debug',
+      `pxel-server${process.platform === 'win32' ? '.exe' : ''}`,
+    ),
+);
 const dev = spawn(process.execPath, ['scripts/dev.mjs'], {
   stdio: 'inherit',
   windowsHide: true,
@@ -45,10 +53,25 @@ try {
       '--test-concurrency=1',
       'tests/recovery/server-restart.test.mjs',
       'tests/recovery/convergence-restart.test.mjs',
+      'tests/recovery/disclosure-restart.test.mjs',
+      'tests/recovery/views-restart.test.mjs',
+      'tests/recovery/sort-restart.test.mjs',
+      'tests/recovery/privacy-restart.test.mjs',
+      'tests/recovery/history-restart.test.mjs',
+      'tests/recovery/pxel-restart.test.mjs',
+      'tests/recovery/library-restart.test.mjs',
     ],
     [playwright, 'test', '--config', 'apps/web/playwright.config.ts'],
   ]) {
-    const result = spawnSync(process.execPath, args, { stdio: 'inherit', windowsHide: true });
+    const result = spawnSync(process.execPath, args, {
+      stdio: 'inherit',
+      windowsHide: true,
+      env: {
+        ...process.env,
+        PXEL_TEST_SERVER_BINARY: process.env.PXEL_TEST_SERVER_BINARY ?? serverBinary,
+        PXEL_RECOVERY_SERVER_BINARY: process.env.PXEL_RECOVERY_SERVER_BINARY ?? serverBinary,
+      },
+    });
     if (result.status !== 0) throw new Error('Live integration/browser checks failed');
   }
 } finally {

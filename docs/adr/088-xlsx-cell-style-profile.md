@@ -1,14 +1,20 @@
 # ADR-088: bounded XLSX cell-style round trip
 
-Status: PROPOSED FOR IMPLEMENTATION (2026-09-30).
+Status: LOCALLY VERIFIED; bounded profile-1 round trip completed (2026-10-01).
+
+The execution contract and acceptance gates live in
+[`docs/handoff/xlsx-styles-roundtrip.md`](../handoff/xlsx-styles-roundtrip.md).
+The corresponding implementation handoff is complete for the bounded PXEL
+profile. This does not claim general Excel formatting compatibility or close
+deployment gates.
 
 ## Context
 
 ADR-087 adds sparse profile-1 cell formatting, including styled empty cells.
-The current OOXML reader reports cell styles as unsupported and the exporter
-rejects any formatted workbook with HTTP 422. Removing that guard before the
-package reader, import journal, and writer preserve the same leaves would make
-download silently discard user data.
+At decision time, the OOXML reader reported cell styles as unsupported and the
+exporter rejected formatted workbooks with HTTP 422. The bounded reader, import
+journal path and writer now preserve the same profile leaves through local
+PostgreSQL recovery and a real browser download/reimport flow.
 
 The first slice is deliberately limited to the existing 16 closed style
 properties. It does not add row/column styles, arbitrary format strings,
@@ -46,19 +52,19 @@ indices nor Domain types cross the worker boundary.
    defaults. This profile does not claim identical rendering of workbook theme
    defaults. Preserve the distinction between an absent style and a supported
    non-default style; a normalized default style does not create a Domain entry.
-6. Convert normalized style records to one bounded `StyleWrite` event per sheet
-   (up to 1,000 union addresses per batch), with explicit stable row/column IDs,
-   all changed leaves, and reset semantics. The import transaction admits only
-   the existing creation operations plus validated style writes, after checking
-   total events, payload bytes, union addresses and Formula binding limits.
-   Import remains atomic and server-authoritative.
+6. Convert normalized style records to validated `StyleWrite` events on explicit
+   stable row/column IDs. Each operation has at most 1,000 target addresses; the
+   current planner emits one-cell operations to preserve sparse, nonrectangular
+   source shapes. The import transaction checks total events, payload bytes,
+   union addresses and formula binding limits, and admits the writes atomically.
 7. Export enumerates the union of content and style addresses. It deterministically
    interns identical font/fill/border/number-format records, writes the styles
    relationship and content type, and applies an `s` index to styled blank cells
    as well as populated cells. Styles never change stored numbers or formulas.
    Existing issue-bearing workbooks and any unsupported style value remain
-   rejected. Remove the HTTP 422 style gate only after this complete round-trip
-   path passes native package, journal recovery, and browser download tests.
+   rejected. The style-specific HTTP 422 guard was removed after native package,
+   PostgreSQL recovery and browser download/reimport checks passed. Other
+   unsupported export profiles continue to return a typed error.
 8. Keep archive, XML depth, entries, elapsed time, parent revalidation and child
    resource bounds. Style tables are capped at 4,096 records each; each document
    keeps the Domain limits of 100,000 union content/style addresses per sheet,
@@ -85,7 +91,10 @@ round trip through import journal, recovery/snapshot, export and reimport; and
 malformed/oversized package, table, parent IR, relationship and style-index
 rejections. Browser tests must prove a styled blank exports with a style index
 and downloads successfully. Unsupported themes, tints, patterns, custom formats,
-and inheritance need typed report assertions. XLSX fuzzing stays in its existing
-isolated parser suite.
+and inheritance need typed report assertions. Deterministic malformed-package,
+table-count, relationship and parent-IR cases run in the isolated parser unit
+suite. A dedicated coverage-guided fuzz harness is outside this bounded handoff.
 
-This ADR does not claim full Excel formatting fidelity or close the XLSX phase.
+This closes the bounded profile-1 style round trip locally. It does not claim
+full Excel formatting fidelity, browser file upload, broad import resource
+isolation, Linux/Compose readiness or the remaining deployment gates.

@@ -1,7 +1,11 @@
 //! Pure, bounded sparse projection. Canonical hash format is `PXEL-DOMAIN-1`.
-pub use crate::axis_edit::{AxisChange, AxisDelta, ColumnPlacement, RowPlacement};
+pub use crate::axis_edit::{
+    AxisChange, AxisDelta, ColumnPlacement, GuardedAxisStyleWrite, RowPlacement,
+};
+pub use crate::axis_size::{AxisSizeChange, AxisSizeTarget};
 pub use crate::formula::FormulaSource;
 use crate::formula::{AxisReferenceMode, BoundCellReference, Formula, Node};
+use crate::merge::{MAX_MERGE_CELLS, MAX_MERGE_RANGES_PER_SHEET, MergeChange, MergeRange};
 use crate::style::CellStyle;
 pub use crate::style_write::{GuardedStyleWrite, StyleWriteKind};
 use sha2::{Digest, Sha256};
@@ -20,6 +24,7 @@ pub const MAX_CELL_VALUE_BATCH_TEXT_BYTES: usize = 512 * 1024;
 pub const MAX_TEXT_BYTES: usize = 32 * 1024;
 pub const MAX_WORKBOOK_TEXT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_WORKBOOK_AST_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_AXIS_SIZE_OVERRIDES: usize = 1_000_000;
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 pub enum DomainError {
@@ -51,6 +56,8 @@ pub enum DomainError {
     InvalidCalculationContext,
     #[error("cell content no longer matches the committed preimage")]
     PreimageConflict,
+    #[error("merge overlaps another range or would hide authored data")]
+    MergeConflict,
 }
 
 macro_rules! identity {
@@ -327,6 +334,26 @@ pub enum RangeWriteKind {
     SetValues,
     Copy,
 }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CellBatchIntent {
+    SetValues,
+    SortRange {
+        range: crate::sort::SortRange,
+        order: Vec<RowId>,
+    },
+    CopyRange {
+        source: CellAddress,
+        destination: CellAddress,
+        rows: u32,
+        columns: u32,
+    },
+    MoveRange {
+        source: CellAddress,
+        destination: CellAddress,
+        rows: u32,
+        columns: u32,
+    },
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CellWriteKind {
     SetValue,
@@ -335,6 +362,15 @@ pub enum CellWriteKind {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
+    FrozenRowsWrite {
+        sheet: SheetId,
+        rows: u32,
+        previous: u32,
+    },
+    AxisSizeWrite {
+        sheet: SheetId,
+        writes: Vec<AxisSizeChange>,
+    },
     StyleWrite {
         kind: StyleWriteKind,
         writes: Vec<GuardedStyleWrite>,
@@ -425,6 +461,23 @@ pub enum Operation {
         undoes: Option<OperationId>,
         undoes_version: Option<DocumentVersion>,
     },
+    /// Atomic content and formatting batch. Used by structured imports which
+    /// must apply values and cell styles as one durable, undoable event.
+    CellBatchWrite {
+        intent: CellBatchIntent,
+        content_writes: Vec<GuardedContentWrite>,
+        style_writes: Vec<GuardedStyleWrite>,
+        undoes: Option<OperationId>,
+        undoes_version: Option<DocumentVersion>,
+    },
+    /// One guarded stable-ID merge membership change; older operations remain
+    /// unchanged and canonical hashes omit this suffix for pre-merge books.
+    MergeWrite {
+        sheet: SheetId,
+        change: MergeChange,
+        undoes: Option<OperationId>,
+        undoes_version: Option<DocumentVersion>,
+    },
     SetCellFormula {
         address: CellAddress,
         formula: Formula,
@@ -448,6 +501,17 @@ pub enum Operation {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum CommandPayload {
+    SortRange {
+        range: crate::sort::SortRange,
+    },
+    SetFrozenRows {
+        sheet: SheetId,
+        rows: u32,
+    },
+    SetAxisSizes {
+        sheet: SheetId,
+        writes: Vec<(AxisSizeTarget, Option<u32>)>,
+    },
     SetCellStyle {
         address: CellAddress,
         changes: Vec<crate::style::StyleChange>,
@@ -491,6 +555,10 @@ pub enum CommandPayload {
     SetCellValues {
         writes: Vec<CellWrite>,
     },
+    SetCellBatch {
+        writes: Vec<CellWrite>,
+        styles: Vec<(CellAddress, Vec<crate::style::StyleChange>)>,
+    },
     CopyRange {
         source: CellAddress,
         destination: CellAddress,
@@ -512,6 +580,11 @@ pub enum CommandPayload {
     },
     UndoCell {
         target_operation_id: OperationId,
+    },
+    SetMergeRange {
+        sheet: SheetId,
+        range: MergeRange,
+        merged: bool,
     },
 }
 impl Operation {
@@ -551,6 +624,30 @@ impl Operation {
                     ..
                 } | Self::RangeWrite {
                     kind: None,
+                    undoes: Some(_),
+                    undoes_version: Some(_),
+                    ..
+                }
+            )
+            || matches!(
+                self,
+                Self::CellBatchWrite {
+                    undoes: None,
+                    undoes_version: None,
+                    ..
+                } | Self::CellBatchWrite {
+                    undoes: Some(_),
+                    undoes_version: Some(_),
+                    ..
+                }
+            )
+            || matches!(
+                self,
+                Self::MergeWrite {
+                    undoes: None,
+                    undoes_version: None,
+                    ..
+                } | Self::MergeWrite {
                     undoes: Some(_),
                     undoes_version: Some(_),
                     ..
@@ -607,6 +704,10 @@ pub struct Sheet {
     pub(crate) column_positions: HashMap<ColumnId, u32>,
     pub(crate) cells: BTreeMap<CellAddress, CellContent>,
     pub(crate) styles: BTreeMap<CellAddress, CellStyle>,
+    pub(crate) row_heights: BTreeMap<RowId, u32>,
+    pub(crate) column_widths: BTreeMap<ColumnId, u32>,
+    pub(crate) merges: BTreeSet<MergeRange>,
+    pub(crate) frozen_rows: u32,
 }
 
 /// Versioned storage codecs encode this authored image; calculated values are absent.
@@ -629,10 +730,100 @@ pub struct SnapshotSheetImage {
     pub sheet: SheetSeed,
     pub cells: Vec<(CellAddress, CellContent)>,
     pub styles: Vec<(CellAddress, CellStyle)>,
+    pub row_heights: Vec<(RowId, u32)>,
+    pub column_widths: Vec<(ColumnId, u32)>,
+    pub merges: Vec<MergeRange>,
+    pub frozen_rows: u32,
 }
 impl Sheet {
+    /// Requested top-row count; views clamp it to the current axis extent.
+    pub const fn frozen_rows(&self) -> u32 {
+        self.frozen_rows
+    }
     pub fn styles(&self) -> &BTreeMap<CellAddress, CellStyle> {
         &self.styles
+    }
+    pub fn row_heights(&self) -> &BTreeMap<RowId, u32> {
+        &self.row_heights
+    }
+    pub fn column_widths(&self) -> &BTreeMap<ColumnId, u32> {
+        &self.column_widths
+    }
+    pub fn merges(&self) -> &BTreeSet<MergeRange> {
+        &self.merges
+    }
+    pub(crate) fn merge_bounds(
+        &self,
+        range: MergeRange,
+    ) -> Result<(u32, u32, u32, u32), DomainError> {
+        range.bounds(&self.row_positions, &self.column_positions)
+    }
+    pub(crate) fn validate_writable_address(
+        &self,
+        address: CellAddress,
+    ) -> Result<(), DomainError> {
+        self.validate_address(address)?;
+        let row = self
+            .row_position(address.row)
+            .ok_or(DomainError::MissingRow)?;
+        let column = self
+            .column_position(address.column)
+            .ok_or(DomainError::MissingColumn)?;
+        for range in &self.merges {
+            let (first_row, last_row, first_column, last_column) = self.merge_bounds(*range)?;
+            if (first_row..=last_row).contains(&row)
+                && (first_column..=last_column).contains(&column)
+                && range.anchor() != (address.row, address.column)
+            {
+                return Err(DomainError::MergeConflict);
+            }
+        }
+        Ok(())
+    }
+    fn validate_row_merge_edit(
+        &self,
+        before: Option<RowId>,
+        deleted: &[RowId],
+    ) -> Result<(), DomainError> {
+        let insertion = before
+            .map(|row| self.row_position(row).ok_or(DomainError::MissingRow))
+            .transpose()?;
+        for range in &self.merges {
+            let (first, last, _, _) = self.merge_bounds(*range)?;
+            if insertion.is_some_and(|position| position > first && position <= last)
+                || deleted.iter().any(|row| {
+                    self.row_position(*row)
+                        .is_some_and(|position| (first..=last).contains(&position))
+                })
+            {
+                return Err(DomainError::UnsupportedStructuralDependency);
+            }
+        }
+        Ok(())
+    }
+    fn validate_column_merge_edit(
+        &self,
+        before: Option<ColumnId>,
+        deleted: &[ColumnId],
+    ) -> Result<(), DomainError> {
+        let insertion = before
+            .map(|column| {
+                self.column_position(column)
+                    .ok_or(DomainError::MissingColumn)
+            })
+            .transpose()?;
+        for range in &self.merges {
+            let (_, _, first, last) = self.merge_bounds(*range)?;
+            if insertion.is_some_and(|position| position > first && position <= last)
+                || deleted.iter().any(|column| {
+                    self.column_position(*column)
+                        .is_some_and(|position| (first..=last).contains(&position))
+                })
+            {
+                return Err(DomainError::UnsupportedStructuralDependency);
+            }
+        }
+        Ok(())
     }
     pub(crate) fn occupied_count(&self) -> usize {
         self.cells.len()
@@ -704,6 +895,10 @@ impl Sheet {
             column_positions,
             cells: BTreeMap::new(),
             styles: BTreeMap::new(),
+            row_heights: BTreeMap::new(),
+            column_widths: BTreeMap::new(),
+            merges: BTreeSet::new(),
+            frozen_rows: 0,
         })
     }
     pub(crate) fn validate_address(&self, address: CellAddress) -> Result<(), DomainError> {
@@ -786,6 +981,65 @@ impl Sheet {
         }
         Ok(deleted)
     }
+}
+
+fn validate_new_merge(sheet: &Sheet, range: MergeRange) -> Result<(), DomainError> {
+    let (first_row, last_row, first_column, last_column) = sheet.merge_bounds(range)?;
+    let area = (u64::from(last_row - first_row + 1))
+        .checked_mul(u64::from(last_column - first_column + 1))
+        .ok_or(DomainError::LimitExceeded)?;
+    if area < 2 || area > MAX_MERGE_CELLS as u64 {
+        return Err(DomainError::InvalidAxis);
+    }
+    let existing_area = sheet.merges.iter().try_fold(0u64, |total, existing| {
+        let (first, last, left, right) = sheet.merge_bounds(*existing)?;
+        let area = u64::from(last - first + 1)
+            .checked_mul(u64::from(right - left + 1))
+            .ok_or(DomainError::LimitExceeded)?;
+        total.checked_add(area).ok_or(DomainError::LimitExceeded)
+    })?;
+    if existing_area
+        .checked_add(area)
+        .filter(|total| *total <= crate::merge::MAX_MERGE_COVERED_CELLS_PER_SHEET as u64)
+        .is_none()
+    {
+        return Err(DomainError::LimitExceeded);
+    }
+    for existing in &sheet.merges {
+        let (a_first_row, a_last_row, a_first_column, a_last_column) =
+            sheet.merge_bounds(*existing)?;
+        if first_row <= a_last_row
+            && last_row >= a_first_row
+            && first_column <= a_last_column
+            && last_column >= a_first_column
+        {
+            return Err(DomainError::MergeConflict);
+        }
+    }
+    let anchor = range.anchor();
+    for row_position in first_row..=last_row {
+        let row = *sheet
+            .rows
+            .get(row_position as usize)
+            .ok_or(DomainError::MissingRow)?;
+        for column_position in first_column..=last_column {
+            let column = *sheet
+                .columns
+                .get(column_position as usize)
+                .ok_or(DomainError::MissingColumn)?;
+            if (row, column) != anchor {
+                let address = CellAddress {
+                    sheet: sheet.id,
+                    row,
+                    column,
+                };
+                if sheet.cells.contains_key(&address) || sheet.styles.contains_key(&address) {
+                    return Err(DomainError::MergeConflict);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -917,6 +1171,18 @@ impl Workbook {
                     },
                     cells: sheet.cells.iter().map(|(a, c)| (*a, c.clone())).collect(),
                     styles: sheet.styles.iter().map(|(a, c)| (*a, c.clone())).collect(),
+                    row_heights: sheet
+                        .row_heights
+                        .iter()
+                        .map(|(id, size)| (*id, *size))
+                        .collect(),
+                    column_widths: sheet
+                        .column_widths
+                        .iter()
+                        .map(|(id, size)| (*id, *size))
+                        .collect(),
+                    merges: sheet.merges.iter().copied().collect(),
+                    frozen_rows: sheet.frozen_rows,
                 })
                 .collect(),
             retired_rows: self.retired_row_ids.iter().copied().collect(),
@@ -979,6 +1245,34 @@ impl Workbook {
             .iter()
             .flat_map(|sheet| sheet.styles.iter().cloned())
             .collect::<Vec<_>>();
+        let size_entries = image
+            .sheets
+            .iter()
+            .map(|sheet| {
+                (
+                    sheet.sheet.id,
+                    sheet.row_heights.clone(),
+                    sheet.column_widths.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let merge_entries = image
+            .sheets
+            .iter()
+            .map(|sheet| (sheet.sheet.id, sheet.merges.clone()))
+            .collect::<Vec<_>>();
+        let frozen_entries = image
+            .sheets
+            .iter()
+            .map(|s| (s.sheet.id, s.frozen_rows))
+            .collect::<Vec<_>>();
+        let size_count = size_entries
+            .iter()
+            .map(|(_, rows, columns)| rows.len() + columns.len())
+            .sum::<usize>();
+        if size_count > MAX_AXIS_SIZE_OVERRIDES {
+            return Err(DomainError::LimitExceeded);
+        }
         let mut workbook = Self::hydrate_sheets(
             image.document_id,
             image.version,
@@ -995,6 +1289,60 @@ impl Workbook {
             if style.is_default() || sheet.styles.insert(address, style).is_some() {
                 return Err(DomainError::InvalidStyle);
             }
+        }
+        for (sheet_id, row_heights, column_widths) in size_entries {
+            let sheet = workbook
+                .sheets
+                .iter_mut()
+                .find(|sheet| sheet.id == sheet_id)
+                .ok_or(DomainError::MissingSheet)?;
+            for (id, size) in row_heights {
+                let target = AxisSizeTarget::Row(id);
+                if !sheet.row_positions.contains_key(&id)
+                    || !crate::axis_size::valid_size(target, size)
+                    || size == crate::axis_size::DEFAULT_ROW_HEIGHT
+                    || sheet.row_heights.insert(id, size).is_some()
+                {
+                    return Err(DomainError::InvalidAxis);
+                }
+            }
+            for (id, size) in column_widths {
+                let target = AxisSizeTarget::Column(id);
+                if !sheet.column_positions.contains_key(&id)
+                    || !crate::axis_size::valid_size(target, size)
+                    || size == crate::axis_size::DEFAULT_COLUMN_WIDTH
+                    || sheet.column_widths.insert(id, size).is_some()
+                {
+                    return Err(DomainError::InvalidAxis);
+                }
+            }
+        }
+        for (sheet_id, merges) in merge_entries {
+            let target = workbook
+                .sheets
+                .iter_mut()
+                .find(|sheet| sheet.id == sheet_id)
+                .ok_or(DomainError::MissingSheet)?;
+            if merges.len() > MAX_MERGE_RANGES_PER_SHEET {
+                return Err(DomainError::LimitExceeded);
+            }
+            for range in merges {
+                validate_new_merge(target, range)?;
+                if !target.merges.insert(range) {
+                    return Err(DomainError::MergeConflict);
+                }
+            }
+        }
+        for (sheet_id, rows) in frozen_entries {
+            if rows > crate::axis_size::MAX_FROZEN_ROWS {
+                return Err(DomainError::LimitExceeded);
+            }
+            let sheet = workbook
+                .sheets
+                .iter_mut()
+                .find(|s| s.id == sheet_id)
+                .ok_or(DomainError::MissingSheet)?;
+            sheet.frozen_rows = rows;
         }
         crate::style_write::validate_capacity(&workbook)?;
         if image.row_activation_floors.len() > MAX_RETIRED_ROWS
@@ -1213,6 +1561,141 @@ impl Workbook {
         if self.version.get().checked_add(1) != Some(next_version.get()) {
             return Err(DomainError::VersionConflict);
         }
+        if let Operation::FrozenRowsWrite {
+            sheet,
+            rows,
+            previous,
+        } = operation
+        {
+            let current = self
+                .sheets
+                .iter()
+                .find(|s| s.id == *sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            if *previous != current.frozen_rows {
+                return Err(DomainError::PreimageConflict);
+            }
+            if *rows > crate::axis_size::MAX_FROZEN_ROWS
+                || *rows as usize > current.rows.len()
+                || rows == previous
+            {
+                return Err(DomainError::InvalidAxis);
+            }
+            let mut next = self.clone();
+            let target = next
+                .sheets
+                .iter_mut()
+                .find(|s| s.id == *sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            target.frozen_rows = *rows;
+            next.version = next_version;
+            return Ok(next);
+        }
+        if let Operation::MergeWrite {
+            sheet,
+            change,
+            undoes,
+            undoes_version,
+        } = operation
+        {
+            if change.merged == change.previous
+                || (undoes.is_some() != undoes_version.is_some())
+                || undoes_version.is_some_and(|version| {
+                    version == DocumentVersion::ZERO || version > self.version
+                })
+            {
+                return Err(DomainError::VersionConflict);
+            }
+            let mut next = self.clone();
+            let target = next
+                .sheets
+                .iter_mut()
+                .find(|current| current.id == *sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            let exists = target.merges.contains(&change.range);
+            if exists != change.previous {
+                return Err(DomainError::PreimageConflict);
+            }
+            if change.merged {
+                if target.merges.len() >= MAX_MERGE_RANGES_PER_SHEET {
+                    return Err(DomainError::LimitExceeded);
+                }
+                validate_new_merge(target, change.range)?;
+                target.merges.insert(change.range);
+            } else if !target.merges.remove(&change.range) {
+                return Err(DomainError::PreimageConflict);
+            }
+            next.version = next_version;
+            return Ok(next);
+        }
+        if let Operation::AxisSizeWrite { sheet, writes } = operation {
+            if writes.is_empty() || writes.len() > crate::axis_size::MAX_AXIS_SIZE_WRITES {
+                return Err(DomainError::LimitExceeded);
+            }
+            let current = self
+                .sheets
+                .iter()
+                .find(|item| item.id == *sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            let mut seen = BTreeSet::new();
+            let mut next = self.clone();
+            let target = next
+                .sheets
+                .iter_mut()
+                .find(|item| item.id == *sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            for write in writes {
+                if !seen.insert(write.target)
+                    || write.size == write.previous
+                    || write
+                        .size
+                        .is_some_and(|size| !crate::axis_size::valid_size(write.target, size))
+                {
+                    return Err(DomainError::InvalidAxis);
+                }
+                let found = match write.target {
+                    AxisSizeTarget::Row(id) => {
+                        if !current.row_positions.contains_key(&id) {
+                            return Err(DomainError::MissingRow);
+                        }
+                        current.row_heights.get(&id).copied()
+                    }
+                    AxisSizeTarget::Column(id) => {
+                        if !current.column_positions.contains_key(&id) {
+                            return Err(DomainError::MissingColumn);
+                        }
+                        current.column_widths.get(&id).copied()
+                    }
+                };
+                if found != write.previous {
+                    return Err(DomainError::PreimageConflict);
+                }
+                match (write.target, write.size) {
+                    (AxisSizeTarget::Row(id), Some(size)) => {
+                        target.row_heights.insert(id, size);
+                    }
+                    (AxisSizeTarget::Row(id), None) => {
+                        target.row_heights.remove(&id);
+                    }
+                    (AxisSizeTarget::Column(id), Some(size)) => {
+                        target.column_widths.insert(id, size);
+                    }
+                    (AxisSizeTarget::Column(id), None) => {
+                        target.column_widths.remove(&id);
+                    }
+                }
+            }
+            let total = next
+                .sheets
+                .iter()
+                .map(|item| item.row_heights.len() + item.column_widths.len())
+                .sum::<usize>();
+            if total > MAX_AXIS_SIZE_OVERRIDES {
+                return Err(DomainError::LimitExceeded);
+            }
+            next.version = next_version;
+            return Ok(next);
+        }
         if let Operation::StyleWrite { kind, writes } = operation {
             return crate::style_write::candidate(self, *kind, writes, next_version, true);
         }
@@ -1229,6 +1712,16 @@ impl Workbook {
             return crate::style_write::candidate(self, *kind, writes, next_version, false);
         }
         if let Operation::AxisEdit { change } = operation {
+            if !self
+                .sheets
+                .iter()
+                .find(|sheet| sheet.id == change.sheet)
+                .ok_or(DomainError::MissingSheet)?
+                .merges
+                .is_empty()
+            {
+                return Err(DomainError::UnsupportedStructuralDependency);
+            }
             return crate::axis_edit::candidate(self, change, next_version, false);
         }
         if let Operation::AxisCompensation {
@@ -1239,6 +1732,16 @@ impl Workbook {
         {
             if *undoes_version == DocumentVersion::ZERO || *undoes_version >= next_version {
                 return Err(DomainError::VersionConflict);
+            }
+            if !self
+                .sheets
+                .iter()
+                .find(|sheet| sheet.id == change.sheet)
+                .ok_or(DomainError::MissingSheet)?
+                .merges
+                .is_empty()
+            {
+                return Err(DomainError::UnsupportedStructuralDependency);
             }
             return crate::axis_edit::candidate(self, change, next_version, true);
         }
@@ -1377,6 +1880,290 @@ impl Workbook {
                 .collect::<Result<Vec<_>, DomainError>>()?;
             return self.preview_candidate(&operations, next_version);
         }
+        if let Operation::CellBatchWrite {
+            intent,
+            content_writes,
+            style_writes,
+            undoes,
+            undoes_version,
+        } = operation
+        {
+            if !operation.is_inverse_target()
+                || content_writes.is_empty()
+                || content_writes.len()
+                    > if matches!(intent, CellBatchIntent::SortRange { .. }) {
+                        crate::sort::MAX_SORT_CELLS as usize
+                    } else if matches!(intent, CellBatchIntent::MoveRange { .. }) {
+                        10_000
+                    } else {
+                        1_000
+                    }
+                || style_writes.len()
+                    > if matches!(intent, CellBatchIntent::SortRange { .. }) {
+                        crate::sort::MAX_SORT_CELLS as usize
+                    } else if matches!(intent, CellBatchIntent::MoveRange { .. }) {
+                        2_000
+                    } else {
+                        1_000
+                    }
+                || undoes_version.is_some_and(|v| v == DocumentVersion::ZERO || v > self.version)
+            {
+                return Err(DomainError::LimitExceeded);
+            }
+            let text_limit = if matches!(intent, CellBatchIntent::SortRange { .. }) {
+                4 * 1024 * 1024
+            } else {
+                MAX_CELL_VALUE_BATCH_TEXT_BYTES
+            };
+            let mut content_addresses = BTreeSet::new();
+            let mut incoming_bytes = 0usize;
+            let mut previous_bytes = 0usize;
+            for write in content_writes {
+                if !content_addresses.insert(write.address) {
+                    return Err(DomainError::InvalidAxis);
+                }
+                incoming_bytes = incoming_bytes
+                    .checked_add(write.content.as_ref().map_or(0, CellContent::text_bytes))
+                    .filter(|n| *n <= text_limit)
+                    .ok_or(DomainError::LimitExceeded)?;
+                previous_bytes = previous_bytes
+                    .checked_add(write.previous.as_ref().map_or(0, CellContent::text_bytes))
+                    .filter(|n| *n <= text_limit)
+                    .ok_or(DomainError::LimitExceeded)?;
+            }
+            if let CellBatchIntent::SortRange { range, order } = intent {
+                let bounds = range.validate_order(self, order)?;
+                let sheet = self
+                    .sheets
+                    .iter()
+                    .find(|s| s.id == range.source.sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                if content_addresses.len()
+                    != (range.rows - range.header_rows) as usize * range.columns as usize
+                {
+                    return Err(DomainError::InvalidAxis);
+                }
+                for row in bounds.row + range.header_rows..bounds.row + range.rows {
+                    for column in bounds.column..bounds.column + range.columns {
+                        if !content_addresses.contains(&CellAddress {
+                            sheet: sheet.id,
+                            row: sheet.rows[row as usize],
+                            column: sheet.columns[column as usize],
+                        }) {
+                            return Err(DomainError::InvalidAxis);
+                        }
+                    }
+                }
+            }
+            if let CellBatchIntent::CopyRange {
+                source,
+                destination,
+                rows,
+                columns,
+            } = intent
+            {
+                let count = rows
+                    .checked_mul(*columns)
+                    .ok_or(DomainError::LimitExceeded)?;
+                if count as usize != content_addresses.len()
+                    || source.sheet != destination.sheet
+                    || *rows == 0
+                    || *columns == 0
+                {
+                    return Err(DomainError::InvalidAxis);
+                }
+                let sheet = self
+                    .sheets
+                    .iter()
+                    .find(|sheet| sheet.id == source.sheet)
+                    .ok_or(DomainError::MissingSheet)?;
+                let source_row = sheet
+                    .row_position(source.row)
+                    .ok_or(DomainError::MissingRow)?;
+                let source_column = sheet
+                    .column_position(source.column)
+                    .ok_or(DomainError::MissingColumn)?;
+                let destination_row = sheet
+                    .row_position(destination.row)
+                    .ok_or(DomainError::MissingRow)?;
+                let destination_column = sheet
+                    .column_position(destination.column)
+                    .ok_or(DomainError::MissingColumn)?;
+                if source_row
+                    .checked_add(*rows)
+                    .is_none_or(|end| end as usize > sheet.rows.len())
+                    || source_column
+                        .checked_add(*columns)
+                        .is_none_or(|end| end as usize > sheet.columns.len())
+                    || destination_row
+                        .checked_add(*rows)
+                        .is_none_or(|end| end as usize > sheet.rows.len())
+                    || destination_column
+                        .checked_add(*columns)
+                        .is_none_or(|end| end as usize > sheet.columns.len())
+                {
+                    return Err(DomainError::InvalidAxis);
+                }
+                for row in 0..*rows {
+                    for column in 0..*columns {
+                        let address = CellAddress {
+                            sheet: destination.sheet,
+                            row: sheet.rows[(destination_row + row) as usize],
+                            column: sheet.columns[(destination_column + column) as usize],
+                        };
+                        if !content_addresses.contains(&address) {
+                            return Err(DomainError::InvalidAxis);
+                        }
+                    }
+                }
+            }
+            if let CellBatchIntent::MoveRange {
+                source,
+                destination,
+                rows,
+                columns,
+            } = intent
+            {
+                let count = rows
+                    .checked_mul(*columns)
+                    .ok_or(DomainError::LimitExceeded)?;
+                if count == 0
+                    || count > 1_000
+                    || source.sheet != destination.sheet
+                    || source == destination
+                {
+                    return Err(DomainError::InvalidAxis);
+                }
+                // move_candidate validates both rectangles and requires the exact
+                // source/destination footprint plus any inbound formula rewrites.
+                let candidate = match (undoes, undoes_version) {
+                    (None, None) => self.move_candidate(
+                        *source,
+                        *destination,
+                        *rows,
+                        *columns,
+                        content_writes,
+                        next_version,
+                    )?,
+                    (Some(id), Some(version)) => self.candidate(
+                        &Operation::MoveCompensation {
+                            source: *source,
+                            destination: *destination,
+                            rows: *rows,
+                            columns: *columns,
+                            writes: content_writes.clone(),
+                            undoes: *id,
+                            undoes_version: *version,
+                        },
+                        next_version,
+                    )?,
+                    _ => return Err(DomainError::VersionConflict),
+                };
+                if style_writes
+                    .iter()
+                    .any(|write| !content_addresses.contains(&write.address))
+                {
+                    return Err(DomainError::InvalidStyle);
+                }
+                if style_writes.is_empty() {
+                    return Ok(candidate);
+                }
+                let mut styled = candidate;
+                for chunk in style_writes.chunks(1_000) {
+                    styled = crate::style_write::candidate(
+                        &styled,
+                        crate::style_write::StyleWriteKind::Range,
+                        chunk,
+                        next_version,
+                        false,
+                    )?;
+                }
+                return Ok(styled);
+            }
+            if style_writes
+                .iter()
+                .any(|write| !content_addresses.contains(&write.address))
+            {
+                return Err(DomainError::InvalidStyle);
+            }
+            let content_ops = content_writes
+                .iter()
+                .map(|write| Operation::CellWrite {
+                    address: write.address,
+                    content: write.content.clone(),
+                    previous: write.previous.clone(),
+                    kind: undoes.is_none().then_some(match write.content {
+                        Some(CellContent::Formula(_)) => CellWriteKind::SetFormula,
+                        Some(CellContent::Value(_)) => CellWriteKind::SetValue,
+                        None => CellWriteKind::Clear,
+                    }),
+                    undoes: *undoes,
+                    undoes_version: *undoes_version,
+                })
+                .collect::<Vec<_>>();
+            let after_content = if matches!(intent, CellBatchIntent::MoveRange { .. }) {
+                return Err(DomainError::InvalidAxis);
+            } else {
+                self.preview_candidate(&content_ops, next_version)?
+            };
+            if style_writes.is_empty() {
+                return Ok(after_content);
+            }
+            if matches!(intent, CellBatchIntent::SortRange { .. }) {
+                return crate::style_write::sort_candidate(
+                    &after_content,
+                    style_writes,
+                    next_version,
+                );
+            }
+            let mut addresses = BTreeSet::new();
+            for write in style_writes {
+                if !addresses.insert(write.address) {
+                    return Err(DomainError::InvalidStyle);
+                }
+            }
+            let sheet = after_content
+                .sheets()
+                .iter()
+                .find(|sheet| {
+                    style_writes
+                        .first()
+                        .is_some_and(|write| write.address.sheet == sheet.id())
+                })
+                .ok_or(DomainError::MissingSheet)?;
+            let mut rows = BTreeSet::new();
+            let mut columns = BTreeSet::new();
+            for address in &addresses {
+                if address.sheet != sheet.id() {
+                    return Err(DomainError::InvalidStyle);
+                }
+                rows.insert(
+                    sheet
+                        .row_position(address.row)
+                        .ok_or(DomainError::MissingRow)?,
+                );
+                columns.insert(
+                    sheet
+                        .column_position(address.column)
+                        .ok_or(DomainError::MissingColumn)?,
+                );
+            }
+            let kind = if addresses.len() == 1 {
+                crate::style_write::StyleWriteKind::Cell
+            } else {
+                crate::style_write::StyleWriteKind::Range
+            };
+            // Import alignment can target selected columns only, so validate
+            // the stable footprint without requiring it to be a rectangle.
+            let _ = (rows, columns);
+            return crate::style_write::candidate(
+                &after_content,
+                kind,
+                style_writes,
+                next_version,
+                false,
+            );
+        }
         if let Operation::SetCellValues { writes } = operation {
             if writes.is_empty() || writes.len() > 1_000 {
                 return Err(DomainError::LimitExceeded);
@@ -1509,12 +2296,16 @@ impl Workbook {
                 Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
                 Operation::CopyRange { .. }
                 | Operation::RangeWrite { .. }
+                | Operation::CellBatchWrite { .. }
                 | Operation::MoveRange { .. }
                 | Operation::MoveCompensation { .. }
                 | Operation::AxisEdit { .. }
                 | Operation::AxisCompensation { .. }
                 | Operation::StyleWrite { .. }
-                | Operation::StyleCompensation { .. } => {
+                | Operation::StyleCompensation { .. }
+                | Operation::AxisSizeWrite { .. }
+                | Operation::FrozenRowsWrite { .. }
+                | Operation::MergeWrite { .. } => {
                     return Err(DomainError::InvalidAxis);
                 }
             };
@@ -1581,7 +2372,7 @@ impl Workbook {
                 .iter()
                 .find(|s| s.id == address.sheet)
                 .ok_or(DomainError::MissingSheet)?;
-            sheet.validate_address(*address)?;
+            sheet.validate_writable_address(*address)?;
             let default = CellStyle::default();
             let style = sheet
                 .styles
@@ -1926,6 +2717,7 @@ impl Workbook {
                     .row_position(*before)
                     .ok_or(DomainError::MissingRow)?;
                 target.validate_row_extension(rows)?;
+                target.validate_row_merge_edit(Some(*before), &[])?;
                 if self.sheets.iter().any(|sheet| {
                     sheet
                         .cells
@@ -1951,6 +2743,7 @@ impl Workbook {
                     .row_position(*before)
                     .ok_or(DomainError::MissingRow)?;
                 target.validate_row_extension(rows)?;
+                target.validate_row_merge_edit(Some(*before), &[])?;
                 (self.text_bytes, self.ast_memory_bytes)
             }
             Operation::DeleteRows { sheet, rows } => {
@@ -1960,6 +2753,8 @@ impl Workbook {
                     .find(|current| current.id == *sheet)
                     .ok_or(DomainError::MissingSheet)?;
                 let deleted = target.validate_row_deletion(rows)?;
+                target
+                    .validate_row_merge_edit(None, &deleted.iter().copied().collect::<Vec<_>>())?;
                 if self.retired_row_ids.len().saturating_add(deleted.len()) > MAX_RETIRED_ROWS {
                     return Err(DomainError::LimitExceeded);
                 }
@@ -1999,6 +2794,7 @@ impl Workbook {
                 target
                     .column_position(*before)
                     .ok_or(DomainError::MissingColumn)?;
+                target.validate_column_merge_edit(Some(*before), &[])?;
                 (self.text_bytes, self.ast_memory_bytes)
             }
             Operation::DeleteColumns { sheet, columns } => {
@@ -2008,6 +2804,10 @@ impl Workbook {
                     .find(|current| current.id == *sheet)
                     .ok_or(DomainError::MissingSheet)?;
                 let deleted = target.validate_column_deletion(columns)?;
+                target.validate_column_merge_edit(
+                    None,
+                    &deleted.iter().copied().collect::<Vec<_>>(),
+                )?;
                 if self.retired_column_ids.len().saturating_add(deleted.len()) > MAX_RETIRED_COLUMNS
                 {
                     return Err(DomainError::LimitExceeded);
@@ -2056,12 +2856,15 @@ impl Workbook {
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
             Operation::CopyRange { .. }
             | Operation::RangeWrite { .. }
+            | Operation::CellBatchWrite { .. }
             | Operation::MoveRange { .. }
             | Operation::MoveCompensation { .. }
             | Operation::AxisEdit { .. }
             | Operation::AxisCompensation { .. }
             | Operation::StyleWrite { .. }
-            | Operation::StyleCompensation { .. } => {
+            | Operation::StyleCompensation { .. }
+            | Operation::AxisSizeWrite { .. }
+            | Operation::FrozenRowsWrite { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {
@@ -2079,6 +2882,7 @@ impl Workbook {
                     content.as_ref().map_or(0, CellContent::ast_memory_bytes),
                 )?
             }
+            Operation::MergeWrite { .. } => (self.text_bytes, self.ast_memory_bytes),
         })
     }
     fn validate_guarded_write(&self, operation: &Operation) -> Result<(), DomainError> {
@@ -2120,6 +2924,11 @@ impl Workbook {
         if self.cell_content(*address)? != previous.as_ref() {
             return Err(DomainError::PreimageConflict);
         }
+        self.sheets
+            .iter()
+            .find(|sheet| sheet.id == address.sheet)
+            .ok_or(DomainError::MissingSheet)?
+            .validate_writable_address(*address)?;
         match content {
             Some(CellContent::Value(CellValue::Blank)) => {
                 return Err(DomainError::InvalidValue);
@@ -2281,7 +3090,7 @@ impl Workbook {
                     .iter_mut()
                     .find(|s| s.id == address.sheet)
                     .ok_or(DomainError::MissingSheet)?;
-                sheet.validate_address(*address)?;
+                sheet.validate_writable_address(*address)?;
                 if normalized == CellValue::Blank {
                     sheet.cells.remove(address);
                 } else {
@@ -2297,12 +3106,16 @@ impl Workbook {
             Operation::SetCellValues { .. } => return Err(DomainError::InvalidAxis),
             Operation::CopyRange { .. }
             | Operation::RangeWrite { .. }
+            | Operation::CellBatchWrite { .. }
             | Operation::MoveRange { .. }
             | Operation::MoveCompensation { .. }
+            | Operation::MergeWrite { .. }
             | Operation::AxisEdit { .. }
             | Operation::AxisCompensation { .. }
             | Operation::StyleWrite { .. }
-            | Operation::StyleCompensation { .. } => {
+            | Operation::StyleCompensation { .. }
+            | Operation::AxisSizeWrite { .. }
+            | Operation::FrozenRowsWrite { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
             Operation::SetCellFormula { address, formula } => {
@@ -2327,7 +3140,7 @@ impl Workbook {
                     .iter_mut()
                     .find(|s| s.id == address.sheet)
                     .ok_or(DomainError::MissingSheet)?;
-                sheet.validate_address(*address)?;
+                sheet.validate_writable_address(*address)?;
                 sheet.cells.remove(address);
             }
             Operation::CellWrite {
@@ -2633,7 +3446,7 @@ impl Workbook {
             .iter()
             .find(|sheet| sheet.id == address.sheet)
             .ok_or(DomainError::MissingSheet)?;
-        sheet.validate_address(address)?;
+        sheet.validate_writable_address(address)?;
         let previous_bytes = sheet.cells.get(&address).map_or(0, CellContent::text_bytes);
         let previous_ast_bytes = sheet
             .cells
@@ -2758,6 +3571,24 @@ impl Workbook {
                 }
             }
         }
+        if self.sheets.iter().any(|sheet| !sheet.merges.is_empty()) {
+            hash.update(b"PXEL-MERGES-1\0");
+            let total = self
+                .sheets
+                .iter()
+                .map(|sheet| sheet.merges.len())
+                .sum::<usize>();
+            hash.update((total as u64).to_be_bytes());
+            for sheet in &self.sheets {
+                for range in &sheet.merges {
+                    hash.update(sheet.id.as_bytes());
+                    hash.update(range.first_row().as_bytes());
+                    hash.update(range.last_row().as_bytes());
+                    hash.update(range.first_column().as_bytes());
+                    hash.update(range.last_column().as_bytes());
+                }
+            }
+        }
         if let Some(context) = &self.calculation_context {
             // Legacy documents never enter this branch, preserving PXEL-DOMAIN-1
             // goldens while context-bearing states gain a domain-separated suffix.
@@ -2818,6 +3649,42 @@ impl Workbook {
                     style.append_to(&mut bytes);
                     hash.update((bytes.len() as u64).to_be_bytes());
                     hash.update(bytes);
+                }
+            }
+        }
+        if self
+            .sheets
+            .iter()
+            .any(|s| !s.row_heights.is_empty() || !s.column_widths.is_empty())
+        {
+            hash.update(b"PXEL-AXIS-SIZES-1\0");
+            let total = self
+                .sheets
+                .iter()
+                .map(|sheet| sheet.row_heights.len() + sheet.column_widths.len())
+                .sum::<usize>();
+            hash.update((total as u64).to_be_bytes());
+            for sheet in &self.sheets {
+                for (id, size) in &sheet.row_heights {
+                    hash.update(sheet.id.as_bytes());
+                    hash.update([0]);
+                    hash.update(id.as_bytes());
+                    hash.update(size.to_be_bytes());
+                }
+                for (id, size) in &sheet.column_widths {
+                    hash.update(sheet.id.as_bytes());
+                    hash.update([1]);
+                    hash.update(id.as_bytes());
+                    hash.update(size.to_be_bytes());
+                }
+            }
+        }
+        if self.sheets.iter().any(|s| s.frozen_rows != 0) {
+            hash.update(b"PXEL-FROZEN-ROWS-1\0");
+            for sheet in &self.sheets {
+                if sheet.frozen_rows != 0 {
+                    hash.update(sheet.id.as_bytes());
+                    hash.update(sheet.frozen_rows.to_be_bytes());
                 }
             }
         }

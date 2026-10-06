@@ -1,3 +1,4 @@
+import { createBookFromUi } from './create-book';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { GRID, columnLabel } from '../src/grid/viewport';
 import { uuidV7, type Projection } from '../src/document/store';
@@ -25,6 +26,11 @@ async function state(page: Page): Promise<Projection> {
   const response = await page.request.get(`/api/documents/${id}`);
   expect(response.ok()).toBe(true);
   return response.json();
+}
+function workbookState(projection: Projection) {
+  const result = { ...projection };
+  delete result.capabilities;
+  return result;
 }
 async function editorFor(page: Page, browser: Browser) {
   const origin = new URL(page.url()).origin;
@@ -95,8 +101,9 @@ for (const axis of ['row', 'column'] as const) {
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await page.goto('/');
+      await createBookFromUi(page);
       await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-      await page.getByRole('button', { name: 'Создать таблицу' }).click();
+      await createBookFromUi(page);
       await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
       const { editor, close } = await editorFor(page, browser);
       editor.on('pageerror', (error) => errors.push(error.message));
@@ -185,10 +192,12 @@ for (const axis of ['row', 'column'] as const) {
         ).toBeDisabled();
         await editor.reload();
         await expect(editor.getByTestId('connection-status')).toHaveText('Подключено');
-        expect(await state(editor)).toEqual(redone);
+        const editorReloaded = await state(editor);
+        expect(editorReloaded.capabilities).toMatchObject({ can_edit: true, can_share: false });
+        expect(workbookState(editorReloaded)).toEqual(workbookState(redone));
         await page.reload();
         await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-        expect(await state(page)).toEqual(redone);
+        expect(workbookState(await state(page))).toEqual(workbookState(redone));
         expect(errors).toEqual([]);
       } finally {
         await close();

@@ -1,0 +1,137 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT snapshot_id, snapshot_version, last_axis_change_version, snapshot_schema_version, object_key, byte_length, payload_checksum, state_hash, writer_engine_version, writer_compatibility_profile FROM document_snapshots WHERE document_id=$1 AND snapshot_version<=$2 AND state='ACTIVE' ORDER BY snapshot_version DESC, activated_at DESC LIMIT 128",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "snapshot_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "snapshot_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "snapshot_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "snapshot_version"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "last_axis_change_version",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "last_axis_change_version"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "snapshot_schema_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "snapshot_schema_version"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "object_key",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "object_key"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "payload_checksum",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "payload_checksum"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "state_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "state_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "writer_engine_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "writer_engine_version"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "writer_compatibility_profile",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "writer_compatibility_profile"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "05204018709e7cf0759f45702135f2e17af2b640c4aec8d9a47143b9e7fb5f88"
+}

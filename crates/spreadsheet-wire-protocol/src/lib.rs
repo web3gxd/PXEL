@@ -76,6 +76,9 @@ pub fn decode_request(bytes: &[u8]) -> Result<ClientRequest, DecodeError> {
                 || request.document_id.iter().all(|byte| *byte == 0)
                 || request.input_version == 0
                 || request.input_version > i64::MAX as u64
+                || request
+                    .base_input_version
+                    .is_some_and(|version| version > i64::MAX as u64)
             {
                 return Err(DecodeError::InvalidMessage);
             }
@@ -237,6 +240,7 @@ mod tests {
                 v1::RequestCalculation {
                     document_id: vec![1; 16],
                     input_version: 2,
+                    base_input_version: None,
                 },
             )),
         };
@@ -250,6 +254,23 @@ mod tests {
         );
         if let Some(v1::client_envelope::Payload::RequestCalculation(value)) = &mut request.payload
         {
+            value.base_input_version = Some(1);
+        }
+        assert!(matches!(
+            decode_request(&request.encode_to_vec())?,
+            ClientRequest::Calculation(_)
+        ));
+        if let Some(v1::client_envelope::Payload::RequestCalculation(value)) = &mut request.payload
+        {
+            value.base_input_version = Some(i64::MAX as u64 + 1);
+        }
+        assert!(matches!(
+            decode_request(&request.encode_to_vec()),
+            Err(DecodeError::InvalidMessage)
+        ));
+        if let Some(v1::client_envelope::Payload::RequestCalculation(value)) = &mut request.payload
+        {
+            value.base_input_version = None;
             value.input_version = 0;
         }
         assert!(matches!(

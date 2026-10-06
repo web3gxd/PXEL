@@ -9,6 +9,7 @@ import {
   createDocument,
   getDocument,
   login,
+  mergeRangeCommand,
   releaseSessions,
   setCommand,
 } from '../helpers/client.mjs';
@@ -105,11 +106,31 @@ test(
       const writer = await connect(base, cookie);
       let backupHash;
       let sourceVersionThreeHash;
+      let expectedMerge;
       try {
         assert.equal((await writer.send(setCommand(writer, snapshot, 'one'))).case, 'committed');
         const atTwo = await getDocument(base, cookie, snapshot.document_id);
+        const merged = await writer.send(
+          mergeRangeCommand(writer, atTwo, {
+            firstRow: 1,
+            lastRow: 2,
+            firstColumn: 1,
+            lastColumn: 2,
+            sequence: 2,
+          }),
+        );
+        assert.equal(merged.case, 'committed');
+        assert.equal(merged.value.committedVersion, 3n);
+        const atThree = await getDocument(base, cookie, snapshot.document_id);
+        expectedMerge = {
+          first_row_id: atThree.sheets[0].rows[1],
+          last_row_id: atThree.sheets[0].rows[2],
+          first_column_id: atThree.sheets[0].columns[1],
+          last_column_id: atThree.sheets[0].columns[2],
+        };
+        assert.deepEqual(atThree.sheets[0].merges, [expectedMerge]);
         assert.equal(
-          (await writer.send(setCommand(writer, atTwo, 'two', { sequence: 2 }))).case,
+          (await writer.send(setCommand(writer, atThree, 'two', { sequence: 3 }))).case,
           'committed',
         );
         const activeQuery = `SELECT count(*) FROM document_snapshots WHERE document_id='${snapshot.document_id}' AND snapshot_version=3 AND state='ACTIVE'`;
@@ -140,13 +161,13 @@ test(
           await delay(100);
         }
         assert.ok(active, 'snapshot v3 did not activate before backup');
-        const atThree = await getDocument(base, cookie, snapshot.document_id);
         sourceVersionThreeHash = atThree.state_hash;
+        const atFour = await getDocument(base, cookie, snapshot.document_id);
         const committed = await writer.send(
-          setCommand(writer, atThree, 'backup point', { sequence: 3 }),
+          setCommand(writer, atFour, 'backup point', { sequence: 4 }),
         );
         assert.equal(committed.case, 'committed');
-        assert.equal(committed.value.committedVersion, 4n);
+        assert.equal(committed.value.committedVersion, 5n);
         backupHash = Buffer.from(committed.value.confirmedStateHash).toString('hex');
       } finally {
         writer.socket.terminate();
@@ -177,18 +198,18 @@ test(
       );
       run(exe('pg_verifybackup'), ['-q', backupData], sourceEnv, false, 120000);
 
-      // The source advances after the backup. Restoring must stay at v4.
+      // The source advances after the backup. Restoring must stay at v5.
       server = await startServer(sourceEnv, base, join(root, 'source-server.log'));
       const laterCookie = await login(base);
       const laterWriter = await connect(base, laterCookie);
       try {
-        const atFour = await getDocument(base, laterCookie, snapshot.document_id);
-        assert.equal(atFour.version, '4');
+        const atFive = await getDocument(base, laterCookie, snapshot.document_id);
+        assert.equal(atFive.version, '5');
         assert.equal(
-          (await laterWriter.send(setCommand(laterWriter, atFour, 'later', { sequence: 1 }))).case,
+          (await laterWriter.send(setCommand(laterWriter, atFive, 'later', { sequence: 1 }))).case,
           'committed',
         );
-        assert.equal((await getDocument(base, laterCookie, snapshot.document_id)).version, '5');
+        assert.equal((await getDocument(base, laterCookie, snapshot.document_id)).version, '6');
       } finally {
         laterWriter.socket.terminate();
         await releaseSessions(base);
@@ -203,9 +224,10 @@ test(
       server = await startServer(restoredEnv, base, join(root, 'restored-server.log'));
       const restoredCookie = await login(base);
       const restored = await getDocument(base, restoredCookie, snapshot.document_id);
-      assert.equal(restored.version, '4');
+      assert.equal(restored.version, '5');
       assert.equal(restored.state_hash, backupHash);
       assert.equal(restored.sheets[0].cells[0].value.value, 'backup point');
+      assert.deepEqual(restored.sheets[0].merges, [expectedMerge]);
       const recoveries = readFileSync(join(root, 'restored-server.log'), 'utf8')
         .split('\n')
         .filter(Boolean)
@@ -213,7 +235,7 @@ test(
         .filter((line) => line.fields?.event === 'document_recovery');
       assert.ok(
         recoveries.some(
-          (line) => line.fields.snapshot_version === 3 && line.fields.replayed_events === 1,
+          (line) => line.fields.snapshot_version === 3 && line.fields.replayed_events === 2,
         ),
         'restored actor did not use snapshot v3 plus v4 tail',
       );
@@ -221,7 +243,9 @@ test(
         headers: { Origin: 'http://127.0.0.1:5173', Cookie: restoredCookie },
       });
       assert.equal(historical.status, 200);
-      assert.equal((await historical.json()).state_hash, sourceVersionThreeHash);
+      const restoredVersionThree = await historical.json();
+      assert.equal(restoredVersionThree.state_hash, sourceVersionThreeHash);
+      assert.deepEqual(restoredVersionThree.sheets[0].merges, [expectedMerge]);
       await releaseSessions(base);
     } finally {
       try {

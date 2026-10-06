@@ -991,6 +991,7 @@ async fn axis_history_oversized_removed_preimages_refuse_original_before_commit(
                 })
             })
             .collect::<Result<_, DomainError>>()?,
+        style_writes: vec![],
     };
     let operation_id = OperationId::from_bytes(1093u128.to_be_bytes())?;
     let request = CommitRequest {

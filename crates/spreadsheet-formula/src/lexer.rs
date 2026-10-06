@@ -173,6 +173,8 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token>, ParseError> {
                 if source.as_bytes().get(position) == Some(&b'!') {
                     TokenKind::Word(text.into())
                 } else {
+                    let normalized = excel_significant_digit_limit(text);
+                    let text = normalized.as_deref().unwrap_or(text);
                     let number: f64 = text.parse().map_err(|_| {
                         ParseError::at(ParseErrorCode::InvalidNumber, start, position)
                     })?;
@@ -263,4 +265,28 @@ pub(crate) fn lex(source: &str) -> Result<Vec<Token>, ParseError> {
         },
     });
     Ok(tokens)
+}
+
+/// Excel keeps at most 15 significant decimal digits in entered numeric constants.
+/// Preserve the exponent and decimal point, zeroing only excess mantissa digits.
+fn excel_significant_digit_limit(text: &str) -> Option<String> {
+    let mantissa = text
+        .split_once(['e', 'E'])
+        .map_or(text, |(mantissa, _)| mantissa);
+    let first_significant = mantissa
+        .bytes()
+        .position(|byte| byte.is_ascii_digit() && byte != b'0')?;
+    let mut significant_digits = 0_usize;
+    let mut normalized = None::<Vec<u8>>;
+    for (index, byte) in mantissa.bytes().enumerate().skip(first_significant) {
+        if !byte.is_ascii_digit() {
+            continue;
+        }
+        significant_digits += 1;
+        if significant_digits > 15 {
+            let bytes = normalized.get_or_insert_with(|| text.as_bytes().to_vec());
+            bytes[index] = b'0';
+        }
+    }
+    normalized.and_then(|bytes| String::from_utf8(bytes).ok())
 }

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT byte_length,payload_checksum,state_hash FROM document_snapshots WHERE snapshot_id=$1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "byte_length",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "byte_length"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "payload_checksum",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "payload_checksum"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "state_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "document_snapshots",
+            "name": "state_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "65fa43fdf91e8afaf7d6326174b271fdfe31d2eb0185c7e6a41a7fef1fa667b1"
+}

@@ -338,6 +338,33 @@ async fn bootstrap_open_timer_and_edit_epochs_publish_the_exact_latest_system_ev
 }
 
 #[tokio::test]
+async fn confirmed_analysis_read_never_initializes_a_missing_volatile_context() -> TestResult {
+    let (journal, identity) = fixture(true)?;
+    let original = journal.state.lock().await.0.clone();
+    let events = journal.state.lock().await.1.len();
+    let samples = Arc::new(AtomicU8::new(0));
+    let counter = samples.clone();
+    let directory =
+        InProcessSessionDirectory::new(journal.clone()).with_context_sampler(move |reason| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok((OperationId::from_bytes([30; 16])?, context(30, reason)?))
+        });
+    let session = directory.session(identity, original.document_id()).await?;
+    let captured = session.read_confirmed(identity).await?;
+    assert_eq!(captured.version(), original.version());
+    assert_eq!(captured.hash(), original.hash());
+    assert!(captured.calculation_context().is_none());
+    assert_eq!(samples.load(Ordering::SeqCst), 0);
+    assert_eq!(journal.state.lock().await.1.len(), events);
+    assert_eq!(
+        session.read(identity).await?.version().get(),
+        original.version().get() + 1
+    );
+    assert_eq!(samples.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn bootstrap_post_commit_failure_still_publishes_exact_system_event() -> TestResult {
     let (mut journal, identity) = fixture(true)?;
     journal.fail_after_commit = true;

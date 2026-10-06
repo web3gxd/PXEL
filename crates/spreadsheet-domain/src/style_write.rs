@@ -34,8 +34,9 @@ fn validate_targets(
     addresses: &[CellAddress],
     kind: StyleWriteKind,
     require_rectangle: bool,
+    max_targets: usize,
 ) -> Result<(), DomainError> {
-    if addresses.is_empty() || addresses.len() > MAX_STYLE_TARGETS {
+    if addresses.is_empty() || addresses.len() > max_targets {
         return Err(DomainError::LimitExceeded);
     }
     if kind == StyleWriteKind::Cell && addresses.len() != 1 {
@@ -54,7 +55,7 @@ fn validate_targets(
         if address.sheet != first.sheet {
             return Err(DomainError::InvalidStyle);
         }
-        sheet.validate_address(*address)?;
+        sheet.validate_writable_address(*address)?;
         if !seen.insert(*address) {
             return Err(DomainError::InvalidStyle);
         }
@@ -91,7 +92,7 @@ pub fn prepare_style_write(
     patch: &[StyleChange],
     kind: StyleWriteKind,
 ) -> Result<Operation, DomainError> {
-    validate_targets(book, addresses, kind, true)?;
+    validate_targets(book, addresses, kind, true, MAX_STYLE_TARGETS)?;
     let changes = canonical_patch(patch)?;
     let mut writes = Vec::with_capacity(addresses.len());
     for address in addresses {
@@ -141,13 +142,46 @@ pub(crate) fn candidate(
     version: DocumentVersion,
     require_rectangle: bool,
 ) -> Result<Workbook, DomainError> {
-    if writes.is_empty() || writes.len() > MAX_STYLE_TARGETS {
+    bounded_candidate(
+        book,
+        kind,
+        writes,
+        version,
+        require_rectangle,
+        MAX_STYLE_TARGETS,
+    )
+}
+
+pub(crate) fn sort_candidate(
+    book: &Workbook,
+    writes: &[GuardedStyleWrite],
+    version: DocumentVersion,
+) -> Result<Workbook, DomainError> {
+    bounded_candidate(
+        book,
+        StyleWriteKind::Range,
+        writes,
+        version,
+        false,
+        crate::sort::MAX_SORT_CELLS as usize,
+    )
+}
+
+fn bounded_candidate(
+    book: &Workbook,
+    kind: StyleWriteKind,
+    writes: &[GuardedStyleWrite],
+    version: DocumentVersion,
+    require_rectangle: bool,
+    max_targets: usize,
+) -> Result<Workbook, DomainError> {
+    if writes.is_empty() || writes.len() > max_targets {
         return Err(DomainError::LimitExceeded);
     }
     let addresses = writes.iter().map(|w| w.address).collect::<Vec<_>>();
     // Compensation reuses a frozen stable footprint; later insertions may
     // separate those cells without altering any written property.
-    validate_targets(book, &addresses, kind, require_rectangle)?;
+    validate_targets(book, &addresses, kind, require_rectangle, max_targets)?;
     if writes.windows(2).any(|w| w[0].address >= w[1].address) {
         return Err(DomainError::InvalidStyle);
     }

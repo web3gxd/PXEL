@@ -1,6 +1,12 @@
 //! A bounded local process boundary for XLSX parsing. OS sandbox adapters are
-//! a later gate; only a bounded, parent-validated IR crosses this boundary.
+//! only partially installed: process-tree termination is enforced, while hard
+//! resource and filesystem/network isolation remain open gates.
 
+#[cfg(windows)]
+use process_wrap::tokio::JobObject;
+#[cfg(unix)]
+use process_wrap::tokio::ProcessGroup;
+use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use spreadsheet_xlsx::NormalizedWorkbook;
 use std::{
     io::{Read, Write},
@@ -13,7 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const REQUEST_MAGIC: &[u8; 4] = b"PXIW";
 const RESPONSE_MAGIC: &[u8; 4] = b"PXOW";
-const PROTOCOL_VERSION: u16 = 3;
+const PROTOCOL_VERSION: u16 = 4;
 const MAX_PATH_BYTES: usize = 4096;
 const RESPONSE_HEADER_BYTES: usize = 11;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
@@ -37,6 +43,35 @@ pub enum WorkerError {
 pub struct PreviewCounts {
     pub sheets: u32,
     pub cells: u32,
+}
+
+struct WorkerProcessGuard {
+    child: Box<dyn ChildWrapper>,
+    terminate_on_drop: bool,
+}
+
+impl WorkerProcessGuard {
+    fn new(child: Box<dyn ChildWrapper>) -> Self {
+        Self {
+            child,
+            terminate_on_drop: true,
+        }
+    }
+
+    async fn terminate(&mut self) {
+        let _ = self.child.start_kill();
+        if self.child.wait().await.is_ok() {
+            self.terminate_on_drop = false;
+        }
+    }
+}
+
+impl Drop for WorkerProcessGuard {
+    fn drop(&mut self) {
+        if self.terminate_on_drop {
+            let _ = self.child.start_kill();
+        }
+    }
 }
 
 /// Parent-side entry point. Only a canonical absolute path crosses the boundary.
@@ -82,9 +117,15 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
     if let Some(system_root) = std::env::var_os("SystemRoot") {
         command.env("SystemRoot", system_root);
     }
-    let mut child = command.spawn().map_err(|_| WorkerError::Process)?;
-    let mut stdin = child.stdin.take().ok_or(WorkerError::Process)?;
-    let mut stdout = child.stdout.take().ok_or(WorkerError::Process)?;
+    let mut command = CommandWrap::from(command);
+    command.wrap(KillOnDrop);
+    #[cfg(unix)]
+    command.wrap(ProcessGroup::leader());
+    #[cfg(windows)]
+    command.wrap(JobObject);
+    let mut child = WorkerProcessGuard::new(command.spawn().map_err(|_| WorkerError::Process)?);
+    let mut stdin = child.child.stdin().take().ok_or(WorkerError::Process)?;
+    let mut stdout = child.child.stdout().take().ok_or(WorkerError::Process)?;
     let transfer = tokio::time::timeout(WORKER_TIMEOUT, async {
         stdin
             .write_all(REQUEST_MAGIC)
@@ -124,23 +165,22 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
         {
             return Err(WorkerError::Protocol);
         }
-        let status = child.wait().await.map_err(|_| WorkerError::Process)?;
+        let status = child.child.wait().await.map_err(|_| WorkerError::Process)?;
         if !status.success() {
             return Err(WorkerError::Process);
         }
+        child.terminate_on_drop = false;
         decode_payload(&payload)
     })
     .await;
     match transfer {
         Ok(Ok(counts)) => Ok(counts),
         Ok(Err(error)) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            child.terminate().await;
             Err(error)
         }
         Err(_) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            child.terminate().await;
             Err(WorkerError::Timeout)
         }
     }
@@ -238,13 +278,27 @@ fn decode_payload(payload: &[u8]) -> Result<NormalizedWorkbook, WorkerError> {
 #[cfg(test)]
 mod tests {
     use super::{WorkerError, decode_header, decode_payload, encode_header};
+    #[cfg(windows)]
+    use process_wrap::tokio::JobObject;
+    #[cfg(unix)]
+    use process_wrap::tokio::ProcessGroup;
+    use process_wrap::tokio::{CommandWrap, KillOnDrop};
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+        time::Duration,
+    };
+    use tokio::{
+        io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+        process::ChildStdout,
+    };
 
     #[test]
     fn response_codec_rejects_unknown_version_status_and_size() {
         let frame = encode_header(0, 5).unwrap_or([0; 11]);
         assert_eq!(decode_header(&frame), Ok(5));
         let mut unknown = frame;
-        unknown[5] = 4;
+        unknown[5] = 5;
         assert_eq!(decode_header(&unknown), Err(WorkerError::Protocol));
         let rejected = encode_header(1, 0).unwrap_or([0; 11]);
         assert_eq!(decode_header(&rejected), Err(WorkerError::Rejected));
@@ -257,24 +311,131 @@ mod tests {
 
     #[test]
     fn parent_rejects_invalid_worker_ir() {
-        let valid = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"hello"}}]}],"issues":[]}"#;
+        let valid = br#"{"schema_version":3,"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"hello"}}]}],"issues":[]}"#;
         assert!(decode_payload(valid).is_ok());
-        let duplicate = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"a"}},{"row":1,"column":1,"value":{"Text":"b"}}]}],"issues":[]}"#;
+        let previous_schema =
+            br#"{"schema_version":2,"sheets":[{"name":"Data","cells":[]}],"issues":[]}"#;
+        assert_eq!(decode_payload(previous_schema), Err(WorkerError::Protocol));
+        let duplicate = br#"{"schema_version":3,"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Text":"a"}},{"row":1,"column":1,"value":{"Text":"b"}}]}],"issues":[]}"#;
         assert_eq!(decode_payload(duplicate), Err(WorkerError::Protocol));
-        let invalid_number = br#"{"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Number":-0.0}}]}],"issues":[]}"#;
+        let invalid_number = br#"{"schema_version":3,"sheets":[{"name":"Data","cells":[{"row":1,"column":1,"value":{"Number":-0.0}}]}],"issues":[]}"#;
         assert_eq!(decode_payload(invalid_number), Err(WorkerError::Protocol));
-        let unknown = br#"{"sheets":[{"name":"Data","cells":[],"hidden":true}],"issues":[]}"#;
+        let unknown = br#"{"schema_version":3,"sheets":[{"name":"Data","cells":[],"hidden":true}],"issues":[]}"#;
         assert_eq!(decode_payload(unknown), Err(WorkerError::Protocol));
         let duplicate_names =
-            br#"{"sheets":[{"name":"Data","cells":[]},{"name":"data","cells":[]}],"issues":[]}"#;
+            br#"{"schema_version":3,"sheets":[{"name":"Data","cells":[]},{"name":"data","cells":[]}],"issues":[]}"#;
         assert_eq!(decode_payload(duplicate_names), Err(WorkerError::Protocol));
-        let invented_code = br#"{"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"Unknown","sheet_index":0}]}"#;
+        let invented_code = br#"{"schema_version":3,"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"Unknown","sheet_index":0}]}"#;
         assert_eq!(decode_payload(invented_code), Err(WorkerError::Protocol));
-        let invalid_sheet = br#"{"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"CellFormatting","sheet_index":1}]}"#;
+        let invalid_sheet = br#"{"schema_version":3,"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"CellFormatting","sheet_index":1}]}"#;
         assert_eq!(decode_payload(invalid_sheet), Err(WorkerError::Protocol));
-        let duplicated_issue = br#"{"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"CellFormatting","sheet_index":0},{"code":"CellFormatting","sheet_index":0}]}"#;
+        let duplicated_issue = br#"{"schema_version":3,"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"CellFormatting","sheet_index":0},{"code":"CellFormatting","sheet_index":0}]}"#;
         assert_eq!(decode_payload(duplicated_issue), Err(WorkerError::Protocol));
-        let mislabeled_issue = br#"{"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"WorkbookMetadata","sheet_index":0}]}"#;
+        let mislabeled_issue = br#"{"schema_version":3,"sheets":[{"name":"Data","cells":[]}],"issues":[{"code":"WorkbookMetadata","sheet_index":0}]}"#;
         assert_eq!(decode_payload(mislabeled_issue), Err(WorkerError::Protocol));
+    }
+
+    fn start_process_tree_probe()
+    -> Result<(super::WorkerProcessGuard, BufReader<ChildStdout>), Box<dyn std::error::Error>> {
+        let mut command = CommandWrap::with_new(std::env::current_exe()?, |command| {
+            command
+                .args([
+                    "--exact",
+                    "xlsx_worker::tests::process_tree_probe",
+                    "--nocapture",
+                ])
+                .env("PXEL_XLSX_TREE_PROBE", "root")
+                .env_remove("RUST_TEST_THREADS")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+        });
+        command.wrap(KillOnDrop);
+        #[cfg(unix)]
+        command.wrap(ProcessGroup::leader());
+        #[cfg(windows)]
+        command.wrap(JobObject);
+        let mut child = super::WorkerProcessGuard::new(command.spawn()?);
+        let stdout = child
+            .child
+            .stdout()
+            .take()
+            .ok_or("worker stdout unavailable")?;
+        Ok((child, BufReader::new(stdout)))
+    }
+
+    async fn wait_for_process_tree_probe(
+        reader: &mut BufReader<ChildStdout>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut line = String::new();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).await? == 0 {
+                    return Err(std::io::Error::other("worker exited before spawning child"));
+                }
+                if line.trim_end() == "PXEL_TREE_READY" {
+                    return Ok::<(), std::io::Error>(());
+                }
+            }
+        })
+        .await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn process_tree_probe() -> Result<(), Box<dyn std::error::Error>> {
+        match std::env::var("PXEL_XLSX_TREE_PROBE").as_deref() {
+            Ok("descendant") => {
+                std::thread::sleep(Duration::from_secs(60));
+                return Ok(());
+            }
+            Ok("root") => {
+                Command::new(std::env::current_exe()?)
+                    .args([
+                        "--exact",
+                        "xlsx_worker::tests::process_tree_probe",
+                        "--nocapture",
+                    ])
+                    .env("PXEL_XLSX_TREE_PROBE", "descendant")
+                    .env_remove("RUST_TEST_THREADS")
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::null())
+                    .spawn()?;
+                println!("PXEL_TREE_READY");
+                std::io::stdout().flush()?;
+                std::thread::sleep(Duration::from_secs(60));
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        let (mut child, mut reader) = start_process_tree_probe()?;
+        wait_for_process_tree_probe(&mut reader).await?;
+        child.child.start_kill()?;
+        let killed = child.child.wait().await?;
+        assert!(!killed.success());
+        child.terminate_on_drop = false;
+        let mut remaining_output = Vec::new();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            reader.read_to_end(&mut remaining_output),
+        )
+        .await??;
+
+        assert!(remaining_output.is_empty());
+
+        let (child, mut reader) = start_process_tree_probe()?;
+        wait_for_process_tree_probe(&mut reader).await?;
+        drop(child);
+        let mut remaining_output = Vec::new();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            reader.read_to_end(&mut remaining_output),
+        )
+        .await??;
+        assert!(remaining_output.is_empty());
+        Ok(())
     }
 }

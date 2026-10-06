@@ -1,13 +1,30 @@
+mod analysis_api;
 mod auth;
 mod calculation_context;
 mod calculation_stream;
+mod catalog_api;
 mod config;
 mod delivery;
+mod disclosure_api;
 mod documents;
 #[cfg(test)]
 mod head_history_tests;
+mod history_api;
 mod outbound;
 mod presence;
+mod privacy_api;
+mod profile_api;
+mod pxel_api;
+mod pxel_file;
+mod pxel_workbook;
+mod share_password;
+mod shares_api;
+mod storage_maintenance;
+#[cfg(feature = "legacy-migration")]
+mod storage_migration;
+mod storage_restore;
+mod templates_api;
+mod views_api;
 #[cfg(feature = "dev-auth")]
 mod xlsx_import;
 mod xlsx_worker;
@@ -15,7 +32,7 @@ mod xlsx_worker;
 use axum::{
     Json, Router,
     extract::{
-        State, WebSocketUpgrade,
+        Path, State, WebSocketUpgrade,
         ws::{CloseFrame, Message, WebSocket},
     },
     http::{HeaderMap, HeaderValue, StatusCode, header},
@@ -43,7 +60,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{Mutex, Semaphore, mpsc, watch};
+use tokio::sync::{Mutex, Semaphore, broadcast, mpsc, watch};
 use tower_http::services::{ServeDir, ServeFile};
 use uuid::Uuid;
 
@@ -57,9 +74,55 @@ struct AppState {
     exports: Arc<Semaphore>,
     history_reads: Arc<Semaphore>,
     rate: Mutex<(Instant, u32)>,
+    passwords: share_password::PasswordWorkers,
+    share_admission: Arc<Semaphore>,
     sessions: spreadsheet_collab::InProcessSessionDirectory<PgDatabase>,
     delivery: delivery::DeliveryGates,
+    access_events: broadcast::Sender<AccessEpochEvent>,
     presence: presence::PresenceDirectory,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AccessEpochEvent {
+    Document { document: DocumentId, epoch: u64 },
+    Reconnect,
+}
+
+async fn access_epoch_worker(
+    state: Arc<AppState>,
+    mut listener: spreadsheet_storage::AccessEpochListener,
+) {
+    loop {
+        match listener.recv().await {
+            Ok(change) => {
+                state
+                    .delivery
+                    .get(change.document)
+                    .await
+                    .committed_epoch(change.epoch);
+                let _ = state.access_events.send(AccessEpochEvent::Document {
+                    document: change.document,
+                    epoch: change.epoch,
+                });
+            }
+            Err(_) => {
+                // Fail closed while LISTEN is unavailable. Any later access
+                // change may have happened in the reconnect gap.
+                let _ = state.access_events.send(AccessEpochEvent::Reconnect);
+                tracing::warn!(event = "access_epoch_listener_disconnected");
+                loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    match state.database.listen_access_epochs().await {
+                        Ok(reconnected) => {
+                            listener = reconnected;
+                            break;
+                        }
+                        Err(_) => tracing::warn!(event = "access_epoch_listener_reconnect_failed"),
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -142,6 +205,35 @@ async fn snapshot_cleanup_worker(
                 delete_attempts = report.delete_attempts,
             ),
             Err(_) => tracing::warn!(event = "snapshot_cleanup_failed"),
+        }
+    }
+}
+
+async fn share_expiry_worker(state: Arc<AppState>) {
+    let mut ticker = tokio::time::interval(Duration::from_secs(1));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        ticker.tick().await;
+        let documents = match state.database.expired_share_documents(100).await {
+            Ok(documents) => documents,
+            Err(_) => {
+                tracing::warn!(event = "share_expiry_scan_failed");
+                continue;
+            }
+        };
+        for document in documents {
+            let gate = state.delivery.get(document).await;
+            let Ok(_write) = tokio::time::timeout(Duration::from_secs(3), gate.lock.write()).await
+            else {
+                continue;
+            };
+            match state.database.expire_document_shares(document).await {
+                Ok(Some(receipt)) if receipt.newly_committed => {
+                    gate.committed_epoch(receipt.access_epoch)
+                }
+                Ok(_) => {}
+                Err(_) => tracing::warn!(event = "share_expiry_commit_failed"),
+            }
         }
     }
 }
@@ -328,6 +420,22 @@ fn head_hint(document: DocumentId, update: &HeadUpdate) -> Vec<u8> {
     head_hint_with_operation(document, update, true)
 }
 
+fn guest_head_hint(document: DocumentId, version: DocumentVersion) -> Vec<u8> {
+    v1::ServerEnvelope {
+        protocol_version: wire::PROTOCOL_VERSION,
+        payload: Some(v1::server_envelope::Payload::DocumentHeadChanged(
+            v1::DocumentHeadChanged {
+                document_id: document.as_bytes().to_vec(),
+                head_version: version.get(),
+                latest_operation: None,
+                head_event_kind: v1::HeadEventKind::Unspecified as i32,
+                head_actor_id: Vec::new(),
+            },
+        )),
+    }
+    .encode_to_vec()
+}
+
 fn head_hint_with_operation(
     document: DocumentId,
     update: &HeadUpdate,
@@ -369,6 +477,54 @@ async fn main() -> anyhow::Result<()> {
     let mut arguments = std::env::args_os();
     let _program = arguments.next();
     let command = arguments.next();
+    if command.as_deref() == Some(std::ffi::OsStr::new("storage")) {
+        #[cfg(feature = "legacy-migration")]
+        {
+            let args: Vec<_> = std::env::args_os().skip(1).collect();
+            return storage_migration::run(&args)
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"));
+        }
+        #[cfg(not(feature = "legacy-migration"))]
+        anyhow::bail!("storage maintenance requires the legacy-migration build feature");
+    }
+    if command.as_deref() == Some(std::ffi::OsStr::new("backup")) {
+        let args: Vec<_> = std::env::args_os().skip(1).collect();
+        if args.get(1).is_some_and(|arg| arg == "wal-restore") {
+            return storage_restore::run_wal_restore(&args)
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"));
+        }
+        if args
+            .get(1)
+            .is_some_and(|arg| arg == "restore" || arg == "recovery-check")
+        {
+            return storage_restore::run(&args)
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"));
+        }
+        storage_maintenance::run(&args)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        return Ok(());
+    }
+    let key_rotation_target = if command.as_deref() == Some(std::ffi::OsStr::new("keys")) {
+        if arguments.next().as_deref() != Some(std::ffi::OsStr::new("rotate"))
+            || arguments.next().as_deref() != Some(std::ffi::OsStr::new("--to"))
+        {
+            anyhow::bail!("usage: pxel-server keys rotate --to <key_id>");
+        }
+        let target = arguments
+            .next()
+            .and_then(|value| value.into_string().ok())
+            .ok_or_else(|| anyhow::anyhow!("key rotation requires a key ID"))?;
+        if arguments.next().is_some() {
+            anyhow::bail!("unexpected key rotation argument");
+        }
+        Some(target)
+    } else {
+        None
+    };
     if command.as_deref() == Some(std::ffi::OsStr::new("xlsx-worker")) {
         if arguments.next().is_some() {
             anyhow::bail!("XLSX worker accepts no command-line arguments");
@@ -482,6 +638,24 @@ async fn main() -> anyhow::Result<()> {
         database.close().await;
         return Ok(());
     }
+    database
+        .encryption_readiness()
+        .await
+        .map_err(|_| anyhow::anyhow!("encrypted storage or retained keys are not ready"))?;
+    if let Some(target) = key_rotation_target {
+        let report = database.rotate_keys(&target).await.map_err(|_| {
+            anyhow::anyhow!(
+                "key rotation failed; retained keys and maintenance availability must be checked"
+            )
+        })?;
+        tracing::info!(event="key_rotation_complete", rewrapped=report.rewrapped, verified=report.verified, active_kek_id=%report.active_kek_id);
+        database.close().await;
+        return Ok(());
+    }
+    let access_listener = database
+        .listen_access_epochs()
+        .await
+        .map_err(|_| anyhow::anyhow!("document access listener could not start"))?;
     let blobs = create_blob_store(&config).await?;
     let recovery_database = database.clone();
     let recovery_blobs = blobs.clone();
@@ -500,6 +674,7 @@ async fn main() -> anyhow::Result<()> {
         config.snapshot_active_retention,
     ));
     let snapshot_interval = config.snapshot_interval;
+    let (access_events, _) = broadcast::channel(256);
     let state = Arc::new(AppState {
         auth: auth::Auth::new(config.dev_auth, database.clone()),
         sessions: spreadsheet_collab::InProcessSessionDirectory::with_recovery(
@@ -532,7 +707,9 @@ async fn main() -> anyhow::Result<()> {
                             SnapshotError::Blob(_) | SnapshotError::Database(_) => {
                                 JournalError::Unavailable
                             }
-                            SnapshotError::WorkerFailed => JournalError::Unavailable,
+                            SnapshotError::WorkerFailed | SnapshotError::Crypto(_) => {
+                                JournalError::Unavailable
+                            }
                         })
                 }
             },
@@ -561,6 +738,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }),
         delivery: delivery::DeliveryGates::default(),
+        access_events,
         presence: presence::PresenceDirectory::default(),
         database,
         blobs,
@@ -570,7 +748,11 @@ async fn main() -> anyhow::Result<()> {
         exports: Arc::new(Semaphore::new(1)),
         history_reads: Arc::new(Semaphore::new(2)),
         rate: Mutex::new((Instant::now(), 0)),
+        passwords: share_password::PasswordWorkers::new().await?,
+        share_admission: Arc::new(Semaphore::new(2)),
     });
+    tokio::spawn(share_expiry_worker(state.clone()));
+    tokio::spawn(access_epoch_worker(state.clone(), access_listener));
     let app = Router::new()
         .route(
             "/healthz",
@@ -578,6 +760,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/readyz", get(ready))
         .route("/api/ws", get(websocket))
+        .route("/api/shared/{link}/ws", get(shared_websocket))
         .route(
             "/api/documents/{id}/calculation",
             get(documents::get_calculation),
@@ -587,8 +770,89 @@ async fn main() -> anyhow::Result<()> {
             post(dev_session).delete(revoke_dev_session),
         )
         .route("/api/dev/identity", get(dev_identity))
-        .route("/api/documents", post(documents::create))
+        .route("/api/notifications", get(shares_api::notifications))
+        .route(
+            "/api/documents",
+            get(catalog_api::list).post(documents::create),
+        )
+        .route(
+            "/api/library/layout",
+            axum::routing::put(catalog_api::layout),
+        )
+        .route(
+            "/api/documents/{id}/metadata",
+            get(catalog_api::metadata).put(catalog_api::set_metadata),
+        )
+        .route(
+            "/api/documents/{id}/favorite",
+            axum::routing::put(catalog_api::favorite),
+        )
+        .route("/api/documents/{id}/opened", post(catalog_api::touch))
+        .route("/api/library/templates", post(templates_api::create))
         .route("/api/documents/{id}", get(documents::get_document))
+        .route("/api/documents/{id}/profile", post(profile_api::profile))
+        .route("/api/documents/{id}/history", get(history_api::history))
+        .route(
+            "/api/documents/{id}/history/{version}",
+            get(history_api::historical),
+        )
+        .route("/api/documents/{id}/diff", get(history_api::compare))
+        .route(
+            "/api/documents/{id}/privacy",
+            get(privacy_api::get_policy).put(privacy_api::set_policy),
+        )
+        .route(
+            "/api/documents/{id}/privacy/analyze",
+            post(privacy_api::analyze_owner),
+        )
+        .route(
+            "/api/documents/{id}/diagnostics",
+            post(analysis_api::diagnostics),
+        )
+        .route(
+            "/api/documents/{id}/shares",
+            get(shares_api::list).post(shares_api::create),
+        )
+        .route(
+            "/api/documents/{id}/shares/{link}",
+            axum::routing::delete(shares_api::revoke),
+        )
+        .route(
+            "/api/documents/{id}/comments",
+            get(shares_api::list_comments).post(shares_api::add_comment),
+        )
+        .route(
+            "/api/documents/{id}/comments/{comment}",
+            axum::routing::delete(shares_api::delete_comment),
+        )
+        .route(
+            "/api/shared/{link}/session",
+            get(shares_api::session_get).post(shares_api::session_post),
+        )
+        .route(
+            "/api/shared/{link}/document",
+            get(shares_api::shared_document),
+        )
+        .route(
+            "/api/shared/{link}/calculation-context",
+            get(shares_api::guest_calculation_context),
+        )
+        .route(
+            "/api/shared/{link}/recalculate",
+            post(shares_api::guest_recalculate),
+        )
+        .route(
+            "/api/shared/{link}/undo-history",
+            get(shares_api::guest_undo_history),
+        )
+        .route(
+            "/api/shared/{link}/comments",
+            get(shares_api::list_guest_comments).post(shares_api::add_guest_comment),
+        )
+        .route(
+            "/api/shared/{link}/comments/{comment}",
+            axum::routing::delete(shares_api::delete_guest_comment),
+        )
         .route(
             "/api/documents/{id}/undo-history",
             get(documents::undo_history),
@@ -596,6 +860,31 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/documents/{id}/export.xlsx",
             get(documents::export_xlsx),
+        )
+        .route(
+            "/api/documents/{id}/disclosure-policy",
+            get(disclosure_api::get_policy).put(disclosure_api::set_policy),
+        )
+        .route("/api/documents/{id}/audit", get(disclosure_api::audit))
+        .route(
+            "/api/documents/{id}/personal-view",
+            get(views_api::get).put(views_api::put),
+        )
+        .route(
+            "/api/shared/{link}/personal-view",
+            get(views_api::guest_get).put(views_api::guest_put),
+        )
+        .route(
+            "/api/documents/{id}/clipboard/authorize",
+            post(disclosure_api::clipboard),
+        )
+        .route(
+            "/api/shared/{link}/clipboard/authorize",
+            post(disclosure_api::guest_clipboard),
+        )
+        .route(
+            "/api/shared/{link}/export.xlsx",
+            get(documents::export_shared_xlsx),
         )
         .route(
             "/api/documents/{id}/versions/{version}",
@@ -609,11 +898,22 @@ async fn main() -> anyhow::Result<()> {
             "/api/documents/{id}/recalculate",
             post(documents::recalculate),
         )
+        .route("/api/documents/{id}/export.pxel", post(pxel_api::export))
+        .route("/api/shared/{id}/export.pxel", post(pxel_api::guest_export))
         .fallback_service(
             ServeDir::new("apps/web/dist")
                 .not_found_service(ServeFile::new("apps/web/dist/index.html")),
         )
         .layer(tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024))
+        .merge(
+            Router::new()
+                .route("/api/imports/pxel/preview", post(pxel_api::preview))
+                .route("/api/imports/pxel", post(pxel_api::import))
+                .layer(axum::extract::DefaultBodyLimit::max(48 * 1024 * 1024))
+                .layer(tower_http::limit::RequestBodyLimitLayer::new(
+                    48 * 1024 * 1024,
+                )),
+        )
         .layer(middleware::from_fn(security_headers))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(config.address).await?;
@@ -754,7 +1054,71 @@ async fn websocket(
         })
 }
 
+async fn shared_websocket(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(link): Path<String>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    if !auth::valid_origin(&headers, &state.origins) || !rate_allowed(&state).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Ok(link) = Uuid::parse_str(&link) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if link.get_version_num() != 7 {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let principal = match state.auth.authenticate_share(&headers, link).await {
+        Ok(Some(principal)) => principal,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    };
+    let Ok(permit) = state.sockets.clone().try_acquire_owned() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    upgrade
+        .max_message_size(wire::MAX_MESSAGE_BYTES)
+        .max_frame_size(wire::MAX_MESSAGE_BYTES)
+        .read_buffer_size(4096)
+        .write_buffer_size(0)
+        .max_write_buffer_size(wire::MAX_MESSAGE_BYTES + 4096)
+        .on_upgrade(move |socket| async move {
+            let _permit = permit;
+            connection(socket, principal, state).await;
+        })
+}
+
 async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Arc<AppState>) {
+    let anonymized_guest =
+        if let auth::PrincipalScope::ShareGuest { session, .. } = &principal.scope {
+            match state
+                .database
+                .requires_anonymization(
+                    principal.identity,
+                    session.document_id,
+                    Some(session.link_id),
+                )
+                .await
+            {
+                Ok(value) => value,
+                Err(_) => return,
+            }
+        } else {
+            false
+        };
+    let mut access_events = state.access_events.subscribe();
+    // Watch receivers do not retain the sender; keep the weak-directory gate socket-owned.
+    let guest_delivery_gate =
+        if let auth::PrincipalScope::ShareGuest { session, .. } = &principal.scope {
+            Some(state.delivery.get(session.document_id).await)
+        } else {
+            None
+        };
+    let mut guest_access_changes = guest_delivery_gate.as_ref().map(|gate| gate.watch());
+    if !matches!(state.auth.active(&principal).await, Ok(true)) {
+        return;
+    }
     let first = tokio::time::timeout(Duration::from_secs(5), socket.recv()).await;
     let result = match first {
         Ok(Some(Ok(Message::Binary(bytes)))) => wire::decode_hello(&bytes),
@@ -800,8 +1164,43 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
     let mut calculation = None;
     let mut head_subscription: Option<HeadSubscription> = None;
     let mut last_presence = Instant::now() - Duration::from_millis(50);
+    let expiry = tokio::time::Instant::from_std(principal.expires_at);
+    let expiry_timer = tokio::time::sleep_until(expiry);
+    tokio::pin!(expiry_timer);
+    let mut guest_access_closed = false;
     loop {
         tokio::select! {
+            _ = &mut expiry_timer => {
+                guest_access_closed = matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. });
+                break;
+            },
+            event = access_events.recv() => match event {
+                Ok(AccessEpochEvent::Document { document, .. }) => {
+                    let guest_matches = matches!(
+                        &principal.scope,
+                        auth::PrincipalScope::ShareGuest { session, .. }
+                            if session.document_id == document
+                    );
+                    let subscription_matches = head_subscription
+                        .as_ref()
+                        .is_some_and(|active| active.document == document);
+                    if guest_matches || subscription_matches {
+                        guest_access_closed |= guest_matches;
+                        break;
+                    }
+                }
+                Ok(AccessEpochEvent::Reconnect) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                    guest_access_closed |= matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. });
+                    if guest_access_closed || head_subscription.is_some() { break; }
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            changed = async { match guest_access_changes.as_mut() { Some(receiver)=>receiver.changed().await, None=>std::future::pending().await } } => {
+                if guest_access_changes.is_some() || changed.is_err() {
+                    guest_access_closed = true;
+                    break;
+                }
+            }
             changed = outbound_closed.changed() => {
                 if changed.is_err() || *outbound_closed.borrow() { break; }
             }
@@ -810,6 +1209,7 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 let update = match event {
                     SubscriptionEvent::Head(update) => update,
                     SubscriptionEvent::Presence(peers) => {
+                        if matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. }) { continue; }
                         let Some(active) = head_subscription.as_ref() else { continue; };
                         let payload = v1::ServerEnvelope {
                             protocol_version: wire::PROTOCOL_VERSION,
@@ -843,11 +1243,15 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                         gate: active.gate.clone(),
                         ticket: active.ticket,
                     };
-                    let replay = send_replay(
-                        &outbound, &state, &principal, &active.session, &delivery,
-                        active.last_sent, current,
-                    ).await;
-                    if replay.is_err() { break; }
+                    if matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. }) {
+                        if !send_document_payload(&outbound, &delivery, guest_head_hint(active.document,current)) { break; }
+                    } else {
+                        let replay = send_replay(
+                            &outbound, &state, &principal, &active.session, &delivery,
+                            active.last_sent, current,
+                        ).await;
+                        if replay.is_err() { break; }
+                    }
                     active.last_sent = current;
                 }
             }
@@ -863,10 +1267,17 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 ) { break; }
             }
             _ = heartbeat.tick() => {
-                if last_pong.elapsed() >= Duration::from_secs(45)
-                    || !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
+                if last_pong.elapsed() >= Duration::from_secs(45) { break; }
+                match state.auth.active(&principal).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        guest_access_closed |= matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. });
+                        break;
+                    }
+                    Err(_) => break,
+                }
                 if !outbound.enqueue(Message::Ping(Vec::new().into()), None) { break; }
-                if let Some(active) = &head_subscription
+                if !anonymized_guest && let Some(active) = &head_subscription
                     && active.session.request_timer(principal.identity).is_err() {
                     tracing::debug!(event = "calculation_timer_admission_skipped");
                 }
@@ -876,7 +1287,14 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                 Some(Ok(Message::Ping(bytes))) => { if !outbound.enqueue(Message::Pong(bytes), None) { break; } },
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                 Some(Ok(Message::Binary(bytes))) => {
-                    if !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
+                    match state.auth.active(&principal).await {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            guest_access_closed |= matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. });
+                            break;
+                        }
+                        Err(_) => break,
+                    }
                     match wire::decode_request(&bytes) {
                         Ok(wire::ClientRequest::Command(command)) => {
                             let document = command.document_id.as_slice().try_into().ok()
@@ -905,6 +1323,7 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                             if !delivered { break; }
                         }
                         Ok(wire::ClientRequest::Calculation(request)) => {
+                            if anonymized_guest { continue; }
                             if !rate_allowed(&state).await { break; }
                             drop(calculation.take());
                             match calculation_stream::start(state.clone(), principal.clone(), request).await {
@@ -920,6 +1339,7 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                             }
                         }
                         Ok(wire::ClientRequest::Presence(request)) => {
+                            if matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. }) { continue; }
                             let Some(active) = head_subscription.as_ref() else { break; };
                             if request.document_id.as_slice() != active.document.as_bytes()
                                 || !matches!(state.auth.active(&principal).await, Ok(true)) { break; }
@@ -939,6 +1359,8 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 Some(document) => document,
                                 None => break,
                             };
+                            if let auth::PrincipalScope::ShareGuest { session: guest, .. } = &principal.scope
+                                && guest.document_id != document { break; }
                             let session = match state.sessions.session(principal.identity, document).await {
                                 Ok(session) => session,
                                 Err(_) => break,
@@ -952,7 +1374,8 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                                 Err(_) => break,
                             };
                             if after > authorized_head { break; }
-                            if head_subscription.as_ref().is_none_or(|active| active.document != document)
+                            if !matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. })
+                                && head_subscription.as_ref().is_none_or(|active| active.document != document)
                                 && session.opened(principal.identity).await.is_err() {
                                 break;
                             }
@@ -971,13 +1394,17 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
                             };
                             let access_changes = gate.watch();
                             if request.last_seen_version > current.get() { break; }
-                            let resync_required = match send_replay(
-                                &outbound, &state, &principal, &session,
-                                &DocumentDelivery { document, gate: gate.clone(), ticket },
-                                after, current,
-                            ).await {
-                                Ok(value) => value,
-                                Err(()) => break,
+                            let resync_required = if matches!(&principal.scope, auth::PrincipalScope::ShareGuest { .. }) {
+                                true
+                            } else {
+                                match send_replay(
+                                    &outbound, &state, &principal, &session,
+                                    &DocumentDelivery { document, gate: gate.clone(), ticket },
+                                    after, current,
+                                ).await {
+                                    Ok(value) => value,
+                                    Err(()) => break,
+                                }
                             };
                             if !send_replay_complete(
                                 &outbound, &state, &principal, &session,
@@ -1018,7 +1445,15 @@ async fn connection(mut socket: WebSocket, principal: auth::Principal, state: Ar
     if let Some(active) = head_subscription.take() {
         state.presence.leave(active.document, session_id).await;
     }
-    let _ = outbound.enqueue(Message::Close(None), None);
+    let close = if guest_access_closed {
+        Message::Close(Some(CloseFrame {
+            code: 4003,
+            reason: "Access closed".into(),
+        }))
+    } else {
+        Message::Close(None)
+    };
+    let _ = outbound.enqueue(close, None);
     drop(outbound);
     if tokio::time::timeout(Duration::from_secs(2), &mut writer)
         .await

@@ -47,6 +47,13 @@ and418moves. These fixtures prove convergence, rather than manual Excel parity.
 
 IEEE-754 binary64, -0 → +0; nonfinite literal/input rejected; computed NaN/infinity → NUM, divide by zero → DIV/0. Hash использует normalized bit pattern, не форматированный decimal text. Subnormals сохраняются и считаются отдельным compatibility case.
 
+Числовые константы внутри формулы сохраняют не более 15 значащих десятичных
+цифр: лишние цифры мантиссы заменяются нулями до binary64 parsing, экспонента
+сохраняется. Это правило подтверждено отдельным Excel COM fixture (ADR-101), а
+не распространяется на результаты вычислений или ввод числовых значений ячеек.
+Для одного очень малого значения fixture допускает наблюдаемое расхождение в
+1 ULP; общая bitwise Excel parity не обещается.
+
 `+ - * /` выполняются в фиксированном AST order. Нет fast-math, reassociation или недокументированного FMA. SUM обходит аргументы слева направо, диапазоны в workbook row-major order; parallel reduction, меняющий order, запрещен. Optimization требует benchmark и correctness corpus.
 
 POWER и `^` используют общий portable libm0.2.16 с отключённым arch и включённым force-soft-floats по ADR-061. Дробные и большие finite exponents допустимы; negative base с nonintegral exponent даёт NUM; zero negative exponent даёт DIV/0, zero-to-zero NUM; nonfinite output NUM. Underflow сохраняет subnormals либо normalized zero. Бывший integer-only squaring profile заменён с новым engine identity0.5.0; history/context не переписываются. Native/WASM corpus доказывает сходимость в проверенных случаях, а не bitwise Excel parity или все возможные platform combinations.
@@ -105,7 +112,9 @@ ROUND/ROUNDUP/ROUNDDOWN используют bounded shortest-decimal quantizati
 точность усекается к нулю, ROUND округляет ties от нуля, ROUNDUP от нуля,
 ROUNDDOWN к нулю. Overflow даёт NUM; -0 нормализуется. Общий корпус содержит
 202 примера, включая midpoint neighbors и extreme/subnormal values. Это явный
-PXEL профиль; полная Excel precision compatibility ещё не подтверждена.
+PXEL профиль. Excel 16 golden из ADR-101 проверяет выбранные rounding cases
+после ограничения значащих цифр литералов; полная precision compatibility
+остаётся открытой.
 
 CONCAT/LEFT/RIGHT/MID/LEN/TRIM/LOWER/UPPER реализованы по [ADR-062](adr/062-bounded-text-functions.md).
 Unicode scalar indexing соответствует modern surrogate-pair profile; combining
@@ -251,7 +260,10 @@ persisted AST/text. Structural changes rebuild those rectangles from current bou
 targets. Dynamic references may shrink but unsupported expansion is rejected.
 Full-source dependencies remain conservative, including unselected source cycles.
 
-ADR075 adds SUMIFS and COUNTIFS, engine0.14.0. All normalized rectangles have equal
+ADR075 adds SUMIFS and COUNTIFS; the current calculation identity is engine0.15.0
+after the verified criteria correction in ADR-097. Its Excel golden confirms that
+`"<>"` includes formula-empty text but excludes true blanks, while `"*"` excludes
+formula-empty text. All normalized rectangles have equal
 row AND column counts.1..127 pairs reuse ADR074 criteria and intersect a bounded
 mask in row-major order. Each range is traversed and checked even if earlier
 criteria already excluded every cell. SUMIFS then reads the sum range, includes

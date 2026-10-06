@@ -50,7 +50,10 @@ semantics and manual compatibility gaps.
 
 All fixture expectations in `fixtures/formulas/profile-v1.json` are documented,
 derived or explicit project contracts, **not manually verified Excel results**.
-Source provenance and documentation conflicts are retained in the corpus.
+The separate `fixtures/formulas/excel-criteria-2026-10-02.json` records 15
+observations from Microsoft Excel 16.0.20326.20158; it covers only the criteria
+cases listed in ADR-097. Source provenance and documentation conflicts are
+retained in the corpus.
 
 - Binary64; input literals must be finite, computed nonfinite -> `#NUM!`, zero
   normalization removes negative zero. `/0` -> `#DIV/0!`.
@@ -83,7 +86,7 @@ Source provenance and documentation conflicts are retained in the corpus.
   conditions, preserving later errors even after a decisive boolean; range
   traversal is budgeted and checked. NOT takes one scalar and inverts the same
   scalar coercion as IF. Arrays/implicit intersection remain unsupported.
-  Engine identity is `pxel-formula-0.14.0`; old persisted contexts require a new
+  Engine identity is `pxel-formula-0.16.0`; old persisted contexts require a new
   authorized calculation epoch. See ADR-055 and the common fixture corpus.
 
 - ABS takes one scalar; MOD takes two and follows the divisor sign. Blank is
@@ -138,9 +141,14 @@ then resolve one return cell. They return scalar values rather than references;
 blank returns zero. Whole-table100k cap, visitor cardinality, text/array boundaries
 and cancellation remain enforced. Mixed-type/coercion/error/collation edge cases
 are provisional; manual Excel validation and dynamic selected dependencies remain
-open. Current identity is pxel-formula-0.14.0.
+open. Current identity is pxel-formula-0.16.0. Formula numeric literals retain
+at most 15 significant decimal digits before binary64 parsing (ADR-101); this
+does not establish general Excel floating-point parity.
 
 SUMIF/COUNTIF (ADR-074) share bounded scalar criteria and charged wildcard helpers.
+Excel golden verification in ADR-097 confirms that `COUNTIF(range,"<>")`
+includes formula results containing empty text but excludes genuinely blank
+cells, while `COUNTIF(range,"*")` excludes empty text.
 Literal SUMIF anchors expand using criteria dimensions and add corresponding
 reverse dependencies. Dynamic INDEX/XLOOKUP ranges support covered shrinkage;
 uncovered expansion fails typed. Blank/numeric-text/boolean/error/Unicode rules

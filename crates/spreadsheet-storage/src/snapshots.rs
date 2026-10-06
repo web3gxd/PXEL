@@ -1,4 +1,4 @@
-use crate::PgDatabase;
+use crate::{CRYPTO_ENVELOPE_OVERHEAD, CryptoError, PgDatabase};
 use bytes::Bytes;
 use futures_util::{TryStreamExt, stream};
 use spreadsheet_application::{
@@ -13,6 +13,7 @@ use spreadsheet_storage_codec as codec;
 use std::{num::NonZeroU16, sync::Arc, time::Duration};
 use thiserror::Error;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 #[derive(Debug, Error)]
 pub enum SnapshotError {
@@ -28,6 +29,8 @@ pub enum SnapshotError {
     Blob(#[from] BlobStoreError),
     #[error("snapshot metadata storage failed")]
     Database(#[from] sqlx::Error),
+    #[error("snapshot encryption failed")]
+    Crypto(#[from] CryptoError),
     #[error("journal replay failed")]
     Journal(#[from] JournalError),
     #[error("snapshot encoding worker failed")]
@@ -103,7 +106,7 @@ async fn read_verified<B: BlobStore>(
     expected_len: usize,
     expected_checksum: [u8; 32],
 ) -> Result<Vec<u8>, SnapshotError> {
-    if expected_len > codec::MAX_SNAPSHOT_BYTES {
+    if expected_len > codec::MAX_SNAPSHOT_BYTES + CRYPTO_ENVELOPE_OVERHEAD {
         return Err(SnapshotError::TooLarge);
     }
     let download = blobs.get(key).await?;
@@ -162,9 +165,7 @@ impl PgDatabase {
         document_id: DocumentId,
         target: DocumentVersion,
     ) -> Result<RecoveryResult, SnapshotError> {
-        let snapshot = self
-            .latest_valid_snapshot(blobs, document_id, target)
-            .await?;
+        let snapshot = Box::pin(self.latest_valid_snapshot(blobs, document_id, target)).await?;
         let snapshot_version = snapshot.as_ref().map(Workbook::version);
         let mut workbook = snapshot.unwrap_or_else(|| Workbook::empty(document_id));
         let mut replayed_events = 0_u64;
@@ -203,7 +204,10 @@ impl PgDatabase {
         engine_version: &str,
         compatibility_profile: &str,
     ) -> Result<SnapshotReceipt, SnapshotError> {
-        self.publish_snapshot_inner(
+        // Protect the whole upload/activation lifecycle from an exclusive
+        // maintenance operation, including while immutable blob I/O is pending.
+        let mut fence = self.begin_guarded().await?;
+        let mut publication = Box::pin(self.publish_snapshot_inner(
             blobs,
             snapshot_id,
             workbook,
@@ -211,8 +215,27 @@ impl PgDatabase {
             compatibility_profile,
             #[cfg(test)]
             None,
-        )
-        .await
+        ));
+        let mut keepalive = tokio::time::interval(Duration::from_secs(2));
+        keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let result = loop {
+            tokio::select! {
+                result = &mut publication => break result,
+                _ = keepalive.tick() => {
+                    sqlx::query("SELECT 1").execute(&mut *fence).await?;
+                }
+            }
+        };
+        match result {
+            Ok(receipt) => {
+                fence.commit().await?;
+                Ok(receipt)
+            }
+            Err(error) => {
+                fence.rollback().await?;
+                Err(error)
+            }
+        }
     }
 
     async fn publish_snapshot_inner<B: BlobStore>(
@@ -226,24 +249,28 @@ impl PgDatabase {
     ) -> Result<SnapshotReceipt, SnapshotError> {
         let document_id = workbook.document_id();
         let source = sqlx::query!(
-            "SELECT o.payload, o.payload_checksum, o.canonical_event_hash, d.head_version, d.state FROM document_operations o JOIN documents d ON d.document_id=o.document_id WHERE o.document_id=$1 AND o.committed_version=$2",
+            "SELECT o.committed_version, o.operation_id, o.actor_id, o.principal_kind, o.schema_version, o.payload, o.payload_checksum, o.canonical_event_hash, d.head_version, d.state FROM document_operations o JOIN documents d ON d.document_id=o.document_id WHERE o.document_id=$1 AND o.committed_version=$2",
             uuid(document_id.as_bytes()), sql_number(workbook.version().get())?
         ).fetch_optional(&self.pool).await?.ok_or(SnapshotError::SourceMismatch)?;
-        if source.state != "active"
-            || source.head_version < sql_number(workbook.version().get())?
-            || codec::checksum(&source.payload).as_slice() != source.payload_checksum
-        {
+        if source.state != "active" || source.head_version < sql_number(workbook.version().get())? {
             return Err(SnapshotError::SourceMismatch);
         }
-        let event = codec::decode(&source.payload).map_err(|_| SnapshotError::SourceMismatch)?;
-        if event.document_id != document_id
-            || event.version != workbook.version()
-            || event.state_hash != workbook.hash()
-            || codec::event_hash(&event)
-                .map_err(|_| SnapshotError::SourceMismatch)?
-                .as_slice()
-                != source.canonical_event_hash
-        {
+        let event = crate::journal::verified_event(
+            self,
+            crate::journal::StoredEventRow {
+                document: document_id,
+                committed_version: source.committed_version,
+                operation_id: source.operation_id,
+                actor_id: source.actor_id,
+                principal_kind: &source.principal_kind,
+                schema_version: source.schema_version,
+                payload: &source.payload,
+                payload_checksum: &source.payload_checksum,
+                canonical_event_hash: &source.canonical_event_hash,
+            },
+        )
+        .await?;
+        if event.state_hash != workbook.hash() {
             return Err(SnapshotError::SourceMismatch);
         }
         let encoding_book = workbook.clone();
@@ -254,22 +281,47 @@ impl PgDatabase {
         })
         .await
         .map_err(|_| SnapshotError::WorkerFailed)??;
-        let body_len = body.len();
-        let checksum = codec::checksum(&body);
         let key_uuid = uuid(snapshot_id.as_bytes());
         let key = BlobKey::parse(&key_uuid.to_string()).map_err(|_| SnapshotError::Corrupt)?;
+        let body = Zeroizing::new(body);
+        let ciphertext = self
+            .seal_record_guarded(
+                document_id,
+                workbook.version().get(),
+                "snapshot",
+                key_uuid,
+                codec::SNAPSHOT_SCHEMA_VERSION,
+                &body,
+                codec::MAX_SNAPSHOT_BYTES,
+            )
+            .await?;
+        drop(body);
+        let body_len = ciphertext.len();
+        let checksum = codec::checksum(&ciphertext);
+        let encrypted_hash = self
+            .seal_record_guarded(
+                document_id,
+                workbook.version().get(),
+                "snapshot-hash",
+                key_uuid,
+                codec::SNAPSHOT_SCHEMA_VERSION,
+                &workbook.hash(),
+                32,
+            )
+            .await?;
         sqlx::query!(
-            "INSERT INTO document_snapshots (snapshot_id, document_id, snapshot_version, last_axis_change_version, snapshot_schema_version, object_key, byte_length, payload_checksum, state_hash, writer_engine_version, writer_compatibility_profile) VALUES ($1,$2,$3,$4,4,$5,$6,$7,$8,$9,$10)",
+            "INSERT INTO document_snapshots (snapshot_id, document_id, snapshot_version, last_axis_change_version, snapshot_schema_version, object_key, byte_length, payload_checksum, state_hash, writer_engine_version, writer_compatibility_profile) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
             key_uuid, uuid(document_id.as_bytes()), sql_number(workbook.version().get())?,
-            sql_number(workbook.last_axis_change_version().get())?, key_uuid,
-            sql_number(body.len() as u64)?, &checksum[..], &workbook.hash()[..], engine_version, compatibility_profile
+            sql_number(workbook.last_axis_change_version().get())?,
+            i32::try_from(codec::SNAPSHOT_SCHEMA_VERSION).map_err(|_| SnapshotError::Corrupt)?, key_uuid,
+            sql_number(body_len as u64)?, &checksum[..], &encrypted_hash, engine_version, compatibility_profile
         ).execute(&self.pool).await?;
         #[cfg(test)]
         interrupt_at(PublicationBoundary::MetadataInsert, interruption)?;
         blobs
             .put(
                 &key,
-                Box::pin(stream::once(async move { Ok(Bytes::from(body)) })),
+                Box::pin(stream::once(async move { Ok(Bytes::from(ciphertext)) })),
                 Checksum::from_bytes(checksum),
             )
             .await?;
@@ -283,6 +335,17 @@ impl PgDatabase {
         interrupt_at(PublicationBoundary::Stored, interruption)?;
         let verified = async {
             let verified = read_verified(blobs, &key, body_len, checksum).await?;
+            let verified = self
+                .open_record(
+                    document_id,
+                    workbook.version().get(),
+                    "snapshot",
+                    key_uuid,
+                    codec::SNAPSHOT_SCHEMA_VERSION,
+                    &verified,
+                    codec::MAX_SNAPSHOT_BYTES,
+                )
+                .await?;
             codec::decode_snapshot(
                 &verified,
                 document_id,
@@ -305,7 +368,7 @@ impl PgDatabase {
         }
         #[cfg(test)]
         interrupt_at(PublicationBoundary::Verified, interruption)?;
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.begin_guarded().await?;
         let document = sqlx::query!(
             "SELECT head_version, state FROM documents WHERE document_id=$1 FOR UPDATE",
             uuid(document_id.as_bytes())
@@ -336,6 +399,17 @@ impl PgDatabase {
     /// Retires old incomplete metadata and repeatedly deletes objects owned by
     /// rejected records. ACTIVE snapshots and the append-only journal are never touched.
     pub async fn cleanup_incomplete_snapshots<B: BlobStore>(
+        &self,
+        blobs: &B,
+        min_age: Duration,
+        max_rows: NonZeroU16,
+    ) -> Result<SnapshotCleanupReport, SnapshotError> {
+        self.with_shared_fence(Box::pin(
+            self.cleanup_incomplete_snapshots_inner(blobs, min_age, max_rows),
+        ))
+        .await
+    }
+    async fn cleanup_incomplete_snapshots_inner<B: BlobStore>(
         &self,
         blobs: &B,
         min_age: Duration,
@@ -382,6 +456,16 @@ impl PgDatabase {
         min_age: Duration,
         max_rows: NonZeroU16,
     ) -> Result<u64, SnapshotError> {
+        self.with_shared_fence(Box::pin(
+            self.retire_old_active_snapshots_inner(min_age, max_rows),
+        ))
+        .await
+    }
+    async fn retire_old_active_snapshots_inner(
+        &self,
+        min_age: Duration,
+        max_rows: NonZeroU16,
+    ) -> Result<u64, SnapshotError> {
         let retired = sqlx::query!(
             "WITH candidates AS (SELECT s.snapshot_id FROM document_snapshots s JOIN documents d ON d.document_id=s.document_id WHERE s.state='ACTIVE' AND s.created_at < now() - ($1::bigint * interval '1 second') AND s.snapshot_id IS DISTINCT FROM d.preferred_snapshot_id AND (SELECT count(DISTINCT newer.snapshot_version) FROM document_snapshots newer WHERE newer.document_id=s.document_id AND newer.state='ACTIVE' AND newer.snapshot_version>s.snapshot_version) >= 2 ORDER BY s.created_at, s.snapshot_id LIMIT $2 FOR UPDATE OF s SKIP LOCKED) UPDATE document_snapshots s SET state='REJECTED' FROM candidates c WHERE s.snapshot_id=c.snapshot_id AND s.state='ACTIVE' RETURNING s.snapshot_id",
             sql_number(min_age.as_secs())?,
@@ -401,37 +485,70 @@ impl PgDatabase {
         through: DocumentVersion,
     ) -> Result<Option<Workbook>, SnapshotError> {
         let rows = sqlx::query!(
-            "SELECT snapshot_version, last_axis_change_version, object_key, byte_length, payload_checksum, state_hash, writer_engine_version, writer_compatibility_profile FROM document_snapshots WHERE document_id=$1 AND snapshot_version<=$2 AND state='ACTIVE' ORDER BY snapshot_version DESC, activated_at DESC LIMIT 128",
+            "SELECT snapshot_id, snapshot_version, last_axis_change_version, snapshot_schema_version, object_key, byte_length, payload_checksum, state_hash, writer_engine_version, writer_compatibility_profile FROM document_snapshots WHERE document_id=$1 AND snapshot_version<=$2 AND state='ACTIVE' ORDER BY snapshot_version DESC, activated_at DESC LIMIT 128",
             uuid(document_id.as_bytes()), sql_number(through.get())?
         ).fetch_all(&self.pool).await?;
         for row in rows {
-            let key =
-                BlobKey::parse(&row.object_key.to_string()).map_err(|_| SnapshotError::Corrupt)?;
-            let expected_checksum = bytes32(&row.payload_checksum)?;
-            let expected_hash = bytes32(&row.state_hash)?;
-            let len = usize::try_from(row.byte_length).map_err(|_| SnapshotError::Corrupt)?;
-            let body = match read_verified(blobs, &key, len, expected_checksum).await {
-                Ok(body) => body,
+            let candidate = Box::pin(async {
+                let snapshot_version = version(row.snapshot_version)?;
+                let schema = u32::try_from(row.snapshot_schema_version)
+                    .map_err(|_| SnapshotError::Corrupt)?;
+                let key = BlobKey::parse(&row.object_key.to_string())
+                    .map_err(|_| SnapshotError::Corrupt)?;
+                let hash = self
+                    .open_record(
+                        document_id,
+                        snapshot_version.get(),
+                        "snapshot-hash",
+                        row.snapshot_id,
+                        schema,
+                        &row.state_hash,
+                        32,
+                    )
+                    .await?;
+                let expected_hash = bytes32(&hash)?;
+                let len = usize::try_from(row.byte_length).map_err(|_| SnapshotError::Corrupt)?;
+                let body = read_verified(blobs, &key, len, bytes32(&row.payload_checksum)?).await?;
+                let body = self
+                    .open_record(
+                        document_id,
+                        snapshot_version.get(),
+                        "snapshot",
+                        row.object_key,
+                        schema,
+                        &body,
+                        codec::MAX_SNAPSHOT_BYTES,
+                    )
+                    .await?;
+                codec::decode_snapshot(
+                    &body,
+                    document_id,
+                    snapshot_version,
+                    version(row.last_axis_change_version)?,
+                    expected_hash,
+                    &row.writer_engine_version,
+                    &row.writer_compatibility_profile,
+                )
+                .map_err(SnapshotError::from)
+            })
+            .await;
+            match candidate {
+                Ok(workbook) => return Ok(Some(workbook)),
                 Err(SnapshotError::Blob(
                     BlobStoreError::NotFound
                     | BlobStoreError::CorruptBlob
                     | BlobStoreError::ChecksumMismatch
                     | BlobStoreError::UnsupportedSchema,
                 ))
-                | Err(SnapshotError::Corrupt | SnapshotError::TooLarge) => continue,
+                | Err(SnapshotError::Corrupt | SnapshotError::TooLarge | SnapshotError::Codec(_))
+                | Err(SnapshotError::Crypto(
+                    CryptoError::InvalidContext
+                    | CryptoError::InvalidEnvelope
+                    | CryptoError::UnsupportedVersion
+                    | CryptoError::AuthenticationFailed
+                    | CryptoError::LimitExceeded { .. },
+                )) => continue,
                 Err(error) => return Err(error),
-            };
-            match codec::decode_snapshot(
-                &body,
-                document_id,
-                version(row.snapshot_version)?,
-                version(row.last_axis_change_version)?,
-                expected_hash,
-                &row.writer_engine_version,
-                &row.writer_compatibility_profile,
-            ) {
-                Ok(workbook) => return Ok(Some(workbook)),
-                Err(_) => continue,
             }
         }
         Ok(None)
@@ -510,6 +627,70 @@ mod tests {
             active.preferred_snapshot_id,
             Some(uuid(snapshot_id.as_bytes()))
         );
+        Ok(())
+    }
+
+    async fn insert_snapshot_with_wrong_object_context(
+        db: &PgDatabase,
+        blobs: &LocalFilesystemBlobStore,
+        workbook: &Workbook,
+        snapshot_id: SnapshotId,
+        ciphertext: Vec<u8>,
+    ) -> TestResult {
+        let object_id = uuid(snapshot_id.as_bytes());
+        let checksum = codec::checksum(&ciphertext);
+        let encrypted_hash = db
+            .seal_record(
+                workbook.document_id(),
+                workbook.version().get(),
+                "snapshot-hash",
+                object_id,
+                codec::SNAPSHOT_SCHEMA_VERSION,
+                &workbook.hash(),
+                32,
+            )
+            .await?;
+        assert!(matches!(
+            db.open_record(
+                workbook.document_id(),
+                workbook.version().get(),
+                "snapshot",
+                object_id,
+                codec::SNAPSHOT_SCHEMA_VERSION,
+                &ciphertext,
+                codec::MAX_SNAPSHOT_BYTES,
+            )
+            .await,
+            Err(CryptoError::AuthenticationFailed)
+        ));
+        sqlx::query(
+            "INSERT INTO document_snapshots(snapshot_id,document_id,snapshot_version,last_axis_change_version,snapshot_schema_version,object_key,byte_length,payload_checksum,state_hash,writer_engine_version,writer_compatibility_profile) VALUES($1,$2,$3,$4,$5,$1,$6,$7,$8,'engine-v1','pxel-v1')",
+        )
+        .bind(object_id)
+        .bind(uuid(workbook.document_id().as_bytes()))
+        .bind(sql_number(workbook.version().get())?)
+        .bind(sql_number(workbook.last_axis_change_version().get())?)
+        .bind(i32::try_from(codec::SNAPSHOT_SCHEMA_VERSION)?)
+        .bind(sql_number(ciphertext.len() as u64)?)
+        .bind(checksum.as_slice())
+        .bind(encrypted_hash)
+        .execute(&db.pool)
+        .await?;
+        let key = BlobKey::parse(&object_id.to_string())?;
+        blobs
+            .put(
+                &key,
+                Box::pin(stream::once(async move { Ok(Bytes::from(ciphertext)) })),
+                Checksum::from_bytes(checksum),
+            )
+            .await?;
+        for state in ["STORED", "VERIFIED", "ACTIVE"] {
+            sqlx::query("UPDATE document_snapshots SET state=$2,verified_at=clock_timestamp(),activated_at=clock_timestamp() WHERE snapshot_id=$1")
+                .bind(object_id)
+                .bind(state)
+                .execute(&db.pool)
+                .await?;
+        }
         Ok(())
     }
 
@@ -882,7 +1063,7 @@ mod tests {
     }
 
     async fn active_retention_scenario(pool: sqlx::PgPool) -> TestResult {
-        let db = PgDatabase { pool };
+        let db = PgDatabase::for_test(pool)?;
         db.migrate().await?;
         let identity = AuthenticatedActor {
             actor_id: ActorId::from_bytes([1; 16])?,
@@ -920,7 +1101,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let blobs = LocalFilesystemBlobStore::new(
             temp.path().join("blobs"),
-            codec::MAX_SNAPSHOT_BYTES as u64,
+            (codec::MAX_SNAPSHOT_BYTES + CRYPTO_ENVELOPE_OVERHEAD) as u64,
         )
         .await?;
         let first_hash = book.hash();
@@ -1048,7 +1229,7 @@ mod tests {
     }
 
     async fn two_sheet_snapshot_scenario(pool: sqlx::PgPool) -> TestResult {
-        let db = PgDatabase { pool };
+        let db = PgDatabase::for_test(pool)?;
         db.migrate().await?;
         let identity = AuthenticatedActor {
             actor_id: ActorId::from_bytes([61; 16])?,
@@ -1114,7 +1295,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let blobs = LocalFilesystemBlobStore::new(
             temp.path().join("blobs"),
-            codec::MAX_SNAPSHOT_BYTES as u64,
+            (codec::MAX_SNAPSHOT_BYTES + CRYPTO_ENVELOPE_OVERHEAD) as u64,
         )
         .await?;
         let snapshot_id = SnapshotId::from_bytes([75; 16])?;
@@ -1132,7 +1313,7 @@ mod tests {
         )
         .fetch_one(&db.pool)
         .await?;
-        assert_eq!(schema, 4);
+        assert_eq!(schema, 7);
         let tail = Operation::SetCellValue {
             address: second_address,
             value: CellValue::Number(9.0),
@@ -1191,7 +1372,7 @@ mod tests {
     // Keep the SQLx test thread's Windows stack small; the scenario owns several
     // large async state machines, so its future is allocated separately.
     async fn snapshot_scenario(pool: sqlx::PgPool) -> TestResult {
-        let db = PgDatabase { pool };
+        let db = PgDatabase::for_test(pool)?;
         db.migrate().await?;
         let identity = AuthenticatedActor {
             actor_id: ActorId::from_bytes([1; 16])?,
@@ -1224,7 +1405,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let blobs = LocalFilesystemBlobStore::new(
             temp.path().join("blobs"),
-            codec::MAX_SNAPSHOT_BYTES as u64,
+            (codec::MAX_SNAPSHOT_BYTES + CRYPTO_ENVELOPE_OVERHEAD) as u64,
         )
         .await?;
         let older_id = SnapshotId::from_bytes([10; 16])?;
@@ -1291,6 +1472,65 @@ mod tests {
             "pxel-v1",
         )
         .await?;
+        let at_rest = sqlx::query!(
+            "SELECT byte_length,payload_checksum,state_hash FROM document_snapshots WHERE snapshot_id=$1",
+            uuid(newer_id.as_bytes())
+        )
+        .fetch_one(&db.pool)
+        .await?;
+        let newer_key = BlobKey::parse(&uuid(newer_id.as_bytes()).to_string())?;
+        let stored = read_verified(
+            &blobs,
+            &newer_key,
+            usize::try_from(at_rest.byte_length)?,
+            bytes32(&at_rest.payload_checksum)?,
+        )
+        .await?;
+        assert!(
+            !stored
+                .windows(b"saved".len())
+                .any(|bytes| bytes == b"saved")
+        );
+        assert_ne!(at_rest.state_hash, book2.hash().to_vec());
+        assert!(
+            codec::decode_snapshot(
+                &stored,
+                document_id,
+                book2.version(),
+                book2.last_axis_change_version(),
+                book2.hash(),
+                "engine-v1",
+                "pxel-v1",
+            )
+            .is_err()
+        );
+        let plaintext = db
+            .open_record(
+                document_id,
+                book2.version().get(),
+                "snapshot",
+                uuid(newer_id.as_bytes()),
+                codec::SNAPSHOT_SCHEMA_VERSION,
+                &stored,
+                codec::MAX_SNAPSHOT_BYTES,
+            )
+            .await?;
+        assert_eq!(
+            plaintext.as_slice(),
+            codec::encode_snapshot(&book2, "engine-v1", "pxel-v1")?.as_slice(),
+        );
+        let decrypted_hash = db
+            .open_record(
+                document_id,
+                book2.version().get(),
+                "snapshot-hash",
+                uuid(newer_id.as_bytes()),
+                codec::SNAPSHOT_SCHEMA_VERSION,
+                &at_rest.state_hash,
+                32,
+            )
+            .await?;
+        assert_eq!(decrypted_hash.as_slice(), &book2.hash());
         assert_preferred(&db, document_id, newer_id).await?;
         assert_eq!(
             db.latest_valid_snapshot(&blobs, document_id, book2.version())
@@ -1311,12 +1551,19 @@ mod tests {
             &book2,
         ))
         .await?;
-        let newer_key = BlobKey::parse(&uuid(newer_id.as_bytes()).to_string())?;
         let blob_path = temp.path().join("blobs").join(newer_key.as_str());
         let mut damaged = tokio::fs::read(&blob_path).await?;
         let final_byte = damaged.last_mut().ok_or("empty blob")?;
         *final_byte ^= 0x01;
         tokio::fs::write(&blob_path, damaged).await?;
+        Box::pin(insert_snapshot_with_wrong_object_context(
+            &db,
+            &blobs,
+            &book2,
+            SnapshotId::from_bytes([51; 16])?,
+            stored,
+        ))
+        .await?;
         let fallback = db
             .latest_valid_snapshot(&blobs, document_id, book2.version())
             .await?
@@ -1355,7 +1602,7 @@ mod tests {
     }
 
     async fn historical_scenario(pool: sqlx::PgPool) -> TestResult {
-        let db = PgDatabase { pool };
+        let db = PgDatabase::for_test(pool)?;
         db.migrate().await?;
         let identity = AuthenticatedActor {
             actor_id: ActorId::from_bytes([1; 16])?,
@@ -1391,7 +1638,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let blobs = LocalFilesystemBlobStore::new(
             temp.path().join("blobs"),
-            codec::MAX_SNAPSHOT_BYTES as u64,
+            (codec::MAX_SNAPSHOT_BYTES + CRYPTO_ENVELOPE_OVERHEAD) as u64,
         )
         .await?;
         let older_id = SnapshotId::from_bytes([10; 16])?;
@@ -1522,7 +1769,7 @@ mod tests {
     }
 
     async fn crash_scenario(pool: sqlx::PgPool) -> TestResult {
-        let db = PgDatabase { pool };
+        let db = PgDatabase::for_test(pool)?;
         db.migrate().await?;
         let identity = AuthenticatedActor {
             actor_id: ActorId::from_bytes([1; 16])?,
@@ -1555,7 +1802,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let blobs = LocalFilesystemBlobStore::new(
             temp.path().join("blobs"),
-            codec::MAX_SNAPSHOT_BYTES as u64,
+            (codec::MAX_SNAPSHOT_BYTES + CRYPTO_ENVELOPE_OVERHEAD) as u64,
         )
         .await?;
         Box::pin(assert_publication_crash_boundaries(

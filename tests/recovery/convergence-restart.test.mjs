@@ -24,7 +24,10 @@ test(
     let server;
     async function start() {
       server = spawn(
-        resolve('target/debug/pxel-server' + (process.platform === 'win32' ? '.exe' : '')),
+        resolve(
+          process.env.PXEL_RECOVERY_SERVER_BINARY ??
+            'target/debug/pxel-server' + (process.platform === 'win32' ? '.exe' : ''),
+        ),
         [],
         {
           env: { ...process.env, PXEL_DEV_AUTH: '1', PXEL_BIND: '127.0.0.1:18083' },

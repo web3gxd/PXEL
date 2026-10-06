@@ -5,11 +5,12 @@ Canvas, ввод значений, durable PostgreSQL CAS commit и восста
 reload/restart. Формулы сохраняются как source и серверный bound AST.
 Асинхронный серверный пересчет доставляется по WebSocket отдельными
 `CalculationCommitted` сообщениями с версией, ограниченными частями и итоговым
-хэшем. Stateful WASM Worker показывает отдельно помеченный предварительный расчет,
+хэшем; при совпавшей клиентской calculation version сервер отправляет только
+changed/cleared results, при cache miss — полный snapshot. Stateful WASM Worker показывает отдельно помеченный предварительный расчет,
 передавая cell patches после начальной загрузки. CalculationContext теперь
 записывается отдельным системным событием и восстанавливается из журнала;
 полный контекст теперь передаётся через авторизованную HTTP-проекцию в WASM
-Worker (init schema 4; старые readers сохранены). `RAND`/`NOW`/`TODAY` используют этот сохранённый контекст:
+Worker (init schema 5; старые readers сохранены). `RAND`/`NOW`/`TODAY` используют этот сохранённый контекст:
 при первом сохранении volatile-формулы сервер создаёт его автоматически.
 Дальнейшие правки содержимого автоматически создают следующий epoch.
 У открытого документа NOW обновляется по heartbeat не чаще раза в минуту,
@@ -23,11 +24,19 @@ volatile-контекст, включая RAND. Уже открытые вкла
 системное событие вызывает авторизованный resync. Временное presence показывает
 удалённое выделение, не меняя версию документа. Отзыв документного ACL закрывает
 старую подписку через durable access epoch и локальный send gate. Полный gate
-фазы 3, crash/recovery matrix snapshots, production S3 и XLSX import/reimport ещё впереди. Локальные
+фазы 3, crash/recovery matrix snapshots и production S3 ещё впереди.
+Ограниченный XLSX profile-1 уже проходит import/export/reimport через PostgreSQL;
+широкая Excel-совместимость и upload недоверенных файлов остаются отдельными gates.
+Локальные
 snapshots уже проходят проверенную активацию и используются при запуске actor;
 после каждых 1000 операций запускается фоновая запись. У каждого WebSocket есть очередь
 отправки с лимитами 160 кадров / 2 MiB; медленный клиент отключается,
 а фактическая отправка снова проверяет ACL.
+
+Заголовки строк и столбцов остаются закреплёнными над Canvas. Доступные
+пользовательские полосы прокрутки дают больше точности в заполненной области
+разреженного листа; wheel, touchpad и клавиатура перемещают лист линейно. См.
+[ADR-091](docs/adr/091-adaptive-axis-scrollbars.md).
 
 Строки и столбцы имеют stable IDs; доступны вставка/удаление, TSV, копирование
 и атомарный cut/move содержимого внутри листа. Собственная история undo/redo
@@ -41,8 +50,9 @@ snapshots уже проходят проверенную активацию и �
 других вкладок. Это до 100 целей Undo и 100 целей Redo; возможность выполнить
 конкретную отмену сервер проверяет при команде. Этот срез локально проверен на
 реальном PostgreSQL, HTTP/WebSocket, в браузере и при аварийных перезапусках;
-весь gate фазы 4 не закрыт. Объединения, перенос оформления вместе с содержимым,
-полный XLSX и общие нагрузочные/deployment gates остаются открытыми. Перенос получает отдельный
+весь gate фазы 4 не закрыт. Объединённые ячейки реализованы для ограниченного
+профиля; полный XLSX и общие нагрузочные/deployment gates остаются открытыми.
+Перенос получает отдельный
 WASM preview содержимого и формул до подтверждения сервера: shared Rust planner,
 геометрический запрос, отдельный pending overlay и сброс при конфликте/resync.
 Native/browser corpus переноса: 209 книг / 418 операций, exact results и rendered
@@ -54,14 +64,20 @@ formula text. [Контракт](docs/adr/084-optimistic-move-worker.md).
 очистка значения сохраняет стиль. Команда атомарно меняет до 16 свойств у 1000
 явно указанных ячеек. Доступны Undo/Redo и восстановление истории после reload,
 в том числе отмена оформления исходных ячеек после вставки между ними новой строки.
+Удаление строк и столбцов сохраняет оформление в durable preimages с guarded
+Undo/Redo ([ADR-092](docs/adr/092-structural-style-preimages.md)).
+GFM alignment из Markdown-таблиц импортируется вместе со значениями одной
+durable batch operation и одной отменой ([ADR-093](docs/adr/093-atomic-cell-content-style-batches.md)).
 Canvas и панель оформления проверены в 8 браузерных сценариях при DPR 1/2.
 В WASM передаются точный bound AST и authored metadata; самостоятельно вычисленный
 хэш книги сравнивается с серверным отдельно от результатов формул.
 [Native/browser corpus: 1027 книг, 2037 patches](docs/benchmarks/2026-09-30-style-worker-parity-local.md).
 Общая браузерная регрессия прошла 150/150 сценариев при DPR 1/2; отдельно
-прошло восстановление стилей после двух жёстких перезапусков. Реальный экспорт
-оформленной книги возвращает проверенный typed 422. Copy/cut/move пока переносят
-только содержимое; удаление осей, которое потеряло бы оформление, отклоняется.
+прошло восстановление стилей после двух жёстких перезапусков. Затем sparse
+formatting добавлен в атомарные durable CopyRange/MoveRange operations с Undo
+([ADR-094](docs/adr/094-styled-range-copy.md),
+[ADR-095](docs/adr/095-styled-range-move.md)). Новые проверки запускаются
+отдельно и записаны в RUNBOOK.
 Числовое отображение использует фиксированный профиль en-US, DateIso — систему
 1900 с явным serial 60. Неподдерживаемая дата показывает `#FORMAT!`; произвольные
 Excel format strings и отображение системы 1904 не заявляются.
@@ -82,12 +98,26 @@ cargo run --locked -q -p pxel-server -- xlsx-preview fixtures/xlsx/minimal_scala
 Команда запускает отдельный дочерний процесс, принимает от него bounded IR,
 повторно проверяет модель в родителе и печатает только количество листов и
 ячеек. OS sandbox и загрузка XLSX в редактор ещё не реализованы. Владелец документа
-может скачать подтверждённую scalar-книгу кнопкой «Скачать XLSX» или через
-`GET /api/documents/{id}/export.xlsx`; подготовка файла аудируется до ответа.
-Стили, даты, merges и проверенная Excel-совместимость пока не входят в XLSX-профиль.
-Для книги с оформлением экспорт возвращает typed HTTP 422
-`xlsx_styles_not_supported`, чтобы не потерять его при скачивании; runtime ответ
-проверен на обоих DPR. Styles-aware import/export/reimport будет следующим расширением.
+может скачать подтверждённую книгу кнопкой «Скачать XLSX» или через
+`GET /api/documents/{id}/export.xlsx`; права и durable audit проверяются до ответа.
+По умолчанию экспорт доступен владельцу. «Выдача и аудит» задаёт правила книги
+и отдельных гостевых ссылок; участники и гости получают экспорт только после
+явного разрешения владельца. Правила пересекаются и не дают права правки.
+Копирование и вырезание также требуют durable authorization; отказ не меняет
+системный буфер или вырезанный диапазон. Требование обезличивания пока блокирует
+выдачу до появления проверенной безопасной копии (ADR-108).
+Поддерживаются scalar values/formulas и ограниченный профиль из 16 стилей ячейки,
+включая оформление пустых ячеек. XLSX styles import/export/reimport прошёл локальную
+PostgreSQL recovery и browser download проверку при DPR 1/2; bounded merged-cell
+OOXML import/export и durable Undo/Redo также локально проверены в ADR-096;
+подробный контракт —
+в [ADR-088](docs/adr/088-xlsx-cell-style-profile.md) и
+[handoff](docs/handoff/xlsx-styles-roundtrip.md). Импорт остаётся локальной CLI
+командой с явной политикой потерь; browser upload, широкая Excel совместимость
+и произвольные форматы не входят в завершённый профиль. Merge import/export
+поддерживает bounded rectangular ranges и отклоняет hidden non-anchor data;
+unbounded OOXML extensions остаются неподдерживаемыми. Неподдерживаемый
+export profile по-прежнему возвращает typed ошибку.
 
 Для локального dev-стенда scalar XLSX с 1–64 листами можно атомарно превратить
 в новый документ после `just infra-up`/`just infra-native`. Возьмите opaque
@@ -111,9 +141,10 @@ PXEL_DEV_AUTH=1 cargo run --locked -q -p pxel-server --features dev-auth -- xlsx
 
 Формульный корпус и реальный browser Worker проверяются `just formula-parity`.
 Поддержаны AND/OR/NOT с диапазонами и typed resource limits. Текущий engine
-identity — `pxel-formula-0.14.0`; INDEX поддерживает выбор из contiguous range
-и ссылочные аргументы агрегатов (ADR-070). Dynamic spill и multi-area ещё
-не поддержаны.
+identity — `pxel-formula-0.16.0`; числовые литералы формул ограничиваются 15
+значащими десятичными цифрами по наблюдению Excel (ADR-101). INDEX поддерживает
+выбор из contiguous range и ссылочные аргументы агрегатов (ADR-070). Dynamic
+spill и multi-area ещё не поддержаны.
 MATCH выполняет exact/wildcard и sorted approximate lookup в одномерных
 диапазонах (ADR-071, provisional blank/error/collation profile).
 VLOOKUP/HLOOKUP выбирают scalar result из contiguous table, с exact/wildcard
@@ -165,6 +196,11 @@ just dev
 `just infra-up` создает случайные локальные credentials в игнорируемой `.local/`,
 поднимает PostgreSQL 18.6 на `127.0.0.1:55432`, применяет миграции.
 `just dev` запускает backend `127.0.0.1:8080` и frontend `127.0.0.1:5173`.
+Для нового dev-хранилища setup также создаёт приватный keyring в
+`.local/keys/keyring.json`; это ключи конкретного локального стенда. Существующее
+plaintext-хранилище требует offline-миграции в отдельный кластер: обычный запуск
+отказывается переписывать его на месте. Срез миграции и его проверки описываются
+в RUNBOOK по мере реализации.
 Откройте <http://127.0.0.1:5173>. Ctrl+C останавливает оба процесса приложения.
 PostgreSQL остается запущенным; `docker compose down` останавливает его с сохранением volume.
 
@@ -175,7 +211,8 @@ PostgreSQL остается запущенным; `docker compose down` оста
 или `action="revoke"` без `role`. Grant приглашает существующего пользователя
 в workspace; при следующем dev login он передает `X-PXEL-DEV-WORKSPACE` с ID
 workspace владельца. ACL-команда требует cookie, разрешённый Origin и роль
-owner; в production dev login отключен. Пользовательского sharing dialog пока нет.
+owner; в production dev login отключен. В редакторе есть владельческий диалог
+защищённых гостевых ссылок и отдельные настройки выдачи с журналом попыток.
 
 Без Docker: установите PostgreSQL 18.6 binaries и задайте `PXEL_PG_BIN`, затем
 вместо `infra-up` выполните `just infra-native`. Команда создает отдельный cluster
@@ -202,6 +239,9 @@ just test        # nextest + Vitest; PostgreSQL должна работать
 just sqlx-check  # sqlx-cli 0.9.0; сверка .sqlx с реальной PostgreSQL
 just smoke      # запускает/останавливает приложение; HTTP/WS + Playwright
 just audit      # cargo-deny 0.20.2, cargo-audit 0.22.2, pnpm audit
+just share-log-redaction # synthetic PIN/password/token/cookie отсутствуют в application logs
+just s3-encrypted-snapshot # S3-backed snapshot ciphertext survives server hard restart
+just distributed-share-revocation # idle guest WebSocket closes across two server processes
 pnpm test:recovery # собирает dev-auth binary и проверяет hard restart
 just crash-recovery-postgres # отдельный PostgreSQL 18: immediate stop, WAL recovery, snapshot+tail
 just backup-restore-postgres # pg_basebackup + pg_verifybackup + snapshot objects → новый кластер
@@ -216,6 +256,24 @@ Linux CI использует `--with-deps`. Порты 8080/5173 перед `ju
 Cargo-nextest закреплен на 0.9.146. `cargo test --workspace --all-features`
 также работает без nextest. SQLx compile-time metadata хранится в `.sqlx/`;
 `SQLX_OFFLINE=true cargo build --locked --workspace` не требует БД при компиляции.
+`just share-log-redaction` запускает отдельный loopback сервер с dev-auth и требует
+`DATABASE_URL` из изолированной acceptance PostgreSQL и `PXEL_KEYRING_FILE` с
+активными write generations. Тест генерирует краткоживущие секреты в памяти,
+проверяет неудачный и успешный unlock для PIN и password, затем ищет их, link
+token, URL и guest cookie в захваченном stdout/stderr сервера.
+Если `PXEL_TEST_POSTGRES_LOG` указывает на лог того же изолированного кластера,
+тест также проверит только записи, добавленные за время сценария.
+`just s3-encrypted-snapshot` требует изолированные `DATABASE_URL`,
+`PXEL_KEYRING_FILE`, `PXEL_S3_TEST_ENDPOINT`, `PXEL_S3_TEST_BUCKET`,
+`PXEL_S3_TEST_REGION` и тестовые AWS SDK credentials. Для извлечения объекта из
+S3-compatible test endpoint нужен Python с boto3 (`PXEL_TEST_PYTHON`; по умолчанию
+`.local/moto-venv/Scripts/python.exe` на Windows). Тест проверяет envelope и
+ciphertext checksum самого объекта, отсутствие контрольного style value и
+восстановление snapshot+tail после hard restart.
+`just distributed-share-revocation` использует те же изолированные
+`DATABASE_URL` и `PXEL_KEYRING_FILE`; тест запускает два локальных server process
+против общей PostgreSQL и проверяет закрытие idle guest WebSocket и отказ чтения
+после revoke на первом экземпляре.
 `crash-recovery-postgres` требует `PXEL_PG_BIN`, создает отдельный кластер под
 `.local`, включает `synchronous_commit`, `fsync` и `full_page_writes`, затем
 удаляет кластер после остановки. Это проверка аварийного завершения процесса БД,
@@ -236,20 +294,21 @@ GitHub Actions выполняет те же команды на Ubuntu 24.04. Н
 
 ## Конфигурация и границы
 
-| Переменная                                | Назначение                                                                                                 |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL` / `PXEL_DATABASE_URL_FILE` | DB URL из environment или файла; default file `.local/database-url`                                        |
-| `PXEL_BIND`                               | Backend bind; default `127.0.0.1:8080`                                                                     |
-| `PXEL_ALLOWED_ORIGINS`                    | Список точных Origin через запятую, без wildcard                                                           |
-| `PXEL_DEV_AUTH`                           | `1` работает только с compile feature `dev-auth` и loopback bind                                           |
-| `PXEL_BLOB_ROOT`                          | Private writable directory; default `.local/blobs`                                                         |
-| `PXEL_SNAPSHOT_INTERVAL`                  | Число committed событий между snapshots; default `1000`, предел `1..100000`                                |
-| `PXEL_SNAPSHOT_CLEANUP_HOURS`             | Возраст incomplete snapshot до уборки; default `24`, предел `1..8760`                                      |
-| `PXEL_SNAPSHOT_ACTIVE_RETENTION_DAYS`     | Возраст старых ACTIVE snapshots до вывода; default `30`, предел `1..3650`; два новых поколения сохраняются |
-| `PXEL_S3_ENDPOINT`                        | При сборке с `--features s3` выбирает S3 adapter; HTTPS вне loopback                                       |
-| `PXEL_S3_BUCKET` / `PXEL_S3_REGION`       | Обязательны вместе с endpoint; credentials задаются через стандартные AWS SDK providers                    |
-| `PXEL_DB_PORT`                            | Порт только локального bootstrap; default `55432`                                                          |
-| `PXEL_PG_BIN`                             | Каталог binaries для native bootstrap                                                                      |
+| Переменная                                | Назначение                                                                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL` / `PXEL_DATABASE_URL_FILE` | DB URL из environment или файла; default file `.local/database-url`                                          |
+| `PXEL_KEYRING_FILE` / `PXEL_KEYRING_JSON` | Ровно один источник keyring schema 1; приватный файл вне PGDATA, blobs и backup/restore. Нет fallback-ключа. |
+| `PXEL_BIND`                               | Backend bind; default `127.0.0.1:8080`                                                                       |
+| `PXEL_ALLOWED_ORIGINS`                    | Список точных Origin через запятую, без wildcard                                                             |
+| `PXEL_DEV_AUTH`                           | `1` работает только с compile feature `dev-auth` и loopback bind                                             |
+| `PXEL_BLOB_ROOT`                          | Private writable directory; default `.local/blobs`                                                           |
+| `PXEL_SNAPSHOT_INTERVAL`                  | Число committed событий между snapshots; default `1000`, предел `1..100000`                                  |
+| `PXEL_SNAPSHOT_CLEANUP_HOURS`             | Возраст incomplete snapshot до уборки; default `24`, предел `1..8760`                                        |
+| `PXEL_SNAPSHOT_ACTIVE_RETENTION_DAYS`     | Возраст старых ACTIVE snapshots до вывода; default `30`, предел `1..3650`; два новых поколения сохраняются   |
+| `PXEL_S3_ENDPOINT`                        | При сборке с `--features s3` выбирает S3 adapter; HTTPS вне loopback                                         |
+| `PXEL_S3_BUCKET` / `PXEL_S3_REGION`       | Обязательны вместе с endpoint; credentials задаются через стандартные AWS SDK providers                      |
+| `PXEL_DB_PORT`                            | Порт только локального bootstrap; default `55432`                                                            |
+| `PXEL_PG_BIN`                             | Каталог binaries для native bootstrap                                                                        |
 
 Для проверки S3 endpoint задайте `PXEL_S3_TEST_ENDPOINT`,
 `PXEL_S3_TEST_BUCKET` и SDK credentials, затем выполните `just s3-contract`.

@@ -1,3 +1,5 @@
+import { createBookFromUi } from './create-book';
+import { cutSelection } from './clipboard';
 import { expect, test, type Page } from '@playwright/test';
 import { fromBinary } from '@bufbuild/protobuf';
 import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
@@ -8,8 +10,9 @@ const active = (page: Page) => page.getByTestId('active-cell');
 async function createDocument(page: Page) {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
 }
 async function write(page: Page, value: string) {
@@ -55,7 +58,7 @@ test('cut in one tab moves a formula range in another tab and updates inbound re
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('Shift+ArrowRight');
-  await page.keyboard.press('ControlOrMeta+X');
+  await cutSelection(page);
   await expect(page.getByTestId('cut-status')).toContainText('Исходные ячейки пока сохранены');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('3\t=(A1*2)');
   const id = new URL(page.url()).searchParams.get('document');
@@ -110,7 +113,7 @@ test('rejected partial-range cut keeps source data and reports the unsupported d
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('ArrowLeft');
-  await page.keyboard.press('ControlOrMeta+X');
+  await cutSelection(page);
   await page.keyboard.press('ArrowDown');
   const id = new URL(page.url()).searchParams.get('document');
   const before = await (await page.request.get(`/api/documents/${id}`)).json();
@@ -133,7 +136,7 @@ test('remote edits invalidate a cut without falling back to clipboard text', asy
   await page.bringToFront();
   await grid(page).focus();
   await page.keyboard.press('ArrowUp');
-  await page.keyboard.press('ControlOrMeta+X');
+  await cutSelection(page);
   await second.bringToFront();
   await grid(second).focus();
   await second.keyboard.press('ArrowRight');

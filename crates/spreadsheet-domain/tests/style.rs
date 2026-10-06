@@ -130,7 +130,7 @@ fn all_leaf_tags_are_distinct_and_typed_border_edges_are_atomic() -> TestResult 
         StyleChange::BorderLeft(Change::Set(border)),
         StyleChange::Horizontal(Change::Set(HorizontalAlignment::Right)),
         StyleChange::Vertical(Change::Set(VerticalAlignment::Top)),
-        StyleChange::Wrap(Change::Set(true)),
+        StyleChange::TextOverflow(Change::Set(TextOverflow::Wrap)),
         StyleChange::NumberFormat(Change::Set(NumberFormat::DateIso)),
     ];
     let style = CellStyle::default().apply(&changes)?;
@@ -161,6 +161,36 @@ fn all_leaf_tags_are_distinct_and_typed_border_edges_are_atomic() -> TestResult 
     assert!(VerticalAlignment::try_from(3).is_err());
     assert!(BorderLine::try_from(0).is_err());
     assert!(NumberFormat::try_from(7).is_err());
+    Ok(())
+}
+
+#[test]
+fn text_overflow_modes_share_legacy_wrap_identity_and_have_distinct_canonical_state() -> TestResult
+{
+    let default = CellStyle::default();
+    assert_eq!(default.text_overflow(), TextOverflow::Clip);
+    let wrapped = default.apply(&[StyleChange::TextOverflow(Change::Set(TextOverflow::Wrap))])?;
+    assert_eq!(wrapped.text_overflow(), TextOverflow::Wrap);
+    assert!(wrapped.wrap());
+
+    let overflow = default.apply(&[StyleChange::TextOverflow(Change::Set(
+        TextOverflow::Overflow,
+    ))])?;
+    assert_eq!(overflow.text_overflow(), TextOverflow::Overflow);
+    assert_ne!(overflow, wrapped);
+    assert_eq!(
+        overflow.apply(&[StyleChange::TextOverflow(Change::Reset)])?,
+        default
+    );
+
+    let mut mode_bytes = Vec::new();
+    wrapped.append_to(&mut mode_bytes);
+    assert!(mode_bytes.ends_with(&[0, 1, 15, 1]));
+
+    let mut overflow_bytes = Vec::new();
+    overflow.append_to(&mut overflow_bytes);
+    assert!(overflow_bytes.ends_with(&[0, 1, 15, 2]));
+    assert_ne!(mode_bytes, overflow_bytes);
     Ok(())
 }
 proptest! {
