@@ -31,6 +31,7 @@ mod templates_api;
 mod views_api;
 #[cfg(feature = "dev-auth")]
 mod xlsx_import;
+mod xlsx_sandbox;
 mod xlsx_worker;
 
 use axum::{

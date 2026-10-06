@@ -19,8 +19,8 @@ just xlsx-wasi-check
 ```
 
 The recipe builds trusted source to wasm32-wasip1, builds the native comparison
-worker and verifies the real Wasmtime version and 10 capability/protocol/parity
-cases. It never executes uploaded WebAssembly or accepts a user-supplied runtime
+worker and verifies the real Wasmtime version, capability/protocol/parity
+cases and configured backend execution. It never executes uploaded WebAssembly or accepts a user-supplied runtime
 argument. Tests can use an operator-selected PXEL_WASMTIME_BIN path; CARGO_TARGET_DIR
 is respected. Other hosts must install their verified official 49.0.2 runtime;
 Linux execution and artifact verification remain an open deployment gate.
@@ -31,3 +31,17 @@ payloads. Clocks and stdio are allowed, while directory/environment inheritance,
 network capabilities, HTTP and compiled-module cache are disabled. Guest memory
 is capped at 256 MiB; fuel and timeout tests independently terminate loops.
 Those caps do not establish an OS-wide host-process memory limit.
+
+## Operator-configured backend (ADR-132)
+
+Set `PXEL_XLSX_SANDBOX_MANIFEST` to an operator-owned JSON file with exactly:
+`schema_version` (1), `runtime_version` ("49.0.2"), absolute `runtime_path` and
+`module_path`, and lowercase 64-character `runtime_sha256` and `module_sha256`.
+Calculate artifact hashes only after verifying the official runtime archive and
+building the trusted locked worker source. Keep the manifest under ignored
+`.local`; the service must not be able to modify artifacts or parent directories.
+
+Each CLI preview/import verifies the artifact hashes and runtime version before
+execution. Configured failures never fall back to native parsing. Without the
+manifest, the existing operator-only CLI still uses its native child. This does
+not enable browser uploads or establish a startup readiness/public-upload gate.

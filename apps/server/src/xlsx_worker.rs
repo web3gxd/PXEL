@@ -1,6 +1,6 @@
 //! A bounded local process boundary for XLSX parsing. OS sandbox adapters are
-//! only partially installed: process-tree termination is enforced, while hard
-//! resource and filesystem/network isolation remain open gates.
+//! operator-configured WASI execution denies guest filesystem/network access.
+//! Host resource and public-upload policies remain open gates.
 
 #[cfg(windows)]
 use process_wrap::tokio::JobObject;
@@ -29,6 +29,8 @@ pub enum WorkerError {
     Timeout,
     #[error("XLSX worker could not start or complete")]
     Process,
+    #[error("XLSX sandbox configuration is invalid or unavailable")]
+    Sandbox,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -107,10 +109,23 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
         return Err(WorkerError::InvalidInput);
     }
     let source_len = u32::try_from(source.len()).map_err(|_| WorkerError::InvalidInput)?;
-    let executable = std::env::current_exe().map_err(|_| WorkerError::Process)?;
-    let mut command = tokio::process::Command::new(executable);
+    let sandbox = match std::env::var_os("PXEL_XLSX_SANDBOX_MANIFEST") {
+        Some(path) => Some(
+            crate::xlsx_sandbox::Sandbox::load(path.into())
+                .await
+                .map_err(|_| WorkerError::Sandbox)?,
+        ),
+        None => None,
+    };
+    let mut command = if let Some(sandbox) = &sandbox {
+        sandbox.command()
+    } else {
+        let executable = std::env::current_exe().map_err(|_| WorkerError::Process)?;
+        let mut command = tokio::process::Command::new(executable);
+        command.arg("xlsx-worker");
+        command
+    };
     command
-        .arg("xlsx-worker")
         .env_clear()
         .current_dir(std::env::temp_dir())
         .stdin(Stdio::piped())

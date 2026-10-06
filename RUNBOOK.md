@@ -7617,3 +7617,34 @@ Vite >500kB chunk warning сохранён. Private workspace/regression logs:
 CLI5/5, fmt и strict all-feature server Clippy повторно PASS. Исходники после
 проверок не менялись; добавлена только запись результатов. Post-rebase log:
 .local/reports/xlsx-wasi-post-rebase.log.
+
+## 2026-10-07 — XLSX runtime adapter in progress (ADR-132)
+
+feat/xlsx-runtime-adapter adds an operator-owned strict manifest with runtime/module
+SHA256 pins and Wasmtime49.0.2 version check. Configured CLI execution uses fixed
+WASI arguments and never falls back to native parsing. Artifact handles remain
+open; Windows denies write/delete sharing. Manifest reads reject non-regular or
+oversized files; module magic uses read_exact independently of read chunk size.
+No new dependencies, HTTP upload or persistence/wire changes.
+
+Regression RED: the previous backend ignored invalid manifest pins and executed
+native parsing. After implementation, actual CLI tests3/3 PASS twice, including a
+correctly pinned empty Wasm module: execution fails with no native fallback and no
+content/path echo. Valid XLSX preview reports two sheets/five cells. Invalid pins,
+versions, missing/relative paths and unknown arguments fail closed. Strict
+all-target/all-feature server Clippy PASS after the final source change; Rust fmt
+and new test/ADR Prettier applied. This is targeted evidence, not a full workspace
+or public-upload acceptance. Review, broader regression and commit are pending.
+Host-process memory policy, malware policy, browser XLSX selection/publication,
+Linux/Compose/remote CI and the remaining nine functional steps stay open.
+
+Adapter review and targeted regression completed: Windows artifact guard1/1,
+isolated PostgreSQL server units82/82 (3.14s), strict server all-target/all-feature
+Clippy, fmt and changed-doc/test Prettier PASS. Expanded just xlsx-wasi-check
+builds both workers and passes13/13 real runtime/backend tests (4.93s).
+The isolated helper's generic completion message mentions recovery, but this
+invocation ran only server units; no recovery check is claimed here. Review
+confirmed strict operator-owned manifest, bounded hashing, no caller argv,
+retained handles and generic errors. Unix artifact mutation protection requires
+operator-owned read-only paths and remains unverified. This is an operator CLI
+adapter, not public upload or host-process memory isolation.
