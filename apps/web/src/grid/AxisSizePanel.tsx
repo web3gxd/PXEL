@@ -40,7 +40,10 @@ export function AxisSizePanel({
     const ok = document.setAxisSize(
       axis,
       axis === 'row' ? row : column,
-      value === (axis === 'row' ? GRID.rowHeight : GRID.columnWidth) ? undefined : value,
+      value ===
+        (axis === 'row' ? GRID.rowHeight : (sheet?.default_column_width ?? GRID.columnWidth))
+        ? undefined
+        : value,
     );
     if (ok) onClose();
     else setError(document.error || 'Не удалось изменить размер.');

@@ -26,11 +26,13 @@ const categories: Record<string, string> = {
   merge: 'Объединения',
   sheet: 'Листы',
   structure: 'Структура',
-  layout: 'Закрепления',
+  layout: 'Макет',
 };
 const operations: Record<string, string> = {
   create_workbook: 'Создание книги',
   add_sheet: 'Добавление листа',
+  sheet_settings: 'Настройки листа',
+  copy_sheet: 'Копирование листа',
   frozen_rows: 'Закрепление строк',
   axis_size: 'Размер осей',
   cell_write: 'Изменение ячейки',

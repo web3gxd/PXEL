@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AxisMetrics,
+  axisMetrics,
   AxisScrollMapping,
   backingSize,
   columnLabel,
@@ -10,6 +11,12 @@ import {
 } from './viewport';
 
 describe('viewport boundaries', () => {
+  it('refreshes cached geometry when the sheet default width changes', () => {
+    const ids = ['a', 'b'];
+    const overrides = [{ axis_id: 'b', size_css_px: 200 }];
+    expect(axisMetrics(ids, overrides, 112).totalSize).toBe(312);
+    expect(axisMetrics(ids, overrides, 80).totalSize).toBe(280);
+  });
   it('skips hidden rows in offsets, hit tests, and navigation without changing identities', () => {
     const axis = new AxisMetrics(['a', 'b', 'c', 'd', 'e'], undefined, 28, new Set([1, 2, 4]));
     expect(axis.count).toBe(5);

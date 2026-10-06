@@ -41,6 +41,7 @@ message SnapshotSheet {
   repeated MergeRange merges = 5;
   // Schema 7 adds the requested top-row freeze count.
   uint32 frozen_rows = 6;
+  SheetSettings settings = 7;
 }
 message SnapshotStyle { CellAddress address = 1; CellStyle style = 2; }
 message AxisSizeOverride { uint32 axis_kind = 1; bytes axis_id = 2; uint32 size_css_px = 3; }

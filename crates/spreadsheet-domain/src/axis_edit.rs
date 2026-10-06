@@ -867,5 +867,8 @@ pub(crate) fn candidate(
         return Err(DomainError::InvalidAxis);
     }
     finish(&mut candidate)?;
+    for sheet in &candidate.sheets {
+        crate::sheet_settings::validate(sheet, &sheet.settings)?;
+    }
     Ok(candidate)
 }

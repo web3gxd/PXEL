@@ -19,6 +19,7 @@ mod move_tests;
 mod range_codec;
 #[cfg(test)]
 mod range_tests;
+mod sheet_settings_codec;
 mod snapshot_codec;
 mod sort_codec;
 #[cfg(test)]
@@ -214,9 +215,34 @@ fn decode_merge_range(
     ))
 }
 fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
+    sheet_settings_codec::validate_operation(o)?;
     use v1::operation::Kind;
     Ok(v1::Operation {
         kind: Some(match o {
+            Operation::SheetSettingsWrite {
+                sheet,
+                previous,
+                settings,
+                previous_index,
+                index,
+            } => Kind::SheetSettingsWrite(v1::SheetSettingsWrite {
+                sheet_id: sheet.as_bytes().to_vec(),
+                previous_name: previous.name.clone(),
+                name: settings.name.clone(),
+                previous: Some(sheet_settings_codec::encode(previous)),
+                settings: Some(sheet_settings_codec::encode(settings)),
+                previous_index: *previous_index,
+                index: *index,
+            }),
+            Operation::CopySheet {
+                source,
+                sheet,
+                index,
+            } => Kind::CopySheet(v1::CopySheet {
+                source_sheet_id: source.as_bytes().to_vec(),
+                sheet: Some(encode_sheet(sheet)),
+                index: *index,
+            }),
             Operation::FrozenRowsWrite {
                 sheet,
                 rows,
@@ -434,7 +460,9 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                     undoes_operation_id: undoes.map_or_else(Vec::new, |id| id.as_bytes().to_vec()),
                     undoes_version: undoes_version.map_or(0, DocumentVersion::get),
                     copy_intent: match intent {
-                        CellBatchIntent::SetValues | CellBatchIntent::SortRange { .. } => None,
+                        CellBatchIntent::SetValues
+                        | CellBatchIntent::SortRange { .. }
+                        | CellBatchIntent::ShiftCells { .. } => None,
                         CellBatchIntent::CopyRange {
                             source,
                             destination,
@@ -459,6 +487,18 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                             columns: *columns,
                             is_move: true,
                         }),
+                    },
+                    shift_intent: match intent {
+                        CellBatchIntent::ShiftCells {
+                            source,
+                            rows,
+                            columns,
+                            axis,
+                            insert,
+                        } => Some(sheet_settings_codec::shift(
+                            *source, *rows, *columns, *axis, *insert,
+                        )),
+                        _ => None,
                     },
                     sort_intent: match intent {
                         CellBatchIntent::SortRange { range, order } => {
@@ -555,6 +595,25 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
 fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
     use v1::operation::Kind;
     Ok(match o.kind.ok_or(CodecError::Invalid)? {
+        Kind::SheetSettingsWrite(write) => Operation::SheetSettingsWrite {
+            sheet: SheetId::from_bytes(id(&write.sheet_id)?).map_err(|_| CodecError::Invalid)?,
+            previous: sheet_settings_codec::decode(
+                write.previous.ok_or(CodecError::Invalid)?,
+                write.previous_name,
+            )?,
+            settings: sheet_settings_codec::decode(
+                write.settings.ok_or(CodecError::Invalid)?,
+                write.name,
+            )?,
+            previous_index: write.previous_index,
+            index: write.index,
+        },
+        Kind::CopySheet(write) => Operation::CopySheet {
+            source: SheetId::from_bytes(id(&write.source_sheet_id)?)
+                .map_err(|_| CodecError::Invalid)?,
+            sheet: decode_sheet(write.sheet.ok_or(CodecError::Invalid)?)?,
+            index: write.index,
+        },
         Kind::FrozenRowsWrite(write) => {
             if write.rows > spreadsheet_domain::axis_size::MAX_FROZEN_ROWS
                 || write.previous > spreadsheet_domain::axis_size::MAX_FROZEN_ROWS
@@ -658,7 +717,16 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                 }
                 None => Vec::new(),
             };
-            let intent = if let Some(sort) = batch.sort_intent {
+            if usize::from(batch.sort_intent.is_some())
+                + usize::from(batch.copy_intent.is_some())
+                + usize::from(batch.shift_intent.is_some())
+                > 1
+            {
+                return Err(CodecError::Invalid);
+            }
+            let intent = if let Some(shift) = batch.shift_intent {
+                sheet_settings_codec::decode_shift(shift)?
+            } else if let Some(sort) = batch.sort_intent {
                 CellBatchIntent::SortRange {
                     range: sort_codec::decode_range(sort.range.ok_or(CodecError::Invalid)?)?,
                     order: sort
@@ -1063,6 +1131,17 @@ pub fn schema_version(operation: &Operation) -> u32 {
             intent: CellBatchIntent::SortRange { .. },
             ..
         } => 37,
+        Operation::SheetSettingsWrite { .. } => 39,
+        Operation::CopySheet { .. } => 40,
+        Operation::CellBatchWrite {
+            intent: CellBatchIntent::ShiftCells { .. },
+            undoes: None,
+            ..
+        } => 41,
+        Operation::CellBatchWrite {
+            intent: CellBatchIntent::ShiftCells { .. },
+            ..
+        } => 42,
         Operation::FrozenRowsWrite { .. } => 36,
         Operation::AxisSizeWrite { .. } => 25,
         Operation::MergeWrite {
@@ -1310,18 +1389,19 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=38) {
+    if !matches!(e.schema_version, 1..=42) {
         return Err(CodecError::UnsupportedSchema);
     }
     // New style families accept the frozen Rust writer's normalized encoding.
     // This rejects unknown fields; it is not a general protobuf canonicalization rule.
-    if matches!(e.schema_version, 23..=38) && e.encode_to_vec() != bytes {
+    if matches!(e.schema_version, 23..=42) && e.encode_to_vec() != bytes {
         return Err(CodecError::Invalid);
     }
     if e.committed_version == 0 {
         return Err(CodecError::Invalid);
     }
     let operation = decode_operation(e.operation.ok_or(CodecError::Invalid)?)?;
+    sheet_settings_codec::validate_operation(&operation)?;
     style_codec::validate(
         &operation,
         Some(DocumentVersion::new(e.committed_version).map_err(|_| CodecError::Invalid)?),
@@ -1354,7 +1434,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         (
             1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
             | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-            | 38,
+            | 38 | 39 | 40 | 41 | 42,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -1365,7 +1445,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         (
             1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
             | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-            | 38,
+            | 38 | 39 | 40 | 41 | 42,
             0,
             actor,
             _,
@@ -1412,6 +1492,10 @@ fn field(h: &mut Sha256, b: &[u8]) {
 }
 fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
     match o {
+        Operation::SheetSettingsWrite { .. } | Operation::CopySheet { .. } => {
+            h.update([schema_version(o) as u8]);
+            field(h, &operation(o)?.encode_to_vec());
+        }
         Operation::FrozenRowsWrite {
             sheet,
             rows,
@@ -1629,7 +1713,23 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
                 (CellBatchIntent::MoveRange { .. }, true) => 33,
                 (CellBatchIntent::SortRange { .. }, false) => 37,
                 (CellBatchIntent::SortRange { .. }, true) => 38,
+                (CellBatchIntent::ShiftCells { .. }, false) => 41,
+                (CellBatchIntent::ShiftCells { .. }, true) => 42,
             }]);
+            if let CellBatchIntent::ShiftCells {
+                source,
+                rows,
+                columns,
+                axis,
+                insert,
+            } = intent
+            {
+                field(
+                    h,
+                    &sheet_settings_codec::shift(*source, *rows, *columns, *axis, *insert)
+                        .encode_to_vec(),
+                );
+            }
             if let CellBatchIntent::SortRange { range, order } = intent {
                 sort_codec::hash_range(h, range)?;
                 h.update((order.len() as u32).to_le_bytes());
@@ -1736,6 +1836,35 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
     h.update(c.base_version.get().to_le_bytes());
     h.update(c.client_sequence.to_le_bytes());
     match &c.operation {
+        CommandPayload::SetSheetSettings { sheet, changes } => {
+            h.update([39]);
+            h.update(sheet.as_bytes());
+            sheet_settings_codec::hash_patch(&mut h, changes);
+        }
+        CommandPayload::CopySheet {
+            source,
+            sheet,
+            index,
+        } => {
+            h.update([40]);
+            h.update(source.as_bytes());
+            h.update(index.to_be_bytes());
+            field(&mut h, &encode_sheet(sheet).encode_to_vec());
+        }
+        CommandPayload::ShiftCells {
+            source,
+            rows,
+            columns,
+            axis,
+            insert,
+        } => {
+            h.update([41]);
+            field(
+                &mut h,
+                &sheet_settings_codec::shift(*source, *rows, *columns, *axis, *insert)
+                    .encode_to_vec(),
+            );
+        }
         CommandPayload::SortRange { range } => {
             h.update([37]);
             sort_codec::hash_range(&mut h, range)?;
@@ -2935,3 +3064,6 @@ mod formula_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod sheet_settings_tests;

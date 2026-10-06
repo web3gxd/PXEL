@@ -55,6 +55,25 @@ it('rejects unknown history versions duplicate events and broken descending curs
     decodeActivity({ ...raw, events: [{ ...event, operation_type: 'unknown' }] }),
   ).toThrow();
 });
+it('loads a mixed activity page containing durable sheet settings and sheet copy', () => {
+  const events = ['sheet_settings', 'copy_sheet', 'cell_write'].map((operation_type, index) => ({
+    operation_id: uuidV7(),
+    actor_id: uuidV7(),
+    created_at: 100,
+    version: String(3 - index),
+    operation_type,
+    structural: index < 2,
+    footprints: [],
+  }));
+  expect(
+    decodeActivity({
+      schema_version: 1,
+      through_version: '3',
+      events,
+      next_before: null,
+    }).events.map((event) => event.operation_type),
+  ).toEqual(['sheet_settings', 'copy_sheet', 'cell_write']);
+});
 it('preserves before after and requires explicit structural context for formula shifts', () => {
   const change = {
     category: 'formula',

@@ -309,7 +309,7 @@ fn snapshot_four_retains_styles_and_refuses_old_profiles_and_default_entries() -
     let book = book.candidate(&event.operation, event.version)?;
     let bytes = encode_snapshot(&book, "engine-v1", "pxel-v1")?;
     let raw = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-    assert_eq!(raw.snapshot_schema_version, 7);
+    assert_eq!(raw.snapshot_schema_version, crate::SNAPSHOT_SCHEMA_VERSION);
     assert_eq!(raw.sheets[0].styles.len(), 4);
     let decoded = restored(&bytes, &book)?;
     assert_eq!(decoded.hash(), book.hash());
@@ -534,6 +534,9 @@ fn snapshot_four_roundtrips_multisheet_content_above_legacy_aggregate_cap() -> T
     assert_eq!(decoded.sheets()[1].styles(), book.sheets()[1].styles());
     let mut legacy = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
     legacy.snapshot_schema_version = 3;
+    for sheet in &mut legacy.sheets {
+        sheet.settings = None;
+    }
     for sheet in &mut legacy.sheets {
         sheet.styles.clear();
     }

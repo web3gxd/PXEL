@@ -20,13 +20,13 @@ export function sheetMetrics(
 ): Geometry | undefined {
   const sheet = document?.sheet;
   if (!document || !sheet) return undefined;
-  const rows = axisMetrics(
-    sheet.rows,
-    sheet.row_heights,
-    GRID.rowHeight,
-    document.filterState.hidden,
+  const rows = axisMetrics(sheet.rows, sheet.row_heights, GRID.rowHeight, document.hiddenRows);
+  const columns = axisMetrics(
+    sheet.columns,
+    sheet.column_widths,
+    sheet.default_column_width ?? GRID.columnWidth,
+    document.hiddenColumns,
   );
-  const columns = axisMetrics(sheet.columns, sheet.column_widths, GRID.columnWidth);
   const sizes = document.pending.filter((op) => op.kind === 'axisSize' && op.sheet === sheet.id);
   const pending = sizes.map((op) => op.id).join('/');
   const previous = cache.get(document);
@@ -36,16 +36,32 @@ export function sheetMetrics(
       : undefined;
   if (!geometry) {
     geometry = { rows, columns };
-    const latest = new Map<string, (typeof sizes)[number]>();
-    for (const op of sizes) if (op.kind === 'axisSize') latest.set(`${op.axis}/${op.axisId}`, op);
-    for (const op of latest.values()) {
-      if (op.kind !== 'axisSize') continue;
-      const ids = op.axis === 'row' ? sheet.rows : sheet.columns;
-      const index = ids.indexOf(op.axisId);
-      if (op.axis === 'row')
-        geometry.rows = withAxisSize(geometry.rows, index, op.size ?? GRID.rowHeight);
-      else geometry.columns = withAxisSize(geometry.columns, index, op.size ?? GRID.columnWidth);
-    }
+    type Write = { axis: 'row' | 'column'; axisId: string; size: number | undefined };
+    const latest = new Map<string, Write>();
+    for (const op of sizes)
+      if (op.kind === 'axisSize')
+        for (const write of op.writes) latest.set(`${write.axis}/${write.axisId}`, write);
+    const overlay = (axis: 'row' | 'column', base: AxisLayout) => {
+      const writes = [...latest.values()].filter((write) => write.axis === axis);
+      if (!writes.length) return base;
+      const overrides = new Map(
+        (axis === 'row' ? sheet.row_heights : sheet.column_widths)?.map((override) => [
+          override.axis_id,
+          override,
+        ]),
+      );
+      for (const write of writes) {
+        if (write.size === undefined) overrides.delete(write.axisId);
+        else overrides.set(write.axisId, { axis_id: write.axisId, size_css_px: write.size });
+      }
+      return axisMetrics(
+        axis === 'row' ? sheet.rows : sheet.columns,
+        [...overrides.values()],
+        axis === 'row' ? GRID.rowHeight : (sheet.default_column_width ?? GRID.columnWidth),
+        axis === 'row' ? document.hiddenRows : document.hiddenColumns,
+      );
+    };
+    geometry = { rows: overlay('row', rows), columns: overlay('column', columns) };
     cache.set(document, { rows, columns, pending, geometry });
   }
   if (resize?.sheetId === sheet.id) {

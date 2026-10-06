@@ -1313,7 +1313,7 @@ mod tests {
         )
         .fetch_one(&db.pool)
         .await?;
-        assert_eq!(schema, 7);
+        assert_eq!(schema, 8);
         let tail = Operation::SetCellValue {
             address: second_address,
             value: CellValue::Number(9.0),

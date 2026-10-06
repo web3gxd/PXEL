@@ -54,7 +54,7 @@ pub fn plan_move_inverse_cancellable(
     let writes = match &target.operation {
         Operation::MoveRange { writes, .. } | Operation::MoveCompensation { writes, .. } => writes,
         Operation::CellBatchWrite {
-            intent: CellBatchIntent::MoveRange { .. },
+            intent: CellBatchIntent::MoveRange { .. } | CellBatchIntent::ShiftCells { .. },
             content_writes,
             ..
         } => content_writes,
@@ -167,7 +167,7 @@ pub fn plan_move_inverse_cancellable(
             ) || matches!(
                 entry.event.operation,
                 Operation::CellBatchWrite {
-                    intent: CellBatchIntent::MoveRange { .. },
+                    intent: CellBatchIntent::MoveRange { .. } | CellBatchIntent::ShiftCells { .. },
                     ..
                 }
             ) {
@@ -400,6 +400,8 @@ fn visit_writes<'a>(
         | Operation::StyleWrite { .. }
         | Operation::StyleCompensation { .. }
         | Operation::AxisSizeWrite { .. }
+        | Operation::SheetSettingsWrite { .. }
+        | Operation::CopySheet { .. }
         | Operation::FrozenRowsWrite { .. }
         | Operation::MergeWrite { .. } => {}
     }

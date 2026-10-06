@@ -51,7 +51,7 @@ fn frozen_event_and_snapshot_have_independent_versions_and_keep_legacy_readers()
     assert_eq!(recovered.sheets()[0].frozen_rows(), 1);
     assert_eq!(recovered.hash(), frozen.hash());
     let mut raw = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-    assert_eq!(raw.snapshot_schema_version, 7);
+    assert_eq!(raw.snapshot_schema_version, crate::SNAPSHOT_SCHEMA_VERSION);
     raw.snapshot_schema_version = 6;
     assert!(
         decode_snapshot(
@@ -68,6 +68,9 @@ fn frozen_event_and_snapshot_have_independent_versions_and_keep_legacy_readers()
     let mut legacy =
         v1::SnapshotEnvelope::decode(encode_snapshot(&book, "engine-v1", "pxel-v1")?.as_slice())?;
     legacy.snapshot_schema_version = 6;
+    for sheet in &mut legacy.sheets {
+        sheet.settings = None;
+    }
     assert_eq!(
         decode_snapshot(
             &legacy.encode_to_vec(),

@@ -60,7 +60,7 @@ export type PreviewInit = Stamp & { sheets: Sheet[] } & (
     | { schema_version: 1 | 2; calculation_context?: never }
     | { schema_version: 3; calculation_context: PreviewContext }
     | {
-        schema_version: 4 | 5;
+        schema_version: 4 | 5 | 6;
         calculation_context?: PreviewContext;
         last_axis_change_version: string;
         retired_row_ids: string[];

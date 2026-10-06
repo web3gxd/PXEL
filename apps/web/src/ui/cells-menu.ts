@@ -16,20 +16,34 @@ import {
 } from '@phosphor-icons/react';
 import type { DocumentStore } from '../document/store';
 import type { EditorAction, EditorMenuGroup } from './EditorMenus';
-
-const pending = (label: string, icon: EditorAction['icon']): EditorAction => ({
-  label,
-  icon,
-  disabled: true,
-  unavailable: 'Эта операция пока не поддерживается. Изменения не будут применены.',
-});
+import type { CellsPanelKind } from './CellsPanel';
 
 export function cellsMenu(
   document: DocumentStore,
   online: boolean,
   sizes: (axis: 'row' | 'column') => void,
+  panel: (kind: CellsPanelKind) => void,
 ): EditorMenuGroup {
   const disabled = !document.sheet || !online || !document.canEdit;
+  const busy = !online || !document.canChangeCells;
+  const showLabel = (axis: 'row' | 'column') => {
+    const label = axis === 'row' ? 'Показать строки' : 'Показать столбцы';
+    const sheet = document.sheet;
+    if (!sheet) return label;
+    const hidden = (axis === 'row' ? sheet.hidden_rows : sheet.hidden_columns) ?? [];
+    if (hidden.length <= 1000) return label;
+    const live = new Set(axis === 'row' ? sheet.rows : sheet.columns);
+    let count = 0;
+    for (const id of hidden)
+      if (live.has(id) && ++count > 1000)
+        return axis === 'row' ? 'Показать 1000 скрытых строк' : 'Показать 1000 скрытых столбцов';
+    return label;
+  };
+  const dialog = (
+    label: string,
+    icon: EditorAction['icon'],
+    kind: CellsPanelKind,
+  ): EditorAction => ({ label, icon, disabled: busy, run: () => panel(kind) });
   return {
     label: 'Ячейки',
     actions: [
@@ -37,7 +51,7 @@ export function cellsMenu(
         label: 'Добавить',
         icon: Plus,
         children: [
-          pending('Вставить ячейки…', GridFour),
+          dialog('Вставить ячейки…', GridFour, 'insert'),
           {
             label: 'Вставить строки листа',
             icon: Rows,
@@ -57,7 +71,7 @@ export function cellsMenu(
         label: 'Удалить',
         icon: Trash,
         children: [
-          pending('Удалить ячейки…', GridFour),
+          dialog('Удалить ячейки…', GridFour, 'delete'),
           {
             label: 'Удалить строки листа',
             icon: Rows,
@@ -77,34 +91,73 @@ export function cellsMenu(
         icon: SlidersHorizontal,
         children: [
           { label: 'Высота строки…', icon: ArrowsVertical, disabled, run: () => sizes('row') },
-          pending('Автоподбор высоты строки', Rows),
+          {
+            label: 'Автоподбор высоты строки',
+            icon: Rows,
+            disabled: busy || disabled,
+            run: () => document.autoFit('row'),
+          },
           {
             label: 'Ширина столбца…',
             icon: ArrowsHorizontal,
             disabled,
             run: () => sizes('column'),
           },
-          pending('Автоподбор ширины столбца', Columns),
-          pending('Ширина по умолчанию…', Columns),
+          {
+            label: 'Автоподбор ширины столбца',
+            icon: Columns,
+            disabled: busy || disabled,
+            run: () => document.autoFit('column'),
+          },
+          dialog('Ширина по умолчанию…', Columns, 'defaultWidth'),
           {
             label: 'Видимость',
             icon: Eye,
             children: [
-              pending('Скрыть строки', EyeSlash),
-              pending('Показать строки', Eye),
-              pending('Скрыть столбцы', EyeSlash),
-              pending('Показать столбцы', Eye),
-              pending('Скрыть лист', EyeSlash),
-              pending('Показать лист…', Eye),
+              {
+                label: 'Скрыть строки',
+                icon: EyeSlash,
+                disabled: busy || disabled,
+                run: () => document.setAxisVisibility('row', true),
+              },
+              {
+                label: showLabel('row'),
+                icon: Eye,
+                disabled: busy || !document.sheet?.hidden_rows?.length,
+                run: () => document.setAxisVisibility('row', false),
+              },
+              {
+                label: 'Скрыть столбцы',
+                icon: EyeSlash,
+                disabled: busy || disabled,
+                run: () => document.setAxisVisibility('column', true),
+              },
+              {
+                label: showLabel('column'),
+                icon: Eye,
+                disabled: busy || !document.sheet?.hidden_columns?.length,
+                run: () => document.setAxisVisibility('column', false),
+              },
+              {
+                label: 'Скрыть лист',
+                icon: EyeSlash,
+                disabled:
+                  busy || (document.projection?.sheets.filter((s) => !s.hidden).length ?? 0) <= 1,
+                run: () => document.setSheetHidden(true),
+              },
+              {
+                ...dialog('Показать лист…', Eye, 'showSheet'),
+                disabled: busy || !document.projection?.sheets.some((s) => s.hidden),
+              },
             ],
           },
           {
             label: 'Управление листами',
             icon: Table,
             children: [
-              pending('Переименовать лист…', PencilSimple),
-              pending('Переместить или скопировать лист…', Copy),
-              pending('Цвет вкладки…', Palette),
+              dialog('Переименовать лист…', PencilSimple, 'rename'),
+              dialog('Переместить или скопировать лист…', Copy, 'moveCopy'),
+              dialog('Цвет вкладки…', Palette, 'tabColor'),
             ],
           },
         ],

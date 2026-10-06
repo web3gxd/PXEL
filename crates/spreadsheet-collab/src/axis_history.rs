@@ -72,6 +72,8 @@ impl AxisTransition {
             ),
             Operation::CreateWorkbook { .. }
             | Operation::AddSheet { .. }
+            | Operation::CopySheet { .. }
+            | Operation::SheetSettingsWrite { .. }
             | Operation::ExtendRows { .. } => return Some(Self::Passive),
             _ => return None,
         };
@@ -171,6 +173,8 @@ impl AxisHistory {
             operation,
             Operation::CreateWorkbook { .. }
                 | Operation::AddSheet { .. }
+                | Operation::CopySheet { .. }
+                | Operation::SheetSettingsWrite { .. }
                 | Operation::ExtendRows { .. }
                 | Operation::InsertRows { .. }
                 | Operation::InsertRowsRebased { .. }
@@ -199,7 +203,7 @@ impl AxisHistory {
             Operation::MoveRange { .. }
                 | Operation::MoveCompensation { .. }
                 | Operation::CellBatchWrite {
-                    intent: CellBatchIntent::MoveRange { .. },
+                    intent: CellBatchIntent::MoveRange { .. } | CellBatchIntent::ShiftCells { .. },
                     ..
                 }
         ) {

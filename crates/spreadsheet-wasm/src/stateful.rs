@@ -250,6 +250,16 @@ impl ContextInput {
 #[serde(deny_unknown_fields)]
 struct SheetInput {
     #[serde(default, deserialize_with = "present")]
+    hidden: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    default_column_width: Option<u32>,
+    #[serde(default, deserialize_with = "present")]
+    tab_color: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "present")]
+    hidden_rows: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "present")]
+    hidden_columns: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "present")]
     frozen_rows: Option<u32>,
     #[serde(default, deserialize_with = "present")]
     row_heights: Option<Vec<SizeInput>>,
@@ -853,7 +863,7 @@ impl PreviewWorkbook {
             return Err(PreviewError::LimitExceeded);
         }
         let init: Initialize = serde_json::from_str(json).map_err(|_| PreviewError::InvalidJson)?;
-        if !matches!(init.schema_version, 1..=5)
+        if !matches!(init.schema_version, 1..=6)
             || init.sheets.is_empty()
             || init.sheets.len() > 64
             || (init.schema_version == 1 && init.sheets.len() != 1)
@@ -863,7 +873,8 @@ impl PreviewWorkbook {
             return Err(PreviewError::UnsupportedProfile);
         }
         let exact = init.schema_version >= 4;
-        let layout = init.schema_version == 5;
+        let layout = init.schema_version >= 5;
+        let settings_present = init.schema_version == 6;
         let metadata_present = init.last_axis_change_version.is_some()
             && init.retired_row_ids.is_some()
             && init.retired_column_ids.is_some()
@@ -878,7 +889,12 @@ impl PreviewWorkbook {
             || (!exact && metadata_any)
             || init.sheets.iter().any(|s| s.styles.is_some() != exact)
             || init.sheets.iter().any(|s| {
-                (s.frozen_rows.is_some() != layout)
+                (s.hidden.is_some() != settings_present)
+                    || (s.default_column_width.is_some() != settings_present)
+                    || (s.tab_color.is_some() != settings_present)
+                    || (s.hidden_rows.is_some() != settings_present)
+                    || (s.hidden_columns.is_some() != settings_present)
+                    || (s.frozen_rows.is_some() != layout)
                     || (s.row_heights.is_some() != layout)
                     || (s.column_widths.is_some() != layout)
                     || (s.merges.is_some() != layout)
@@ -901,7 +917,40 @@ impl PreviewWorkbook {
         let mut total_cells = 0usize;
         let mut all_styles = Vec::new();
         let mut layouts = Vec::new();
+        let mut settings_entries = Vec::new();
         for sheet in init.sheets {
+            if settings_present {
+                let rows = sheet
+                    .hidden_rows
+                    .as_ref()
+                    .ok_or(PreviewError::InvalidProjection)?;
+                let columns = sheet
+                    .hidden_columns
+                    .as_ref()
+                    .ok_or(PreviewError::InvalidProjection)?;
+                let settings = spreadsheet_domain::workbook::SheetSettings {
+                    name: sheet.name.clone(),
+                    hidden: sheet.hidden.ok_or(PreviewError::InvalidProjection)?,
+                    default_column_width: sheet
+                        .default_column_width
+                        .ok_or(PreviewError::InvalidProjection)?,
+                    tab_color: sheet.tab_color.ok_or(PreviewError::InvalidProjection)?,
+                    hidden_rows: rows
+                        .iter()
+                        .map(|v| Ok(RowId::from_bytes(identity(v)?)?))
+                        .collect::<Result<BTreeSet<_>, PreviewError>>()?,
+                    hidden_columns: columns
+                        .iter()
+                        .map(|v| Ok(ColumnId::from_bytes(identity(v)?)?))
+                        .collect::<Result<BTreeSet<_>, PreviewError>>()?,
+                };
+                if settings.hidden_rows.len() != rows.len()
+                    || settings.hidden_columns.len() != columns.len()
+                {
+                    return Err(PreviewError::InvalidProjection);
+                }
+                settings_entries.push((SheetId::from_bytes(identity(&sheet.id)?)?, settings));
+            }
             if layout {
                 let sheet_id = SheetId::from_bytes(identity(&sheet.id)?)?;
                 let rows = sheet
@@ -1005,6 +1054,14 @@ impl PreviewWorkbook {
                 sheet.row_heights = rows;
                 sheet.column_widths = columns;
                 sheet.merges = merges;
+            }
+            for (id, settings) in settings_entries {
+                image
+                    .sheets
+                    .iter_mut()
+                    .find(|s| s.sheet.id == id)
+                    .ok_or(PreviewError::InvalidProjection)?
+                    .settings = settings;
             }
             image.last_axis_change_version = DocumentVersion::new(revision(
                 init.last_axis_change_version

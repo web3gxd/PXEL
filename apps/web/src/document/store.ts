@@ -1,4 +1,7 @@
-import { create, toBinary } from '@bufbuild/protobuf';
+import { create, toBinary, type MessageInitShape } from '@bufbuild/protobuf';
+import { canvasFont } from './styles';
+import { GRID } from '../grid/viewport';
+import { fitColumnWidth, fitRowHeight } from '../grid/autofit';
 import { FORMULA_ENGINE_VERSION, PreviewClient, type PreviewStatus } from '../calculation/client';
 import { copyFormulaInWorker } from '../calculation/formula-copy';
 import { readHistory } from './history';
@@ -46,6 +49,8 @@ import {
   SetCellValueSchema,
   CalculationCommittedSchema,
   BoundFormulaSchema,
+  DocumentCommandSchema,
+  SheetSettingsCommandSchema,
 } from '../generated/pxel/wire/v1/session_pb';
 import type {
   CanonicalOperation,
@@ -78,6 +83,11 @@ export type MergeRange = {
   last_column_id: string;
 };
 export type Sheet = {
+  hidden?: boolean;
+  hidden_rows?: string[];
+  hidden_columns?: string[];
+  default_column_width?: number;
+  tab_color?: number | null;
   frozen_rows?: number;
   id: string;
   name: string;
@@ -197,13 +207,17 @@ type PendingAxisSize = {
   bytes: Uint8Array;
   attempts: number;
   sheet: string;
-  axis: 'row' | 'column';
-  axisId: string;
-  size: number | undefined;
+  writes: { axis: 'row' | 'column'; axisId: string; size: number | undefined }[];
 };
 type PendingFrozenRows = { kind: 'frozenRows'; id: string; bytes: Uint8Array; attempts: number };
 type PendingMerge = { kind: 'merge'; id: string; bytes: Uint8Array; attempts: number };
 type PendingSort = { kind: 'sortRange'; id: string; bytes: Uint8Array; attempts: number };
+type PendingCellsCommand = {
+  kind: 'sheetSettings' | 'shiftCells';
+  id: string;
+  bytes: Uint8Array;
+  attempts: number;
+};
 type Pending =
   | PendingCell
   | PendingBatch
@@ -220,7 +234,8 @@ type Pending =
   | PendingAxisSize
   | PendingFrozenRows
   | PendingMerge
-  | PendingSort;
+  | PendingSort
+  | PendingCellsCommand;
 export function uuidBytes(id: string) {
   return Uint8Array.from(id.replaceAll('-', '').match(/../g) ?? [], (pair) => parseInt(pair, 16));
 }
@@ -287,6 +302,10 @@ const isUuid = (value: unknown): value is string =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 const formulaProfile = 'pxel-excel-subset-v1';
 const byteLength = (text: string) => new TextEncoder().encode(text).length;
+const validSheetName = (name: string) =>
+  !!name &&
+  Array.from(name).length <= 31 &&
+  Array.from(name).every((char) => char.charCodeAt(0) >= 32 && !'[]:*?/\\'.includes(char));
 function decodeFormula(input: unknown, authored = false): FormulaDescriptor {
   const value = input as Partial<FormulaDescriptor> | undefined;
   if (
@@ -501,7 +520,7 @@ export function decodeProjection(input: unknown): Projection {
           !Number.isInteger(entry.size_css_px) ||
           entry.size_css_px < 12 ||
           entry.size_css_px > 1000 ||
-          entry.size_css_px === 28
+          (p.authored_projection_schema_version !== 8 && entry.size_css_px === 28)
         )
           throw invalid();
         rowsSized.add(entry.axis_id);
@@ -515,7 +534,7 @@ export function decodeProjection(input: unknown): Projection {
           !Number.isInteger(entry.size_css_px) ||
           entry.size_css_px < 24 ||
           entry.size_css_px > 2000 ||
-          entry.size_css_px === 112
+          (p.authored_projection_schema_version !== 8 && entry.size_css_px === 112)
         )
           throw invalid();
         columnsSized.add(entry.axis_id);
@@ -555,7 +574,7 @@ export function decodeProjection(input: unknown): Projection {
           }
       }
     } else if (sheet.merges !== undefined) throw invalid();
-    if (p.authored_projection_schema_version === 7) {
+    if ((p.authored_projection_schema_version ?? 0) >= 7) {
       if (
         !Number.isInteger(sheet.frozen_rows) ||
         sheet.frozen_rows! < 0 ||
@@ -563,7 +582,43 @@ export function decodeProjection(input: unknown): Projection {
       )
         throw invalid();
     } else if (sheet.frozen_rows !== undefined) throw invalid();
+    if (p.authored_projection_schema_version === 8) {
+      if (
+        typeof sheet.hidden !== 'boolean' ||
+        !Number.isInteger(sheet.default_column_width) ||
+        sheet.default_column_width! < 24 ||
+        sheet.default_column_width! > 2000 ||
+        (sheet.tab_color !== null &&
+          (!Number.isInteger(sheet.tab_color) ||
+            sheet.tab_color! < 0 ||
+            sheet.tab_color! > 0xffffff))
+      )
+        throw invalid();
+      for (const [hidden, live, retired] of [
+        [sheet.hidden_rows, rows, p.retired_row_ids],
+        [sheet.hidden_columns, columns, p.retired_column_ids],
+      ] as const) {
+        if (
+          !Array.isArray(hidden) ||
+          new Set(hidden).size !== hidden.length ||
+          hidden.length > 1_000_000 ||
+          hidden.filter((id) => live.has(id)).length >= live.size ||
+          hidden.some((id) => !live.has(id) && !retired?.includes(id))
+        )
+          throw invalid();
+      }
+    } else if (
+      [
+        sheet.hidden,
+        sheet.hidden_rows,
+        sheet.hidden_columns,
+        sheet.default_column_width,
+        sheet.tab_color,
+      ].some((v) => v !== undefined)
+    )
+      throw invalid();
   }
+  if (p.sheets.every((sheet) => sheet.hidden)) throw invalid();
   decodeAuthoredMetadata(p, rowIds, columnIds);
   return p as Projection;
 }
@@ -583,7 +638,7 @@ export function decodeRedactedProjection(input: unknown): Projection {
     'encryption',
   ];
   if (
-    p.redacted_projection_schema_version !== 1 ||
+    (p.redacted_projection_schema_version !== 1 && p.redacted_projection_schema_version !== 2) ||
     Object.keys(p).some((k) => !allowed.includes(k)) ||
     !Number.isSafeInteger(p.privacy_revision) ||
     (p.privacy_revision as number) < 0 ||
@@ -609,7 +664,7 @@ export function decodeRedactedProjection(input: unknown): Projection {
       throw new Error('В обезличенном представлении допустимы только значения.');
   }
   const result = decodeProjection({
-    authored_projection_schema_version: 7,
+    authored_projection_schema_version: p.redacted_projection_schema_version === 2 ? 8 : 7,
     style_schema_version: p.style_schema_version,
     style_profile_version: p.style_profile_version,
     document_id: p.document_id,
@@ -769,6 +824,56 @@ export class DocumentStore {
     this.filterCache = { sheet, version, calculated: this.calculatedVersion, settings, value };
     return value;
   }
+  private visibilityCache:
+    | {
+        sheet: Sheet;
+        filtered: ReadonlySet<number>;
+        rowIds: string[] | undefined;
+        columnIds: string[] | undefined;
+        rows: ReadonlySet<number>;
+        columns: ReadonlySet<number>;
+      }
+    | undefined;
+  private visibleAxes() {
+    const sheet = this.sheet,
+      filtered = this.filterState.hidden;
+    if (!sheet) return { rows: EMPTY_FILTER_STATE.hidden, columns: EMPTY_FILTER_STATE.hidden };
+    const cached = this.visibilityCache;
+    if (
+      cached?.sheet === sheet &&
+      cached.filtered === filtered &&
+      cached.rowIds === sheet.hidden_rows &&
+      cached.columnIds === sheet.hidden_columns
+    )
+      return cached;
+    const hiddenRows = new Set(sheet.hidden_rows),
+      hiddenColumns = new Set(sheet.hidden_columns);
+    const rows = hiddenRows.size ? new Set(filtered) : filtered;
+    if (hiddenRows.size)
+      sheet.rows.forEach((id, index) => {
+        if (hiddenRows.has(id)) (rows as Set<number>).add(index);
+      });
+    const columns = new Set<number>();
+    sheet.columns.forEach((id, index) => {
+      if (hiddenColumns.has(id)) columns.add(index);
+    });
+    const value = {
+      sheet,
+      filtered,
+      rowIds: sheet.hidden_rows,
+      columnIds: sheet.hidden_columns,
+      rows,
+      columns,
+    };
+    this.visibilityCache = value;
+    return value;
+  }
+  get hiddenRows() {
+    return this.visibleAxes().rows;
+  }
+  get hiddenColumns() {
+    return this.visibleAxes().columns;
+  }
   async reloadPersonalView() {
     const doc = this.projection?.document_id;
     if (!doc || !this.projection?.capabilities || this.guestAccessClosed) return;
@@ -880,7 +985,7 @@ export class DocumentStore {
     return this.transport.guest !== undefined;
   }
   get allRowsHidden() {
-    return !!this.sheet?.rows.length && this.filterState.hidden.size === this.sheet.rows.length;
+    return !!this.sheet?.rows.length && this.hiddenRows.size === this.sheet.rows.length;
   }
   get canEdit() {
     return this.canAuthor && !this.allRowsHidden;
@@ -1354,7 +1459,7 @@ export class DocumentStore {
   };
   snapshot = () => this.revision;
   notify = () => {
-    const hidden = this.filterState.hidden;
+    const hidden = this.hiddenRows;
     if (hidden.has(this.selected.row) && this.sheet) {
       let row = this.selected.row;
       while (row < this.sheet.rows.length - 1 && hidden.has(row)) row++;
@@ -1364,13 +1469,23 @@ export class DocumentStore {
         this.selectionAnchor = { ...this.selected };
       }
     }
+    const hiddenColumns = this.hiddenColumns;
+    if (hiddenColumns.has(this.selected.column) && this.sheet) {
+      let column = this.selected.column;
+      while (column < this.sheet.columns.length - 1 && hiddenColumns.has(column)) column++;
+      while (column > 0 && hiddenColumns.has(column)) column--;
+      if (!hiddenColumns.has(column)) {
+        this.selected = { ...this.selected, column };
+        this.selectionAnchor = { ...this.selected };
+      }
+    }
     this.revision++;
     this.listeners.forEach((fn) => fn());
   };
   get sheet() {
     return (
-      this.projection?.sheets.find((sheet) => sheet.id === this.activeSheetId) ??
-      this.projection?.sheets[0]
+      this.projection?.sheets.find((sheet) => sheet.id === this.activeSheetId && !sheet.hidden) ??
+      this.projection?.sheets.find((sheet) => !sheet.hidden)
     );
   }
   private pruneHistory() {
@@ -1501,7 +1616,8 @@ export class DocumentStore {
   }
   selectSheet(sheetId: string) {
     if (this.sheet?.id === sheetId) return true;
-    if (!this.projection?.sheets.some((sheet) => sheet.id === sheetId)) return false;
+    if (!this.projection?.sheets.some((sheet) => sheet.id === sheetId && !sheet.hidden))
+      return false;
     if (this.editing) this.commit();
     if (this.editing) return false;
     this.activeSheetId = sheetId;
@@ -1814,7 +1930,12 @@ export class DocumentStore {
         }
         this.preview.reset({
           ...stamp,
-          schema_version: (projection.authored_projection_schema_version ?? 0) >= 7 ? 5 : 4,
+          schema_version:
+            projection.authored_projection_schema_version === 8
+              ? 6
+              : (projection.authored_projection_schema_version ?? 0) >= 7
+                ? 5
+                : 4,
           sheets,
           last_axis_change_version: projection.last_axis_change_version,
           retired_row_ids: projection.retired_row_ids,
@@ -2096,8 +2217,9 @@ export class DocumentStore {
     const previousSheet = this.sheet;
     const documentChanged = this.projection?.document_id !== projection.document_id;
     const nextSheet =
-      projection.sheets.find((sheet) => sheet.id === this.activeSheetId && !documentChanged) ??
-      projection.sheets[0];
+      projection.sheets.find(
+        (sheet) => sheet.id === this.activeSheetId && !documentChanged && !sheet.hidden,
+      ) ?? projection.sheets.find((sheet) => !sheet.hidden);
     const axesChanged = Boolean(
       previousSheet &&
       nextSheet &&
@@ -2715,9 +2837,10 @@ export class DocumentStore {
     const lines: CellMatrix = [];
     let bytes = 0;
     for (let row = startRow; row <= endRow; row++) {
-      if (this.filterState.hidden.has(row)) continue;
+      if (this.hiddenRows.has(row)) continue;
       const fields: string[] = [];
       for (let column = startColumn; column <= endColumn; column++) {
+        if (this.hiddenColumns.has(column)) continue;
         const value = this.value({ row, column });
         const text = value?.type === 'formula' ? value.value.current_text : displayValue(value);
         if (text === undefined) {
@@ -2754,9 +2877,12 @@ export class DocumentStore {
     const cells = new Map(sheet.cells.map((c) => [key(c.row_id, c.column_id), c.value]));
     const lines: CellMatrix = [];
     for (let row = startRow; row <= endRow; row++) {
-      if (this.filterState.hidden.has(row)) continue;
+      if (this.hiddenRows.has(row)) continue;
       const fields: string[] = [];
-      for (let column = startColumn; column <= endColumn; column++)
+      for (const column of Array.from(
+        { length: endColumn - startColumn + 1 },
+        (_, index) => startColumn + index,
+      ).filter((index) => !this.hiddenColumns.has(index)))
         fields.push(
           displayValue(cells.get(key(sheet.rows[row] ?? '', sheet.columns[column] ?? ''))),
         );
@@ -2992,50 +3118,85 @@ export class DocumentStore {
     const sheet = this.sheet;
     const axisId = axis === 'row' ? sheet?.rows[index] : sheet?.columns[index];
     if (!sheet || !axisId) return undefined;
-    const defaultSize = axis === 'row' ? 28 : 112;
+    const defaultSize =
+      axis === 'row' ? GRID.rowHeight : (sheet.default_column_width ?? GRID.columnWidth);
     const previous = this.pending.findLast(
       (pending) =>
         pending.kind === 'axisSize' &&
         pending.sheet === sheet.id &&
-        pending.axis === axis &&
-        pending.axisId === axisId,
+        pending.writes.some((write) => write.axis === axis && write.axisId === axisId),
     );
     return previous?.kind === 'axisSize'
-      ? (previous.size ?? defaultSize)
+      ? (previous.writes.find((write) => write.axis === axis && write.axisId === axisId)?.size ??
+          defaultSize)
       : ((axis === 'row' ? sheet.row_heights : sheet.column_widths)?.find(
           (item) => item.axis_id === axisId,
         )?.size_css_px ?? defaultSize);
   }
   setAxisSize(axis: 'row' | 'column', index: number, size: number | undefined) {
+    return this.setAxisSizes(axis, [{ index, size }]);
+  }
+  setAxisSizes(
+    axis: 'row' | 'column',
+    sizes: readonly { index: number; size: number | undefined }[],
+  ) {
     if (!this.canEdit) return false;
     const sheet = this.sheet,
       projection = this.projection,
       actor = this.actor;
-    const axisId = axis === 'row' ? sheet?.rows[index] : sheet?.columns[index];
+    const ids = axis === 'row' ? sheet?.rows : sheet?.columns;
     const minimum = axis === 'row' ? 12 : 24,
       maximum = axis === 'row' ? 1000 : 2000;
     if (
       !sheet ||
       !projection ||
       !actor ||
-      !axisId ||
+      !ids ||
+      sizes.length < 1 ||
+      sizes.length > 1000 ||
+      new Set(sizes.map((s) => s.index)).size !== sizes.length ||
+      sizes.some((s) => !ids[s.index]) ||
       !this.sender ||
       this.syncing ||
       this.pendingCount >= 128
     )
       return false;
-    if (size !== undefined && (!Number.isInteger(size) || size < minimum || size > maximum)) {
+    if (
+      sizes.some(
+        ({ size }) =>
+          size !== undefined && (!Number.isInteger(size) || size < minimum || size > maximum),
+      )
+    ) {
       this.error = `Размер должен быть от ${minimum} до ${maximum} пикселей.`;
       this.notify();
       return false;
     }
-    const defaultSize = axis === 'row' ? 28 : 112;
-    const currentSize = this.axisSize(axis, index);
-    if ((size ?? defaultSize) === currentSize) return true;
+    const defaults =
+      axis === 'row' ? GRID.rowHeight : (sheet.default_column_width ?? GRID.columnWidth);
+    const currentSizes = new Map(
+      (axis === 'row' ? sheet.row_heights : sheet.column_widths)?.map((s) => [
+        s.axis_id,
+        s.size_css_px,
+      ]),
+    );
+    for (const pending of this.pending) {
+      if (pending.kind !== 'axisSize' || pending.sheet !== sheet.id) continue;
+      for (const write of pending.writes) {
+        if (write.axis !== axis) continue;
+        if (write.size === undefined) currentSizes.delete(write.axisId);
+        else currentSizes.set(write.axisId, write.size);
+      }
+    }
+    sizes = sizes
+      .map(({ index, size }) => ({ index, size: size === defaults ? undefined : size }))
+      .filter(({ index, size }) => currentSizes.get(ids[index]!) !== size);
+    if (!sizes.length) return true;
     const id = uuidV7();
-    const writes = [
-      { axisKind: axis === 'row' ? 1 : 2, axisId: uuidBytes(axisId), sizeCssPx: size },
-    ];
+    const writes = sizes.map(({ index, size }) => ({
+      axisKind: axis === 'row' ? 1 : 2,
+      axisId: uuidBytes(ids![index]!),
+      sizeCssPx: size,
+    }));
     const bytes = toBinary(
       ClientEnvelopeSchema,
       create(ClientEnvelopeSchema, {
@@ -3060,14 +3221,270 @@ export class DocumentStore {
       bytes,
       attempts: 0,
       sheet: sheet.id,
-      axis,
-      axisId,
-      size,
+      writes: sizes.map(({ index, size }) => ({ axis, axisId: ids[index]!, size })),
     });
     this.error = '';
     this.notify();
     this.flush();
     return true;
+  }
+  get canChangeCells() {
+    return (
+      !!this.sheet &&
+      this.canAuthor &&
+      !!this.sender &&
+      !this.syncing &&
+      !this.pending.length &&
+      !this.editing
+    );
+  }
+  private cellsIntent(
+    intent: Partial<MessageInitShape<typeof DocumentCommandSchema>>,
+    kind: 'sheetSettings' | 'shiftCells' | 'addSheet',
+    sheetId?: string,
+  ) {
+    const projection = this.projection,
+      actor = this.actor;
+    if (!this.canChangeCells || !projection || !actor) return false;
+    const id = uuidV7();
+    const bytes = toBinary(
+      ClientEnvelopeSchema,
+      create(ClientEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'command',
+          value: {
+            ...intent,
+            operationId: uuidBytes(id),
+            documentId: uuidBytes(projection.document_id),
+            actorId: actor,
+            baseVersion: BigInt(projection.version),
+            clientSequence: ++this.sequence,
+          },
+        },
+      }),
+    );
+    if (bytes.length > 1_048_576) return this.cellsError('Команда превышает лимит 1 МБ.');
+    if (kind === 'addSheet' && sheetId)
+      this.pending.push({ kind, id, sheetId, bytes, attempts: 0 });
+    else if (kind !== 'addSheet') this.pending.push({ kind, id, bytes, attempts: 0 });
+    else return false;
+    this.error = '';
+    this.notify();
+    this.flush();
+    return true;
+  }
+  private cellsError(message: string) {
+    this.error = message;
+    this.notify();
+    return false;
+  }
+  private sheetSettings(
+    patch: MessageInitShape<typeof SheetSettingsCommandSchema>,
+    sheetId = this.sheet?.id,
+  ) {
+    if (!sheetId) return false;
+    return this.cellsIntent(
+      { sheetSettings: { ...patch, schemaVersion: 1, sheetId: uuidBytes(sheetId) } },
+      'sheetSettings',
+    );
+  }
+  renameSheet(name: string) {
+    name = name.trim();
+    if (
+      !validSheetName(name) ||
+      this.projection?.sheets.some(
+        (sheet) => sheet.id !== this.sheet?.id && sheet.name.toLowerCase() === name.toLowerCase(),
+      )
+    )
+      return this.cellsError('Введите уникальное имя до 31 символа без [] : * ? / \\.');
+    if (name === this.sheet?.name) return this.canChangeCells;
+    return this.sheetSettings({ name });
+  }
+  setDefaultColumnWidth(width: number) {
+    if (!Number.isInteger(width) || width < 24 || width > 2000)
+      return this.cellsError('Ширина должна быть целым числом от 24 до 2000 px.');
+    if (width === (this.sheet?.default_column_width ?? 112)) return this.canChangeCells;
+    return this.sheetSettings({ defaultColumnWidth: width });
+  }
+  setTabColor(color: number | null) {
+    if (color !== null && (!Number.isInteger(color) || color < 0 || color > 0xffffff)) return false;
+    if (color === (this.sheet?.tab_color ?? null)) return this.canChangeCells;
+    return this.sheetSettings({
+      tabColor: {
+        action:
+          color === null
+            ? { case: 'reset', value: true }
+            : { case: 'set', value: Uint8Array.of(color >>> 16, (color >>> 8) & 255, color & 255) },
+      },
+    });
+  }
+  setSheetHidden(hidden: boolean, sheetId = this.sheet?.id) {
+    if ((this.projection?.sheets.find((sheet) => sheet.id === sheetId)?.hidden ?? false) === hidden)
+      return this.canChangeCells;
+    if (hidden && (this.projection?.sheets.filter((sheet) => !sheet.hidden).length ?? 0) <= 1)
+      return this.cellsError('В книге должен оставаться хотя бы один видимый лист.');
+    return this.sheetSettings({ hidden }, sheetId);
+  }
+  setAxisVisibility(axis: 'row' | 'column', hidden: boolean) {
+    const sheet = this.sheet;
+    if (!sheet) return false;
+    const ids = axis === 'row' ? sheet.rows : sheet.columns;
+    const already = new Set(axis === 'row' ? sheet.hidden_rows : sheet.hidden_columns);
+    const bounds = this.selectionBounds;
+    const start = axis === 'row' ? bounds.startRow : bounds.startColumn;
+    const end = axis === 'row' ? bounds.endRow : bounds.endColumn;
+    const targets = hidden
+      ? ids.slice(start, end + 1).filter((id) => !already.has(id))
+      : ids.filter((id) => already.has(id)).slice(0, 1000);
+    if (!targets.length) return this.canChangeCells;
+    if (hidden && new Set([...ids.filter((id) => already.has(id)), ...targets]).size >= ids.length)
+      return this.cellsError('Оставьте хотя бы одну видимую строку и один столбец.');
+    if (targets.length > 1000)
+      return this.cellsError(
+        'За одно действие можно изменить видимость до 1000 строк или столбцов.',
+      );
+    return this.sheetSettings({
+      visibility: targets.map((id) => ({
+        axisKind: axis === 'row' ? 1 : 2,
+        axisId: uuidBytes(id),
+        hidden,
+      })),
+    });
+  }
+  moveOrCopySheet(index: number, copy: boolean, name = '') {
+    const sheet = this.sheet,
+      projection = this.projection;
+    if (
+      !sheet ||
+      !projection ||
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index > projection.sheets.length
+    )
+      return false;
+    if (
+      !copy &&
+      Math.min(index, projection.sheets.length - 1) ===
+        projection.sheets.findIndex((s) => s.id === sheet.id)
+    )
+      return this.canChangeCells;
+    if (!copy) return this.sheetSettings({ index: Math.min(index, projection.sheets.length - 1) });
+    if (projection.sheets.length >= 64) return this.cellsError('Лимит книги — 64 листа.');
+    name = name.trim();
+    if (
+      !validSheetName(name) ||
+      projection.sheets.some((s) => s.name.toLowerCase() === name.toLowerCase())
+    )
+      return this.cellsError('Введите уникальное имя копии до 31 символа.');
+    const sheetId = uuidV7();
+    return this.cellsIntent(
+      {
+        copySheet: {
+          schemaVersion: 1,
+          sourceSheetId: uuidBytes(sheet.id),
+          index,
+          sheet: {
+            sheetId: uuidBytes(sheetId),
+            name,
+            rows: sheet.rows.map(() => uuidBytes(uuidV7())),
+            columns: sheet.columns.map(() => uuidBytes(uuidV7())),
+          },
+        },
+      },
+      'addSheet',
+      sheetId,
+    );
+  }
+  shiftCells(axis: 'row' | 'column', insert: boolean) {
+    const sheet = this.sheet;
+    if (!sheet) return false;
+    const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
+    return this.cellsIntent(
+      {
+        shiftCells: {
+          schemaVersion: 1,
+          source: {
+            sheetId: uuidBytes(sheet.id),
+            rowId: uuidBytes(sheet.rows[startRow]!),
+            columnId: uuidBytes(sheet.columns[startColumn]!),
+          },
+          rows: endRow - startRow + 1,
+          columns: endColumn - startColumn + 1,
+          axisKind: axis === 'row' ? 1 : 2,
+          insert,
+        },
+      },
+      'shiftCells',
+    );
+  }
+  autoFit(axis: 'row' | 'column') {
+    const sheet = this.sheet;
+    if (!sheet || !this.canChangeCells || this.allRowsHidden) return false;
+    if (this.privacyMask && this.privacyMask.version !== this.projection?.version)
+      return this.cellsError('Дождитесь обновления маски перед автоподбором.');
+    const authored = this.confirmedCells(sheet);
+    if (
+      authored.some((cell) => cell.value.type === 'formula') &&
+      this.calculatedVersion !== this.projection?.version
+    )
+      return this.cellsError('Дождитесь подтверждённого расчёта формул перед автоподбором.');
+    const context = globalThis.document.createElement('canvas').getContext('2d');
+    if (!context) return this.cellsError('Не удалось измерить текст в браузере.');
+    const bounds = this.selectionBounds;
+    const start = axis === 'row' ? bounds.startRow : bounds.startColumn;
+    const end = axis === 'row' ? bounds.endRow : bounds.endColumn;
+    if (end - start >= 1000)
+      return this.cellsError('Автоподбор ограничен 1000 строками или столбцами.');
+    const ids = axis === 'row' ? sheet.rows : sheet.columns;
+    const hidden = axis === 'row' ? this.hiddenRows : this.hiddenColumns;
+    const mergedAxes = new Set<number>();
+    for (const merge of sheet.merges ?? []) {
+      const first = ids.indexOf(axis === 'row' ? merge.first_row_id : merge.first_column_id);
+      const last = ids.indexOf(axis === 'row' ? merge.last_row_id : merge.last_column_id);
+      for (let index = Math.max(start, first); index <= Math.min(end, last); index++)
+        mergedAxes.add(index);
+    }
+    const sizes = new Map<number, number>();
+    for (let index = start; index <= end; index++)
+      if (!hidden.has(index) && !mergedAxes.has(index)) sizes.set(index, axis === 'row' ? 28 : 24);
+    if (!sizes.size) return true;
+    const rowPositions = new Map(sheet.rows.map((id, index) => [id, index]));
+    const columnPositions = new Map(sheet.columns.map((id, index) => [id, index]));
+    const cells = new Map<string, Position>();
+    for (const cell of [...authored, ...(sheet.styles ?? [])]) {
+      const row = rowPositions.get(cell.row_id)!,
+        column = columnPositions.get(cell.column_id)!;
+      const index = axis === 'row' ? row : column;
+      if (sizes.has(index) && !this.hiddenRows.has(row) && !this.hiddenColumns.has(column))
+        cells.set(`${row}/${column}`, { row, column });
+    }
+    const widths = new Map(sheet.column_widths?.map((w) => [w.axis_id, w.size_css_px]));
+    for (const position of cells.values()) {
+      // Merged cells have no single-axis fit; their geometry is kept.
+      if (this.mergeAt(position)) continue;
+      const style = this.style(position),
+        text = this.display(position);
+      context.font = canvasFont(style);
+      const measure = (value: string) => context.measureText(value).width;
+      const index = axis === 'row' ? position.row : position.column;
+      const size =
+        axis === 'column'
+          ? fitColumnWidth(text, measure)
+          : fitRowHeight(
+              text,
+              style,
+              widths.get(sheet.columns[position.column]!) ??
+                sheet.default_column_width ??
+                GRID.columnWidth,
+              measure,
+            );
+      sizes.set(index, Math.max(sizes.get(index)!, size));
+    }
+    return this.setAxisSizes(
+      axis,
+      [...sizes].map(([index, size]) => ({ index, size })),
+    );
   }
   get canUndo() {
     if (!this.canEdit) return false;
@@ -3203,8 +3620,11 @@ export class DocumentStore {
     const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
     const rows = endRow - startRow + 1,
       columns = endColumn - startColumn + 1;
-    if ([...this.filterState.hidden].some((row) => row >= startRow && row <= endRow)) {
-      this.moveError('Сначала снимите фильтр перед вырезанием диапазона со скрытыми строками.');
+    if (
+      [...this.hiddenRows].some((row) => row >= startRow && row <= endRow) ||
+      [...this.hiddenColumns].some((column) => column >= startColumn && column <= endColumn)
+    ) {
+      this.moveError('Покажите скрытые строки и столбцы перед вырезанием диапазона.');
       return undefined;
     }
     if (
@@ -3350,7 +3770,10 @@ export class DocumentStore {
       projection = this.projection;
     if (!sheet || !projection || this.pending.length || this.editing) return undefined;
     const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
-    if ([...this.filterState.hidden].some((row) => row >= startRow && row <= endRow))
+    if (
+      [...this.hiddenRows].some((row) => row >= startRow && row <= endRow) ||
+      [...this.hiddenColumns].some((column) => column >= startColumn && column <= endColumn)
+    )
       return undefined;
     const rows = endRow - startRow + 1,
       columns = endColumn - startColumn + 1;
@@ -3597,7 +4020,8 @@ export class DocumentStore {
       !this.editing &&
       !this.pending.length &&
       !this.privacyMask &&
-      this.filterState.hidden.size === 0 &&
+      this.hiddenRows.size === 0 &&
+      this.hiddenColumns.size === 0 &&
       !this.sheet.merges?.length,
     );
   }
@@ -4260,8 +4684,7 @@ export class DocumentStore {
         )
           throw new Error('Invalid canonical axis-size value');
         seen.add(`${write.axisKind}/${id}`);
-        if (write.sizeCssPx === undefined || write.sizeCssPx === (write.axisKind === 1 ? 28 : 112))
-          target.delete(id);
+        if (write.sizeCssPx === undefined) target.delete(id);
         else target.set(id, write.sizeCssPx);
       }
       sheet.row_heights = [...rows].map(([axis_id, size_css_px]) => ({ axis_id, size_css_px }));
@@ -4665,6 +5088,7 @@ export class DocumentStore {
           completed?.kind === 'batch' ||
           completed?.kind === 'copyRange' ||
           completed?.kind === 'sortRange' ||
+          completed?.kind === 'shiftCells' ||
           completed?.kind === 'moveRange' ||
           completed?.kind === 'insertRows' ||
           completed?.kind === 'deleteRows' ||

@@ -160,7 +160,7 @@ pub fn prepare(
     request: Uuid,
     digest: &[u8],
 ) -> Result<Prepared, FileError> {
-    if input.schema_version != 1 {
+    if !matches!(input.schema_version, 1 | 2) {
         return Err(FileError::Version);
     }
     if input.engine_version != spreadsheet_collab::calculation::ENGINE_VERSION
@@ -179,6 +179,13 @@ pub fn prepare(
         || input.settings.ignored_sensitive_cells.len() > 1000
     {
         return Err(FileError::Limit);
+    }
+    if input
+        .sheets
+        .iter()
+        .any(|s| s.view.is_some() != (input.schema_version == 2))
+    {
+        return Err(FileError::Version);
     }
     let mut axes = 0usize;
     let mut positions = 0usize;
@@ -249,7 +256,7 @@ pub fn prepare(
             },
         )?;
     }
-    for (sheet, seed) in input.sheets.iter().zip(&seeds) {
+    for (index, (sheet, seed)) in input.sheets.iter().zip(&seeds).enumerate() {
         let cells: BTreeMap<_, _> = sheet
             .cells
             .iter()
@@ -333,6 +340,61 @@ pub fn prepare(
                     undoes_version: None,
                 },
             )?;
+        }
+        if let Some(view) = &sheet.view {
+            let settings = SheetSettings {
+                name: sheet.name.clone(),
+                hidden: view.hidden,
+                default_column_width: view.default_column_width,
+                tab_color: view.tab_color,
+                hidden_rows: view
+                    .hidden_rows
+                    .iter()
+                    .map(|i| {
+                        seed.rows
+                            .get(*i as usize)
+                            .copied()
+                            .ok_or(FileError::Invalid)
+                    })
+                    .collect::<Result<_, _>>()?,
+                hidden_columns: view
+                    .hidden_columns
+                    .iter()
+                    .map(|i| {
+                        seed.columns
+                            .get(*i as usize)
+                            .copied()
+                            .ok_or(FileError::Invalid)
+                    })
+                    .collect::<Result<_, _>>()?,
+            };
+            if settings.hidden_rows.len() != view.hidden_rows.len()
+                || settings.hidden_columns.len() != view.hidden_columns.len()
+            {
+                return Err(FileError::Invalid);
+            }
+            let previous = current
+                .sheets()
+                .iter()
+                .find(|s| s.id() == seed.id)
+                .ok_or(FileError::Invalid)?
+                .settings()
+                .clone();
+            if settings != previous {
+                append(
+                    &mut current,
+                    &mut events,
+                    actor,
+                    &mut ids,
+                    Operation::SheetSettingsWrite {
+                        sheet: seed.id,
+                        previous,
+                        settings,
+                        previous_index: index as u32,
+                        index: index as u32,
+                    },
+                )?;
+            }
         }
         let mut sizes = Vec::new();
         let mut seen = BTreeSet::new();
@@ -606,6 +668,23 @@ pub fn export(
             rows: sheet.rows().len() as u32,
             columns: sheet.columns().len() as u32,
             frozen_rows: sheet.frozen_rows(),
+            view: Some(SheetViewSettings {
+                hidden: sheet.settings().hidden,
+                default_column_width: sheet.settings().default_column_width,
+                tab_color: sheet.settings().tab_color,
+                hidden_rows: sheet
+                    .settings()
+                    .hidden_rows
+                    .iter()
+                    .filter_map(|id| sheet.row_position(*id))
+                    .collect(),
+                hidden_columns: sheet
+                    .settings()
+                    .hidden_columns
+                    .iter()
+                    .filter_map(|id| sheet.column_position(*id))
+                    .collect(),
+            }),
             cells,
             styles,
             row_heights: sheet
@@ -751,7 +830,7 @@ pub fn export(
         }
     }
     Ok(Book {
-        schema_version: 1,
+        schema_version: 2,
         engine_version: spreadsheet_collab::calculation::ENGINE_VERSION.into(),
         compatibility_profile: spreadsheet_collab::calculation::COMPATIBILITY_PROFILE.into(),
         title: mask(&title)?,
@@ -776,6 +855,7 @@ mod tests {
                 rows: 100,
                 columns: 5,
                 frozen_rows: 1,
+                view: None,
                 cells: vec![
                     Cell {
                         row: 1,
@@ -977,6 +1057,47 @@ mod tests {
             )
             .is_err()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn version_two_preserves_sheet_visibility_colour_default_width_and_hidden_axes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut input = fixture();
+        input.schema_version = 2;
+        input.sheets[0].view = Some(SheetViewSettings {
+            hidden: false,
+            default_column_width: 160,
+            tab_color: Some(0x123456),
+            hidden_rows: vec![2],
+            hidden_columns: vec![4],
+        });
+        let doc = DocumentId::from_bytes(*Uuid::now_v7().as_bytes())?;
+        let actor = ActorId::from_bytes(*Uuid::now_v7().as_bytes())?;
+        let first = prepare(&input, doc, actor, Uuid::now_v7(), b"settings")?;
+        let file = export(
+            &first.book,
+            &first.personal,
+            &first.privacy,
+            false,
+            input.title.clone(),
+        )?;
+        assert_eq!(file.schema_version, 2);
+        let settings = file.sheets[0].view.as_ref().ok_or("view")?;
+        assert_eq!(settings.default_column_width, 160);
+        assert_eq!(settings.tab_color, Some(0x123456));
+        assert_eq!(settings.hidden_rows, [2]);
+        assert_eq!(settings.hidden_columns, [4]);
+        let second = prepare(
+            &file,
+            DocumentId::from_bytes(*Uuid::now_v7().as_bytes())?,
+            actor,
+            Uuid::now_v7(),
+            b"roundtrip",
+        )?;
+        assert_eq!(second.book.sheets()[0].settings().default_column_width, 160);
+        assert_eq!(second.book.sheets()[0].settings().hidden_rows.len(), 1);
+        assert_eq!(second.book.sheets()[0].settings().hidden_columns.len(), 1);
         Ok(())
     }
 }

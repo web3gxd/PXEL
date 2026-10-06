@@ -376,6 +376,11 @@ pub(super) async fn validate(
             },
             None,
         ) => match intent {
+            CellBatchIntent::ShiftCells { .. } => {
+                book.candidate(&request.event.operation, request.event.version)
+                    .map_err(|_| JournalError::Corrupt)?;
+                request.event.operation.clone()
+            }
             CellBatchIntent::SortRange { range, order } => {
                 let CommandPayload::SortRange { range: selected } = &request.command.operation
                 else {

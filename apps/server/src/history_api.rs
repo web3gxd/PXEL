@@ -225,6 +225,14 @@ fn activity(entry: spreadsheet_storage::ActivityEntry) -> ActivityView {
             axes.push((sheet.id, vec![], vec![]));
             "add_sheet"
         }
+        Operation::SheetSettingsWrite { sheet, .. } => {
+            axes.push((*sheet, vec![], vec![]));
+            "sheet_settings"
+        }
+        Operation::CopySheet { sheet, .. } => {
+            axes.push((sheet.id, vec![], vec![]));
+            "copy_sheet"
+        }
         Operation::FrozenRowsWrite { sheet, .. } => {
             axes.push((*sheet, vec![], vec![]));
             "frozen_rows"
@@ -507,6 +515,50 @@ fn comparable(book: &Workbook) -> Result<Comparable, ApiError> {
             "frozen_rows",
             json!(sheet.frozen_rows()),
         )?;
+        insert(
+            &mut map,
+            sheet.id(),
+            "sheet",
+            String::new(),
+            "hidden",
+            json!(sheet.settings().hidden),
+        )?;
+        insert(
+            &mut map,
+            sheet.id(),
+            "layout",
+            String::new(),
+            "default_column_width",
+            json!(sheet.settings().default_column_width),
+        )?;
+        insert(
+            &mut map,
+            sheet.id(),
+            "sheet",
+            String::new(),
+            "tab_color",
+            json!(sheet.settings().tab_color),
+        )?;
+        for row in &sheet.settings().hidden_rows {
+            insert(
+                &mut map,
+                sheet.id(),
+                "layout",
+                id(row.as_bytes()),
+                "row_hidden",
+                json!(true),
+            )?;
+        }
+        for column in &sheet.settings().hidden_columns {
+            insert(
+                &mut map,
+                sheet.id(),
+                "layout",
+                id(column.as_bytes()),
+                "column_hidden",
+                json!(true),
+            )?;
+        }
         for (position, row) in sheet.rows().iter().enumerate() {
             insert(
                 &mut map,

@@ -42,6 +42,7 @@ import { LibraryNavigation } from './library/LibraryNavigation';
 import './sharing/sharing.css';
 import { EditorMenus } from './ui/EditorMenus';
 import { cellsMenu } from './ui/cells-menu';
+import { CellsPanel, type CellsPanelKind } from './ui/CellsPanel';
 import { ConnectionIndicator } from './connection/ConnectionIndicator';
 import {
   Books,
@@ -141,6 +142,7 @@ function SpreadsheetApp({
   const [commands] = useState(() => createSpreadsheetRegistry(document, navigation));
   const [markdownRequest, setMarkdownRequest] = useState<MarkdownImportRequest>();
   const [axisSizePanel, setAxisSizePanel] = useState<'row' | 'column'>();
+  const [cellsPanel, setCellsPanel] = useState<CellsPanelKind>();
   const [sharing, setSharing] = useState(false);
   const [disclosure, setDisclosure] = useState(false);
   const [viewPanel, setViewPanel] = useState(false);
@@ -475,7 +477,7 @@ function SpreadsheetApp({
                         : []),
                     ],
                   },
-                  cellsMenu(document, state.kind === 'online', setAxisSizePanel),
+                  cellsMenu(document, state.kind === 'online', setAxisSizePanel, setCellsPanel),
                   {
                     label: 'Формат',
                     actions: [
@@ -812,6 +814,13 @@ function SpreadsheetApp({
           onClose={() => setAxisSizePanel(undefined)}
         />
       )}
+      {cellsPanel && document.sheet && (
+        <CellsPanel
+          kind={cellsPanel}
+          document={document}
+          onClose={() => setCellsPanel(undefined)}
+        />
+      )}
 
       <footer className="sheet-footer">
         <div className="sheet-navigation">
@@ -837,22 +846,31 @@ function SpreadsheetApp({
               <path d="M7 6h13M7 12h13M7 18h13M3 6h.01M3 12h.01M3 18h.01" />
             </Icon>
           </span>
-          {document.projection?.sheets.map((sheet) => (
-            <button
-              className={`sheet-tab${document.activeSheetId === sheet.id ? ' active' : ''}`}
-              type="button"
-              key={sheet.id}
-              aria-label={`Перейти на лист ${document.privacyMask?.sheets.find((s) => s.id === sheet.id)?.name ?? sheet.name}`}
-              aria-current={document.activeSheetId === sheet.id ? 'page' : undefined}
-              onClick={() => document.selectSheet(sheet.id)}
-            >
-              <Icon size={15}>
-                <rect x="4" y="3" width="16" height="18" rx="2" />
-                <path d="M4 9h16M10 9v12" />
-              </Icon>
-              {document.privacyMask?.sheets.find((s) => s.id === sheet.id)?.name ?? sheet.name}
-            </button>
-          ))}
+          {document.projection?.sheets
+            .filter((sheet) => !sheet.hidden)
+            .map((sheet) => (
+              <button
+                className={`sheet-tab${document.activeSheetId === sheet.id ? ' active' : ''}`}
+                type="button"
+                key={sheet.id}
+                aria-label={`Перейти на лист ${document.privacyMask?.sheets.find((s) => s.id === sheet.id)?.name ?? sheet.name}`}
+                aria-current={document.activeSheetId === sheet.id ? 'page' : undefined}
+                style={
+                  sheet.tab_color == null
+                    ? undefined
+                    : {
+                        boxShadow: `inset 0 -3px #${sheet.tab_color.toString(16).padStart(6, '0')}`,
+                      }
+                }
+                onClick={() => document.selectSheet(sheet.id)}
+              >
+                <Icon size={15}>
+                  <rect x="4" y="3" width="16" height="18" rx="2" />
+                  <path d="M4 9h16M10 9v12" />
+                </Icon>
+                {document.privacyMask?.sheets.find((s) => s.id === sheet.id)?.name ?? sheet.name}
+              </button>
+            ))}
         </div>
         <span className="sheet-summary">
           {document.displaySheetName()}

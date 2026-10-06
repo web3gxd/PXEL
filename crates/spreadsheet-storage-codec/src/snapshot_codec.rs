@@ -12,7 +12,7 @@ use spreadsheet_domain::workbook::{
 /// The first reader is deliberately bounded; a larger snapshot needs a new
 /// streaming decoder or a measured increase to this cap before activation.
 pub const MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 7;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 
 /// Inspects the bounded persisted envelope before binding its version to AAD.
 /// Callers still validate its workbook and expected metadata with decode_snapshot.
@@ -120,6 +120,7 @@ pub fn encode_snapshot(
                 .map(|sheet| {
                     Ok(v1::SnapshotSheet {
                         frozen_rows: sheet.frozen_rows,
+                        settings: Some(super::sheet_settings_codec::encode(&sheet.settings)),
                         sheet: Some(encode_sheet(&sheet.sheet)),
                         cells: encode_cells(&sheet.cells)?,
                         styles: sheet
@@ -214,7 +215,7 @@ pub fn decode_snapshot(
     let envelope = v1::SnapshotEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
     if !matches!(
         envelope.snapshot_schema_version,
-        1 | 2 | 3 | 4 | 5 | 6 | SNAPSHOT_SCHEMA_VERSION
+        1 | 2 | 3 | 4 | 5 | 6 | 7 | SNAPSHOT_SCHEMA_VERSION
     ) {
         return Err(CodecError::UnsupportedSchema);
     }
@@ -270,6 +271,7 @@ pub fn decode_snapshot(
             column_widths: Vec::new(),
             merges: Vec::new(),
             frozen_rows: 0,
+            settings: spreadsheet_domain::workbook::SheetSettings::default(),
         }]
     } else {
         if envelope.sheet.is_some()
@@ -286,6 +288,29 @@ pub fn decode_snapshot(
                 if entry.cells.len() > MAX_CELLS
                     || entry.styles.len() > spreadsheet_domain::style_write::MAX_STYLED_CELLS
                     || entry.merges.len() > spreadsheet_domain::merge::MAX_MERGE_RANGES_PER_SHEET
+                {
+                    return Err(CodecError::Invalid);
+                }
+                let seed = decode_sheet(entry.sheet.clone().ok_or(CodecError::Invalid)?)?;
+                let settings = if envelope.snapshot_schema_version >= 8 {
+                    super::sheet_settings_codec::decode(
+                        entry.settings.clone().ok_or(CodecError::Invalid)?,
+                        seed.name.clone(),
+                    )?
+                } else {
+                    if entry.settings.is_some() {
+                        return Err(CodecError::Invalid);
+                    }
+                    spreadsheet_domain::workbook::SheetSettings {
+                        name: seed.name.clone(),
+                        ..Default::default()
+                    }
+                };
+                if envelope.snapshot_schema_version < 8
+                    && entry
+                        .axis_sizes
+                        .iter()
+                        .any(|s| s.size_css_px == if s.axis_kind == 1 { 28 } else { 112 })
                 {
                     return Err(CodecError::Invalid);
                 }
@@ -315,6 +340,7 @@ pub fn decode_snapshot(
                 }
                 Ok(SnapshotSheetImage {
                     frozen_rows: entry.frozen_rows,
+                    settings,
                     sheet: decode_sheet(entry.sheet.ok_or(CodecError::Invalid)?)?,
                     cells: decode_cells(entry.cells)?,
                     styles: entry
@@ -345,6 +371,15 @@ pub fn decode_snapshot(
     {
         return Err(CodecError::Invalid);
     }
+    let sheets = sheets
+        .into_iter()
+        .map(|mut s| {
+            if s.settings.name.is_empty() {
+                s.settings.name = s.sheet.name.clone();
+            }
+            s
+        })
+        .collect();
     let image = SnapshotImage {
         document_id: expected_document,
         version: expected_version,
@@ -457,7 +492,7 @@ mod tests {
         )?;
         let bytes = encode_snapshot(&book, "engine-v1", "pxel-excel-subset-v1")?;
         let encoded = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-        assert_eq!(encoded.snapshot_schema_version, 7);
+        assert_eq!(encoded.snapshot_schema_version, SNAPSHOT_SCHEMA_VERSION);
         assert_eq!(encoded.sheets.len(), 2);
         let restored = decode_snapshot(
             &bytes,
@@ -631,6 +666,9 @@ mod tests {
             Err(CodecError::UnsupportedSchema)
         ));
         envelope.snapshot_schema_version = 2;
+        for sheet in &mut envelope.sheets {
+            sheet.settings = None;
+        }
         if let Some(context) = envelope.calculation_context.as_mut() {
             context.engine_version = "engine-v2".into();
         }

@@ -113,7 +113,7 @@ ACK или receipt требует discovery, даже если последне�
 уже включённый в загруженную историю, не добавляется повторно. Общая история
 автора не воспроизводит приватный стек каждой вкладки.
 
-Оформление проходит строгий typed projection decoder: authored projection schema 6,
+Оформление проходит строгий typed projection decoder: authored projection schema 8,
 style schema/profile 1. `confirmedStyles` и pending style overlay разделены;
 неопределённый результат commit сохраняет исходные bytes/ID. Canvas рисует только
 видимые оформленные ячейки, в том числе пустые; числовой формат меняет отображение,
@@ -131,6 +131,15 @@ floors, last axis change marker и необязательный CalculationConte
 authored state hash и отдельный calculated-result hash. Проверка серверного хэша
 проводится только для совпадающей версии/revision без pending edits. Данные
 protobuf формулы не используются как canonical encoding состояния.
+
+Команды «Ячейки» (ADR-119) сохраняют настройки листа и видимость по stable IDs.
+Hidden memberships удерживают retired IDs для структурного Undo; redacted
+projection 2 передаёт только живые memberships. Authored projection 8 и worker
+init 6 включают настройки для самостоятельного hash; snapshot 8 и event 39–42
+имеют отдельные lifecycles. Копия листа получает новые IDs и локально переведённые
+bound references. Настройки и копирование — history barriers, сдвиг ячеек —
+guarded content/style batch с Undo/Redo. Автоподбор посылает существующий bounded
+axis-size batch и сохраняет размеры скрытых осей и осей с объединениями.
 
 ## Развертывание и рост
 

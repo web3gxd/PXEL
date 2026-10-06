@@ -187,6 +187,9 @@ message DocumentCommand {
   SortRangeCommand sort_range = 17;
   // Separate intent so older servers reject repetition instead of copying once.
   RepeatRangeCommand repeat_range = 18;
+  ShiftCellsCommand shift_cells = 19;
+  SheetSettingsCommand sheet_settings = 20;
+  CopySheetCommand copy_sheet = 21;
 }
 
 message MergeRange {
@@ -569,3 +572,8 @@ enum ReferenceError {
  REFERENCE_ERROR_OUT_OF_BOUNDS = 2;
  REFERENCE_ERROR_MISSING_SHEET = 3;
 }
+
+message ShiftCellsCommand { uint32 schema_version = 1; CellAddress source = 2; uint32 rows = 3; uint32 columns = 4; uint32 axis_kind = 5; bool insert = 6; }
+message AxisVisibilitySet { uint32 axis_kind = 1; bytes axis_id = 2; bool hidden = 3; }
+message SheetSettingsCommand { uint32 schema_version = 1; bytes sheet_id = 2; optional string name = 3; optional uint32 index = 4; optional bool hidden = 5; optional uint32 default_column_width = 6; ColorStyleChange tab_color = 7; repeated AxisVisibilitySet visibility = 8; }
+message CopySheetCommand { uint32 schema_version = 1; bytes source_sheet_id = 2; AddSheet sheet = 3; uint32 index = 4; }

@@ -541,7 +541,10 @@ fn snapshot_v5_roundtrips_sparse_row_and_column_sizes() -> TestResult {
 fn snapshot_envelope(book: &Workbook) -> Result<v1::SnapshotEnvelope, Box<dyn std::error::Error>> {
     let bytes = encode_snapshot(book, "engine-v1", "pxel-excel-subset-v1")?;
     let envelope = v1::SnapshotEnvelope::decode(bytes.as_slice())?;
-    assert_eq!(envelope.snapshot_schema_version, 7);
+    assert_eq!(
+        envelope.snapshot_schema_version,
+        crate::SNAPSHOT_SCHEMA_VERSION
+    );
     assert_eq!(snapshot_restore(book, &envelope)?.hash(), book.hash());
     Ok(envelope)
 }
@@ -554,6 +557,9 @@ fn snapshot_v3_preserves_live_revived_and_redeleted_axis_floors_through_tail_rep
     for legacy in [1, 2] {
         let mut old = baseline.clone();
         old.snapshot_schema_version = legacy;
+        for sheet in &mut old.sheets {
+            sheet.settings = None;
+        }
         if legacy == 1 {
             let single = old.sheets.remove(0);
             old.sheet = single.sheet;

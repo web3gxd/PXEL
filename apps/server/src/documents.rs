@@ -333,6 +333,8 @@ pub(crate) fn redacted_view(
     let original = document_view(book.document_id(), book)?.0;
     let mut sheets = original.sheets;
     for (sheet, source) in sheets.iter_mut().zip(book.sheets()) {
+        sheet.hidden_rows.retain(|id| sheet.rows.contains(id));
+        sheet.hidden_columns.retain(|id| sheet.columns.contains(id));
         sheet.name = crate::privacy_api::text_mask(&sheet.name, &policy.rules)?;
         for (cell, (address, _)) in sheet.cells.iter_mut().zip(source.cells()) {
             cell.value = match analysis.values.get(address).ok_or(ApiError(
@@ -351,7 +353,7 @@ pub(crate) fn redacted_view(
         }
     }
     Ok(RedactedView {
-        redacted_projection_schema_version: 1,
+        redacted_projection_schema_version: 2,
         style_schema_version: original.style_schema_version,
         style_profile_version: original.style_profile_version,
         document_id: original.document_id,
@@ -417,6 +419,11 @@ struct CalculationContextView {
 }
 #[derive(Serialize)]
 struct SheetView {
+    hidden: bool,
+    default_column_width: u32,
+    tab_color: Option<u32>,
+    hidden_rows: Vec<String>,
+    hidden_columns: Vec<String>,
     frozen_rows: u32,
     id: String,
     name: String,
@@ -995,6 +1002,17 @@ fn export_projection_redacted(
 ) -> Result<NormalizedWorkbook, ApiError> {
     let mut sheets = Vec::with_capacity(workbook.sheets().len());
     for sheet in workbook.sheets() {
+        if sheet.settings().hidden
+            || sheet.settings().default_column_width != 112
+            || sheet.settings().tab_color.is_some()
+            || !sheet.settings().hidden_rows.is_empty()
+            || !sheet.settings().hidden_columns.is_empty()
+        {
+            return Err(ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "xlsx_profile_unsupported",
+            ));
+        }
         let mut cells = Vec::with_capacity(sheet.cells().len());
         let mut styles = Vec::with_capacity(sheet.styles().len());
         for (address, content) in sheet.cells() {
@@ -1314,6 +1332,21 @@ pub(crate) fn document_view(
         .iter()
         .map(|sheet| -> Result<SheetView, ApiError> {
             Ok(SheetView {
+                hidden: sheet.settings().hidden,
+                default_column_width: sheet.settings().default_column_width,
+                tab_color: sheet.settings().tab_color,
+                hidden_rows: sheet
+                    .settings()
+                    .hidden_rows
+                    .iter()
+                    .map(|id| id_string(id.as_bytes()))
+                    .collect(),
+                hidden_columns: sheet
+                    .settings()
+                    .hidden_columns
+                    .iter()
+                    .map(|id| id_string(id.as_bytes()))
+                    .collect(),
                 frozen_rows: sheet.frozen_rows(),
                 id: id_string(sheet.id().as_bytes()),
                 name: sheet.name().to_owned(),
@@ -1406,7 +1439,7 @@ pub(crate) fn document_view(
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
     Ok(Json(DocumentView {
-        authored_projection_schema_version: 7,
+        authored_projection_schema_version: 8,
         style_schema_version: DOCUMENT_STYLE_SCHEMA_VERSION,
         style_profile_version: wire::style::STYLE_PROFILE_VERSION,
         document_id: id_string(id.as_bytes()),
@@ -1708,11 +1741,104 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
         + usize::from(input.set_merge_range.is_some())
         + usize::from(input.set_frozen_rows.is_some())
         + usize::from(input.sort_range.is_some())
+        + usize::from(input.shift_cells.is_some())
+        + usize::from(input.sheet_settings.is_some())
+        + usize::from(input.copy_sheet.is_some())
         != 1
     {
         return Err(SessionError::InvalidCommand);
     }
-    let operation = if let Some(sort) = input.sort_range {
+    let operation = if let Some(shift) = input.shift_cells {
+        if shift.schema_version != 1 || shift.rows == 0 || shift.columns == 0 {
+            return Err(SessionError::InvalidCommand);
+        }
+        CommandPayload::ShiftCells {
+            source: address(shift.source)?,
+            rows: shift.rows,
+            columns: shift.columns,
+            axis: match shift.axis_kind {
+                1 => spreadsheet_domain::workbook::CellShiftAxis::Row,
+                2 => spreadsheet_domain::workbook::CellShiftAxis::Column,
+                _ => return Err(SessionError::InvalidCommand),
+            },
+            insert: shift.insert,
+        }
+    } else if let Some(settings) = input.sheet_settings {
+        if settings.schema_version != 1 || settings.visibility.len() > 1000 {
+            return Err(SessionError::InvalidCommand);
+        }
+        let tab_color = match settings.tab_color {
+            None => None,
+            Some(color) => Some(match color.action {
+                Some(v1::color_style_change::Action::Set(v)) if v.len() == 3 => {
+                    Some((u32::from(v[0]) << 16) | (u32::from(v[1]) << 8) | u32::from(v[2]))
+                }
+                Some(v1::color_style_change::Action::Reset(true)) => None,
+                _ => return Err(SessionError::InvalidCommand),
+            }),
+        };
+        CommandPayload::SetSheetSettings {
+            sheet: SheetId::from_bytes(bytes_id(&settings.sheet_id)?)?,
+            changes: spreadsheet_domain::workbook::SheetSettingsPatch {
+                name: settings.name,
+                index: settings.index,
+                hidden: settings.hidden,
+                default_column_width: settings.default_column_width,
+                tab_color,
+                visibility: settings
+                    .visibility
+                    .into_iter()
+                    .map(|v| {
+                        Ok((
+                            match v.axis_kind {
+                                1 => spreadsheet_domain::workbook::AxisSizeTarget::Row(
+                                    RowId::from_bytes(bytes_id(&v.axis_id)?)?,
+                                ),
+                                2 => spreadsheet_domain::workbook::AxisSizeTarget::Column(
+                                    ColumnId::from_bytes(bytes_id(&v.axis_id)?)?,
+                                ),
+                                _ => return Err(SessionError::InvalidCommand),
+                            },
+                            v.hidden,
+                        ))
+                    })
+                    .collect::<Result<_, SessionError>>()?,
+            },
+        }
+    } else if let Some(copy) = input.copy_sheet {
+        if copy.schema_version != 1 {
+            return Err(SessionError::InvalidCommand);
+        }
+        let seed = copy.sheet.ok_or(SessionError::InvalidCommand)?;
+        if std::iter::once(&seed.sheet_id)
+            .chain(seed.rows.iter())
+            .chain(seed.columns.iter())
+            .any(|v| {
+                bytes_id(v).is_err()
+                    || bytes_id(v).is_ok_and(|b| Uuid::from_bytes(b).get_version_num() != 7)
+            })
+        {
+            return Err(SessionError::InvalidCommand);
+        }
+        CommandPayload::CopySheet {
+            source: SheetId::from_bytes(bytes_id(&copy.source_sheet_id)?)?,
+            sheet: SheetSeed {
+                id: SheetId::from_bytes(bytes_id(&seed.sheet_id)?)?,
+                name: seed.name,
+                rows: seed
+                    .rows
+                    .iter()
+                    .map(|v| Ok(RowId::from_bytes(bytes_id(v)?)?))
+                    .collect::<Result<_, SessionError>>()?,
+                columns: seed
+                    .columns
+                    .iter()
+                    .map(|v| Ok(ColumnId::from_bytes(bytes_id(v)?)?))
+                    .collect::<Result<_, SessionError>>()?,
+            },
+            index: copy.index,
+        }
+    } else if let Some(sort) = input.sort_range {
         if sort.schema_version != 1 {
             return Err(SessionError::InvalidCommand);
         }
@@ -2346,6 +2472,7 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
                     .collect(),
             })
         }
+        Operation::SheetSettingsWrite { .. } | Operation::CopySheet { .. } => return None,
         Operation::FrozenRowsWrite { sheet, rows, .. } => {
             v1::canonical_operation::Kind::FrozenRowsWrite(v1::FrozenRowsWrite {
                 sheet_id: sheet.as_bytes().to_vec(),
@@ -2703,6 +2830,115 @@ mod undo_wire_tests {
     }
 
     #[test]
+    fn xlsx_export_refuses_sheet_metadata_that_profile_cannot_preserve()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let seed = SheetSeed {
+            id: SheetId::from_bytes([2; 16])?,
+            name: "Sheet".into(),
+            rows: vec![RowId::from_bytes([3; 16])?],
+            columns: vec![ColumnId::from_bytes([4; 16])?],
+        };
+        let original = Workbook::empty(DocumentId::from_bytes([1; 16])?).candidate(
+            &Operation::CreateWorkbook {
+                sheet: seed.clone(),
+            },
+            DocumentVersion::new(1)?,
+        )?;
+        assert!(export_projection(&original).is_ok());
+        let op = spreadsheet_domain::sheet_settings::prepare(
+            &original,
+            seed.id,
+            &spreadsheet_domain::workbook::SheetSettingsPatch {
+                tab_color: Some(Some(0x123456)),
+                default_column_width: Some(160),
+                ..Default::default()
+            },
+        )?;
+        let book = original.candidate(&op, DocumentVersion::new(2)?)?;
+        assert!(matches!(
+            export_projection(&book),
+            Err(ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "xlsx_profile_unsupported"
+            ))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn cells_metadata_and_shift_wire_versions_reject_mixed_unknown_and_bad_colour()
+    -> Result<(), SessionError> {
+        let mut request = envelope();
+        request.sheet_settings = Some(v1::SheetSettingsCommand {
+            schema_version: 1,
+            sheet_id: id(),
+            default_column_width: Some(160),
+            tab_color: Some(v1::ColorStyleChange {
+                action: Some(v1::color_style_change::Action::Set(vec![18, 52, 86])),
+            }),
+            ..Default::default()
+        });
+        assert!(
+            matches!(command(request.clone())?.operation,CommandPayload::SetSheetSettings{changes,..} if changes.tab_color==Some(Some(0x123456)))
+        );
+        for schema in [0, 2] {
+            let mut invalid = request.clone();
+            invalid
+                .sheet_settings
+                .as_mut()
+                .ok_or(SessionError::InvalidCommand)?
+                .schema_version = schema;
+            assert!(matches!(
+                command(invalid),
+                Err(SessionError::InvalidCommand)
+            ));
+        }
+        let mut invalid = request.clone();
+        invalid
+            .sheet_settings
+            .as_mut()
+            .ok_or(SessionError::InvalidCommand)?
+            .tab_color = Some(v1::ColorStyleChange {
+            action: Some(v1::color_style_change::Action::Set(vec![18, 52])),
+        });
+        assert!(matches!(
+            command(invalid),
+            Err(SessionError::InvalidCommand)
+        ));
+        let shift = v1::ShiftCellsCommand {
+            schema_version: 1,
+            source: Some(v1::CellAddress {
+                sheet_id: id(),
+                row_id: id(),
+                column_id: id(),
+            }),
+            rows: 1,
+            columns: 1,
+            axis_kind: 1,
+            insert: true,
+        };
+        let mut combined = request;
+        combined.shift_cells = Some(shift.clone());
+        assert!(matches!(
+            command(combined),
+            Err(SessionError::InvalidCommand)
+        ));
+        let mut single = envelope();
+        single.shift_cells = Some(shift);
+        assert!(matches!(
+            command(single.clone())?.operation,
+            CommandPayload::ShiftCells { .. }
+        ));
+        single
+            .shift_cells
+            .as_mut()
+            .ok_or(SessionError::InvalidCommand)?
+            .axis_kind = 3;
+        assert!(matches!(command(single), Err(SessionError::InvalidCommand)));
+        Ok(())
+    }
+
+    #[test]
     fn style_commands_use_stable_targets_and_exactly_one_intent() -> Result<(), SessionError> {
         let cell = v1::CellAddress {
             sheet_id: id(),
@@ -2911,7 +3147,7 @@ mod undo_wire_tests {
                 .map_err(|_| "projection failed")?
                 .0,
         )?;
-        assert_eq!(view["authored_projection_schema_version"], 7);
+        assert_eq!(view["authored_projection_schema_version"], 8);
         assert_eq!(view["style_schema_version"], 2);
         assert_eq!(view["style_profile_version"], 2);
         assert_eq!(view["last_axis_change_version"], "1");

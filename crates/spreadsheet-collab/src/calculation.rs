@@ -116,7 +116,9 @@ impl CalculationHandle {
                     .changed
                     .extend(writes.iter().map(|write| write.address));
             }
-            Operation::CreateWorkbook { .. } | Operation::AddSheet { .. } => pending.rebuild = true,
+            Operation::CreateWorkbook { .. }
+            | Operation::AddSheet { .. }
+            | Operation::CopySheet { .. } => pending.rebuild = true,
             Operation::ExtendRows { .. } => pending.rebuild = true,
             Operation::InsertRows { .. }
             | Operation::InsertRowsRebased { .. }
@@ -129,6 +131,7 @@ impl CalculationHandle {
             Operation::StyleWrite { .. }
             | Operation::StyleCompensation { .. }
             | Operation::AxisSizeWrite { .. }
+            | Operation::SheetSettingsWrite { .. }
             | Operation::FrozenRowsWrite { .. }
             | Operation::MergeWrite { .. } => {}
         }

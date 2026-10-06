@@ -79,12 +79,21 @@ export class PreviewClient {
             value: toPreviewValue(cell.value, this.authoredProfile),
           })),
           ...(this.authoredProfile ? { styles: sheet.styles ?? [] } : {}),
-          ...(data.schema_version === 5
+          ...(data.schema_version === 5 || data.schema_version === 6
             ? {
                 frozen_rows: sheet.frozen_rows ?? 0,
                 row_heights: sheet.row_heights ?? [],
                 column_widths: sheet.column_widths ?? [],
                 merges: sheet.merges ?? [],
+              }
+            : {}),
+          ...(data.schema_version === 6
+            ? {
+                hidden: sheet.hidden ?? false,
+                hidden_rows: sheet.hidden_rows ?? [],
+                hidden_columns: sheet.hidden_columns ?? [],
+                default_column_width: sheet.default_column_width ?? 112,
+                tab_color: sheet.tab_color ?? null,
               }
             : {}),
         })),

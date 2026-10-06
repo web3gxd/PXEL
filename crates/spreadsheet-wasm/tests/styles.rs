@@ -281,3 +281,42 @@ fn shared_styles_fixture_is_valid_and_context_is_not_advanced()
     assert_eq!(worker.workbook().calculation_context(), original.as_ref());
     Ok(())
 }
+
+#[test]
+fn init_six_null_tab_color_is_present_and_metadata_hash_matches_native()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut input = init();
+    input["schema_version"] = json!(6);
+    let sheet = &mut input["sheets"][0];
+    sheet["frozen_rows"] = json!(0);
+    sheet["row_heights"] = json!([]);
+    sheet["column_widths"] = json!([]);
+    sheet["merges"] = json!([]);
+    sheet["hidden"] = json!(false);
+    sheet["default_column_width"] = json!(160);
+    sheet["tab_color"] = json!(null);
+    sheet["hidden_rows"] = json!([]);
+    sheet["hidden_columns"] = json!([]);
+    let worker = PreviewWorkbook::from_json(&input.to_string())?;
+    assert_eq!(worker.workbook().sheets()[0].settings().tab_color, None);
+    assert_eq!(
+        worker.workbook().sheets()[0]
+            .settings()
+            .default_column_width,
+        160
+    );
+    let hash = worker.workbook().hash();
+    input["sheets"][0]["tab_color"] = json!(0x123456);
+    let coloured = PreviewWorkbook::from_json(&input.to_string())?;
+    assert_ne!(hash, coloured.workbook().hash());
+    assert_eq!(
+        coloured.workbook().sheets()[0].settings().tab_color,
+        Some(0x123456)
+    );
+    input["sheets"][0]
+        .as_object_mut()
+        .ok_or("sheet object")?
+        .remove("tab_color");
+    assert!(PreviewWorkbook::from_json(&input.to_string()).is_err());
+    Ok(())
+}

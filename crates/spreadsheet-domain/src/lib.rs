@@ -111,3 +111,7 @@ mod tests {
 pub mod style_write;
 
 pub use merge::{MergeChange, MergeRange};
+
+pub mod sheet_settings;
+
+pub mod cell_shift;

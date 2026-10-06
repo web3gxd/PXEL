@@ -137,6 +137,29 @@ it('decodes a separate scalar representation and rejects formula context history
     }),
   ).toThrow();
 });
+it('decodes redacted schema2 layout without accepting authored formula or lifecycle data', () => {
+  const raw = safe();
+  const layout = {
+    ...raw,
+    redacted_projection_schema_version: 2,
+    sheets: raw.sheets.map((sheet) => ({
+      ...sheet,
+      hidden: false,
+      hidden_rows: [],
+      hidden_columns: [],
+      default_column_width: 80,
+      tab_color: 0x123456,
+    })),
+  };
+  expect(decodeRedactedProjection(layout).sheets[0]).toMatchObject({
+    default_column_width: 80,
+    tab_color: 0x123456,
+  });
+  expect(() =>
+    decodeRedactedProjection({ ...layout, redacted_projection_schema_version: 3 }),
+  ).toThrow();
+  expect(() => decodeRedactedProjection({ ...layout, retired_row_ids: [uuidV7()] })).toThrow();
+});
 it('keeps local masks separate from authored values and refuses stale safe copying', () => {
   const raw = safe(),
     masked = decodeProjection(raw);

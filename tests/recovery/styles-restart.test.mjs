@@ -281,7 +281,7 @@ test(
       } while (Date.now() < deadline);
       assert.ok(metadata, 'Scheduled snapshot did not activate');
       assert.equal(metadata.snapshot_version, '4');
-      assert.equal(metadata.snapshot_schema_version, 7);
+      assert.equal(metadata.snapshot_schema_version, 8);
       assert.equal(metadata.hash.length, (32 + 56) * 2);
       assert.equal(metadata.hash.slice(0, 16), Buffer.from('PXELENC\0').toString('hex'));
       assert.notEqual(metadata.hash, atSnapshot.state_hash);

@@ -44,6 +44,37 @@ function harness() {
   return { client, worker, requests, update, reply, result };
 }
 afterEach(() => vi.useRealTimers());
+it('passes the full sheet layout in authored init6 without mixing it into calculated results', () => {
+  const h = harness();
+  const sheet = {
+    ...initial.sheets[0]!,
+    styles: [],
+    row_heights: [],
+    column_widths: [],
+    merges: [],
+    frozen_rows: 0,
+    default_column_width: 80,
+    hidden: false,
+    hidden_rows: [],
+    hidden_columns: [],
+    tab_color: 0x123456,
+  };
+  h.client.reset({
+    ...initial,
+    schema_version: 6,
+    sheets: [sheet],
+    last_axis_change_version: '1',
+    retired_row_ids: [],
+    retired_column_ids: [],
+    row_activation_floors: [],
+    column_activation_floors: [],
+  });
+  const request = h.requests.at(-1)!;
+  expect(request.kind).toBe('init');
+  if (request.kind !== 'init') throw new Error('Missing authored initialization');
+  expect(request.data.sheets[0]).toMatchObject(sheet);
+  h.client.dispose();
+});
 it('uses atomic authored patches and coalesces independent style leaves while init is pending', () => {
   const h = harness();
   const init4: PreviewInit = {

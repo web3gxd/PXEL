@@ -398,6 +398,7 @@ fn affects_calculation(operation: &Operation) -> bool {
             | Operation::ExtendRows { .. }
             | Operation::StyleWrite { .. }
             | Operation::StyleCompensation { .. }
+            | Operation::SheetSettingsWrite { .. }
     )
 }
 fn clock_consumers(book: &Workbook) -> (bool, bool) {

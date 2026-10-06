@@ -1,4 +1,5 @@
 import { createBookFromUi } from './create-book';
+import { editorButton } from './editor-menu';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { GRID, columnLabel } from '../src/grid/viewport';
 import { uuidV7, type Projection } from '../src/document/store';
@@ -120,12 +121,12 @@ for (const axis of ['row', 'column'] as const) {
         if (!formulaCell || formulaCell.value.type !== 'formula')
           throw new Error('Missing initial formula');
         await select(page, 0, 0);
-        await page
-          .getByRole('button', {
-            name: `${axis === 'row' ? 'Строка' : 'Столбец'} ${deletion ? '−' : '↑'}`,
-            exact: true,
-          })
-          .click();
+        await (
+          await editorButton(
+            page,
+            `${axis === 'row' ? 'Строка' : 'Столбец'} ${deletion ? '−' : '↑'}`,
+          )
+        ).click();
         await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
         const changed = await state(page);
         const changedSheet = changed.sheets[0];

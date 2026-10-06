@@ -217,7 +217,7 @@ export class AxisMetrics {
 
 const metricsCache = new WeakMap<
   readonly string[],
-  WeakMap<object, WeakMap<object, AxisMetrics>>
+  WeakMap<object, WeakMap<object, { defaultSize: number; metrics: AxisMetrics }>>
 >();
 const noOverrides = Object.freeze([]) as readonly AxisOverride[];
 const noHidden = new Set<number>();
@@ -239,12 +239,12 @@ export function axisMetrics(
     byOverride.set(key, byHidden);
   }
   const hiddenKey = hidden ?? noHidden;
-  let metrics = byHidden.get(hiddenKey);
-  if (!metrics) {
-    metrics = new AxisMetrics(ids, overrides, defaultSize, hidden);
-    byHidden.set(hiddenKey, metrics);
+  let cached = byHidden.get(hiddenKey);
+  if (!cached || cached.defaultSize !== defaultSize) {
+    cached = { defaultSize, metrics: new AxisMetrics(ids, overrides, defaultSize, hidden) };
+    byHidden.set(hiddenKey, cached);
   }
-  return metrics;
+  return cached.metrics;
 }
 
 /** A half-open range, bounded by allocated axes rather than the potential sheet. */

@@ -179,3 +179,53 @@ fn stable_id_diff_covers_every_category_and_structural_formula_context()
     assert_eq!(reverse.changes.len(), result.changes.len());
     Ok(())
 }
+
+#[test]
+fn settings_only_versions_have_per_leaf_historical_diff() -> Result<(), Box<dyn std::error::Error>>
+{
+    let seed = SheetSeed {
+        id: SheetId::from_bytes([2; 16])?,
+        name: "History".into(),
+        rows: vec![RowId::from_bytes([3; 16])?, RowId::from_bytes([4; 16])?],
+        columns: vec![
+            ColumnId::from_bytes([5; 16])?,
+            ColumnId::from_bytes([6; 16])?,
+        ],
+    };
+    let book = Workbook::empty(DocumentId::from_bytes([1; 16])?).candidate(
+        &Operation::CreateWorkbook {
+            sheet: seed.clone(),
+        },
+        DocumentVersion::new(1)?,
+    )?;
+    let changes = spreadsheet_domain::workbook::SheetSettingsPatch {
+        default_column_width: Some(160),
+        tab_color: Some(Some(0x123456)),
+        visibility: vec![
+            (AxisSizeTarget::Row(seed.rows[1]), true),
+            (AxisSizeTarget::Column(seed.columns[1]), true),
+        ],
+        ..Default::default()
+    };
+    let next = book.candidate(
+        &spreadsheet_domain::sheet_settings::prepare(&book, seed.id, &changes)?,
+        DocumentVersion::new(2)?,
+    )?;
+    let before = comparable(&book).map_err(|error| error.1)?;
+    let after = comparable(&next).map_err(|error| error.1)?;
+    let changed = after
+        .iter()
+        .filter(|(key, value)| before.get(*key) != Some(*value))
+        .map(|(key, _)| key.property.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        changed,
+        BTreeSet::from([
+            "default_column_width",
+            "tab_color",
+            "row_hidden",
+            "column_hidden"
+        ])
+    );
+    Ok(())
+}

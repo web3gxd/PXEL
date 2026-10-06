@@ -135,7 +135,7 @@ export function CanvasGrid({
     ]);
     const seen = new Set<string>();
     for (const row of rows)
-      for (let column = columns.start; column < columns.end; column++) {
+      for (const column of columnAxis.indicesInRange(columns.start, columns.end)) {
         const merge = document.mergeAt({ row, column });
         const position = merge
           ? { row: merge.startRow, column: merge.startColumn }
@@ -325,6 +325,10 @@ export function CanvasGrid({
     };
     const { rows, columns } = sheetMetrics(document)!;
     next.row = rows.nearestVisible(next.row, next.row < document.selected.row ? -1 : 1);
+    next.column = columns.nearestVisible(
+      next.column,
+      next.column < document.selected.column ? -1 : 1,
+    );
     document.select(next, extend);
     if (next.row >= document.sheet.rows.length - 20) document.extendRows();
     const scroller = scrollRef.current;

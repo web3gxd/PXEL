@@ -154,7 +154,7 @@ export function isDefaultStyle(style: CellStyle) {
   );
 }
 export type AuthoredMetadata = {
-  authored_projection_schema_version?: 4 | 5 | 6 | 7;
+  authored_projection_schema_version?: 4 | 5 | 6 | 7 | 8;
   style_schema_version?: 1 | 2;
   style_profile_version?: 1 | 2;
   last_axis_change_version?: string;
@@ -186,7 +186,8 @@ export function decodeAuthoredMetadata(
     (p.authored_projection_schema_version !== 4 &&
       p.authored_projection_schema_version !== 5 &&
       p.authored_projection_schema_version !== 6 &&
-      p.authored_projection_schema_version !== 7) ||
+      p.authored_projection_schema_version !== 7 &&
+      p.authored_projection_schema_version !== 8) ||
     !(
       (p.style_schema_version === 1 && p.style_profile_version === 1) ||
       (p.style_schema_version === 2 && p.style_profile_version === 2)

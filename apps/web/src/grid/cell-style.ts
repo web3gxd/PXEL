@@ -37,7 +37,7 @@ export function drawCell(
       if (point !== '\n' && point !== '\r') line += point;
     }
     if (lines.length < limit) lines.push(line);
-  } else lines.push(text.split(/\r?\n/, 1)[0] ?? '');
+  } else lines.push(...text.split(/\r?\n/).slice(0, limit));
   const px = align === 'right' ? x + width - 7 : align === 'center' ? x + width / 2 : x + 7;
   const block = lines.length * lineHeight;
   const py =

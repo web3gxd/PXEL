@@ -7152,3 +7152,95 @@ standalone `just check` and `just sqlx-check` also passed after the source chang
 The earlier fresh-fixture smoke and initial loaded-fixture timeout remain
 recorded as separate runs. This is Windows-local evidence, not a startup capacity
 guarantee for arbitrarily large key histories.
+## 2026-10-06 — реальные команды вкладки «Ячейки» (ADR-119)
+
+В feat/cells-functions реализованы все 14 прежних unavailable-пунктов:
+вставка/удаление ячеек со сдвигом, оба автоподбора, ширина по умолчанию,
+скрытие/показ строк, столбцов и листов, переименование, перемещение/копирование
+листов и цвет вкладки. Изменения сохраняются PostgreSQL через candidate/CAS/
+durable commit; настройки и копии не изменяют confirmed projection до ACK.
+Сдвиг переносит content/style и bound references, поддерживает guarded Undo/Redo.
+Настройки и копии листов сохраняют установленный контракт history barriers.
+
+Authored projection8, redacted projection2, WASM init6, snapshot8 и event39–42
+имеют отдельные version lifecycles. Legacy defaults сохраняют hashes. Миграция
+202610060005 уникальна; исходная acceptance DB с прежним checksum mismatch
+не исправлялась. PXEL workbook schema2 сохраняет layout, читает schema1;
+ограниченный XLSX export отклоняет неподдерживаемые настройки целиком.
+Новые зависимости не добавлены; .env, secrets и remote не менялись.
+
+Скрытые retired IDs удерживаются для axis Undo, redacted view раскрывает только
+живые memberships. Запрещены последний видимый лист/ось, пересечения с merges,
+потеря занятых хвостовых ячеек и неподдерживаемые преобразования формул. Полоса
+со всеми выделенными пустыми ячейками и inbound updates ограничена 1000 writes.
+Автоподбор измеряет отображаемый текст и явные переносы, пропускает скрытые оси
+и оси с объединениями. Копия сохраняет #REF retired references и получает новые
+live IDs. Новые события принимаются панелью истории и участвуют в diff.
+
+Rebase включает smart-fill и resize-preview из main. Pending axis-size batch
+имеет один ID и массив writes; общая geometry строит overlay за один проход,
+использует default листа и обе hidden masks. Возврат быстрого resize к прежнему
+размеру учитывает pending state. Autofill запрещён при живых скрытых осях.
+
+После второго rebase включены custom Select и scrollbar preferences из main;
+новые окна используют общий combobox/listbox с сохранённым initial focus.
+Review выявил stale HTTP cells в автоподборе после canonical WebSocket write.
+Два новых RED tests воспроизвели проблему; измерение и formula-result guard
+переведены на live confirmedCells. Добавлен browser regression для обоих
+автоподборов без metadata refresh или reload.
+
+Полный all-features nextest: 725/725 PASS, 17 configured skips, 331.953 s.
+Первый запуск не собрал три новых server test выражения: исправлены namespace
+SheetSettingsPatch и conversion ApiError. Следующий остановился на неверном
+ожидании copied retired reference: DeleteRows уже создаёт DeletedTarget/#REF,
+копия сохраняет этот AST. Исправлен test; runtime copy contract не менялся.
+Clippy workspace/all-targets PASS для default и all-features, -D warnings;
+три новых nested if приведены к let chains. Pinned WASM generation, Rust fmt,
+proto:check, TypeScript, ESLint, production build и 316/316 Vitest PASS.
+
+Hard-restart recovery: 4/4 PASS (axes/formulas, privacy, PXEL, styles), 12.47 s.
+Первый fixture не стартовал из-за старого migration checksum и одного неверного
+binary path; использована новая собственная временная БД и явный binary path.
+Повтор styles требовал RUST_LOG=info для проверки document_recovery события;
+после настройки fixture снимок и ожидаемый journal tail подтверждены. Ни один
+production/acceptance checksum не изменялся. Временные БД удаляет harness.
+
+Первый Cells Chromium run: 10/18. Исправлены устаревшее keyboard-focus ожидание
+и test stripe budget (999 suffix cells + одна inbound formula = 1000).
+Второй run: 16/18; trace показал HTTP 503 и slow reconnect во время параллельного
+SQLx прогона. Следующий прерван после review autofit; без итогового отчёта он
+не считается успешным. Финальный последовательный Cells run: 20/20 PASS
+при DPR1/DPR2, 2.1 min, retries=0. Покрыты все 14 действий, fresh websocket
+text autofit, formula/style shift Undo после reload, hash parity, peer convergence,
+history acceptance и размеры 390/681/1440 с initial/return focus. Отдельный
+DPR1 regression run восьми соседних suites: 49/50 PASS, 4.6 min. Один privacy
+scroll-label test получил вертикальный delta 15 px вместо ожидаемого. Адресный
+повтор без изменения product/test кода: 2/2 DPR1/DPR2 PASS, 20.8 s; причина
+однократного расхождения не установлена, общий 50/50 run не заявляется.
+Первый расширенный run прерван после old axis-menu locator timeout; существующий
+editorButton helper заменил прежний direct toolbar selector в axis-history test.
+Все четыре его сценария в итоговом расширенном run PASS.
+
+Финальный review обнаружил тупик Show при более 1000 скрытых осей. Два RED tests
+воспроизвели отказ. Теперь Show отправляет первые 1000 live hidden IDs и позволяет
+повторить действие после ACK; menu явно показывает «Показать 1000 скрытых строк»
+или столбцов при превышении лимита. Retired memberships не влияют на label/batch.
+Hide остаётся атомарным с прежним лимитом. Оба UI command tests GREEN; confirmed
+visibility не меняется до ACK. После этой правки весь Cells suite снова 20/20
+DPR1/DPR2 PASS, 2.1 min, retries=0, без pageerror/console error.
+
+Общий Prettier check отмечает прежние RUNBOOK.md и docs/nvda-acceptance.md;
+адресная проверка изменённых frontend/ADR/architecture/recovery PASS. Vite
+сохраняет прежнее предупреждение chunk >500 kB. Generated descriptor пересоздан
+pinned генератором после обнаруженного drift. Два recovery test файла после
+stash/rebase оказались NUL: восстановлены только они из HEAD с повторной точной
+заменой expected schema1→2 и snapshot7→8; source NUL scan и diff check чистые.
+Review correctness/readability/architecture/security/performance выполнен;
+новых зависимостей и логирования document content/credentials нет.
+Linux/Compose/remote CI, production deployment и ручной NVDA остаются gates.
+
+После финального rebase main: адресный native all-features nextest 423/423 PASS
+(25.885 s; 319 tests вне фильтра), включая domain/collab/formula/codec/WASM
+и PostgreSQL sheet_settings_tests. Frontend повтор: 316/316 PASS (9.37 s),
+TypeScript, ESLint, proto:check и cargo fmt PASS. Проверки выполнены после
+финальных let-chain и Show/autofit исправлений; исходники не менялись далее.

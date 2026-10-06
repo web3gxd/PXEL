@@ -225,6 +225,7 @@ pub(crate) fn book(template: Template) -> Result<Book, ApiError> {
             rows: 1000,
             columns: 26,
             frozen_rows: 2,
+            view: None,
             cells,
             styles,
             row_heights: vec![Size {

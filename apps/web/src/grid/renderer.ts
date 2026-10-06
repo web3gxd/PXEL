@@ -34,8 +34,8 @@ function cellOverflowSpan(
 
   context.save();
   context.font = canvasFont(style);
-  const firstLine = text.split(/\r?\n/, 1)[0] ?? '';
-  const desiredWidth = context.measureText(firstLine).width + 14;
+  const desiredWidth =
+    Math.max(...text.split(/\r?\n/).map((line) => context.measureText(line).width)) + 14;
   context.restore();
 
   let width = ownWidth;
@@ -83,7 +83,8 @@ export function drawGrid(
     rows.offsetAt(Math.min(sheet.rows.length, sheet.frozen_rows ?? 0)),
   );
   canvas.dataset.frozenHeight = String(frozenHeight);
-  canvas.dataset.hiddenRows = String(document.filterState.hidden.size);
+  canvas.dataset.hiddenRows = String(document.hiddenRows.size);
+  canvas.dataset.hiddenColumns = String(document.hiddenColumns.size);
   if (frozenHeight > 0) {
     let layer = frozenLayers.get(canvas);
     if (!layer) {
@@ -158,6 +159,7 @@ function drawScrollableGrid(
     start: 0,
     end: 0,
   };
+  const visibleColumns = [...(columnAxis?.indicesInRange(columns.start, columns.end) ?? [])];
   const x = (column: number) =>
     GRID.rowHeaderWidth + (columnAxis?.offsetAt(column) ?? column * GRID.columnWidth) - scrollLeft;
   const y = (row: number) =>
@@ -175,12 +177,12 @@ function drawScrollableGrid(
         ])
       : '';
   const filtering = document?.personalView.settings.filters.some((f) => f.sheet_id === sheet?.id);
-  const geometry = `${document?.projection?.document_id ?? ''}/${sheet?.id ?? ''}/${JSON.stringify([sheet?.merges ?? [], sheet?.row_heights ?? [], sheet?.column_widths ?? [], sheet?.frozen_rows ?? 0, document?.pending.filter((op) => op.kind === 'axisSize' && op.sheet === sheet?.id).map((op) => op.id), resize && [resize.sheetId, resize.axisId, resize.axis, resize.size]])}/${filtering ? `${document?.personalView.revision}/${document?.projection?.version}/${document?.calculatedVersion}` : ''}/${width}/${height}/${scrollLeft}/${scrollTop}/${dpr}`;
+  const geometry = `${document?.projection?.document_id ?? ''}/${sheet?.id ?? ''}/${JSON.stringify([sheet?.merges ?? [], sheet?.row_heights ?? [], sheet?.column_widths ?? [], sheet?.frozen_rows ?? 0, sheet?.default_column_width, sheet?.hidden_rows, sheet?.hidden_columns, document?.pending.filter((op) => op.kind === 'axisSize' && op.sheet === sheet?.id).map((op) => op.id), resize && [resize.sheetId, resize.axisId, resize.axis, resize.size]])}/${filtering ? `${document?.personalView.revision}/${document?.projection?.version}/${document?.calculatedVersion}` : ''}/${width}/${height}/${scrollLeft}/${scrollTop}/${dpr}`;
   const cellSignatures = new Map<string, string>();
   const overflowSpans = new Map<string, number>();
   if (document?.sheet)
     for (const row of rowAxis!.indicesInRange(rows.start, rows.end))
-      for (let column = columns.start; column < columns.end; column++) {
+      for (const column of visibleColumns) {
         const position = { row, column };
         const key = `${row}/${column}`;
         const text = document.privacyVeilAt(position) ? '' : document.display(position),
@@ -355,7 +357,7 @@ function drawScrollableGrid(
     );
     context.clip();
     for (const row of rowAxis!.indicesInRange(rows.start, rows.end))
-      for (let column = columns.start; column < columns.end; column++) {
+      for (const column of visibleColumns) {
         context.fillStyle = colorCss(document.style({ row, column }).fill);
         context.fillRect(x(column), y(row), columnAxis!.sizeAt(column), rowAxis!.sizeAt(row));
       }
@@ -395,7 +397,7 @@ function drawScrollableGrid(
       context.lineTo(pixel(x(column)), pixel(y(row + 1)));
     }
   for (const row of [...(rowAxis?.indicesInRange(rows.start, rows.end) ?? []), rows.end])
-    for (let column = columns.start; column < columns.end; column++) {
+    for (const column of visibleColumns) {
       const merge = document?.mergeAt({
         row: Math.min(row, (sheet?.rows.length ?? 1) - 1),
         column,
@@ -453,7 +455,7 @@ function drawScrollableGrid(
       );
     }
     for (const row of rowAxis!.indicesInRange(rows.start, rows.end))
-      for (let column = columns.start; column < columns.end; column++) {
+      for (const column of visibleColumns) {
         const merge = document.mergeAt({ row, column });
         if (merge && (row !== merge.startRow || column !== merge.startColumn)) continue;
         const value = document.privacyVeilAt({ row, column })
@@ -494,7 +496,7 @@ function drawScrollableGrid(
           );
       }
     for (const row of rowAxis!.indicesInRange(rows.start, rows.end))
-      for (let column = columns.start; column < columns.end; column++) {
+      for (const column of visibleColumns) {
         const merge = document.mergeAt({ row, column });
         if (merge && (row !== merge.startRow || column !== merge.startColumn)) continue;
         drawCellBorders(
@@ -558,7 +560,7 @@ function drawScrollableGrid(
   context.textBaseline = 'middle';
   context.strokeStyle = '#dfe4dd';
   context.beginPath();
-  for (let column = columns.start; column < columns.end; column++) {
+  for (const column of visibleColumns) {
     const left = x(column);
     if (left < GRID.rowHeaderWidth) continue;
     const isWholeColumn =

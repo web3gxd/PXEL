@@ -350,7 +350,9 @@ impl CalculationProjection {
                 let changed = writes.iter().map(|write| write.address).collect();
                 return self.prepare_reconcile(book, &changed, limits);
             }
-            Operation::CreateWorkbook { .. } | Operation::AddSheet { .. } => {
+            Operation::CreateWorkbook { .. }
+            | Operation::AddSheet { .. }
+            | Operation::CopySheet { .. } => {
                 return Err(CalculationError::InvalidProjection);
             }
             // Axis changes replace the graph; the caller must rebuild from the new workbook.
@@ -370,6 +372,7 @@ impl CalculationProjection {
             | Operation::StyleWrite { .. }
             | Operation::StyleCompensation { .. }
             | Operation::AxisSizeWrite { .. }
+            | Operation::SheetSettingsWrite { .. }
             | Operation::FrozenRowsWrite { .. }
             | Operation::MergeWrite { .. } => {
                 return self.prepare_reconcile(book, &BTreeSet::new(), limits);

@@ -1491,6 +1491,9 @@ mod tests {
             let encoded = codec::encode_snapshot(&book, "engine-v1", "pxel-v1")?;
             let mut envelope = codec::v1::SnapshotEnvelope::decode(encoded.as_slice())?;
             envelope.snapshot_schema_version = 6;
+            for sheet in &mut envelope.sheets {
+                sheet.settings = None;
+            }
             let snapshot = envelope.encode_to_vec();
             assert_eq!(
                 codec::decode_snapshot(

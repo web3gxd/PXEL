@@ -70,7 +70,7 @@ test(
       const safe = await api(base, guest, shared + '/document');
       assert.equal(safe.status, 200);
       const projection = await safe.json();
-      assert.equal(projection.redacted_projection_schema_version, 1);
+      assert.equal(projection.redacted_projection_schema_version, 2);
       assert.equal(projection.privacy_revision, 1);
       assert.equal(projection.capabilities.anonymized, true);
       assert.equal(projection.capabilities.can_edit, false);

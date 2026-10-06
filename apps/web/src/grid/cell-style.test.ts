@@ -23,6 +23,20 @@ function context() {
   };
 }
 describe('visible cell formatting', () => {
+  it('renders explicit lines after row autofit even when automatic wrapping is off', () => {
+    const ctx = context();
+    drawCell(
+      ctx as unknown as CanvasRenderingContext2D,
+      DEFAULT_STYLE,
+      'one\ntwo\nthree',
+      0,
+      0,
+      112,
+      80,
+      false,
+    );
+    expect(ctx.fillText.mock.calls.map(([text]) => text)).toEqual(['one', 'two', 'three']);
+  });
   it('uses safe font, numeric alignment, explicit alignment and cell clipping', () => {
     const ctx = context(),
       style = { ...DEFAULT_STYLE, font_bold: true, font_color: [255, 0, 0] as const };

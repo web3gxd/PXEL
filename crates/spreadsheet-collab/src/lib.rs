@@ -2,6 +2,7 @@
 mod axis_history;
 mod bootstrap;
 pub mod calculation;
+mod cell_shift;
 #[cfg(test)]
 mod context_head_tests;
 #[cfg(test)]
@@ -1204,6 +1205,56 @@ fn normalize(
         },
     )?;
     let normalized = match &command.operation {
+        CommandPayload::ShiftCells {
+            source,
+            rows,
+            columns,
+            axis,
+            insert,
+        } => {
+            if command.base_version != workbook.version() {
+                return Err(SessionError::SourceVersionChanged);
+            }
+            let plan = cell_shift::plan_shift(workbook, *source, *rows, *columns, *axis, *insert)?;
+            Ok(Operation::CellBatchWrite {
+                intent: CellBatchIntent::ShiftCells {
+                    source: *source,
+                    rows: *rows,
+                    columns: *columns,
+                    axis: *axis,
+                    insert: *insert,
+                },
+                content_writes: plan.content_writes,
+                style_writes: plan.style_writes,
+                undoes: None,
+                undoes_version: None,
+            })
+        }
+        CommandPayload::SetSheetSettings { sheet, changes } => {
+            if command.base_version != workbook.version() {
+                return Err(SessionError::SourceVersionChanged);
+            }
+            Ok(spreadsheet_domain::sheet_settings::prepare(
+                workbook, *sheet, changes,
+            )?)
+        }
+        CommandPayload::CopySheet {
+            source,
+            sheet,
+            index,
+        } => {
+            if sheet.name.trim().is_empty() {
+                return Err(SessionError::InvalidCommand);
+            }
+            if command.base_version != workbook.version() {
+                return Err(SessionError::SourceVersionChanged);
+            }
+            Ok(Operation::CopySheet {
+                source: *source,
+                sheet: sheet.clone(),
+                index: *index,
+            })
+        }
         CommandPayload::SortRange { .. } => Err(SessionError::InvalidCommand),
         CommandPayload::AddSheet { sheet } => Ok(Operation::AddSheet {
             sheet: sheet.clone(),
@@ -1772,3 +1823,6 @@ fn normalize(
         Ok(normalized)
     }
 }
+
+#[cfg(test)]
+mod sheet_settings_tests;

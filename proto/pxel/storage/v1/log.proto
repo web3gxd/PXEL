@@ -45,6 +45,8 @@ message Operation {
   CellBatchWrite cell_batch_write = 26;
   MergeWrite merge_write = 27;
   FrozenRowsWrite frozen_rows_write = 28;
+  SheetSettingsWrite sheet_settings_write = 29;
+  CopySheet copy_sheet = 30;
  }
 }
 message AxisSizeWrite { bytes sheet_id = 1; repeated AxisSizeChange writes = 2; }
@@ -62,6 +64,7 @@ message CellBatchWrite {
  uint64 undoes_version = 4;
  CellBatchCopyIntent copy_intent = 5;
  CellBatchSortIntent sort_intent = 6;
+ ShiftCellsIntent shift_intent = 7;
 }
 message CellBatchSortIntent { SortRangeIntent range = 1; repeated bytes order = 2; }
 message SortRangeIntent { CellAddress source = 1; uint32 rows = 2; uint32 columns = 3; uint32 header_rows = 4; repeated SortKey keys = 5; }
@@ -305,3 +308,8 @@ enum ReferenceError {
  REFERENCE_ERROR_OUT_OF_BOUNDS = 2;
  REFERENCE_ERROR_MISSING_SHEET = 3;
 }
+
+message SheetSettings { bool hidden = 1; uint32 default_column_width = 2; optional uint32 tab_color = 3; repeated bytes hidden_rows = 4; repeated bytes hidden_columns = 5; }
+message SheetSettingsWrite { bytes sheet_id = 1; string previous_name = 2; string name = 3; SheetSettings previous = 4; SheetSettings settings = 5; uint32 previous_index = 6; uint32 index = 7; }
+message CopySheet { bytes source_sheet_id = 1; CreateWorkbook sheet = 2; uint32 index = 3; }
+message ShiftCellsIntent { CellAddress source = 1; uint32 rows = 2; uint32 columns = 3; uint32 axis_kind = 4; bool insert = 5; }

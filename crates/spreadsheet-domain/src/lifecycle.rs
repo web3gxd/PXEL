@@ -19,6 +19,19 @@ pub fn check_command_activation(book: &Workbook, command: &Command) -> Result<()
         Ok(())
     };
     match &command.operation {
+        CommandPayload::ShiftCells { source, .. } => {
+            address(*source)?;
+            floor = floor.max(book.last_axis_change_version());
+        }
+        CommandPayload::SetSheetSettings { changes, .. } => {
+            for (target, _) in &changes.visibility {
+                floor = floor.max(match target {
+                    AxisSizeTarget::Row(id) => book.row_activation_floor(*id),
+                    AxisSizeTarget::Column(id) => book.column_activation_floor(*id),
+                });
+            }
+        }
+        CommandPayload::CopySheet { .. } => {}
         CommandPayload::SortRange { range } => {
             let bounds = range.validate(book)?;
             let sheet = book

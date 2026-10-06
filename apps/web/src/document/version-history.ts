@@ -73,6 +73,8 @@ function record(v: unknown, keys: string[]): Record<string, unknown> {
 const types = new Set([
   'create_workbook',
   'add_sheet',
+  'sheet_settings',
+  'copy_sheet',
   'frozen_rows',
   'axis_size',
   'cell_write',

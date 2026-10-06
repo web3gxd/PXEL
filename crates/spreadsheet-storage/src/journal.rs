@@ -20,6 +20,8 @@ mod move_tests;
 #[cfg(test)]
 mod range_history_tests;
 #[cfg(test)]
+mod sheet_settings_tests;
+#[cfg(test)]
 mod sort_tests;
 mod style_guard;
 #[cfg(test)]
@@ -100,7 +102,7 @@ pub(crate) async fn verified_event_cached(
     keys: &mut crate::crypto::ReadKeyCache,
     row: StoredEventRow<'_>,
 ) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=38) {
+    if !matches!(row.schema_version, 1..=42) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -245,6 +247,8 @@ fn touched_addresses(
         | Operation::StyleWrite { .. }
         | Operation::StyleCompensation { .. }
         | Operation::AxisSizeWrite { .. }
+        | Operation::SheetSettingsWrite { .. }
+        | Operation::CopySheet { .. }
         | Operation::FrozenRowsWrite { .. }
         | Operation::MergeWrite { .. } => Vec::new(),
     }
@@ -676,7 +680,8 @@ async fn guard_undo_tail(
         ) || matches!(
             &event.operation,
             Operation::CellBatchWrite {
-                intent: spreadsheet_domain::workbook::CellBatchIntent::MoveRange { .. },
+                intent: spreadsheet_domain::workbook::CellBatchIntent::MoveRange { .. }
+                    | spreadsheet_domain::workbook::CellBatchIntent::ShiftCells { .. },
                 ..
             }
         );
@@ -696,7 +701,9 @@ async fn guard_undo_tail(
                     ..
                 } => movement_history.last() == Some(&(undoes, undoes_version)),
                 Operation::CellBatchWrite {
-                    intent: spreadsheet_domain::workbook::CellBatchIntent::MoveRange { .. },
+                    intent:
+                        spreadsheet_domain::workbook::CellBatchIntent::MoveRange { .. }
+                        | spreadsheet_domain::workbook::CellBatchIntent::ShiftCells { .. },
                     undoes: Some(undoes),
                     undoes_version: Some(undoes_version),
                     ..
@@ -976,6 +983,39 @@ impl OperationJournal for PgDatabase {
             return Err(JournalError::Corrupt);
         }
         let canonical_payload = match &e.operation {
+            Operation::SheetSettingsWrite { sheet, .. } => match &c.operation {
+                CommandPayload::SetSheetSettings { sheet: id, .. } if id == sheet => {
+                    c.operation.clone()
+                }
+                _ => return Err(JournalError::Corrupt),
+            },
+            Operation::CopySheet {
+                source,
+                sheet,
+                index,
+            } => CommandPayload::CopySheet {
+                source: *source,
+                sheet: sheet.clone(),
+                index: *index,
+            },
+            Operation::CellBatchWrite {
+                intent:
+                    CellBatchIntent::ShiftCells {
+                        source,
+                        rows,
+                        columns,
+                        axis,
+                        insert,
+                    },
+                undoes: None,
+                ..
+            } => CommandPayload::ShiftCells {
+                source: *source,
+                rows: *rows,
+                columns: *columns,
+                axis: *axis,
+                insert: *insert,
+            },
             Operation::FrozenRowsWrite { sheet, rows, .. } => {
                 let expected = CommandPayload::SetFrozenRows {
                     sheet: *sheet,
@@ -1318,10 +1358,45 @@ impl OperationJournal for PgDatabase {
         // Late copy/cut retries reuse receipts without rereading their sources.
         if matches!(
             c.operation,
-            CommandPayload::CopyRange { .. } | CommandPayload::MoveRange { .. }
+            CommandPayload::CopyRange { .. }
+                | CommandPayload::MoveRange { .. }
+                | CommandPayload::ShiftCells { .. }
+                | CommandPayload::CopySheet { .. }
+                | CommandPayload::SetSheetSettings { .. }
         ) && c.base_version != access.head
         {
             return Err(JournalError::Conflict);
+        }
+        if matches!(
+            e.operation,
+            Operation::SheetSettingsWrite { .. }
+                | Operation::CopySheet { .. }
+                | Operation::CellBatchWrite {
+                    intent: CellBatchIntent::ShiftCells { .. },
+                    ..
+                }
+        ) {
+            let projection = request
+                .inverse_projection
+                .as_deref()
+                .ok_or(JournalError::Corrupt)?;
+            axis_guard::verified_projection(self, &mut tx, c.document_id, access.head, projection)
+                .await?;
+            if let CommandPayload::SetSheetSettings { sheet, changes } = &c.operation
+                && spreadsheet_domain::sheet_settings::prepare(projection, *sheet, changes)
+                    .map_err(|_| JournalError::Corrupt)?
+                    != e.operation
+            {
+                return Err(JournalError::Corrupt);
+            }
+            if projection
+                .candidate(&e.operation, e.version)
+                .map_err(|_| JournalError::Corrupt)?
+                .hash()
+                != e.state_hash
+            {
+                return Err(JournalError::Corrupt);
+            }
         }
         let activation: i64 = sqlx::query_scalar!(
             "SELECT axis_activation_version FROM documents WHERE document_id=$1",
@@ -1443,7 +1518,8 @@ impl OperationJournal for PgDatabase {
                     || matches!(
                         &e.operation,
                         Operation::CellBatchWrite {
-                            intent: spreadsheet_domain::workbook::CellBatchIntent::MoveRange { .. },
+                            intent: spreadsheet_domain::workbook::CellBatchIntent::MoveRange { .. }
+                                | spreadsheet_domain::workbook::CellBatchIntent::ShiftCells { .. },
                             undoes: Some(_),
                             ..
                         }
@@ -1723,6 +1799,8 @@ impl PgDatabase {
                     && matches!(
                         event.operation,
                         Operation::AxisSizeWrite { .. }
+                            | Operation::SheetSettingsWrite { .. }
+                            | Operation::CopySheet { .. }
                             | Operation::FrozenRowsWrite { .. }
                             | Operation::CellBatchWrite {
                                 intent: CellBatchIntent::SetValues,

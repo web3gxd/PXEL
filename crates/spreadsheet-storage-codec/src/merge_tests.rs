@@ -105,7 +105,7 @@ fn snapshot_schema_six_preserves_merge_state() -> Result<(), Box<dyn std::error:
     )?;
     let encoded = encode_snapshot(&merged, "engine-v1", "profile-v1")?;
     let raw = v1::SnapshotEnvelope::decode(encoded.as_slice())?;
-    assert_eq!(raw.snapshot_schema_version, 7);
+    assert_eq!(raw.snapshot_schema_version, crate::SNAPSHOT_SCHEMA_VERSION);
     assert_eq!(raw.sheets[0].merges.len(), 1);
     let restored = crate::decode_snapshot(
         &encoded,

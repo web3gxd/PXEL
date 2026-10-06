@@ -45,11 +45,22 @@ pub struct Sheet {
     pub rows: u32,
     pub columns: u32,
     pub frozen_rows: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<SheetViewSettings>,
     pub cells: Vec<Cell>,
     pub styles: Vec<Style>,
     pub row_heights: Vec<Size>,
     pub column_widths: Vec<Size>,
     pub merges: Vec<Merge>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SheetViewSettings {
+    pub hidden: bool,
+    pub default_column_width: u32,
+    pub tab_color: Option<u32>,
+    pub hidden_rows: Vec<u32>,
+    pub hidden_columns: Vec<u32>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -215,7 +226,7 @@ pub fn decrypt(file: &[u8], secret: &str) -> Result<Book, FileError> {
             .map_err(|_| FileError::Authentication)?,
     );
     let book: Book = serde_json::from_slice(&plain).map_err(|_| FileError::Invalid)?;
-    if book.schema_version != 1 {
+    if !matches!(book.schema_version, 1 | 2) {
         return Err(FileError::Version);
     }
     Ok(book)

@@ -597,17 +597,24 @@ input[type='checkbox']:disabled {
 .modal-body > p {
   line-height: 1.6;
 }
-.modal-body > label:not(:has(input[type='checkbox'], input[type='radio'])) {
+.modal-body > form {
+  display: grid;
+  gap: 14px;
+}
+.modal-body > label:not(:has(input[type='checkbox'], input[type='radio'])),
+.modal-body > form > label:not(:has(input[type='checkbox'], input[type='radio'])) {
   display: grid;
   gap: 8px;
   margin: 16px 0;
   font-weight: 500;
 }
-.modal-body > label > :is(input:not([type='checkbox']):not([type='radio']), select) {
+.modal-body > label > :is(input:not([type='checkbox']):not([type='radio']), select),
+.modal-body > form > label > :is(input:not([type='checkbox']):not([type='radio']), select) {
   width: 100%;
   box-sizing: border-box;
 }
-.modal-body > label:has(input[type='checkbox'], input[type='radio']) {
+.modal-body > label:has(input[type='checkbox'], input[type='radio']),
+.modal-body > form > label:has(input[type='checkbox'], input[type='radio']) {
   display: flex;
   align-items: center;
   gap: 8px;

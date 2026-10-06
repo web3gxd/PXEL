@@ -334,8 +334,21 @@ pub enum RangeWriteKind {
     SetValues,
     Copy,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CellShiftAxis {
+    Row,
+    Column,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CellBatchIntent {
+    ShiftCells {
+        source: CellAddress,
+        rows: u32,
+        columns: u32,
+        axis: CellShiftAxis,
+        insert: bool,
+    },
     SetValues,
     SortRange {
         range: crate::sort::SortRange,
@@ -362,6 +375,18 @@ pub enum CellWriteKind {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
+    SheetSettingsWrite {
+        sheet: SheetId,
+        previous: SheetSettings,
+        settings: SheetSettings,
+        previous_index: u32,
+        index: u32,
+    },
+    CopySheet {
+        source: SheetId,
+        sheet: SheetSeed,
+        index: u32,
+    },
     FrozenRowsWrite {
         sheet: SheetId,
         rows: u32,
@@ -501,6 +526,22 @@ pub enum Operation {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum CommandPayload {
+    ShiftCells {
+        source: CellAddress,
+        rows: u32,
+        columns: u32,
+        axis: CellShiftAxis,
+        insert: bool,
+    },
+    SetSheetSettings {
+        sheet: SheetId,
+        changes: SheetSettingsPatch,
+    },
+    CopySheet {
+        source: SheetId,
+        sheet: SheetSeed,
+        index: u32,
+    },
     SortRange {
         range: crate::sort::SortRange,
     },
@@ -660,6 +701,7 @@ impl Operation {
             self,
             Self::CreateWorkbook { .. }
                 | Self::AddSheet { .. }
+                | Self::CopySheet { .. }
                 | Self::ExtendRows { .. }
                 | Self::InsertRows { .. }
                 | Self::InsertRowsRebased { .. }
@@ -695,6 +737,8 @@ pub struct CommittedEvent {
     pub state_hash: [u8; 32],
 }
 
+pub use crate::sheet_settings::{SheetSettings, SheetSettingsPatch};
+
 #[derive(Clone)]
 pub struct Sheet {
     pub(crate) id: SheetId,
@@ -709,6 +753,7 @@ pub struct Sheet {
     pub(crate) column_widths: BTreeMap<ColumnId, u32>,
     pub(crate) merges: BTreeSet<MergeRange>,
     pub(crate) frozen_rows: u32,
+    pub(crate) settings: SheetSettings,
 }
 
 /// Versioned storage codecs encode this authored image; calculated values are absent.
@@ -735,8 +780,12 @@ pub struct SnapshotSheetImage {
     pub column_widths: Vec<(ColumnId, u32)>,
     pub merges: Vec<MergeRange>,
     pub frozen_rows: u32,
+    pub settings: SheetSettings,
 }
 impl Sheet {
+    pub fn settings(&self) -> &SheetSettings {
+        &self.settings
+    }
     /// Requested top-row count; views clamp it to the current axis extent.
     pub const fn frozen_rows(&self) -> u32 {
         self.frozen_rows
@@ -900,6 +949,10 @@ impl Sheet {
             column_widths: BTreeMap::new(),
             merges: BTreeSet::new(),
             frozen_rows: 0,
+            settings: SheetSettings {
+                name: seed.name.clone(),
+                ..SheetSettings::default()
+            },
         })
     }
     pub(crate) fn validate_address(&self, address: CellAddress) -> Result<(), DomainError> {
@@ -986,6 +1039,17 @@ impl Sheet {
 
 fn validate_new_merge(sheet: &Sheet, range: MergeRange) -> Result<(), DomainError> {
     let (first_row, last_row, first_column, last_column) = sheet.merge_bounds(range)?;
+    if sheet.settings.hidden_rows.iter().any(|id| {
+        sheet
+            .row_position(*id)
+            .is_some_and(|p| (first_row..=last_row).contains(&p))
+    }) || sheet.settings.hidden_columns.iter().any(|id| {
+        sheet
+            .column_position(*id)
+            .is_some_and(|p| (first_column..=last_column).contains(&p))
+    }) {
+        return Err(DomainError::MergeConflict);
+    }
     let area = (u64::from(last_row - first_row + 1))
         .checked_mul(u64::from(last_column - first_column + 1))
         .ok_or(DomainError::LimitExceeded)?;
@@ -1184,6 +1248,7 @@ impl Workbook {
                         .collect(),
                     merges: sheet.merges.iter().copied().collect(),
                     frozen_rows: sheet.frozen_rows,
+                    settings: sheet.settings.clone(),
                 })
                 .collect(),
             retired_rows: self.retired_row_ids.iter().copied().collect(),
@@ -1262,6 +1327,11 @@ impl Workbook {
             .iter()
             .map(|sheet| (sheet.sheet.id, sheet.merges.clone()))
             .collect::<Vec<_>>();
+        let settings_entries = image
+            .sheets
+            .iter()
+            .map(|s| (s.sheet.id, s.settings.clone()))
+            .collect::<Vec<_>>();
         let frozen_entries = image
             .sheets
             .iter()
@@ -1301,7 +1371,6 @@ impl Workbook {
                 let target = AxisSizeTarget::Row(id);
                 if !sheet.row_positions.contains_key(&id)
                     || !crate::axis_size::valid_size(target, size)
-                    || size == crate::axis_size::DEFAULT_ROW_HEIGHT
                     || sheet.row_heights.insert(id, size).is_some()
                 {
                     return Err(DomainError::InvalidAxis);
@@ -1311,7 +1380,6 @@ impl Workbook {
                 let target = AxisSizeTarget::Column(id);
                 if !sheet.column_positions.contains_key(&id)
                     || !crate::axis_size::valid_size(target, size)
-                    || size == crate::axis_size::DEFAULT_COLUMN_WIDTH
                     || sheet.column_widths.insert(id, size).is_some()
                 {
                     return Err(DomainError::InvalidAxis);
@@ -1344,6 +1412,30 @@ impl Workbook {
                 .find(|s| s.id == sheet_id)
                 .ok_or(DomainError::MissingSheet)?;
             sheet.frozen_rows = rows;
+        }
+        let known_retired_rows: BTreeSet<_> = image.retired_rows.iter().copied().collect();
+        let known_retired_columns: BTreeSet<_> = image.retired_columns.iter().copied().collect();
+        for (id, settings) in settings_entries {
+            let target = workbook
+                .sheets
+                .iter_mut()
+                .find(|s| s.id == id)
+                .ok_or(DomainError::MissingSheet)?;
+            if settings.hidden_rows.iter().any(|id| {
+                !target.row_positions.contains_key(id) && !known_retired_rows.contains(id)
+            }) || settings.hidden_columns.iter().any(|id| {
+                !target.column_positions.contains_key(id) && !known_retired_columns.contains(id)
+            }) {
+                return Err(DomainError::InvalidAxis);
+            }
+            if target.name != settings.name {
+                return Err(DomainError::InvalidAxis);
+            }
+            crate::sheet_settings::validate(target, &settings)?;
+            target.settings = settings;
+        }
+        if workbook.sheets.iter().all(|s| s.settings.hidden) {
+            return Err(DomainError::InvalidAxis);
         }
         crate::style_write::validate_capacity(&workbook)?;
         if image.row_activation_floors.len() > MAX_RETIRED_ROWS
@@ -1561,6 +1653,12 @@ impl Workbook {
     ) -> Result<Self, DomainError> {
         if self.version.get().checked_add(1) != Some(next_version.get()) {
             return Err(DomainError::VersionConflict);
+        }
+        if matches!(
+            operation,
+            Operation::SheetSettingsWrite { .. } | Operation::CopySheet { .. }
+        ) {
+            return crate::sheet_settings::candidate(self, operation, next_version);
         }
         if let Operation::FrozenRowsWrite {
             sheet,
@@ -1932,6 +2030,26 @@ impl Workbook {
                     .filter(|n| *n <= text_limit)
                     .ok_or(DomainError::LimitExceeded)?;
             }
+            if let CellBatchIntent::ShiftCells {
+                source,
+                rows,
+                columns,
+                axis,
+                insert,
+            } = intent
+                && undoes.is_none()
+            {
+                crate::cell_shift::validate(
+                    self,
+                    *source,
+                    *rows,
+                    *columns,
+                    *axis,
+                    *insert,
+                    content_writes,
+                    style_writes,
+                )?;
+            }
             if let CellBatchIntent::SortRange { range, order } = intent {
                 let bounds = range.validate_order(self, order)?;
                 let sheet = self
@@ -2223,6 +2341,9 @@ impl Workbook {
         next.apply_operation(operation, budgets, next_version)?;
         next.version = next_version;
         if operation.changes_axes() {
+            for sheet in &next.sheets {
+                crate::sheet_settings::validate(sheet, &sheet.settings)?;
+            }
             next.last_axis_change_version = next_version;
         }
         if matches!(
@@ -2305,6 +2426,8 @@ impl Workbook {
                 | Operation::StyleWrite { .. }
                 | Operation::StyleCompensation { .. }
                 | Operation::AxisSizeWrite { .. }
+                | Operation::SheetSettingsWrite { .. }
+                | Operation::CopySheet { .. }
                 | Operation::FrozenRowsWrite { .. }
                 | Operation::MergeWrite { .. } => {
                     return Err(DomainError::InvalidAxis);
@@ -2865,6 +2988,8 @@ impl Workbook {
             | Operation::StyleWrite { .. }
             | Operation::StyleCompensation { .. }
             | Operation::AxisSizeWrite { .. }
+            | Operation::SheetSettingsWrite { .. }
+            | Operation::CopySheet { .. }
             | Operation::FrozenRowsWrite { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
@@ -3116,6 +3241,8 @@ impl Workbook {
             | Operation::StyleWrite { .. }
             | Operation::StyleCompensation { .. }
             | Operation::AxisSizeWrite { .. }
+            | Operation::SheetSettingsWrite { .. }
+            | Operation::CopySheet { .. }
             | Operation::FrozenRowsWrite { .. } => {
                 return Err(DomainError::InvalidAxis);
             }
@@ -3689,6 +3816,7 @@ impl Workbook {
                 }
             }
         }
+        crate::sheet_settings::hash(self, &mut hash);
         hash.finalize().into()
     }
 }

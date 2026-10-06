@@ -1,3 +1,4 @@
+import { cellsMenu } from '../ui/cells-menu';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { create, fromBinary } from '@bufbuild/protobuf';
 import type { PreviewCell, PreviewResult, Reply, Request } from '../calculation/protocol';
@@ -977,6 +978,314 @@ const projection = (): Projection => ({
   version: '1',
   state_hash: '0'.repeat(64),
   sheets: [{ id: sheetId, name: 'Лист 1', rows: [rowId], columns: [columnId], cells: [] }],
+});
+describe('durable Cells menu commands', () => {
+  const settingsProjection = (): Projection => ({
+    ...projection(),
+    authored_projection_schema_version: 8,
+    style_schema_version: 2,
+    style_profile_version: 2,
+    last_axis_change_version: '1',
+    retired_row_ids: [],
+    retired_column_ids: [],
+    row_activation_floors: [],
+    column_activation_floors: [],
+    sheets: [
+      {
+        ...projection().sheets[0]!,
+        rows: [rowId, uuidV7(), uuidV7()],
+        columns: [columnId, uuidV7(), uuidV7()],
+        styles: [],
+        merges: [],
+        row_heights: [],
+        column_widths: [],
+        frozen_rows: 0,
+        hidden: false,
+        hidden_rows: [],
+        hidden_columns: [],
+        default_column_width: 112,
+        tab_color: null,
+      },
+    ],
+  });
+  it('validates stable hidden IDs, default width, colour and the last visible sheet', () => {
+    const state = settingsProjection();
+    expect(decodeProjection(state)).toEqual(state);
+    for (const patch of [
+      { hidden_rows: [uuidV7()] },
+      { default_column_width: 23 },
+      { tab_color: 0x1000000 },
+      { hidden_rows: [rowId, rowId] },
+      { hidden: true },
+    ]) {
+      const broken = structuredClone(state);
+      Object.assign(broken.sheets[0]!, patch);
+      expect(() => decodeProjection(broken)).toThrow();
+    }
+  });
+  it('sends one settings intent and keeps confirmed metadata unchanged until ACK', async () => {
+    const { store, sent } = await connectedStore();
+    store.load(settingsProjection());
+    expect(store.renameSheet('Новый лист')).toBe(true);
+    expect(store.sheet?.name).toBe('Лист 1');
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing settings command');
+    expect(payload.value.sheetSettings).toMatchObject({ schemaVersion: 1, name: 'Новый лист' });
+    expect(store.renameSheet('Вторая правка')).toBe(false);
+    expect(store.pending).toHaveLength(1);
+    store.dispose();
+  });
+  it('does not enqueue unchanged settings and refuses invalid names or hiding all axes', async () => {
+    const { store, sent } = await connectedStore();
+    store.load(settingsProjection());
+    expect(store.renameSheet('Лист 1')).toBe(true);
+    expect(store.moveOrCopySheet(0, false)).toBe(true);
+    expect(store.setTabColor(null)).toBe(true);
+    expect(store.setDefaultColumnWidth(112)).toBe(true);
+    expect(store.pending).toHaveLength(0);
+    expect(store.renameSheet('bad/name')).toBe(false);
+    expect(store.renameSheet('bad\0name')).toBe(false);
+    expect(store.setSheetHidden(true)).toBe(false);
+    store.select({ row: 2, column: 0 }, true);
+    expect(store.setAxisVisibility('row', true)).toBe(false);
+    expect(sent).toHaveLength(0);
+    store.dispose();
+  });
+  it('preserves retired hidden identities without hiding live cells or sending stale targets', async () => {
+    const { store } = await connectedStore();
+    const state = settingsProjection(),
+      retired = uuidV7();
+    state.retired_row_ids = [retired];
+    state.sheets[0]!.hidden_rows = [retired];
+    expect(decodeProjection(state)).toEqual(state);
+    store.load(state);
+    expect(store.hiddenRows.size).toBe(0);
+    expect(store.setAxisVisibility('row', false)).toBe(true);
+    expect(store.pending).toHaveLength(0);
+    store.dispose();
+  });
+  it('copies only visible cells and refuses an internal rectangular copy across hidden axes', async () => {
+    const { store } = await connectedStore();
+    const state = settingsProjection(),
+      sheet = state.sheets[0]!;
+    sheet.hidden_rows = [sheet.rows[1]!];
+    sheet.hidden_columns = [sheet.columns[1]!];
+    sheet.cells = sheet.rows.flatMap((row, r) =>
+      sheet.columns.map((column, c) => ({
+        row_id: row,
+        column_id: column,
+        value: { type: 'text' as const, value: `${r}${c}` },
+      })),
+    );
+    store.load(state);
+    store.select({ row: 2, column: 2 }, true);
+    expect(store.copySelectionTsv()).toBe('00\t02\n20\t22');
+    expect(store.copyRangePayload()).toBeUndefined();
+    store.dispose();
+  });
+  it.each(['row', 'column'] as const)(
+    'shows large hidden %s sets in repeatable bounded commands',
+    async (axis) => {
+      const { store, sent } = await connectedStore();
+      const state = settingsProjection(),
+        sheet = state.sheets[0]!;
+      const ids = Array.from({ length: 1002 }, () => uuidV7());
+      if (axis === 'row') {
+        sheet.rows = ids;
+        sheet.hidden_rows = ids.slice(0, 1001);
+      } else {
+        sheet.columns = ids;
+        sheet.hidden_columns = ids.slice(0, 1001);
+      }
+      store.load(state);
+      const menu = cellsMenu(
+        store,
+        true,
+        () => {},
+        () => {},
+      );
+      const visibility = menu.actions
+        .find((action) => action.label === 'Форматировать')
+        ?.children?.find((action) => action.label === 'Видимость');
+      const show = visibility?.children?.find(
+        (action) =>
+          action.label ===
+          (axis === 'row' ? 'Показать 1000 скрытых строк' : 'Показать 1000 скрытых столбцов'),
+      );
+      expect(show?.disabled).toBe(false);
+      show?.run?.();
+      const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+      if (payload.case !== 'command') throw new Error('Missing visibility command');
+      expect(payload.value.sheetSettings?.visibility).toHaveLength(1000);
+      expect(payload.value.sheetSettings?.visibility.every((entry) => !entry.hidden)).toBe(true);
+      expect(axis === 'row' ? sheet.hidden_rows : sheet.hidden_columns).toHaveLength(1001);
+      store.dispose();
+    },
+  );
+  it('autofits selected columns in one command using displayed text and preserves confirmed widths', async () => {
+    const { store, sent } = await connectedStore();
+    const state = settingsProjection(),
+      sheet = state.sheets[0]!;
+    sheet.cells = [
+      {
+        row_id: sheet.rows[0]!,
+        column_id: sheet.columns[0]!,
+        value: { type: 'text', value: 'long text' },
+      },
+      { row_id: sheet.rows[0]!, column_id: sheet.columns[1]!, value: { type: 'text', value: 'x' } },
+    ];
+    store.load(state);
+    store.select({ row: 0, column: 1 }, true);
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        getContext: () => ({ measureText: (text: string) => ({ width: text.length * 8 }) }),
+      }),
+    });
+    expect(store.autoFit('column')).toBe(true);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing autofit command');
+    expect(payload.value.setAxisSizes?.writes.map((w) => w.sizeCssPx)).toEqual([86, 24]);
+    expect(sheetMetrics(store)?.columns.sizeAt(0)).toBe(86);
+    expect(sheetMetrics(store)?.columns.sizeAt(1)).toBe(24);
+    expect(sheet.column_widths).toEqual([]);
+    expect(store.projection?.version).toBe('1');
+    store.dispose();
+  });
+  it('autofit reads new confirmed websocket text before reload', async () => {
+    const { store, sent } = await connectedStore();
+    const sheet = store.sheet!;
+    expect(sheet.cells).toEqual([]);
+    store.confirmed.set(`${sheet.rows[0]}/${sheet.columns[0]}`, {
+      type: 'text',
+      value: 'long text',
+    });
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        getContext: () => ({ measureText: (text: string) => ({ width: text.length * 8 }) }),
+      }),
+    });
+    expect(store.autoFit('column')).toBe(true);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing autofit command');
+    expect(payload.value.setAxisSizes?.writes.map((write) => write.sizeCssPx)).toEqual([86]);
+    expect(sheet.cells).toEqual([]);
+    store.dispose();
+  });
+  it('autofit waits for results of a new confirmed websocket formula before reload', async () => {
+    const { store, sent } = await connectedStore();
+    const sheet = store.sheet!;
+    store.confirmed.set(`${sheet.rows[0]}/${sheet.columns[0]}`, {
+      type: 'formula',
+      value: { source: '=1' },
+    });
+    expect(store.autoFit('column')).toBe(false);
+    expect(sent).toHaveLength(0);
+    expect(store.error).toContain('расчёта формул');
+    store.dispose();
+  });
+  it('keeps the latest resize even when it returns to confirmed width and resets to sheet default', async () => {
+    const { store } = await connectedStore();
+    const state = settingsProjection(),
+      sheet = state.sheets[0]!;
+    sheet.default_column_width = 160;
+    sheet.column_widths = [{ axis_id: sheet.columns[0]!, size_css_px: 80 }];
+    store.load(state);
+    expect(store.setAxisSize('column', 0, 100)).toBe(true);
+    expect(store.setAxisSize('column', 0, 80)).toBe(true);
+    expect(store.pending).toHaveLength(2);
+    expect(store.axisSize('column', 0)).toBe(80);
+    expect(sheetMetrics(store)?.columns.sizeAt(0)).toBe(80);
+    expect(store.setAxisSize('column', 0, undefined)).toBe(true);
+    expect(store.axisSize('column', 0)).toBe(160);
+    expect(sheetMetrics(store)?.columns.sizeAt(0)).toBe(160);
+    expect(sheet.column_widths[0]?.size_css_px).toBe(80);
+    store.dispose();
+  });
+  it('blocks autofill for live hidden axes while retired hidden memberships stay inert', async () => {
+    const { store } = await connectedStore();
+    const state = settingsProjection(),
+      sheet = state.sheets[0]!,
+      retired = uuidV7();
+    state.retired_row_ids = [retired];
+    sheet.hidden_rows = [retired];
+    store.load(state);
+    expect(store.canAutofill).toBe(true);
+    sheet.hidden_columns = [sheet.columns[1]!];
+    store.load(structuredClone(state));
+    expect(store.canAutofill).toBe(false);
+    store.dispose();
+  });
+  it('autofit keeps hidden axes and merged geometry unchanged', async () => {
+    const { store, sent } = await connectedStore();
+    const state = settingsProjection(),
+      sheet = state.sheets[0]!;
+    sheet.hidden_columns = [sheet.columns[1]!];
+    sheet.merges = [
+      {
+        first_row_id: sheet.rows[0]!,
+        last_row_id: sheet.rows[1]!,
+        first_column_id: sheet.columns[0]!,
+        last_column_id: sheet.columns[0]!,
+      },
+    ];
+    store.load(state);
+    store.select({ row: 0, column: 2 }, true);
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        getContext: () => ({ measureText: (text: string) => ({ width: text.length * 8 }) }),
+      }),
+    });
+    expect(store.autoFit('column')).toBe(true);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing autofit command');
+    expect(payload.value.setAxisSizes?.writes.map((w) => bytesUuid(w.axisId))).toEqual([
+      sheet.columns[2],
+    ]);
+    store.dispose();
+  });
+  it('hides selected stable rows and retains filter and sheet hidden identities separately', async () => {
+    const { store, sent } = await connectedStore();
+    const state = settingsProjection();
+    state.sheets[0]!.hidden_columns = [state.sheets[0]!.columns[1]!];
+    store.load(state);
+    store.select({ row: 1, column: 0 }, true);
+    expect(store.setAxisVisibility('row', true)).toBe(true);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing visibility command');
+    expect(payload.value.sheetSettings?.visibility).toHaveLength(2);
+    expect(store.hiddenColumns.has(1)).toBe(true);
+    expect(store.hiddenRows.size).toBe(0);
+    store.dispose();
+  });
+  it('reveals hidden sheets by switching to the first visible sheet after refresh', () => {
+    const store = new DocumentStore();
+    const state = settingsProjection();
+    store.load(state);
+    const next = structuredClone(state);
+    next.sheets.push({
+      ...next.sheets[0]!,
+      id: uuidV7(),
+      name: 'Другой',
+      rows: [uuidV7()],
+      columns: [uuidV7()],
+    });
+    next.sheets[0]!.hidden = true;
+    store.load(next);
+    expect(store.sheet?.name).toBe('Другой');
+    expect(store.selectSheet(state.sheets[0]!.id)).toBe(false);
+    store.dispose();
+  });
+  it('copies a sheet with new IDs in one command without creating an optimistic tab', async () => {
+    const { store, sent } = await connectedStore();
+    store.load(settingsProjection());
+    expect(store.moveOrCopySheet(1, true, 'Копия')).toBe(true);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing copy command');
+    expect(payload.value.copySheet?.sheet?.rows).toHaveLength(3);
+    expect(bytesUuid(payload.value.copySheet!.sheet!.rows[0]!)).not.toBe(rowId);
+    expect(store.projection?.sheets).toHaveLength(1);
+    store.dispose();
+  });
 });
 it('validates the complete persisted context before preview initialization', () => {
   const valid = { ...projection(), version: '2', calculation_context: previewContext(rowId, '2') };
