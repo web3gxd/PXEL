@@ -79,6 +79,7 @@ fn range_copy_freezes_values_and_replaces_full_destination_style_atomically()
             destination,
             rows: 1,
             columns: 1,
+            repeat: None,
         },
     };
     let operation = normalize(&command, &book, &axis_history::AxisHistory::new(&book))?;

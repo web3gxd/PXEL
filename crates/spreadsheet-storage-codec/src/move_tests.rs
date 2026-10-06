@@ -247,8 +247,19 @@ fn move_command_fingerprint_is_distinct_and_binds_each_geometry_field() -> TestR
         destination: *destination,
         rows: *rows,
         columns: *columns,
+        repeat: None,
     };
     assert_ne!(command_fingerprint(&copy)?, original);
+    let ordinary = command_fingerprint(&copy)?;
+    if let CommandPayload::CopyRange { repeat, .. } = &mut copy.operation {
+        *repeat = Some((2, 2));
+    }
+    let repeated = command_fingerprint(&copy)?;
+    assert_ne!(ordinary, repeated);
+    if let CommandPayload::CopyRange { repeat, .. } = &mut copy.operation {
+        *repeat = Some((4, 2));
+    }
+    assert_ne!(repeated, command_fingerprint(&copy)?);
     for mutation in 0..4 {
         let mut changed = command.clone();
         if let CommandPayload::MoveRange {

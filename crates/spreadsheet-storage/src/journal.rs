@@ -1085,6 +1085,7 @@ impl OperationJournal for PgDatabase {
                     destination: command_destination,
                     rows: command_rows,
                     columns: command_columns,
+                    repeat: None,
                 } if source == command_source
                     && destination == command_destination
                     && rows == command_rows

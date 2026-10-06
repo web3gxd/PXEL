@@ -11,6 +11,8 @@ mod historical_recovery_tests;
 #[cfg(test)]
 mod move_style_tests;
 #[cfg(test)]
+mod repeat_range_tests;
+#[cfg(test)]
 mod watch_tests;
 use calculation::{CalculatedState, CalculationHandle};
 use spreadsheet_application::journal::{
@@ -1413,12 +1415,23 @@ fn normalize(
             destination,
             rows,
             columns,
+            repeat,
         } => {
             if command.base_version != workbook.version() {
                 return Err(SessionError::SourceVersionChanged);
             }
-            let count = rows
-                .checked_mul(*columns)
+            let (destination_rows, destination_columns) = repeat.unwrap_or((*rows, *columns));
+            if *rows == 0
+                || *columns == 0
+                || destination_rows == 0
+                || destination_columns == 0
+                || destination_rows % rows != 0
+                || destination_columns % columns != 0
+            {
+                return Err(SessionError::InvalidCommand);
+            }
+            let count = destination_rows
+                .checked_mul(destination_columns)
                 .ok_or(SessionError::InvalidCommand)?;
             if count == 0 || count > 1_000 || source.sheet != destination.sheet {
                 return Err(SessionError::InvalidCommand);
@@ -1442,13 +1455,13 @@ fn normalize(
                 .ok_or(DomainError::MissingColumn)?;
             let mut content_writes = Vec::with_capacity(count as usize);
             let mut style_writes = Vec::with_capacity(count as usize);
-            for row_offset in 0..*rows {
-                for column_offset in 0..*columns {
+            for row_offset in 0..destination_rows {
+                for column_offset in 0..destination_columns {
                     let sr = source_row
-                        .checked_add(row_offset)
+                        .checked_add(row_offset % rows)
                         .ok_or(SessionError::InvalidCommand)?;
                     let sc = source_column
-                        .checked_add(column_offset)
+                        .checked_add(column_offset % columns)
                         .ok_or(SessionError::InvalidCommand)?;
                     let dr = destination_row
                         .checked_add(row_offset)
@@ -1545,6 +1558,14 @@ fn normalize(
                             .collect(),
                     });
                 }
+            }
+            if repeat.is_some() {
+                return Ok(Operation::RangeWrite {
+                    kind: Some(spreadsheet_domain::workbook::RangeWriteKind::Copy),
+                    writes: content_writes,
+                    undoes: None,
+                    undoes_version: None,
+                });
             }
             style_writes.sort_by_key(|write| write.address);
             Ok(Operation::CellBatchWrite {

@@ -185,6 +185,8 @@ message DocumentCommand {
   SetMergeRangeCommand set_merge_range = 15;
   SetFrozenRowsCommand set_frozen_rows = 16;
   SortRangeCommand sort_range = 17;
+  // Separate intent so older servers reject repetition instead of copying once.
+  RepeatRangeCommand repeat_range = 18;
 }
 
 message MergeRange {
@@ -338,6 +340,12 @@ message CopyRangeCommand {
   CellAddress destination = 2;
   uint32 rows = 3;
   uint32 columns = 4;
+}
+
+message RepeatRangeCommand {
+  CopyRangeCommand source_block = 1;
+  uint32 destination_rows = 2;
+  uint32 destination_columns = 3;
 }
 
 message SetCellFormulaCommand {

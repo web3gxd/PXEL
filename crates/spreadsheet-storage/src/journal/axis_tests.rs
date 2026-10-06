@@ -645,6 +645,7 @@ async fn axis_history_stale_copy_with_revived_interior_is_rejected(
             destination,
             rows: 5,
             columns: 1,
+            repeat: None,
         },
     )
     .await?;

@@ -208,7 +208,7 @@ test('deleting a styled row preserves its styles through durable undo, reload, a
   );
   const deleted = await committed(
     page,
-    () => page.locator('button[title="Удалить выделенную строку"]').click(),
+    async () => (await editorButton(page, 'Строка −')).click(),
     20_000,
   );
   expect(deleted.sheets[0]?.styles).toEqual([]);

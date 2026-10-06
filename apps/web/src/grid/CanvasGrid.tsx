@@ -650,6 +650,17 @@ export function CanvasGrid({
             event.nativeEvent.isComposing
           )
             return;
+          if (
+            (event.ctrlKey || event.metaKey) &&
+            !event.altKey &&
+            !event.shiftKey &&
+            (event.code === 'KeyD' || event.key.toLowerCase() === 'd') &&
+            !document.editing
+          ) {
+            event.preventDefault();
+            document.fillDown();
+            return;
+          }
           if (commands?.handle(event.nativeEvent, 'grid')) {
             event.stopPropagation();
             return;
@@ -812,7 +823,7 @@ export function CanvasGrid({
         )}
       <p id="grid-description" className="sr-only">
         {document?.sheet
-          ? 'Стрелки и Tab перемещают выделение. Shift со стрелками выделяет диапазон, Ctrl+C и Ctrl+V копируют и вставляют значения. Ctrl+X подготавливает перемещение в пределах листа; исходные ячейки меняются после подтверждения сервера. Ctrl+Z отменяет последнюю сохраненную правку, включая перемещение; Ctrl+Y повторяет её. F2 или двойной щелчок открывают редактор. Enter сохраняет, Escape отменяет ввод.'
+          ? 'Стрелки и Tab перемещают выделение. Shift со стрелками выделяет диапазон, Ctrl+C и Ctrl+V копируют и вставляют значения. Ctrl+D заполняет выделение вниз из его верхней строки. Ctrl+X подготавливает перемещение в пределах листа; исходные ячейки меняются после подтверждения сервера. Ctrl+Z отменяет последнюю сохраненную правку, включая перемещение; Ctrl+Y повторяет её. F2 или двойной щелчок открывают редактор. Enter сохраняет, Escape отменяет ввод.'
           : 'Пустой лист: 1000 строк и 26 столбцов. Режим просмотра. Для прокрутки используйте клавиши со стрелками или Page Down. Создайте таблицу для редактирования.'}
       </p>
       {!canvasAvailable && (

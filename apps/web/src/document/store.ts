@@ -3244,7 +3244,11 @@ export class DocumentStore {
       columns,
     });
   }
-  pasteRangeCopy(raw: string, position: Position = this.pasteOrigin) {
+  pasteRangeCopy(
+    raw: string,
+    position: Position = this.pasteOrigin,
+    destinationExtent?: { rows: number; columns: number },
+  ) {
     if (!this.canEdit) return false;
     const projection = this.projection,
       sheet = this.sheet,
@@ -3287,13 +3291,34 @@ export class DocumentStore {
       sourceColumn = sheet.columns.indexOf(copy.column_id);
     const rows = copy.rows as number,
       columns = copy.columns as number;
+    const extent = destinationExtent ?? this.pasteExtent(rows, columns, position);
+    if (
+      !extent ||
+      !Number.isInteger(extent.rows) ||
+      !Number.isInteger(extent.columns) ||
+      extent.rows < 1 ||
+      extent.columns < 1 ||
+      extent.rows % rows ||
+      extent.columns % columns ||
+      extent.rows * extent.columns > 1000
+    ) {
+      if (extent) {
+        this.error = 'Размер диапазона заполнения недопустим или превышает лимит 1000 ячеек.';
+        this.notify();
+      }
+      return false;
+    }
     if (
       sourceRow < 0 ||
       sourceColumn < 0 ||
       sourceRow + rows > sheet.rows.length ||
       sourceColumn + columns > sheet.columns.length ||
-      position.row + rows > sheet.rows.length ||
-      position.column + columns > sheet.columns.length
+      !Number.isInteger(position.row) ||
+      !Number.isInteger(position.column) ||
+      position.row < 0 ||
+      position.column < 0 ||
+      position.row + extent.rows > sheet.rows.length ||
+      position.column + extent.columns > sheet.columns.length
     ) {
       this.error = 'Диапазон выходит за границы листа.';
       this.notify();
@@ -3302,6 +3327,20 @@ export class DocumentStore {
     const destinationRow = sheet.rows[position.row],
       destinationColumn = sheet.columns[position.column];
     if (!destinationRow || !destinationColumn) return false;
+    const copyRange = {
+      source: {
+        sheetId: uuidBytes(sheet.id),
+        rowId: uuidBytes(copy.row_id),
+        columnId: uuidBytes(copy.column_id),
+      },
+      destination: {
+        sheetId: uuidBytes(sheet.id),
+        rowId: uuidBytes(destinationRow),
+        columnId: uuidBytes(destinationColumn),
+      },
+      rows,
+      columns,
+    };
     const id = uuidV7();
     const bytes = toBinary(
       ClientEnvelopeSchema,
@@ -3315,20 +3354,17 @@ export class DocumentStore {
             actorId: actor,
             baseVersion: BigInt(projection.version),
             clientSequence: ++this.sequence,
-            copyRange: {
-              source: {
-                sheetId: uuidBytes(sheet.id),
-                rowId: uuidBytes(copy.row_id),
-                columnId: uuidBytes(copy.column_id),
-              },
-              destination: {
-                sheetId: uuidBytes(sheet.id),
-                rowId: uuidBytes(destinationRow),
-                columnId: uuidBytes(destinationColumn),
-              },
-              rows,
-              columns,
-            },
+            ...(destinationExtent === undefined &&
+            extent.rows === rows &&
+            extent.columns === columns
+              ? { copyRange }
+              : {
+                  repeatRange: {
+                    sourceBlock: copyRange,
+                    destinationRows: extent.rows,
+                    destinationColumns: extent.columns,
+                  },
+                }),
           },
         },
       }),
@@ -3340,7 +3376,7 @@ export class DocumentStore {
     this.flush();
     return true;
   }
-  async pasteFormulaCopy(raw: string, position: Position = this.selected) {
+  async pasteFormulaCopy(raw: string, position: Position = this.pasteOrigin) {
     if (!this.canEdit) return false;
     const projection = this.projection;
     if (!projection || byteLength(raw) > 64 * 1024 || this.formulaCopyInFlight) return false;
@@ -3375,6 +3411,23 @@ export class DocumentStore {
     }
     const row = this.sheet.rows[position.row],
       column = this.sheet.columns[position.column];
+    const extent = this.pasteExtent(1, 1, position);
+    if (!extent) return false;
+    if (extent.rows * extent.columns > 1) {
+      return this.pasteRangeCopy(
+        JSON.stringify({
+          schema_version: 1,
+          document_id: projection.document_id,
+          version: projection.version,
+          sheet_id: this.sheet.id,
+          row_id: this.sheet.rows[copy.from_row as number],
+          column_id: this.sheet.columns[copy.from_column as number],
+          rows: 1,
+          columns: 1,
+        }),
+        position,
+      );
+    }
     this.formulaCopyInFlight = true;
     try {
       const source = await copyFormulaInWorker({
@@ -3402,7 +3455,32 @@ export class DocumentStore {
       this.formulaCopyInFlight = false;
     }
   }
-  pasteTsv(text: string, position: Position = this.selected, preserveTrailingBlank = false) {
+  fillDown() {
+    const sheet = this.sheet,
+      projection = this.projection;
+    if (!sheet || !projection || this.editing || this.pending.length) return false;
+    const { startRow, endRow, startColumn, endColumn } = this.selectionBounds;
+    const singleRow = endRow === startRow;
+    if (singleRow && startRow === 0) return false;
+    const sourceRow = singleRow ? startRow - 1 : startRow;
+    const destinationRow = singleRow ? startRow : startRow + 1;
+    const columns = endColumn - startColumn + 1;
+    return this.pasteRangeCopy(
+      JSON.stringify({
+        schema_version: 1,
+        document_id: projection.document_id,
+        version: projection.version,
+        sheet_id: sheet.id,
+        row_id: sheet.rows[sourceRow],
+        column_id: sheet.columns[startColumn],
+        rows: 1,
+        columns,
+      }),
+      { row: destinationRow, column: startColumn },
+      { rows: endRow - destinationRow + 1, columns },
+    );
+  }
+  pasteTsv(text: string, position: Position = this.pasteOrigin, preserveTrailingBlank = false) {
     if (!this.canEdit) return false;
     try {
       return this.pasteMatrix(parseDelimited(text, '\t', preserveTrailingBlank), position);
@@ -3414,7 +3492,7 @@ export class DocumentStore {
   }
   pasteMatrix(
     rows: CellMatrix,
-    position: Position = this.selected,
+    position: Position = this.pasteOrigin,
     literal = false,
     alignment: readonly (string | null)[] = [],
   ) {
@@ -3423,6 +3501,33 @@ export class DocumentStore {
       projection = this.projection,
       actor = this.actor;
     if (!sheet || !projection || !actor) return false;
+    if (
+      !Number.isInteger(position.row) ||
+      !Number.isInteger(position.column) ||
+      position.row < 0 ||
+      position.column < 0 ||
+      rows.length === 0
+    )
+      return false;
+    const sourceCount = rows.reduce((count, row) => count + row.length, 0);
+    if (sourceCount > 1000) {
+      this.error = 'Диапазон вставки превышает лимит 1000 ячеек.';
+      this.notify();
+      return false;
+    }
+    const width = Math.max(...rows.map((row) => row.length));
+    if (width === 0) return false;
+    const extent = this.pasteExtent(rows.length, width, position);
+    if (!extent) return false;
+    if (extent.rows !== rows.length || extent.columns !== width) {
+      const source = rows;
+      rows = Array.from({ length: extent.rows }, (_, row) =>
+        Array.from(
+          { length: extent.columns },
+          (_, column) => source[row % source.length]?.[column % width] ?? '',
+        ),
+      );
+    }
     const count = rows.reduce((total, row) => total + row.length, 0);
     if (
       count < 1 ||
@@ -3485,7 +3590,7 @@ export class DocumentStore {
             }),
           }),
         );
-        const horizontal = alignment[c];
+        const horizontal = alignment[c % width];
         if (horizontal === 'left' || horizontal === 'center' || horizontal === 'right') {
           const changes: StyleChange[] = [{ property: 'horizontal', value: horizontal }];
           optimisticStyles.push({ row, column, changes });
@@ -3540,6 +3645,28 @@ export class DocumentStore {
     this.notify();
     this.flush();
     return true;
+  }
+  private pasteExtent(rows: number, columns: number, position: Position) {
+    const bounds = this.selectionBounds;
+    const selectedRows = bounds.endRow - bounds.startRow + 1;
+    const selectedColumns = bounds.endColumn - bounds.startColumn + 1;
+    if (
+      position.row !== bounds.startRow ||
+      position.column !== bounds.startColumn ||
+      selectedRows * selectedColumns === 1
+    )
+      return { rows, columns };
+    if (selectedRows % rows !== 0 || selectedColumns % columns !== 0) {
+      this.error = 'Размер выделения должен быть кратен размеру вставляемого блока.';
+      this.notify();
+      return undefined;
+    }
+    if (selectedRows * selectedColumns > 1000) {
+      this.error = 'Диапазон вставки превышает лимит 1000 ячеек.';
+      this.notify();
+      return undefined;
+    }
+    return { rows: selectedRows, columns: selectedColumns };
   }
   addSheet() {
     if (!this.canEdit) return false;

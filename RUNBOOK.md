@@ -1,3 +1,55 @@
+## 2026-10-06 — слияние feat/one и feat/two в main
+
+После отдельного `2af11e2 chore: git setup` создан backup/pre-merge-20261006-142752.
+feat/one включена merge-коммитом d3ec656; feat/two объединена второй по порядку.
+Первое слияние включило ранее отдельно сохранённый базовый снимок и фикс ПД.
+Remote не добавлялся; push и переписывание истории не выполнялись.
+
+Конфликты RUNBOOK, store, grid, collab, wire schema и generated artifacts разрешены
+с сохранением обеих фич. Store сохраняет canEdit/ПД guards, quoted TSV parser,
+Markdown literal/alignment и повторение выделения после разбора. Выравнивание
+Markdown повторяется по исходным столбцам. Grid сохраняет focus/IME и общий
+command handler вместе с Ctrl+D. Обычный CopyRange переносит sparse стили;
+RepeatRange сохраняет оформление назначения и формирует guarded RangeWrite(Copy).
+Явный fill extent использует RepeatRange даже для одной строки. Новые repeat: None
+в styled copy tests и storage guards сохраняют прежний обычный CopyRange контракт.
+
+Поля wire 13–17 уже заняты: RepeatRange перенесён с конфликтующего 13 на 18.
+TypeScript и descriptor пересозданы pinned генератором. Persisted schemas,
+миграции и legacy fingerprint None не изменены. ADR о fill перенумерован
+из конфликтующего ADR-089 в ADR-118; решения по reconciliation добавлены туда.
+
+Финальные проверки: pnpm install --frozen-lockfile; nextest --locked workspace
+all-features с двумя потоками — 705/705, 17 intentional skipped, 365.145 s.
+Адресные collab repeat tests — 4/4, включая сохранение стиля назначения.
+Frontend Vitest — 276/276; новые merge regressions проверяют quoted TSV,
+Markdown literal/alignment и one-cell RepeatRange. All-features workspace
+Clippy/all-targets -D warnings, ESLint, TypeScript, web production build,
+proto:check, pinned WASM generation, Rust fmt, адресный Prettier и diff check PASS.
+Сохраняется прежнее Vite chunk >500 kB warning.
+
+Полный первоначальный cargo test не оставил финального результата после
+прерывания сессии; успешным он не считается. Первый server build упёрся в
+Windows executable, занятый существующим dev-сервисом. Проверочная сборка
+сделана отдельно в ignored .local/target-git-merge. TypeScript check во время
+пересоздания WASM увидел отсутствующие generated files; последовательный повтор
+после генерации прошёл. Исходная acceptance DB имеет checksum mismatch миграции
+202610020011; её метаданные/миграции не исправлялись. Browser fixture использует
+отдельную новую БД на том же локальном PostgreSQL и порты 18080/15173; созданная
+тестовая БД удалена, проверочные процессы остановлены. Dev 8080/5173 сохранён.
+
+Расширенный Chromium privacy/range-fill/styles DPR1/DPR2: 41/48 за 9.7 min.
+Все 18 privacy и остальные 18 style cases прошли на финальном product-коде.
+Падения нового range suite: старый create-book/Undo helper, отсутствие ожидания
+asynchronous clipboard и готового HTML formula payload. Старый styles case
+искал удалённую toolbar кнопку вместо Ячейки/Удалить. Helpers исправлены;
+проверки версий, формул, стилей, reload, Undo/Redo не ослаблены. Изменение test
+fixtures во время первого прогона не делает его единым финальным green run.
+Финальный последовательный repeat всего range-fill + удаления styled row:
+12/12 DPR1/DPR2 за 2.1 min, retries disabled; JS/console assertions PASS.
+Единый 48/48 прогон после последних test corrections не повторялся. Снимок
+.local/git-merge-fill.png просмотрен; логи — ignored .local/git-merge-*.
+Linux/Compose/remote CI, production deployment и NVDA остаются открытыми gates.
 ## 2026-10-06 — локальная настройка Git перед слиянием
 
 Корень Git проверен: C:/projects/PXEL. Существующая main сохранена; remote нет.
@@ -12,6 +64,75 @@ URL-совпадения — тестовые literals и интерполяци
 не доказательство отсутствия любых секретов. Локальные ключи/credentials стенда
 остаются в ignored .local. История не переписывалась; remote/push не выполнялись.
 # PXEL — RUNBOOK
+
+## 2026-10-06 — вставка во всё выделение и Ctrl+D
+
+Ветка `feat/two`, отдельный worktree ae91. Перед изменением изучены RUNBOOK,
+roadmap, ADR-079/087 и текущие clipboard/history контракты. Параллельный фикс
+режима ПД из другого worktree не реализовывался и не переносился сюда.
+
+Вставка использует нормализованный верхний левый угол: скаляр заполняет всё
+выделение, блок повторяется при кратных размерах; несовместимое выделение
+отклоняется целиком. Ctrl+D/Cmd+D копирует верхнюю строку вниз, включая пустые
+ячейки и формулы с относительными/абсолютными ссылками. Для одной выбранной
+строки источник — строка выше; на первой строке это no-op. Ввод в редакторе и
+pending команды не запускают fill down. Оформление остаётся независимым.
+
+ADR-089 описывает отдельный wire RepeatRangeCommand, optional repeat extent
+в CopyRange intent и receipt fingerprint. Старый сервер отклоняет неизвестный
+intent вместо частичной копии. Сервер читает замороженный источник, формирует
+один существующий guarded RangeWrite с preimages и использует прежние candidate,
+CAS, durable commit и Undo/Redo. Persisted codecs/snapshots и схема БД не менялись.
+
+Общие product-файлы изменены только для этой задачи:
+
+- `apps/web/src/document/store.ts`: геометрия вставки/повторения и fillDown.
+- `apps/web/src/grid/CanvasGrid.tsx`: Ctrl+D и описание клавиатурного действия.
+- `apps/server/src/documents.rs`: декодирование/валидация нового intent.
+- `crates/spreadsheet-domain/src/workbook.rs`: optional repeat extent.
+- `crates/spreadsheet-collab/src/lib.rs`: нормализация повторений из original head.
+- `crates/spreadsheet-storage-codec/src/lib.rs`: fingerprint полного intent.
+- `proto/pxel/wire/v1/session.proto`, `proto/wire-descriptor.bin` и
+  `apps/web/src/generated/pxel/wire/v1/session_pb.ts`: additive wire command
+  и закреплённая генерация. Legacy fingerprints и persisted schemas сохранены.
+
+Дополнены отдельные frontend/browser/native/wire/codec тесты; существующий
+axis-history тест получил `repeat: None`. Роутинг, конфиги, lockfiles, зависимости,
+Cargo manifests, SQL/migrations и файлы режима ПД не менялись.
+
+Фактические проверки: `pnpm test` — 181/181; `pnpm typecheck`, `pnpm lint`,
+`pnpm build`, `pnpm proto:check` — PASS. Native `cargo test --locked` для
+spreadsheet-collab (32 PASS, 2 прежних timing tests ignored),
+spreadsheet-storage-codec (56 PASS) и pxel-server (21 unit + 3 CLI PASS).
+`cargo clippy --locked -p pxel-server -p spreadsheet-collab
+-p spreadsheet-storage-codec --all-targets -- -D warnings` — PASS.
+WASM собран pinned wasm-bindgen 0.2.129; Rust fmt и git diff check — PASS.
+
+Настоящий Chromium и отдельный приватный PostgreSQL проверены через
+игнорируемый `.local/verify-range-fill.mjs`: финальные 16/16 при DPR1/2
+(5 новых сценариев + 3 прежних clipboard/copy сценария на каждом DPR),
+23.9 s. У новых сценариев нет pageerror/console error. Проверены одна версия
+на вставку/fill, сохранение после reload, discovered Undo/Redo, blank clearing,
+formula reference shifts и mixed two-dimensional tiling. Скриншот
+`.local/range-fill.png` просмотрен. Стенд остановлен; другие worktrees и
+основной dev-сервис не перезапускались.
+
+Первоначальные два frontend regression tests реально были RED. Начальные
+неудачные native прогоны: неверное имя Operation в новом тесте исправлено;
+server auth test требует DATABASE_URL — повтор с prerequisite PASS.
+После non-dev cargo test пришлось заново собрать dev-auth binary перед
+браузером. Расширенный браузерный прогон выявил слишком ранние клавиши после
+reload в новом тесте; добавлено ожидание загруженной A1. Single-cell fill test
+исправлен на явный переход вниз: Enter в formula bar сохраняет текущую ячейку.
+Ни одно production assertion не ослаблено.
+
+Общий `pnpm format:check` сохраняет две прежние ошибки: RUNBOOK.md и
+crates/spreadsheet-wasm/fixtures/styles-v4.json. Оба исходных файла из HEAD
+отдельно проверены Prettier и воспроизводят те же ошибки. Массовое
+переформатирование не выполнялось для минимизации конфликтов; адресная проверка
+изменённого кода/нового ADR выполняется перед commit. Полный workspace/150-case
+browser suite, crash restart, Linux/Compose/remote CI и production deployment
+в этом срезе не заявляются пройденными.
 
 ## 2026-10-06 — исправление сброса локальной маски ПД и редактирования
 

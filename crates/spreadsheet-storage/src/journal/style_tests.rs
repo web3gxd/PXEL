@@ -460,6 +460,7 @@ async fn styled_range_copy_commits_and_undoes_content_and_all_style_leaves(
             destination,
             rows: 1,
             columns: 1,
+            repeat: None,
         },
     )
     .await?;

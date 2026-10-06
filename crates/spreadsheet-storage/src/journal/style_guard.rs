@@ -487,6 +487,7 @@ pub(super) async fn validate(
                     destination: command_destination,
                     rows: command_rows,
                     columns: command_columns,
+                    repeat: None,
                 } = &request.command.operation
                 else {
                     return Err(JournalError::Corrupt);
