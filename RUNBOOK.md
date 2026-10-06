@@ -7648,3 +7648,8 @@ confirmed strict operator-owned manifest, bounded hashing, no caller argv,
 retained handles and generic errors. Unix artifact mutation protection requires
 operator-owned read-only paths and remains unverified. This is an operator CLI
 adapter, not public upload or host-process memory isolation.
+
+After commit84f790d and rebase main (up to date), just xlsx-wasi-check13/13
+PASS (4.83s), strict all-feature server Clippy and fmt PASS again. Source is
+unchanged since verification. This closes ADR-132's locally verified operator
+adapter slice; browser upload and host-resource gates remain open.
