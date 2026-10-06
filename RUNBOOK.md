@@ -7671,3 +7671,6 @@ stdout, redacted error, no source echo and no native fallback. Seven existing
 XLSX profile parity cases remain passing. No new dependency or codec version.
 Review confirmed rejection occurs before part decoding and does not alter
 supported workbook semantics. Host resource and browser E2E gates remain open.
+
+After commit1fc4194/rebase main (up to date): parser30/30, strict XLSX Clippy,
+fmt and real WASI/backend14/14 PASS (8.02s). No source changed after verification.
