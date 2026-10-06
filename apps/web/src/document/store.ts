@@ -191,7 +191,17 @@ type PendingStyle = {
   bytes: Uint8Array;
   attempts: number;
 };
-type PendingAxisSize = { kind: 'axisSize'; id: string; bytes: Uint8Array; attempts: number };
+type PendingAxisSize = {
+  kind: 'axisSize';
+  id: string;
+  bytes: Uint8Array;
+  attempts: number;
+  sheet: string;
+  axis: 'row' | 'column';
+  axisId: string;
+  size: number | undefined;
+};
+type PendingFrozenRows = { kind: 'frozenRows'; id: string; bytes: Uint8Array; attempts: number };
 type PendingMerge = { kind: 'merge'; id: string; bytes: Uint8Array; attempts: number };
 type PendingSort = { kind: 'sortRange'; id: string; bytes: Uint8Array; attempts: number };
 type Pending =
@@ -208,6 +218,7 @@ type Pending =
   | PendingRangeMove
   | PendingStyle
   | PendingAxisSize
+  | PendingFrozenRows
   | PendingMerge
   | PendingSort;
 export function uuidBytes(id: string) {
@@ -858,7 +869,7 @@ export class DocumentStore {
         },
       }),
     );
-    this.pending.push({ kind: 'axisSize', id, bytes, attempts: 0 });
+    this.pending.push({ kind: 'frozenRows', id, bytes, attempts: 0 });
     this.notify();
     this.flush();
     return true;
@@ -2977,6 +2988,24 @@ export class DocumentStore {
       return false;
     }
   }
+  axisSize(axis: 'row' | 'column', index: number) {
+    const sheet = this.sheet;
+    const axisId = axis === 'row' ? sheet?.rows[index] : sheet?.columns[index];
+    if (!sheet || !axisId) return undefined;
+    const defaultSize = axis === 'row' ? 28 : 112;
+    const previous = this.pending.findLast(
+      (pending) =>
+        pending.kind === 'axisSize' &&
+        pending.sheet === sheet.id &&
+        pending.axis === axis &&
+        pending.axisId === axisId,
+    );
+    return previous?.kind === 'axisSize'
+      ? (previous.size ?? defaultSize)
+      : ((axis === 'row' ? sheet.row_heights : sheet.column_widths)?.find(
+          (item) => item.axis_id === axisId,
+        )?.size_css_px ?? defaultSize);
+  }
   setAxisSize(axis: 'row' | 'column', index: number, size: number | undefined) {
     if (!this.canEdit) return false;
     const sheet = this.sheet,
@@ -3000,6 +3029,9 @@ export class DocumentStore {
       this.notify();
       return false;
     }
+    const defaultSize = axis === 'row' ? 28 : 112;
+    const currentSize = this.axisSize(axis, index);
+    if ((size ?? defaultSize) === currentSize) return true;
     const id = uuidV7();
     const writes = [
       { axisKind: axis === 'row' ? 1 : 2, axisId: uuidBytes(axisId), sizeCssPx: size },
@@ -3022,7 +3054,16 @@ export class DocumentStore {
       }),
     );
     if (bytes.length > 1_048_576) return false;
-    this.pending.push({ kind: 'axisSize', id, bytes, attempts: 0 });
+    this.pending.push({
+      kind: 'axisSize',
+      id,
+      bytes,
+      attempts: 0,
+      sheet: sheet.id,
+      axis,
+      axisId,
+      size,
+    });
     this.error = '';
     this.notify();
     this.flush();

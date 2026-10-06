@@ -1,5 +1,6 @@
 import type { DocumentStore } from '../document/store';
-import { GRID, axisMetrics, backingSize, columnLabel } from './viewport';
+import { GRID, type AxisLayout, backingSize, columnLabel } from './viewport';
+import { sheetMetrics, type AxisResize } from './geometry';
 import { canvasFont, colorCss, isDefaultStyle } from '../document/styles';
 import { drawCell, drawCellBorders } from './cell-style';
 
@@ -17,7 +18,7 @@ function cellOverflowSpan(
   row: number,
   column: number,
   visibleEnd: number,
-  columnAxis: ReturnType<typeof axisMetrics>,
+  columnAxis: AxisLayout,
   style: ReturnType<DocumentStore['style']>,
   text: string,
   content: ReturnType<DocumentStore['displayContent']>,
@@ -62,16 +63,21 @@ export function drawGrid(
   scrollTop: number,
   dpr: number,
   document?: DocumentStore,
+  resize?: AxisResize,
 ): boolean {
-  const rendered = drawScrollableGrid(canvas, width, height, scrollLeft, scrollTop, dpr, document);
+  const rendered = drawScrollableGrid(
+    canvas,
+    width,
+    height,
+    scrollLeft,
+    scrollTop,
+    dpr,
+    document,
+    resize,
+  );
   const sheet = document?.sheet;
   if (!rendered || !sheet) return rendered;
-  const rows = axisMetrics(
-    sheet.rows,
-    sheet.row_heights,
-    GRID.rowHeight,
-    document.filterState.hidden,
-  );
+  const rows = sheetMetrics(document, resize)!.rows;
   const frozenHeight = Math.min(
     Math.max(0, height - GRID.columnHeaderHeight),
     rows.offsetAt(Math.min(sheet.rows.length, sheet.frozen_rows ?? 0)),
@@ -93,6 +99,7 @@ export function drawGrid(
         0,
         dpr,
         document,
+        resize,
       )
     )
       return false;
@@ -128,6 +135,7 @@ function drawScrollableGrid(
   scrollTop: number,
   dpr: number,
   document?: DocumentStore,
+  resize?: AxisResize,
 ): boolean {
   const context = canvas.getContext('2d', { alpha: false });
   if (!context) return false;
@@ -139,12 +147,9 @@ function drawScrollableGrid(
   }
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   const sheet = document?.sheet;
-  const rowAxis = sheet
-    ? axisMetrics(sheet.rows, sheet.row_heights, GRID.rowHeight, document?.filterState.hidden)
-    : undefined;
-  const columnAxis = sheet
-    ? axisMetrics(sheet.columns, sheet.column_widths, GRID.columnWidth)
-    : undefined;
+  const metrics = sheetMetrics(document, resize);
+  const rowAxis = metrics?.rows;
+  const columnAxis = metrics?.columns;
   const rows = rowAxis?.visibleRange(scrollTop, height - GRID.columnHeaderHeight) ?? {
     start: 0,
     end: 0,
@@ -170,7 +175,7 @@ function drawScrollableGrid(
         ])
       : '';
   const filtering = document?.personalView.settings.filters.some((f) => f.sheet_id === sheet?.id);
-  const geometry = `${document?.projection?.document_id ?? ''}/${sheet?.id ?? ''}/${JSON.stringify([sheet?.merges ?? [], sheet?.row_heights ?? [], sheet?.column_widths ?? [], sheet?.frozen_rows ?? 0])}/${filtering ? `${document?.personalView.revision}/${document?.projection?.version}/${document?.calculatedVersion}` : ''}/${width}/${height}/${scrollLeft}/${scrollTop}/${dpr}`;
+  const geometry = `${document?.projection?.document_id ?? ''}/${sheet?.id ?? ''}/${JSON.stringify([sheet?.merges ?? [], sheet?.row_heights ?? [], sheet?.column_widths ?? [], sheet?.frozen_rows ?? 0, document?.pending.filter((op) => op.kind === 'axisSize' && op.sheet === sheet?.id).map((op) => op.id), resize && [resize.sheetId, resize.axisId, resize.axis, resize.size]])}/${filtering ? `${document?.personalView.revision}/${document?.projection?.version}/${document?.calculatedVersion}` : ''}/${width}/${height}/${scrollLeft}/${scrollTop}/${dpr}`;
   const cellSignatures = new Map<string, string>();
   const overflowSpans = new Map<string, number>();
   if (document?.sheet)

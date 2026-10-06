@@ -1,7 +1,8 @@
 import type { DocumentStore } from '../document/store';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { drawGrid } from './renderer';
-import { GRID, axisMetrics, columnLabel } from './viewport';
+import { GRID, columnLabel } from './viewport';
+import { sheetMetrics, type AxisResize } from './geometry';
 import type { ShortcutRegistry } from '../commands/registry';
 import type { GridNavigation } from '../commands/spreadsheet';
 import type { Position } from '../document/store';
@@ -34,32 +35,51 @@ export function CanvasGrid({
     { id: number; frame: number | undefined; row: number; column: number } | undefined
   >(undefined);
   const resizeRef = useRef<
-    | { id: number; axis: 'row' | 'column'; index: number; start: number; initial: number }
+    | {
+        id: number;
+        axis: 'row' | 'column';
+        axisId: string;
+        sheetId: string;
+        index: number;
+        start: number;
+        initial: number;
+      }
     | undefined
   >(undefined);
-  const [resizePreview, setResizePreview] = useState<{
-    axis: 'row' | 'column';
+  type ResizePreview = AxisResize & {
     index: number;
-    size: number;
     x: number;
     y: number;
-  }>();
+  };
+  const [resizePreview, setResizePreview] = useState<ResizePreview>();
+  const resizePreviewRef = useRef<ResizePreview | undefined>(undefined);
+  const paintResizePreview = useRef<ResizePreview | undefined>(undefined);
+  const resizeFrame = useRef<number | undefined>(undefined);
+  const scheduleDraw = useRef<(() => void) | undefined>(undefined);
+  const clearResizePreview = () => {
+    if (resizeFrame.current !== undefined) cancelAnimationFrame(resizeFrame.current);
+    resizeFrame.current = undefined;
+    resizePreviewRef.current = undefined;
+    setResizePreview(undefined);
+  };
+  useEffect(
+    () => () => {
+      if (resizeFrame.current !== undefined) cancelAnimationFrame(resizeFrame.current);
+    },
+    [],
+  );
+  useLayoutEffect(() => {
+    paintResizePreview.current = resizePreview;
+    scheduleDraw.current?.();
+  }, [resizePreview]);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [canvasAvailable, setCanvasAvailable] = useState(true);
   const reactRenderCount = useRef(0);
   reactRenderCount.current++;
-  const rowAxis = document?.sheet
-    ? axisMetrics(
-        document.sheet.rows,
-        document.sheet.row_heights,
-        GRID.rowHeight,
-        document.filterState.hidden,
-      )
-    : undefined;
-  const columnAxis = document?.sheet
-    ? axisMetrics(document.sheet.columns, document.sheet.column_widths, GRID.columnWidth)
-    : undefined;
+  const metrics = sheetMetrics(document, resizePreview);
+  const rowAxis = metrics?.rows;
+  const columnAxis = metrics?.columns;
   const frozenCount = Math.min(
     document?.sheet?.rows.length ?? 0,
     document?.sheet?.frozen_rows ?? 0,
@@ -179,50 +199,32 @@ export function CanvasGrid({
         scroller.scrollTop,
         window.devicePixelRatio || 1,
         document,
+        paintResizePreview.current,
       );
       canvas.dataset.canvasDrawCalls = String(Number(canvas.dataset.canvasDrawCalls ?? 0) + 1);
       canvas.dataset.reactRenderCount = String(reactRenderCount.current);
       canvas.dataset.paintedViewportPixels = String(scroller.clientWidth * scroller.clientHeight);
       canvas.dataset.canvasDurationMs = (performance.now() - startedAt).toFixed(2);
-      const visibleRows = document?.sheet
-        ? axisMetrics(
-            document.sheet.rows,
-            document.sheet.row_heights,
-            GRID.rowHeight,
-            document.filterState.hidden,
-          ).visibleRange(scroller.scrollTop, scroller.clientHeight - GRID.columnHeaderHeight)
+      const axes = sheetMetrics(document, paintResizePreview.current);
+      const visibleRows = axes
+        ? axes.rows.visibleRange(
+            scroller.scrollTop,
+            scroller.clientHeight - GRID.columnHeaderHeight,
+          )
         : { start: 0, end: 0 };
-      const visibleColumns = document?.sheet
-        ? axisMetrics(
-            document.sheet.columns,
-            document.sheet.column_widths,
-            GRID.columnWidth,
-          ).visibleRange(scroller.scrollLeft, scroller.clientWidth - GRID.rowHeaderWidth)
+      const visibleColumns = axes
+        ? axes.columns.visibleRange(scroller.scrollLeft, scroller.clientWidth - GRID.rowHeaderWidth)
         : { start: 0, end: 0 };
       canvas.dataset.visibleCellCount = String(
         (document?.sheet
           ? new Set([
-              ...axisMetrics(
-                document.sheet.rows,
-                document.sheet.row_heights,
-                GRID.rowHeight,
-                document.filterState.hidden,
-              ).indicesInRange(visibleRows.start, visibleRows.end),
-              ...axisMetrics(
-                document.sheet.rows,
-                document.sheet.row_heights,
-                GRID.rowHeight,
-                document.filterState.hidden,
-              ).indicesInRange(
+              ...axes!.rows.indicesInRange(visibleRows.start, visibleRows.end),
+              ...axes!.rows.indicesInRange(
                 0,
                 Math.min(
                   document.sheet.frozen_rows ?? 0,
-                  axisMetrics(
-                    document.sheet.rows,
-                    document.sheet.row_heights,
-                    GRID.rowHeight,
-                    document.filterState.hidden,
-                  ).indexAt(Math.max(0, scroller.clientHeight - GRID.columnHeaderHeight)) + 1,
+                  axes!.rows.indexAt(Math.max(0, scroller.clientHeight - GRID.columnHeaderHeight)) +
+                    1,
                 ),
               ),
             ]).size
@@ -259,6 +261,7 @@ export function CanvasGrid({
     const schedule = () => {
       frame ??= requestAnimationFrame(render);
     };
+    scheduleDraw.current = schedule;
     const updateViewportSize = () => {
       const next = { width: scroller.clientWidth, height: scroller.clientHeight };
       setViewportSize((current) =>
@@ -280,9 +283,7 @@ export function CanvasGrid({
     const onScroll = () => {
       schedule();
       const sheet = document?.sheet;
-      const axis = sheet
-        ? axisMetrics(sheet.rows, sheet.row_heights, GRID.rowHeight, document?.filterState.hidden)
-        : undefined;
+      const axis = sheetMetrics(document)?.rows;
       if (
         sheet &&
         (axis?.totalSize ?? sheet.rows.length * GRID.rowHeight) -
@@ -295,6 +296,7 @@ export function CanvasGrid({
     watchDpr();
     const unsubscribe = document?.subscribe(schedule);
     return () => {
+      scheduleDraw.current = undefined;
       unsubscribe?.();
       observer.disconnect();
       scroller.removeEventListener('scroll', onScroll);
@@ -316,22 +318,12 @@ export function CanvasGrid({
       row: Math.max(0, Math.min(document.sheet.rows.length - 1, row)),
       column: Math.max(0, Math.min(document.sheet.columns.length - 1, column)),
     };
-    const rows = axisMetrics(
-      document.sheet.rows,
-      document.sheet.row_heights,
-      GRID.rowHeight,
-      document.filterState.hidden,
-    );
+    const { rows, columns } = sheetMetrics(document)!;
     next.row = rows.nearestVisible(next.row, next.row < document.selected.row ? -1 : 1);
     document.select(next, extend);
     if (next.row >= document.sheet.rows.length - 20) document.extendRows();
     const scroller = scrollRef.current;
     if (!scroller) return;
-    const columns = axisMetrics(
-      document.sheet.columns,
-      document.sheet.column_widths,
-      GRID.columnWidth,
-    );
     const x = columns.offsetAt(next.column),
       y = rows.offsetAt(next.row);
     const cellWidth = columns.sizeAt(next.column),
@@ -442,12 +434,16 @@ export function CanvasGrid({
               resizeRef.current = {
                 id: event.pointerId,
                 axis: 'column',
+                axisId: document.sheet.columns[column]!,
+                sheetId: document.sheet.id,
                 index: column,
                 start: event.clientX,
                 initial: columnAxis.sizeAt(column),
               };
               setResizePreview({
                 axis: 'column',
+                axisId: document.sheet.columns[column]!,
+                sheetId: document.sheet.id,
                 index: column,
                 size: columnAxis.sizeAt(column),
                 x: event.clientX - box.left,
@@ -468,12 +464,16 @@ export function CanvasGrid({
               resizeRef.current = {
                 id: event.pointerId,
                 axis: 'row',
+                axisId: document.sheet.rows[row]!,
+                sheetId: document.sheet.id,
                 index: row,
                 start: event.clientY,
                 initial: rowAxis.sizeAt(row),
               };
               setResizePreview({
                 axis: 'row',
+                axisId: document.sheet.rows[row]!,
+                sheetId: document.sheet.id,
                 index: row,
                 size: rowAxis.sizeAt(row),
                 x: event.clientX - box.left,
@@ -507,12 +507,18 @@ export function CanvasGrid({
               ),
             );
             const box = event.currentTarget.getBoundingClientRect();
-            setResizePreview({
+            resizePreviewRef.current = {
               axis: resize.axis,
+              axisId: resize.axisId,
+              sheetId: resize.sheetId,
               index: resize.index,
               size,
               x: event.clientX - box.left,
               y: event.clientY - box.top,
+            };
+            resizeFrame.current ??= requestAnimationFrame(() => {
+              resizeFrame.current = undefined;
+              setResizePreview(resizePreviewRef.current);
             });
             return;
           }
@@ -579,9 +585,15 @@ export function CanvasGrid({
                 Math.min(resize.axis === 'row' ? 1000 : 2000, raw),
               ),
             );
-            document?.setAxisSize(resize.axis, resize.index, size);
+            const sheet = document?.sheet;
+            if (sheet?.id === resize.sheetId) {
+              const index = (resize.axis === 'row' ? sheet.rows : sheet.columns).indexOf(
+                resize.axisId,
+              );
+              if (index >= 0) document?.setAxisSize(resize.axis, index, size);
+            }
             resizeRef.current = undefined;
-            setResizePreview(undefined);
+            clearResizePreview();
             event.currentTarget.style.cursor = '';
             event.currentTarget.releasePointerCapture(event.pointerId);
             return;
@@ -596,7 +608,7 @@ export function CanvasGrid({
         onPointerCancel={(event) => {
           if (resizeRef.current?.id === event.pointerId) {
             resizeRef.current = undefined;
-            setResizePreview(undefined);
+            clearResizePreview();
             event.currentTarget.style.cursor = '';
             return;
           }
@@ -604,6 +616,12 @@ export function CanvasGrid({
           if (!drag || drag.id !== event.pointerId) return;
           if (drag.frame !== undefined) cancelAnimationFrame(drag.frame);
           dragRef.current = undefined;
+        }}
+        onLostPointerCapture={(event) => {
+          if (resizeRef.current?.id !== event.pointerId) return;
+          resizeRef.current = undefined;
+          clearResizePreview();
+          event.currentTarget.style.cursor = '';
         }}
         onDragOver={(event) => {
           if (

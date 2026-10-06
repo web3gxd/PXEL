@@ -11,6 +11,7 @@ import {
 import type { FormulaError } from '../generated/pxel/wire/v1/session_pb';
 import { decodeHistory, readHistory } from './history';
 import { DEFAULT_STYLE } from './styles';
+import { sheetMetrics } from '../grid/geometry';
 import {
   DocumentStore,
   bytesUuid,
@@ -1744,6 +1745,71 @@ async function connectedStore(discoveredHistory = historyResponse()) {
   sent.length = 0;
   return { store, sent };
 }
+
+describe('optimistic axis geometry', () => {
+  it('renders pending sizes without changing confirmed content and rolls back a rejection', async () => {
+    const { store, sent } = await connectedStore();
+    const confirmed = structuredClone(store.projection);
+    expect(store.setAxisSize('column', 0, 180)).toBe(true);
+    expect(sheetMetrics(store)?.columns.sizeAt(0)).toBe(180);
+    expect(sheetMetrics(store)).toBe(sheetMetrics(store));
+    expect(store.projection).toEqual(confirmed);
+    const command = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (command.case !== 'command') throw new Error('Missing size command');
+    await store.receive(
+      create(ServerEnvelopeSchema, {
+        protocolVersion: 1,
+        payload: {
+          case: 'rejected',
+          value: {
+            documentId: uuidBytes(documentId),
+            operationId: command.value.operationId,
+            code: 3,
+          },
+        },
+      }),
+    );
+    expect(sheetMetrics(store)?.columns.sizeAt(0)).toBe(112);
+    expect(store.projection).toEqual(confirmed);
+    store.dispose();
+  });
+
+  it('follows stable IDs, keeps the latest pending size, and previews reset separately', async () => {
+    const { store, sent } = await connectedStore();
+    expect(store.setAxisSize('row', 0, 42)).toBe(true);
+    expect(store.setAxisSize('row', 0, 64)).toBe(true);
+    expect(sheetMetrics(store)?.rows.sizeAt(0)).toBe(64);
+    store.personalView.settings.filters = [
+      {
+        id: uuidV7(),
+        sheet_id: sheetId,
+        first_row_id: rowId,
+        last_row_id: rowId,
+        first_column_id: columnId,
+        last_column_id: columnId,
+        header_row_id: null,
+        conditions: [{ column_id: columnId, predicate: { kind: 'nonblank' } }],
+      },
+    ];
+    expect(sheetMetrics(store)?.rows.sizeAt(0)).toBe(0);
+    expect(store.axisSize('row', 0)).toBe(64);
+    store.personalView.settings.filters = [];
+    store.sheet!.rows = [uuidV7(), rowId];
+    expect(sheetMetrics(store)?.rows.sizeAt(0)).toBe(28);
+    expect(sheetMetrics(store)?.rows.sizeAt(1)).toBe(64);
+    expect(store.setAxisSize('row', 1, undefined)).toBe(true);
+    expect(sheetMetrics(store)?.rows.sizeAt(1)).toBe(28);
+    expect(store.sheet!.row_heights).toBeUndefined();
+    const before = sent.length;
+    const pending = store.pending.length;
+    expect(store.setAxisSize('row', 1, 28)).toBe(true);
+    expect(sent).toHaveLength(before);
+    expect(store.pending).toHaveLength(pending);
+    store.sheet!.rows = [uuidV7()];
+    expect(sheetMetrics(store)?.rows.totalSize).toBe(28);
+    store.dispose();
+  });
+});
 
 describe('durable history discovery', () => {
   const hint = (version: bigint, kind = 0, actor?: string) =>

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   AxisMetrics,
   AxisScrollMapping,
@@ -6,6 +6,7 @@ import {
   columnLabel,
   robustUsedEnd,
   visibleRange,
+  withAxisSize,
 } from './viewport';
 
 describe('viewport boundaries', () => {
@@ -42,6 +43,44 @@ describe('viewport boundaries', () => {
 });
 
 describe('variable axis metrics', () => {
+  it('previews size deltas with the same geometry as a rebuilt axis, including hidden rows', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e'];
+    const hidden = new Set([1, 4]);
+    const base = new AxisMetrics(ids, [{ axis_id: 'd', size_css_px: 40 }], 28, hidden);
+    const preview = withAxisSize(base, 2, 90);
+    const expected = new AxisMetrics(
+      ids,
+      [
+        { axis_id: 'c', size_css_px: 90 },
+        { axis_id: 'd', size_css_px: 40 },
+      ],
+      28,
+      hidden,
+    );
+    for (let index = -1; index <= ids.length + 1; index++) {
+      expect(preview.sizeAt(index)).toBe(expected.sizeAt(index));
+      expect(preview.offsetAt(index)).toBe(expected.offsetAt(index));
+    }
+    for (let offset = -1; offset <= expected.totalSize + 1; offset++) {
+      expect(preview.indexAt(offset)).toBe(expected.indexAt(offset));
+      expect(preview.visibleRange(offset, 50)).toEqual(expected.visibleRange(offset, 50));
+    }
+    expect([...preview.indicesInRange(0, 5)]).toEqual([0, 2, 3]);
+    expect(withAxisSize(base, 1, 50)).toBe(base);
+    expect(withAxisSize(base, -1, 50)).toBe(base);
+    expect(base.sizeAt(2)).toBe(28);
+  });
+
+  it('keeps a resize at 100000 rows logarithmic without rebuilding prefix storage', () => {
+    const ids = Array.from({ length: 100_000 }, (_, index) => String(index));
+    const base = new AxisMetrics(ids, undefined, 28);
+    const offsetAt = vi.spyOn(base, 'offsetAt');
+    const preview = withAxisSize(base, 50_000, 1000);
+    expect(preview.indexAt(1_400_999)).toBe(50_000);
+    expect(offsetAt.mock.calls.length).toBeLessThanOrEqual(18);
+    expect(preview.totalSize).toBe(2_800_972);
+    expect(base.totalSize).toBe(2_800_000);
+  });
   it('maps offsets, cell sizes and visible ranges across sparse overrides', () => {
     const axis = new AxisMetrics(
       ['r1', 'r2', 'r3', 'r4'],

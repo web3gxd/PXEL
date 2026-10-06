@@ -72,6 +72,55 @@ export function robustUsedEnd(indices: readonly number[], extent: number): numbe
 }
 
 export type AxisOverride = { axis_id: string; size_css_px: number };
+export type AxisLayout = Pick<
+  AxisMetrics,
+  | 'count'
+  | 'totalSize'
+  | 'sizeAt'
+  | 'offsetAt'
+  | 'indexAt'
+  | 'nearestVisible'
+  | 'indicesInRange'
+  | 'visibleRange'
+>;
+
+/** A single size delta shares the prefix index; pointer frames never rebuild an axis. */
+export function withAxisSize(base: AxisLayout, index: number, size: number): AxisLayout {
+  if (index < 0 || index >= base.count || base.sizeAt(index) === 0 || base.sizeAt(index) === size)
+    return base;
+  const delta = size - base.sizeAt(index);
+  const next: AxisLayout = {
+    count: base.count,
+    totalSize: base.totalSize + delta,
+    sizeAt: (position) => (position === index ? size : base.sizeAt(position)),
+    offsetAt: (position) => base.offsetAt(position) + (position > index ? delta : 0),
+    indexAt: (offset) => {
+      const target = Math.max(0, Math.min(next.totalSize, Number.isFinite(offset) ? offset : 0));
+      let low = 0,
+        high = next.count;
+      while (low < high) {
+        const middle = (low + high + 1) >>> 1;
+        if (next.offsetAt(middle) <= target) low = middle;
+        else high = middle - 1;
+      }
+      return base.nearestVisible(Math.min(next.count - 1, low), 1);
+    },
+    nearestVisible: (position, direction) => base.nearestVisible(position, direction),
+    indicesInRange: (start, end) => base.indicesInRange(start, end),
+    visibleRange: (scroll, viewport, overscan = GRID.overscan) => {
+      if (!next.count || !Number.isFinite(scroll) || !Number.isFinite(viewport))
+        return { start: 0, end: 0 };
+      return {
+        start: Math.max(0, next.indexAt(Math.max(0, scroll)) - overscan),
+        end: Math.min(
+          next.count,
+          next.indexAt(Math.max(0, scroll) + Math.max(0, viewport)) + 1 + overscan,
+        ),
+      };
+    },
+  };
+  return next;
+}
 export class AxisMetrics {
   private readonly offsets: Float64Array;
   private readonly sizes: Float64Array;

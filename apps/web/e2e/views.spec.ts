@@ -27,6 +27,9 @@ async function fixture(page: import('@playwright/test').Page) {
 test('personal filter survives reload without a document commit and navigation skips hidden rows', async ({
   page,
 }) => {
+  // Creation, paste, filter edits and reload share one test deadline. Keep the
+  // individual assertion deadlines while allowing this full workflow to finish.
+  test.setTimeout(60_000);
   const { grid, id, state } = await fixture(page);
   const before = await state();
   const opener = editorTrigger(page, 'Вид листа');

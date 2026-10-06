@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type PointerEvent, type KeyboardEvent } from 'react';
-import { AxisMetrics, AxisScrollMapping, columnLabel } from './viewport';
+import { type AxisLayout, AxisScrollMapping, columnLabel } from './viewport';
 
 type Props = {
   axis: 'row' | 'column';
-  metrics: AxisMetrics;
+  metrics: AxisLayout;
   mapping: AxisScrollMapping;
   offset: number;
   viewportSize: number;

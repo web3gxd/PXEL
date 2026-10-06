@@ -43,10 +43,11 @@ test('local mask preserves owner editing and the originals choice after automati
   await write(page, 0, 'test@example.com');
   await (await editorButton(page, 'Персональные данные')).click();
   const dialog = page.getByRole('dialog', { name: 'Персональные данные' });
+  const reportStatus = dialog.getByRole('status').filter({ hasText: 'Совпадений:' });
   await dialog.getByRole('checkbox', { name: 'Включить распознавание' }).check();
   await dialog.getByRole('checkbox', { name: 'Email', exact: true }).check();
   await dialog.getByRole('button', { name: 'Сохранить настройки', exact: true }).click();
-  await expect(dialog.getByRole('status')).toContainText('Совпадений: 1');
+  await expect(reportStatus).toContainText('Совпадений: 1');
   await page.keyboard.press('Escape');
   await expect(page.locator('.privacy-veil')).toHaveCount(1);
   const veil = page.getByRole('button', { name: /^(Раскрыть|Скрыть) данные A1$/ });
@@ -66,13 +67,13 @@ test('local mask preserves owner editing and the originals choice after automati
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(veil).toBeVisible();
   await (await editorButton(page, 'Персональные данные')).click();
-  await expect(dialog.getByRole('status')).toContainText(`Версия ${(await book(page)).version}.`);
+  await expect(reportStatus).toContainText(`Версия ${(await book(page)).version}.`);
   await dialog.getByRole('button', { name: 'Показать оригиналы', exact: true }).click();
   await page.keyboard.press('Escape');
   await write(page, 1, '42');
   const version = (await book(page)).version;
   await (await editorButton(page, 'Персональные данные')).click();
-  await expect(dialog.getByRole('status')).toContainText(`Версия ${version}.`);
+  await expect(reportStatus).toContainText(`Версия ${version}.`);
   await expect(dialog.getByRole('button', { name: 'Локальная маска', exact: true })).toBeVisible();
   await dialog.getByRole('button', { name: 'Обновить анализ', exact: true }).click();
   await expect(dialog.getByRole('button', { name: 'Обновить анализ', exact: true })).toBeEnabled();

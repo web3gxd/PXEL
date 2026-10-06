@@ -23,17 +23,8 @@ export function AxisSizePanel({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setHeight(
-      String(
-        sheet?.row_heights?.find((item) => item.axis_id === rowId)?.size_css_px ?? GRID.rowHeight,
-      ),
-    );
-    setWidth(
-      String(
-        sheet?.column_widths?.find((item) => item.axis_id === columnId)?.size_css_px ??
-          GRID.columnWidth,
-      ),
-    );
+    setHeight(String(document.axisSize('row', row) ?? GRID.rowHeight));
+    setWidth(String(document.axisSize('column', column) ?? GRID.columnWidth));
     setError('');
   }, [sheet?.id, rowId, columnId, sheet]);
 

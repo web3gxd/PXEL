@@ -65,6 +65,67 @@ security, performance) проверены; неограниченных журн
 Linux/Compose/remote CI, production deployment и ручной NVDA; полный browser
 suite этим адресным прогоном не подменяется. Git rebase/повторные проверки и
 fast-forward merge выполняются по текущему AGENTS.md после проверки чистоты main.
+## 2026-10-06 — быстрый resize строк и столбцов (ADR-119)
+
+Причина видимой задержки: Canvas и DOM использовали только подтверждённые
+размеры; при отпускании мыши геометрия ожидала последовательный серверный
+commit. Pointermove обновлял React tooltip отдельно на каждом событии. Новый
+браузерный тест удерживает отправку WebSocket: на исходном коде ширина оставалась
+2958 вместо 3018 px до падения проверки через 5 секунд.
+
+Размеры теперь имеют отдельные transient/pending geometry overlays по stable
+sheet/axis IDs. Canvas, hit testing, редактор, selection, privacy veils, frozen
+panes и scrollbars используют одни метрики. Pointermove объединяется через rAF;
+prefix index разделяется с исходной осью, без пересоздания 100 000 элементов на
+кадр. Release отправляет одну команду, cancel/lost capture снимают preview;
+terminal rejection возвращает подтверждённый размер, повтор сохраняет исходные
+bytes/operation ID. Неизменившийся размер не создаёт команду. Панель читает
+pending размер независимо от скрытия строки личным фильтром. Content, версии,
+hash и результаты расчётов остаются подтверждёнными. Server/wire/persistence
+код и зависимости не менялись.
+
+Изменены `DocumentStore` и его tests, `CanvasGrid`, `renderer`, новая
+`grid/geometry.ts`, `viewport` и tests, `SmartScrollbar`, `scrollbar`,
+`AxisSizePanel`; добавлены `e2e/resize.spec.ts`, `tests/performance/resize.mjs`,
+ADR-119 и benchmark report. В проверке ПД уточнён locator результата анализа:
+при открытии одновременно существуют loading/report status. Для длинного
+filter/reload сценария общий budget стал 60 s, индивидуальные assertion
+timeouts сохранены: trace показал успешные отдельные действия и исчерпание
+общего 30-секундного срока, а не отказ фильтра.
+
+Фактически проверено на Windows, Chromium 153.0.8010.12, реальном isolated
+PostgreSQL 18.6 (loopback:55433), dev-auth сервере и Vite: 280/280 Vitest;
+ESLint, TypeScript, production build, формат всех 16 изменённых code/report
+файлов и diff-check прошли. Build сохраняет прежнее предупреждение main chunk
+>500 kB. Pinned dependencies/toolchain переиспользованы через ignored junctions;
+из-за отказа pnpm task-state на symlink команды выполнены прямыми Node CLI.
+Секреты, generated WASM, data, logs и toolchains не коммитятся.
+
+Браузер: первые адресные 4/4 и 6/6 DPR1/2 прошли; расширенный 26-case matrix
+дал 24 passed/2 failed (неоднозначный status ПД и общий timeout filter case).
+Повтор на финальном product-коде: 13/14 прошли, оставшийся DPR2 filter case
+достиг общего 30 s budget в конце сценария. После его уточнения тот же filter
+полностью прошёл 2/2 DPR1/2 за 58.8 s. Проверены обе оси, held-ACK live paint,
+pending hit testing, cancel, reload и peer tab, merge, styled blank, overflow,
+concurrent style edits, hidden/all-hidden/frozen rows и ПД. Это адресная
+регрессия; полный E2E/smoke/Rust/HTTP/recovery corpus не запускался.
+
+Финальный воспроизводимый benchmark (20 samples + 2 warmups на версию,
+одна пустая durable книга 1000×26): pointermove → Canvas draw submission:
+median 50.3 → 19.4 ms, p95 82.8 → 36.9 ms, max 83.1 → 39.3 ms. Ранее exploratory
+сравнение до синхронизации Canvas/DOM дало p95 467.1 → 19.9 ms; это не замер
+финального кода. Подробности и ограничения —
+`docs/benchmarks/2026-10-06-axis-resize-local.md`. Результаты не являются SLA
+для production/100k populated cells. Linux/Compose/remote CI и deployment gates
+остаются открытыми. Браузер открыт, бюджетный шаблон проверен живым drag;
+локальный стенд оставлен работающим.
+
+После rebase на `2a2a4cd` (ADR-121, локальный помощник и fill handle) повторно
+прошли 289/289 Vitest, ESLint, TypeScript и production build. Адресный browser
+прогон на объединённом product-коде: обе resize-проверки, протягивание формул
+с durable Undo/Redo и числовое/клавиатурное заполнение при DPR1/DPR2 — 8/8.
+Общий geometry layer совместим с fill handle; новые зависимости не добавлены.
+Скриншот результата сохранён в ignored `.local/resize-verified.png`.
 
 ## 2026-10-06 — общие правила проекта в AGENTS.md
 

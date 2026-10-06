@@ -1,6 +1,6 @@
 import { isDefaultStyle } from '../document/styles';
 import type { Sheet } from '../document/store';
-import { AxisMetrics, AxisScrollMapping, robustUsedEnd } from './viewport';
+import { type AxisLayout, AxisScrollMapping, robustUsedEnd } from './viewport';
 
 export type Axis = 'row' | 'column';
 
@@ -41,7 +41,7 @@ function usedEnds(sheet: Sheet): UsedEnds {
 export function axisScrollMapping(
   sheet: Sheet,
   axis: Axis,
-  metrics: AxisMetrics,
+  metrics: AxisLayout,
   viewportSize: number,
 ) {
   const viewport = Math.max(0, Number.isFinite(viewportSize) ? viewportSize : 0);
