@@ -390,6 +390,10 @@ h1 {
   background: white;
 }
 .cell-address {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  min-width: 0;
   width: 105px;
   padding-left: 24px;
   border-right: 1px solid var(--line);

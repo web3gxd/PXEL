@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import { DocumentStore, displayValue } from './document/store';
-import { columnLabel } from './grid/viewport';
+import { AddressInput } from './document/AddressInput';
 import { CanvasGrid } from './grid/CanvasGrid';
 import { StyleToolbar } from './document/StyleToolbar';
 import { useSession } from './connection/useSession';
@@ -680,11 +680,7 @@ function SpreadsheetApp({
 
       <div className="formula-bar" aria-label="Строка ввода">
         <HardcodeMonitor document={document} />
-        <span className="cell-address">
-          {document.sheet && !document.allRowsHidden
-            ? `${columnLabel(document.selected.column)}${document.selected.row + 1}`
-            : '—'}
-        </span>
+        <AddressInput document={document} navigation={navigation} />
         <span className="formula-symbol" aria-hidden="true">
           ƒ<span>x</span>
         </span>
