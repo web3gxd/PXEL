@@ -2855,6 +2855,103 @@ describe('document projection and pending intents', () => {
     expect(store.error).toContain('формул');
     store.disconnected();
   });
+  it('fills a reversed selected rectangle with one pasted value', async () => {
+    const { store } = await connectedStore();
+    const state = projection();
+    state.sheets[0]!.rows.push(uuidV7(), uuidV7());
+    state.sheets[0]!.columns.push(uuidV7());
+    store.load(state);
+    store.select({ row: 2, column: 1 });
+    store.select({ row: 0, column: 0 }, true);
+    expect(store.pasteTsv('7')).toBe(true);
+    expect(store.pending).toHaveLength(1);
+    for (let row = 0; row < 3; row++)
+      for (let column = 0; column < 2; column++)
+        expect(store.value({ row, column })).toEqual({ type: 'number', value: 7 });
+    store.dispose();
+  });
+  it('fills down from the top row as one exact-head command without changing confirmed data', async () => {
+    const { store, sent } = await connectedStore();
+    const state = projection();
+    state.sheets[0]!.rows.push(uuidV7(), uuidV7());
+    state.sheets[0]!.columns.push(uuidV7());
+    store.load(state);
+    expect(store.fillDown()).toBe(false);
+    store.select({ row: 2, column: 1 });
+    store.select({ row: 0, column: 0 }, true);
+    expect(store.fillDown()).toBe(true);
+    expect(store.pending).toHaveLength(1);
+    expect(store.projection?.version).toBe('1');
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing fill command');
+    expect(payload.value.copyRange).toBeUndefined();
+    expect(payload.value.repeatRange).toMatchObject({
+      destinationRows: 2,
+      destinationColumns: 2,
+      sourceBlock: { rows: 1, columns: 2 },
+    });
+    expect(bytesUuid(payload.value.repeatRange!.sourceBlock!.source!.rowId)).toBe(rowId);
+    expect(bytesUuid(payload.value.repeatRange!.sourceBlock!.destination!.rowId)).toBe(
+      state.sheets[0]!.rows[1],
+    );
+    expect(store.fillDown()).toBe(false);
+    store.dispose();
+  });
+  it('repeats a copied formula through the server and preserves the clipboard version guard', async () => {
+    const { store, sent } = await connectedStore();
+    const state = projection();
+    state.sheets[0]!.rows.push(uuidV7(), uuidV7());
+    state.sheets[0]!.cells.push({
+      row_id: rowId,
+      column_id: columnId,
+      value: { type: 'formula', value: { source: '=B1+$B$1', current_text: '=B1+$B$1' } },
+    });
+    store.load(state);
+    const raw = store.copyFormulaPayload();
+    store.select({ row: 1, column: 0 });
+    store.select({ row: 2, column: 0 }, true);
+    expect(await store.pasteFormulaCopy(raw!)).toBe(true);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing formula fill');
+    expect(payload.value.repeatRange?.destinationRows).toBe(2);
+    expect(payload.value.repeatRange?.sourceBlock?.rows).toBe(1);
+    state.version = '2';
+    store.load(state);
+    expect(await store.pasteFormulaCopy(raw!)).toBe(false);
+    store.dispose();
+  });
+  it('fills a single selected cell from the row above', async () => {
+    const { store, sent } = await connectedStore();
+    const state = projection();
+    state.sheets[0]!.rows.push(uuidV7());
+    store.load(state);
+    store.select({ row: 1, column: 0 });
+    expect(store.fillDown()).toBe(true);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing single-cell fill');
+    expect(payload.value.copyRange).toMatchObject({ rows: 1, columns: 1 });
+    expect(bytesUuid(payload.value.copyRange!.source!.rowId)).toBe(rowId);
+    expect(bytesUuid(payload.value.copyRange!.destination!.rowId)).toBe(state.sheets[0]!.rows[1]);
+    store.dispose();
+  });
+  it('tiles a pasted row and refuses incompatible selection atomically', async () => {
+    const { store } = await connectedStore();
+    const state = projection();
+    state.sheets[0]!.rows.push(uuidV7());
+    state.sheets[0]!.columns.push(uuidV7(), uuidV7(), uuidV7());
+    store.load(state);
+    store.select({ row: 1, column: 3 }, true);
+    expect(store.pasteTsv('1\t2')).toBe(true);
+    expect(store.value({ row: 1, column: 2 })).toEqual({ type: 'number', value: 1 });
+    expect(store.value({ row: 1, column: 3 })).toEqual({ type: 'number', value: 2 });
+    store.dispose();
+    const second = await connectedStore();
+    second.store.load(state);
+    second.store.select({ row: 1, column: 2 }, true);
+    expect(second.store.pasteTsv('1\t2')).toBe(false);
+    expect(second.store.pending).toHaveLength(0);
+    second.store.dispose();
+  });
   it('deletes by stable row ID and cancels a draft when axes change', async () => {
     const { store, sent } = await connectedStore();
     expect(store.deleteSelectedRow()).toBe(false);

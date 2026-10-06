@@ -177,6 +177,8 @@ message DocumentCommand {
   MoveRangeCommand move_range = 10;
   SetCellStyleCommand set_cell_style = 11;
   SetRangeStyleCommand set_range_style = 12;
+  // Separate intent so older servers reject repetition instead of copying once.
+  RepeatRangeCommand repeat_range = 13;
 }
 
 // Public formatting profile, independent of persisted event/snapshot schemas.
@@ -277,6 +279,12 @@ message CopyRangeCommand {
   CellAddress destination = 2;
   uint32 rows = 3;
   uint32 columns = 4;
+}
+
+message RepeatRangeCommand {
+  CopyRangeCommand source_block = 1;
+  uint32 destination_rows = 2;
+  uint32 destination_columns = 3;
 }
 
 message SetCellFormulaCommand {

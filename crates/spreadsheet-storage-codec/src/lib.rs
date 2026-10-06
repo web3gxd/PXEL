@@ -1248,6 +1248,7 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
             destination,
             rows,
             columns,
+            repeat,
         } => {
             h.update([15]);
             for address in [source, destination] {
@@ -1257,6 +1258,11 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
             }
             h.update(rows.to_le_bytes());
             h.update(columns.to_le_bytes());
+            if let Some((rows, columns)) = repeat {
+                h.update([1]);
+                h.update(rows.to_le_bytes());
+                h.update(columns.to_le_bytes());
+            }
         }
         CommandPayload::ClearCell { address } => {
             semantic_operation(&mut h, &Operation::ClearCell { address: *address })?

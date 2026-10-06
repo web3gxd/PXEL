@@ -1082,6 +1082,7 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
         + usize::from(input.formula_command.is_some())
         + usize::from(input.undo_cell.is_some())
         + usize::from(input.copy_range.is_some())
+        + usize::from(input.repeat_range.is_some())
         + usize::from(input.move_range.is_some())
         + usize::from(input.set_cell_style.is_some())
         + usize::from(input.set_range_style.is_some())
@@ -1128,6 +1129,26 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
             destination: address(copy.destination)?,
             rows: copy.rows,
             columns: copy.columns,
+            repeat: None,
+        }
+    } else if let Some(repeat) = input.repeat_range {
+        let copy = repeat.source_block.ok_or(SessionError::InvalidCommand)?;
+        if copy.rows == 0
+            || copy.columns == 0
+            || repeat.destination_rows == 0
+            || repeat.destination_columns == 0
+            || repeat.destination_rows % copy.rows != 0
+            || repeat.destination_columns % copy.columns != 0
+            || u64::from(repeat.destination_rows) * u64::from(repeat.destination_columns) > 1000
+        {
+            return Err(SessionError::InvalidCommand);
+        }
+        CommandPayload::CopyRange {
+            source: address(copy.source)?,
+            destination: address(copy.destination)?,
+            rows: copy.rows,
+            columns: copy.columns,
+            repeat: Some((repeat.destination_rows, repeat.destination_columns)),
         }
     } else if let Some(moved) = input.move_range {
         let source = address(moved.source)?;
@@ -1715,6 +1736,51 @@ mod undo_wire_tests {
             client_sequence: 1,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn repeat_wire_rejects_bad_extents_and_competing_intents() -> Result<(), SessionError> {
+        let cell = v1::CellAddress {
+            sheet_id: id(),
+            row_id: id(),
+            column_id: id(),
+        };
+        let block = v1::CopyRangeCommand {
+            source: Some(cell.clone()),
+            destination: Some(cell),
+            rows: 1,
+            columns: 2,
+        };
+        let mut request = envelope();
+        request.repeat_range = Some(v1::RepeatRangeCommand {
+            source_block: Some(block.clone()),
+            destination_rows: 3,
+            destination_columns: 4,
+        });
+        assert!(matches!(
+            command(request.clone())?.operation,
+            CommandPayload::CopyRange {
+                repeat: Some((3, 4)),
+                ..
+            }
+        ));
+        for (rows, columns) in [(0, 4), (3, 0), (3, 3), (1001, 2), (u32::MAX, u32::MAX)] {
+            let mut invalid = request.clone();
+            if let Some(repeat) = &mut invalid.repeat_range {
+                repeat.destination_rows = rows;
+                repeat.destination_columns = columns;
+            }
+            assert!(matches!(
+                command(invalid),
+                Err(SessionError::InvalidCommand)
+            ));
+        }
+        request.copy_range = Some(block);
+        assert!(matches!(
+            command(request),
+            Err(SessionError::InvalidCommand)
+        ));
+        Ok(())
     }
 
     fn bold_patch() -> v1::StylePatch {

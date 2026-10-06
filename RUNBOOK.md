@@ -1,5 +1,74 @@
 # PXEL — RUNBOOK
 
+## 2026-10-06 — вставка во всё выделение и Ctrl+D
+
+Ветка `feat/two`, отдельный worktree ae91. Перед изменением изучены RUNBOOK,
+roadmap, ADR-079/087 и текущие clipboard/history контракты. Параллельный фикс
+режима ПД из другого worktree не реализовывался и не переносился сюда.
+
+Вставка использует нормализованный верхний левый угол: скаляр заполняет всё
+выделение, блок повторяется при кратных размерах; несовместимое выделение
+отклоняется целиком. Ctrl+D/Cmd+D копирует верхнюю строку вниз, включая пустые
+ячейки и формулы с относительными/абсолютными ссылками. Для одной выбранной
+строки источник — строка выше; на первой строке это no-op. Ввод в редакторе и
+pending команды не запускают fill down. Оформление остаётся независимым.
+
+ADR-089 описывает отдельный wire RepeatRangeCommand, optional repeat extent
+в CopyRange intent и receipt fingerprint. Старый сервер отклоняет неизвестный
+intent вместо частичной копии. Сервер читает замороженный источник, формирует
+один существующий guarded RangeWrite с preimages и использует прежние candidate,
+CAS, durable commit и Undo/Redo. Persisted codecs/snapshots и схема БД не менялись.
+
+Общие product-файлы изменены только для этой задачи:
+
+- `apps/web/src/document/store.ts`: геометрия вставки/повторения и fillDown.
+- `apps/web/src/grid/CanvasGrid.tsx`: Ctrl+D и описание клавиатурного действия.
+- `apps/server/src/documents.rs`: декодирование/валидация нового intent.
+- `crates/spreadsheet-domain/src/workbook.rs`: optional repeat extent.
+- `crates/spreadsheet-collab/src/lib.rs`: нормализация повторений из original head.
+- `crates/spreadsheet-storage-codec/src/lib.rs`: fingerprint полного intent.
+- `proto/pxel/wire/v1/session.proto`, `proto/wire-descriptor.bin` и
+  `apps/web/src/generated/pxel/wire/v1/session_pb.ts`: additive wire command
+  и закреплённая генерация. Legacy fingerprints и persisted schemas сохранены.
+
+Дополнены отдельные frontend/browser/native/wire/codec тесты; существующий
+axis-history тест получил `repeat: None`. Роутинг, конфиги, lockfiles, зависимости,
+Cargo manifests, SQL/migrations и файлы режима ПД не менялись.
+
+Фактические проверки: `pnpm test` — 181/181; `pnpm typecheck`, `pnpm lint`,
+`pnpm build`, `pnpm proto:check` — PASS. Native `cargo test --locked` для
+spreadsheet-collab (32 PASS, 2 прежних timing tests ignored),
+spreadsheet-storage-codec (56 PASS) и pxel-server (21 unit + 3 CLI PASS).
+`cargo clippy --locked -p pxel-server -p spreadsheet-collab
+-p spreadsheet-storage-codec --all-targets -- -D warnings` — PASS.
+WASM собран pinned wasm-bindgen 0.2.129; Rust fmt и git diff check — PASS.
+
+Настоящий Chromium и отдельный приватный PostgreSQL проверены через
+игнорируемый `.local/verify-range-fill.mjs`: финальные 16/16 при DPR1/2
+(5 новых сценариев + 3 прежних clipboard/copy сценария на каждом DPR),
+23.9 s. У новых сценариев нет pageerror/console error. Проверены одна версия
+на вставку/fill, сохранение после reload, discovered Undo/Redo, blank clearing,
+formula reference shifts и mixed two-dimensional tiling. Скриншот
+`.local/range-fill.png` просмотрен. Стенд остановлен; другие worktrees и
+основной dev-сервис не перезапускались.
+
+Первоначальные два frontend regression tests реально были RED. Начальные
+неудачные native прогоны: неверное имя Operation в новом тесте исправлено;
+server auth test требует DATABASE_URL — повтор с prerequisite PASS.
+После non-dev cargo test пришлось заново собрать dev-auth binary перед
+браузером. Расширенный браузерный прогон выявил слишком ранние клавиши после
+reload в новом тесте; добавлено ожидание загруженной A1. Single-cell fill test
+исправлен на явный переход вниз: Enter в formula bar сохраняет текущую ячейку.
+Ни одно production assertion не ослаблено.
+
+Общий `pnpm format:check` сохраняет две прежние ошибки: RUNBOOK.md и
+crates/spreadsheet-wasm/fixtures/styles-v4.json. Оба исходных файла из HEAD
+отдельно проверены Prettier и воспроизводят те же ошибки. Массовое
+переформатирование не выполнялось для минимизации конфликтов; адресная проверка
+изменённого кода/нового ADR выполняется перед commit. Полный workspace/150-case
+browser suite, crash restart, Linux/Compose/remote CI и production deployment
+в этом срезе не заявляются пройденными.
+
 ## 2026-09-29 — локальный PITR до named restore point
 
 Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-004/041, recovery

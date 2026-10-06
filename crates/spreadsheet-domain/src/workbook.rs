@@ -496,6 +496,7 @@ pub enum CommandPayload {
         destination: CellAddress,
         rows: u32,
         columns: u32,
+        repeat: Option<(u32, u32)>,
     },
     MoveRange {
         source: CellAddress,
