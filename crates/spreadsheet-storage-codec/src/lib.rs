@@ -8,6 +8,7 @@ mod cell_batch_tests;
 mod formula_codec;
 #[cfg(test)]
 mod frozen_rows_tests;
+mod merge_cells_codec;
 #[cfg(test)]
 mod merge_tests;
 mod move_codec;
@@ -511,6 +512,9 @@ fn operation(o: &Operation) -> Result<v1::Operation, CodecError> {
                     },
                 })
             }
+            Operation::MergeCellsWrite { .. } => {
+                Kind::MergeCellsWrite(merge_cells_codec::encode(o)?)
+            }
             Operation::MergeWrite {
                 sheet,
                 change,
@@ -768,6 +772,7 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
                 undoes_version,
             }
         }
+        Kind::MergeCellsWrite(write) => merge_cells_codec::decode(write)?,
         Kind::MergeWrite(write) => {
             let undoes = if write.undoes_operation_id.is_empty() {
                 if write.undoes_version != 0 {
@@ -1122,6 +1127,10 @@ fn decode_operation(o: v1::Operation) -> Result<Operation, CodecError> {
 }
 pub fn schema_version(operation: &Operation) -> u32 {
     match operation {
+        Operation::MergeCellsWrite {
+            undoes: Some(_), ..
+        } => 44,
+        Operation::MergeCellsWrite { .. } => 43,
         Operation::CellBatchWrite {
             intent: CellBatchIntent::SortRange { .. },
             undoes: Some(_),
@@ -1220,6 +1229,7 @@ pub fn schema_version(operation: &Operation) -> u32 {
     }
 }
 pub fn encode(event: &CommittedEvent) -> Result<Vec<u8>, CodecError> {
+    merge_cells_codec::validate(&event.operation, Some(event.version))?;
     style_codec::validate(&event.operation, Some(event.version))?;
     axis_codec::validate(&event.operation, Some(event.version))?;
     move_codec::validate(&event.operation, Some(event.version))?;
@@ -1389,18 +1399,22 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         return Err(CodecError::Invalid);
     }
     let e = v1::EventEnvelope::decode(bytes).map_err(|_| CodecError::Invalid)?;
-    if !matches!(e.schema_version, 1..=42) {
+    if !matches!(e.schema_version, 1..=44) {
         return Err(CodecError::UnsupportedSchema);
     }
     // New style families accept the frozen Rust writer's normalized encoding.
     // This rejects unknown fields; it is not a general protobuf canonicalization rule.
-    if matches!(e.schema_version, 23..=42) && e.encode_to_vec() != bytes {
+    if matches!(e.schema_version, 23..=44) && e.encode_to_vec() != bytes {
         return Err(CodecError::Invalid);
     }
     if e.committed_version == 0 {
         return Err(CodecError::Invalid);
     }
     let operation = decode_operation(e.operation.ok_or(CodecError::Invalid)?)?;
+    merge_cells_codec::validate(
+        &operation,
+        Some(DocumentVersion::new(e.committed_version).map_err(|_| CodecError::Invalid)?),
+    )?;
     sheet_settings_codec::validate_operation(&operation)?;
     style_codec::validate(
         &operation,
@@ -1434,7 +1448,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         (
             1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
             | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-            | 38 | 39 | 40 | 41 | 42,
+            | 38 | 39 | 40 | 41 | 42 | 43 | 44,
             0,
             actor,
             Operation::AdvanceCalculationEpoch { .. },
@@ -1445,7 +1459,7 @@ pub fn decode(bytes: &[u8]) -> Result<CommittedEvent, CodecError> {
         (
             1 | 2 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
             | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37
-            | 38 | 39 | 40 | 41 | 42,
+            | 38 | 39 | 40 | 41 | 42 | 43 | 44,
             0,
             actor,
             _,
@@ -1507,6 +1521,7 @@ fn semantic_operation(h: &mut Sha256, o: &Operation) -> Result<(), CodecError> {
             h.update(previous.to_be_bytes());
         }
         Operation::AxisSizeWrite { sheet, writes } => axis_size_codec::hash(h, *sheet, writes)?,
+        Operation::MergeCellsWrite { .. } => merge_cells_codec::hash(h, o)?,
         Operation::MergeWrite {
             sheet,
             change,
@@ -1880,6 +1895,14 @@ pub fn command_fingerprint(c: &Command) -> Result<[u8; 32], CodecError> {
         CommandPayload::SetAxisSizes { sheet, writes } => {
             axis_size_codec::hash_command(&mut h, *sheet, writes)?
         }
+        CommandPayload::MergeCells { sheet, range } => {
+            h.update([43]);
+            h.update(sheet.as_bytes());
+            h.update(range.first_row().as_bytes());
+            h.update(range.last_row().as_bytes());
+            h.update(range.first_column().as_bytes());
+            h.update(range.last_column().as_bytes());
+        }
         CommandPayload::SetMergeRange {
             sheet,
             range,
@@ -2104,6 +2127,7 @@ pub fn event_hash(e: &CommittedEvent) -> Result<[u8; 32], CodecError> {
         | (EventPrincipal::System, Operation::StyleWrite { .. })
         | (EventPrincipal::System, Operation::StyleCompensation { .. })
         | (EventPrincipal::System, Operation::CellWrite { .. })
+        | (EventPrincipal::System, Operation::MergeCellsWrite { .. })
         | (EventPrincipal::System, Operation::MergeWrite { .. })
         | (EventPrincipal::System, Operation::ClearCell { .. }) => return Err(CodecError::Invalid),
         (EventPrincipal::User(_), _) => h.update(b"PXEL-EVENT-1"),

@@ -1962,10 +1962,19 @@ fn command(input: v1::DocumentCommand) -> Result<Command, SessionError> {
         if merge.sheet_id.len() != 16 {
             return Err(SessionError::InvalidCommand);
         }
-        CommandPayload::SetMergeRange {
-            sheet: SheetId::from_bytes(bytes_id(&merge.sheet_id)?)?,
-            range: decode_wire_merge_range(merge.range.ok_or(SessionError::InvalidCommand)?)?,
-            merged: merge.merged,
+        let sheet = SheetId::from_bytes(bytes_id(&merge.sheet_id)?)?;
+        let range = decode_wire_merge_range(merge.range.ok_or(SessionError::InvalidCommand)?)?;
+        if merge.clear_covered {
+            if !merge.merged {
+                return Err(SessionError::InvalidCommand);
+            }
+            CommandPayload::MergeCells { sheet, range }
+        } else {
+            CommandPayload::SetMergeRange {
+                sheet,
+                range,
+                merged: merge.merged,
+            }
         }
     } else if let Some(formula) = input.formula_command {
         CommandPayload::SetCellFormula {
@@ -2472,7 +2481,9 @@ fn canonical(operation: Operation) -> Option<v1::CanonicalOperation> {
                     .collect(),
             })
         }
-        Operation::SheetSettingsWrite { .. } | Operation::CopySheet { .. } => return None,
+        Operation::SheetSettingsWrite { .. }
+        | Operation::CopySheet { .. }
+        | Operation::MergeCellsWrite { .. } => return None,
         Operation::FrozenRowsWrite { sheet, rows, .. } => {
             v1::canonical_operation::Kind::FrozenRowsWrite(v1::FrozenRowsWrite {
                 sheet_id: sheet.as_bytes().to_vec(),

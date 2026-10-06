@@ -2798,15 +2798,11 @@ export class DocumentStore {
             actorId: actor,
             baseVersion: BigInt(projection.version),
             clientSequence: ++this.sequence,
-            operation: {
-              kind: {
-                case: 'mergeWrite',
-                value: {
-                  sheetId: uuidBytes(sheet.id),
-                  range,
-                  merged,
-                },
-              },
+            setMergeRange: {
+              sheetId: uuidBytes(sheet.id),
+              range,
+              merged,
+              clearCovered: merged,
             },
           },
         },

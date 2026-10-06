@@ -328,7 +328,8 @@ fn history_writes(event: &CommittedEvent) -> Result<Vec<HistoryWrite<'_>>, MoveI
                 });
             }
         }
-        Operation::CellBatchWrite { content_writes, .. } => {
+        Operation::CellBatchWrite { content_writes, .. }
+        | Operation::MergeCellsWrite { content_writes, .. } => {
             for write in content_writes {
                 entries.push(HistoryWrite {
                     event,
@@ -381,7 +382,8 @@ fn visit_writes<'a>(
                 visit(write.address, content_formula(write.content.as_ref()))?;
             }
         }
-        Operation::CellBatchWrite { content_writes, .. } => {
+        Operation::CellBatchWrite { content_writes, .. }
+        | Operation::MergeCellsWrite { content_writes, .. } => {
             for write in content_writes {
                 visit(write.address, content_formula(write.content.as_ref()))?;
             }

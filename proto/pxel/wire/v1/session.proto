@@ -207,6 +207,7 @@ message SetMergeRangeCommand {
   bytes sheet_id = 1;
   MergeRange range = 2;
   bool merged = 3;
+  bool clear_covered = 4;
 }
 
 message AxisSizeWrite { bytes sheet_id = 1; repeated AxisSizeSet writes = 2; }

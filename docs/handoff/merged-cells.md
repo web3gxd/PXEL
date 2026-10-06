@@ -95,3 +95,9 @@ The conservative profile rejects structural edits intersecting a merge, and
 rejects merges hiding non-empty content or formatting. Linux/Compose and remote
 CI remain unavailable on this Windows host; broad Excel golden compatibility,
 OS-isolated browser upload, and production storage/deployment are not claimed.
+
+# 2026-10-06 extension
+
+See [ADR-123](../adr/123-populated-cell-merges.md): explicit interactive merging
+now clears covered values and styles with frozen Undo preimages in schemas43/44.
+Unmerge does not restore them. Older persisted merges retain their semantics.

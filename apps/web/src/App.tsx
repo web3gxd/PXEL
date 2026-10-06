@@ -863,6 +863,14 @@ function SpreadsheetApp({
                       }
                 }
                 onClick={() => document.selectSheet(sheet.id)}
+                onDoubleClick={() => {
+                  if (
+                    state.kind === 'online' &&
+                    document.canChangeCells &&
+                    document.selectSheet(sheet.id)
+                  )
+                    setCellsPanel('rename');
+                }}
               >
                 <Icon size={15}>
                   <rect x="4" y="3" width="16" height="18" rx="2" />

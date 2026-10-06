@@ -1,5 +1,6 @@
 import type { DocumentStore } from '../document/store';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { drawGrid } from './renderer';
 import { GRID, columnLabel } from './viewport';
 import { sheetMetrics, type AxisResize } from './geometry';
@@ -191,10 +192,13 @@ export function CanvasGrid({
       const startedAt = performance.now();
       canvas.style.width = `${scroller.clientWidth}px`;
       canvas.style.height = `${scroller.clientHeight}px`;
-      setScroll((current) =>
-        current.left === scroller.scrollLeft && current.top === scroller.scrollTop
-          ? current
-          : { left: scroller.scrollLeft, top: scroller.scrollTop },
+      // Commit the DOM overlays in the same animation frame as the canvas.
+      flushSync(() =>
+        setScroll((current) =>
+          current.left === scroller.scrollLeft && current.top === scroller.scrollTop
+            ? current
+            : { left: scroller.scrollLeft, top: scroller.scrollTop },
+        ),
       );
       const rendered = drawGrid(
         canvas,

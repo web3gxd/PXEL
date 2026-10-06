@@ -1,3 +1,65 @@
+## 2026-10-06 — объединение заполненных ячеек и замечания к сетке/ПД
+
+Ветка feat/merge-populated-cells. Изучены RUNBOOK, roadmap, architecture,
+ADR-096 и handoff merged-cells; решения записаны в ADR-123/124. Новых
+зависимостей нет. По прямому выбору пользователя объединение сохраняет
+верхнюю левую ячейку, очищает остальные значения и оформление; только Undo
+возвращает их. Разъединение само по себе ничего не восстанавливает.
+
+Новый MergeCellsWrite (persisted schemas43/44, protobuf tag31) объединяет
+frozen content/style preimages и membership в один кандидат/событие/CAS/version.
+Journal независимо проверяет locked head, intent, actor/inverse provenance,
+content/style/membership history и итоговый hash до durable commit. Stale
+destructive commands отклоняются. Старые события/хэши/import/snapshot
+сохраняют смысл; browser wire v1 передаёт явный clear_covered intent, а итоговое
+состояние получает через существующий projection-resync. Preimages в public
+wire не публикуются. Migration202610060006 расширяет principal/schema check.
+Формулы пересчитывают очищенные/восстановленные адреса. Существующие лимиты
+геометрии и максимум1000 затронутых непустых/оформленных ячеек сохраняются.
+
+Включение распознавания выбирает все6 типов; индивидуальные флажки остаются
+редактируемыми. Раскрытые значения ограничены прямоугольником ячейки,
+включая частично видимые ячейки. DOM-плашки обновляются синхронно в animation
+frame canvas. Выделенные плашки получают зелёную заливку; весь столбец не
+получает дополнительную горизонтальную рамку merged anchor. Для большого
+диапазона активная ячейка получает более насыщенную заливку без внутренней
+обводки. Sparse redraw сохраняется для одиночного выделения; multi selection
+перерисовывается в пределах viewport, сохраняя внешнюю рамку при обновлениях.
+Double-click вкладки открывает существующий rename dialog с прежними guards.
+
+Фактическая локальная проверка Windows/PG18.4:
+
+- Domain merge4/4: values, styled blank, snapshot, stale preimage atomic rejection,
+  Undo/Redo и legacy overlap guards. Первоначальный RED нового варианта выявил
+  отсутствующие exhaustive handlers; расширение fixture сначала ошибочно
+  использовало Cell style kind для двух адресов, исправлено на Range и4/4 green.
+- Suites domain/formula/collab/application прошли; codec71/71 и его Clippy прошли.
+  PostgreSQL journal merge2/2: ordinary/clearing commit, retry, Undo/Redo, replay.
+- Workspace check all-targets/all-features, Clippy -D warnings, cargo fmt check,
+  web lint/typecheck/build, proto:check, git diff --check прошли. Web unit316/316.
+- Populated/legacy merge E2E4/4 на DPR1/2; финальный populated + XLSX4/4 проверяет
+  formula8→1→8→1, exact content/style restore, worker authored hash, reload,
+  unmerge без восстановления. Первый параллельный запуск столкнулся с общей
+  папкой trace (ENOENT); отдельные output directories устранили конфликт.
+- Новые UI regressions10/10 DPR1/2: все6 types+persist, длинное значение и partial
+  scroll clipping, dblclick rename+reload, реальные canvas draw calls без лишней
+  обводки, согласование painted scroll и DOM bounds, green selected mask.
+  RED подтвердил master-checkbox и dblclick ошибки; итоговый запуск10/10 green.
+- Existing privacy/styles/cells-menu/scrollbar-select:55/56; один timeout в
+  старом createBookFromUi до XLSX action. Повторный targeted XLSX2/2 прошёл,
+  прочие55 прошли, включая export/guest privacy, разные размеры/themes,
+  sparse style/copy/cut/axis-history и concurrent foreign style conflict.
+
+Read-only review codec/domain/journal/inverse и собственная проверка пяти
+осей качества не выявили оставшихся замечаний. Перед применением миграции
+сделан ignored pg_dump latest-before-merge-change.dump. Обновлён локальный
+latest database, readyz200; свежая вкладка существующей демонстрационной
+книги01a11297-5298-7c62-875e-48f334b999ca подключена, листПД открыт,
+double-click rename и column-selection визуально проверены. Старую вкладку
+с двумя неподтверждёнными операциями оставили открытой, данные не отброшены.
+Тестовая БД/порты изолированы от демо. Linux/Compose/remote CI и production
+deployment остаются открытыми gates; локальная проверка их не заменяет.
+
 ## 2026-10-06 — пустые книги, выбор скроллбара и custom dropdowns
 
 Ветка feat/scrollbars-dropdowns; изучены roadmap, architecture и ADR-091/116/117.
@@ -169,6 +231,7 @@ security, performance) проверены; неограниченных журн
 Linux/Compose/remote CI, production deployment и ручной NVDA; полный browser
 suite этим адресным прогоном не подменяется. Git rebase/повторные проверки и
 fast-forward merge выполняются по текущему AGENTS.md после проверки чистоты main.
+
 ## 2026-10-06 — быстрый resize строк и столбцов (ADR-119)
 
 Причина видимой задержки: Canvas и DOM использовали только подтверждённые
@@ -201,9 +264,10 @@ timeouts сохранены: trace показал успешные отдель�
 PostgreSQL 18.6 (loopback:55433), dev-auth сервере и Vite: 280/280 Vitest;
 ESLint, TypeScript, production build, формат всех 16 изменённых code/report
 файлов и diff-check прошли. Build сохраняет прежнее предупреждение main chunk
->500 kB. Pinned dependencies/toolchain переиспользованы через ignored junctions;
-из-за отказа pnpm task-state на symlink команды выполнены прямыми Node CLI.
-Секреты, generated WASM, data, logs и toolchains не коммитятся.
+
+> 500 kB. Pinned dependencies/toolchain переиспользованы через ignored junctions;
+> из-за отказа pnpm task-state на symlink команды выполнены прямыми Node CLI.
+> Секреты, generated WASM, data, logs и toolchains не коммитятся.
 
 Браузер: первые адресные 4/4 и 6/6 DPR1/2 прошли; расширенный 26-case matrix
 дал 24 passed/2 failed (неоднозначный status ПД и общий timeout filter case).
@@ -249,6 +313,7 @@ HEAD 11cd2b0 без изменения файлов; 1af8 остаётся detac
 Каталоги worktrees, локальные данные и backup/pre-merge tag сохранены.
 Результаты проверки и cleanup оформлены отдельной документационной записью.
 Remote/push и переписывание существующей истории не выполнялись.
+
 ## 2026-10-06 — слияние feat/one и feat/two в main
 
 После отдельного `2af11e2 chore: git setup` создан backup/pre-merge-20261006-142752.
@@ -302,6 +367,7 @@ fixtures во время первого прогона не делает его 
 Единый 48/48 прогон после последних test corrections не повторялся. Снимок
 .local/git-merge-fill.png просмотрен; логи — ignored .local/git-merge-*.
 Linux/Compose/remote CI, production deployment и NVDA остаются открытыми gates.
+
 ## 2026-10-06 — локальная настройка Git перед слиянием
 
 Корень Git проверен: C:/projects/PXEL. Существующая main сохранена; remote нет.

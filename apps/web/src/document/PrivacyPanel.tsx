@@ -136,7 +136,10 @@ export function PrivacyPanel({
               <input
                 type="checkbox"
                 checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
+                onChange={(e) => {
+                  setEnabled(e.target.checked);
+                  if (e.target.checked) setTypes(Object.keys(PRIVACY_TYPES) as PrivacyKind[]);
+                }}
               />{' '}
               Включить распознавание
             </label>

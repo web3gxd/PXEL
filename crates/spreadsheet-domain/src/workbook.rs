@@ -503,6 +503,14 @@ pub enum Operation {
         undoes: Option<OperationId>,
         undoes_version: Option<DocumentVersion>,
     },
+    MergeCellsWrite {
+        sheet: SheetId,
+        change: MergeChange,
+        content_writes: Vec<GuardedContentWrite>,
+        style_writes: Vec<crate::style_write::GuardedStyleWrite>,
+        undoes: Option<OperationId>,
+        undoes_version: Option<DocumentVersion>,
+    },
     SetCellFormula {
         address: CellAddress,
         formula: Formula,
@@ -526,6 +534,10 @@ pub enum Operation {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum CommandPayload {
+    MergeCells {
+        sheet: SheetId,
+        range: MergeRange,
+    },
     ShiftCells {
         source: CellAddress,
         rows: u32,
@@ -648,6 +660,18 @@ impl Operation {
     }
     pub const fn is_inverse_target(&self) -> bool {
         self.is_cell_inverse_target()
+            || matches!(
+                self,
+                Self::MergeCellsWrite {
+                    undoes: None,
+                    undoes_version: None,
+                    ..
+                } | Self::MergeCellsWrite {
+                    undoes: Some(_),
+                    undoes_version: Some(_),
+                    ..
+                }
+            )
             || matches!(
                 self,
                 Self::StyleWrite { .. }
@@ -1690,6 +1714,89 @@ impl Workbook {
             next.version = next_version;
             return Ok(next);
         }
+        if let Operation::MergeCellsWrite {
+            sheet,
+            change,
+            content_writes,
+            style_writes,
+            undoes,
+            undoes_version,
+        } = operation
+        {
+            if change.merged == change.previous
+                || (undoes.is_some() != undoes_version.is_some())
+                || undoes_version.is_some_and(|v| v == DocumentVersion::ZERO || v > self.version)
+            {
+                return Err(DomainError::VersionConflict);
+            }
+            let target = self
+                .sheets
+                .iter()
+                .find(|s| s.id == *sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            let (top, bottom, left, right) = target.merge_bounds(change.range)?;
+            for address in content_writes
+                .iter()
+                .map(|w| w.address)
+                .chain(style_writes.iter().map(|w| w.address))
+            {
+                let row = target
+                    .row_position(address.row)
+                    .ok_or(DomainError::MissingRow)?;
+                let column = target
+                    .column_position(address.column)
+                    .ok_or(DomainError::MissingColumn)?;
+                if address.sheet != *sheet
+                    || row < top
+                    || row > bottom
+                    || column < left
+                    || column > right
+                    || (row == top && column == left)
+                {
+                    return Err(DomainError::InvalidAxis);
+                }
+            }
+            if change.merged
+                && (content_writes.iter().any(|w| w.content.is_some())
+                    || style_writes.iter().any(|w| {
+                        w.changes
+                            .iter()
+                            .any(|p| crate::style::CellStyle::default().change(p.property()) != *p)
+                    }))
+            {
+                return Err(DomainError::InvalidStyle);
+            }
+            let membership = Operation::MergeWrite {
+                sheet: *sheet,
+                change: *change,
+                undoes: *undoes,
+                undoes_version: *undoes_version,
+            };
+            let mut next = if change.merged {
+                self.clone()
+            } else {
+                self.candidate(&membership, next_version)?
+            };
+            next.version = self.version;
+            if !content_writes.is_empty() || !style_writes.is_empty() {
+                next = next.candidate(
+                    &Operation::CellBatchWrite {
+                        intent: CellBatchIntent::SetValues,
+                        content_writes: content_writes.clone(),
+                        style_writes: style_writes.clone(),
+                        undoes: *undoes,
+                        undoes_version: *undoes_version,
+                    },
+                    next_version,
+                )?;
+                next.version = self.version;
+            }
+            if change.merged {
+                next = next.candidate(&membership, next_version)?;
+            }
+            next.version = next_version;
+            return Ok(next);
+        }
         if let Operation::MergeWrite {
             sheet,
             change,
@@ -2429,7 +2536,8 @@ impl Workbook {
                 | Operation::SheetSettingsWrite { .. }
                 | Operation::CopySheet { .. }
                 | Operation::FrozenRowsWrite { .. }
-                | Operation::MergeWrite { .. } => {
+                | Operation::MergeWrite { .. }
+                | Operation::MergeCellsWrite { .. } => {
                     return Err(DomainError::InvalidAxis);
                 }
             };
@@ -3009,6 +3117,7 @@ impl Workbook {
                 )?
             }
             Operation::MergeWrite { .. } => (self.text_bytes, self.ast_memory_bytes),
+            Operation::MergeCellsWrite { .. } => return Err(DomainError::InvalidAxis),
         })
     }
     fn validate_guarded_write(&self, operation: &Operation) -> Result<(), DomainError> {
@@ -3236,6 +3345,7 @@ impl Workbook {
             | Operation::MoveRange { .. }
             | Operation::MoveCompensation { .. }
             | Operation::MergeWrite { .. }
+            | Operation::MergeCellsWrite { .. }
             | Operation::AxisEdit { .. }
             | Operation::AxisCompensation { .. }
             | Operation::StyleWrite { .. }

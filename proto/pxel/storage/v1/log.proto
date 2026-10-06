@@ -47,6 +47,7 @@ message Operation {
   FrozenRowsWrite frozen_rows_write = 28;
   SheetSettingsWrite sheet_settings_write = 29;
   CopySheet copy_sheet = 30;
+  MergeCellsWrite merge_cells_write = 31;
  }
 }
 message AxisSizeWrite { bytes sheet_id = 1; repeated AxisSizeChange writes = 2; }
@@ -313,3 +314,6 @@ message SheetSettings { bool hidden = 1; uint32 default_column_width = 2; option
 message SheetSettingsWrite { bytes sheet_id = 1; string previous_name = 2; string name = 3; SheetSettings previous = 4; SheetSettings settings = 5; uint32 previous_index = 6; uint32 index = 7; }
 message CopySheet { bytes source_sheet_id = 1; CreateWorkbook sheet = 2; uint32 index = 3; }
 message ShiftCellsIntent { CellAddress source = 1; uint32 rows = 2; uint32 columns = 3; uint32 axis_kind = 4; bool insert = 5; }
+
+// Schemas 43/44 freeze destructive merge writes and their Undo preimages.
+message MergeCellsWrite { MergeWrite merge = 1; repeated GuardedContentWrite content_writes = 2; StyleWrite styles = 3; }

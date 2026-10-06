@@ -902,6 +902,12 @@ async fn submit<J: OperationJournal>(
                                 SessionError::Domain(error)
                             }
                         })?
+                } else if matches!(target.operation, Operation::MergeCellsWrite { .. }) {
+                    spreadsheet_domain::merge::inverse_merge_cells(
+                        &target.operation,
+                        target.operation_id,
+                        target.version,
+                    )?
                 } else if let Operation::MergeWrite { sheet, change, .. } = target.operation {
                     Operation::MergeWrite {
                         sheet,
@@ -1358,6 +1364,14 @@ fn normalize(
                 sheet: *sheet,
                 writes,
             })
+        }
+        CommandPayload::MergeCells { sheet, range } => {
+            if command.base_version != workbook.version() {
+                return Err(SessionError::Domain(DomainError::VersionConflict));
+            }
+            Ok(spreadsheet_domain::merge::prepare_merge_cells(
+                workbook, *sheet, *range,
+            )?)
         }
         CommandPayload::SetMergeRange {
             sheet,

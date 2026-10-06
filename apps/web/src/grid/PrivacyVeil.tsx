@@ -28,10 +28,16 @@ export function PrivacyVeil({
   const [revealed, setRevealed] = useState(false);
   const address = `${columnLabel(position.column)}${position.row + 1}`;
   const original = revealed ? document.privacyOriginalDisplay(position) : undefined;
+  const bounds = document.selectionBounds;
+  const selected =
+    position.row >= bounds.startRow &&
+    position.row <= bounds.endRow &&
+    position.column >= bounds.startColumn &&
+    position.column <= bounds.endColumn;
   return (
     <button
       type="button"
-      className={`privacy-veil${revealed ? ' privacy-veil-revealed' : ''}`}
+      className={`privacy-veil${revealed ? ' privacy-veil-revealed' : ''}${selected ? ' privacy-veil-selected' : ''}`}
       style={{ left, top, width, height }}
       aria-label={`${revealed ? 'Скрыть' : 'Раскрыть'} данные ${address}`}
       aria-pressed={revealed}

@@ -82,7 +82,7 @@ pub(super) async fn validate(
     Ok(())
 }
 
-async fn ensure_latest_range_write(
+pub(super) async fn ensure_latest_range_write(
     db: &PgDatabase,
     tx: &mut Transaction<'_, Postgres>,
     document: DocumentId,
@@ -117,7 +117,7 @@ async fn ensure_latest_range_write(
             },
         )
         .await?;
-        if matches!(event.operation, Operation::MergeWrite { sheet: changed_sheet, change, .. } if changed_sheet == sheet && change.range == range)
+        if matches!(event.operation, Operation::MergeWrite { sheet: changed_sheet, change, .. } | Operation::MergeCellsWrite { sheet: changed_sheet, change, .. } if changed_sheet == sheet && change.range == range)
         {
             return Err(JournalError::UndoConflict);
         }

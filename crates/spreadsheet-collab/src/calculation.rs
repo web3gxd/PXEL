@@ -106,7 +106,8 @@ impl CalculationHandle {
                     .changed
                     .extend(writes.iter().map(|write| write.address));
             }
-            Operation::CellBatchWrite { content_writes, .. } => {
+            Operation::CellBatchWrite { content_writes, .. }
+            | Operation::MergeCellsWrite { content_writes, .. } => {
                 pending
                     .changed
                     .extend(content_writes.iter().map(|write| write.address));

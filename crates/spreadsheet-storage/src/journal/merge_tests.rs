@@ -51,6 +51,15 @@ async fn commit(db: &PgDatabase, book: &mut Workbook, request: &CommitRequest) -
 
 #[sqlx::test(migrations = false)]
 async fn merge_history_commits_undo_redo_and_replays(pool: sqlx::PgPool) -> TestResult {
+    merge_history(pool, false).await
+}
+
+#[sqlx::test(migrations = false)]
+async fn populated_merge_clears_and_restores_one_durable_event(pool: sqlx::PgPool) -> TestResult {
+    merge_history(pool, true).await
+}
+
+async fn merge_history(pool: sqlx::PgPool, clearing: bool) -> TestResult {
     let (db, identity, mut book) = super::tests::fixture(pool).await?;
     let sheet = book.sheets()[0].id();
     let added_row = RowId::from_bytes([31; 16])?;
@@ -76,15 +85,70 @@ async fn merge_history_commits_undo_redo_and_replays(pool: sqlx::PgPool) -> Test
         book.sheets()[0].columns()[0],
         book.sheets()[0].columns()[0],
     );
-    let merge = Operation::MergeWrite {
+    let hidden = CellAddress {
         sheet,
-        change: MergeChange {
-            range,
-            merged: true,
-            previous: false,
-        },
-        undoes: None,
-        undoes_version: None,
+        row: added_row,
+        column: book.sheets()[0].columns()[0],
+    };
+    if clearing {
+        let write = prepared(
+            &db,
+            identity,
+            &book,
+            40,
+            Operation::CellWrite {
+                address: hidden,
+                content: Some(CellContent::Value(CellValue::Text("restorable".into()))),
+                previous: None,
+                kind: Some(CellWriteKind::SetValue),
+                undoes: None,
+                undoes_version: None,
+            },
+            CommandPayload::SetCellValue {
+                address: hidden,
+                value: CellValue::Text("restorable".into()),
+            },
+        )
+        .await?;
+        commit(&db, &mut book, &write).await?;
+        let changes = vec![spreadsheet_domain::style::StyleChange::FontBold(
+            spreadsheet_domain::style::Change::Set(true),
+        )];
+        let style = spreadsheet_domain::style_write::prepare_style_write(
+            &book,
+            &[hidden],
+            &changes,
+            StyleWriteKind::Cell,
+        )?;
+        let style = prepared(
+            &db,
+            identity,
+            &book,
+            41,
+            style,
+            CommandPayload::SetCellStyle {
+                address: hidden,
+                changes,
+            },
+        )
+        .await?;
+        commit(&db, &mut book, &style).await?;
+    }
+    let original_content = book.cell_content(hidden)?.cloned();
+    let original_style = book.sheets()[0].styles().get(&hidden).cloned();
+    let merge = if clearing {
+        spreadsheet_domain::merge::prepare_merge_cells(&book, sheet, range)?
+    } else {
+        Operation::MergeWrite {
+            sheet,
+            change: MergeChange {
+                range,
+                merged: true,
+                previous: false,
+            },
+            undoes: None,
+            undoes_version: None,
+        }
     };
     let target = prepared(
         &db,
@@ -92,17 +156,30 @@ async fn merge_history_commits_undo_redo_and_replays(pool: sqlx::PgPool) -> Test
         &book,
         33,
         merge,
-        CommandPayload::SetMergeRange {
-            sheet,
-            range,
-            merged: true,
+        if clearing {
+            CommandPayload::MergeCells { sheet, range }
+        } else {
+            CommandPayload::SetMergeRange {
+                sheet,
+                range,
+                merged: true,
+            }
         },
     )
     .await?;
     commit(&db, &mut book, &target).await?;
     assert!(book.sheets()[0].merges().contains(&range));
+    assert!(book.cell_content(hidden)?.is_none());
+    assert!(!book.sheets()[0].styles().contains_key(&hidden));
 
     let inverse = |target: &CommittedEvent, merged: bool| -> TestResult<Operation> {
+        if clearing {
+            return Ok(spreadsheet_domain::merge::inverse_merge_cells(
+                &target.operation,
+                target.operation_id,
+                target.version,
+            )?);
+        }
         let Operation::MergeWrite { sheet, change, .. } = &target.operation else {
             return Err("target is not a merge event".into());
         };
@@ -131,6 +208,11 @@ async fn merge_history_commits_undo_redo_and_replays(pool: sqlx::PgPool) -> Test
     .await?;
     commit(&db, &mut book, &undo).await?;
     assert!(!book.sheets()[0].merges().contains(&range));
+    assert_eq!(book.cell_content(hidden)?.cloned(), original_content);
+    assert_eq!(
+        book.sheets()[0].styles().get(&hidden).cloned(),
+        original_style
+    );
 
     let redo_operation = inverse(&undo.event, true)?;
     let redo = prepared(

@@ -84,3 +84,116 @@ pub struct MergeChange {
     pub merged: bool,
     pub previous: bool,
 }
+
+/// Freeze only occupied/styled non-anchor cells. Clearing and membership are
+/// published together; these exact preimages are retained solely for Undo.
+pub fn prepare_merge_cells(
+    book: &crate::workbook::Workbook,
+    sheet: crate::workbook::SheetId,
+    range: MergeRange,
+) -> Result<crate::workbook::Operation, DomainError> {
+    use crate::workbook::*;
+    let target = book
+        .sheets()
+        .iter()
+        .find(|s| s.id() == sheet)
+        .ok_or(DomainError::MissingSheet)?;
+    let (top, bottom, left, right) = target.merge_bounds(range)?;
+    let mut content_writes = Vec::new();
+    let mut style_writes = Vec::new();
+    for row in top..=bottom {
+        for column in left..=right {
+            if row == top && column == left {
+                continue;
+            }
+            let address = CellAddress {
+                sheet,
+                row: target.rows()[row as usize],
+                column: target.columns()[column as usize],
+            };
+            let previous = book.cell_content(address)?.cloned();
+            let style = target.styles().get(&address);
+            if previous.is_some() || style.is_some() {
+                content_writes.push(GuardedContentWrite {
+                    address,
+                    previous,
+                    content: None,
+                });
+                if content_writes.len() > 1_000 {
+                    return Err(DomainError::LimitExceeded);
+                }
+            }
+            if let Some(style) = style {
+                let previous = style.normalized_changes();
+                let default = crate::style::CellStyle::default();
+                let changes = previous
+                    .iter()
+                    .map(|p| default.change(p.property()))
+                    .collect();
+                style_writes.push(crate::style_write::GuardedStyleWrite {
+                    address,
+                    previous,
+                    changes,
+                });
+            }
+        }
+    }
+    content_writes.sort_by_key(|w| w.address);
+    style_writes.sort_by_key(|w| w.address);
+    Ok(Operation::MergeCellsWrite {
+        sheet,
+        change: MergeChange {
+            range,
+            merged: true,
+            previous: false,
+        },
+        content_writes,
+        style_writes,
+        undoes: None,
+        undoes_version: None,
+    })
+}
+
+pub fn inverse_merge_cells(
+    operation: &crate::workbook::Operation,
+    id: crate::workbook::OperationId,
+    version: crate::workbook::DocumentVersion,
+) -> Result<crate::workbook::Operation, DomainError> {
+    use crate::workbook::*;
+    let Operation::MergeCellsWrite {
+        sheet,
+        change,
+        content_writes,
+        style_writes,
+        ..
+    } = operation
+    else {
+        return Err(DomainError::InvalidAxis);
+    };
+    Ok(Operation::MergeCellsWrite {
+        sheet: *sheet,
+        change: MergeChange {
+            range: change.range,
+            merged: !change.merged,
+            previous: change.merged,
+        },
+        content_writes: content_writes
+            .iter()
+            .map(|w| GuardedContentWrite {
+                address: w.address,
+                content: w.previous.clone(),
+                previous: w.content.clone(),
+            })
+            .collect(),
+        style_writes: style_writes
+            .iter()
+            .map(|w| crate::style_write::GuardedStyleWrite {
+                address: w.address,
+                changes: w.previous.clone(),
+                previous: w.changes.clone(),
+            })
+            .collect(),
+        undoes: Some(id),
+        undoes_version: Some(version),
+    })
+}

@@ -11,6 +11,7 @@ mod axis_tests;
 mod discovery;
 #[cfg(test)]
 mod discovery_tests;
+mod merge_cells_guard;
 mod merge_guard;
 #[cfg(test)]
 mod merge_tests;
@@ -102,7 +103,7 @@ pub(crate) async fn verified_event_cached(
     keys: &mut crate::crypto::ReadKeyCache,
     row: StoredEventRow<'_>,
 ) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=42) {
+    if !matches!(row.schema_version, 1..=44) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
@@ -179,7 +180,8 @@ fn target_writes(
         Operation::RangeWrite { writes, .. }
         | Operation::MoveRange { writes, .. }
         | Operation::MoveCompensation { writes, .. } => Ok(writes.clone()),
-        Operation::CellBatchWrite { content_writes, .. } => Ok(content_writes.clone()),
+        Operation::CellBatchWrite { content_writes, .. }
+        | Operation::MergeCellsWrite { content_writes, .. } => Ok(content_writes.clone()),
         Operation::AxisEdit { change } | Operation::AxisCompensation { change, .. } => {
             Ok(change.writes.clone())
         }
@@ -216,7 +218,8 @@ fn touched_addresses(
             .map(|w| w.address)
             .filter(|a| targets.contains_key(a))
             .collect(),
-        Operation::CellBatchWrite { content_writes, .. } => content_writes
+        Operation::CellBatchWrite { content_writes, .. }
+        | Operation::MergeCellsWrite { content_writes, .. } => content_writes
             .iter()
             .map(|w| w.address)
             .filter(|a| targets.contains_key(a))
@@ -612,7 +615,7 @@ async fn guard_undo_tail(
         if event.version.get() != expected {
             return Err(JournalError::Corrupt);
         }
-        if matches!(event.operation, Operation::MergeWrite { sheet, .. }
+        if matches!(event.operation, Operation::MergeWrite { sheet, .. } | Operation::MergeCellsWrite { sheet, .. }
             if effective_writes.keys().any(|address| address.sheet == sheet))
         {
             return Err(JournalError::UndoConflict);
@@ -640,6 +643,11 @@ async fn guard_undo_tail(
                     ..
                 }
                 | Operation::CellBatchWrite {
+                    undoes: Some(id),
+                    undoes_version: Some(version),
+                    ..
+                }
+                | Operation::MergeCellsWrite {
                     undoes: Some(id),
                     undoes_version: Some(version),
                     ..
@@ -1039,6 +1047,20 @@ impl OperationJournal for PgDatabase {
                 }
                 expected
             }
+            Operation::MergeCellsWrite {
+                sheet,
+                change,
+                undoes,
+                ..
+            } => match undoes {
+                Some(id) => CommandPayload::UndoCell {
+                    target_operation_id: *id,
+                },
+                None => CommandPayload::MergeCells {
+                    sheet: *sheet,
+                    range: change.range,
+                },
+            },
             Operation::MergeWrite {
                 sheet,
                 change,
@@ -1441,6 +1463,9 @@ impl OperationJournal for PgDatabase {
         if matches!(e.operation, Operation::MergeWrite { undoes: None, .. }) {
             merge_guard::validate(self, &mut tx, request, access.head, None).await?;
         }
+        if matches!(e.operation, Operation::MergeCellsWrite { undoes: None, .. }) {
+            merge_cells_guard::validate(self, &mut tx, request, access.head, None).await?;
+        }
         let inverse_target = match &e.operation {
             Operation::CellWrite {
                 kind: None,
@@ -1478,6 +1503,11 @@ impl OperationJournal for PgDatabase {
                 undoes: Some(id),
                 undoes_version: Some(version),
                 ..
+            }
+            | Operation::MergeCellsWrite {
+                undoes: Some(id),
+                undoes_version: Some(version),
+                ..
             } => Some((*id, *version)),
             _ => None,
         };
@@ -1495,6 +1525,9 @@ impl OperationJournal for PgDatabase {
                 style_guard::validate(self, &mut tx, request, access.head, Some(&target)).await?;
             } else if matches!(e.operation, Operation::AxisCompensation { .. }) {
                 axis_guard::validate(self, &mut tx, request, access.head, Some(&target)).await?;
+            } else if matches!(e.operation, Operation::MergeCellsWrite { .. }) {
+                merge_cells_guard::validate(self, &mut tx, request, access.head, Some(&target))
+                    .await?;
             } else if matches!(e.operation, Operation::MergeWrite { .. }) {
                 merge_guard::validate(self, &mut tx, request, access.head, Some(&target)).await?;
             } else {

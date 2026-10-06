@@ -10,7 +10,10 @@ fn style_writes(operation: &Operation) -> Option<(StyleWriteKind, &[GuardedStyle
     match operation {
         Operation::StyleWrite { kind, writes }
         | Operation::StyleCompensation { kind, writes, .. } => Some((*kind, writes)),
-        Operation::CellBatchWrite { style_writes, .. } if !style_writes.is_empty() => {
+        Operation::CellBatchWrite { style_writes, .. }
+        | Operation::MergeCellsWrite { style_writes, .. }
+            if !style_writes.is_empty() =>
+        {
             Some((StyleWriteKind::Range, style_writes))
         }
         _ => None,
@@ -24,6 +27,11 @@ fn inverse(operation: &Operation) -> Option<(OperationId, DocumentVersion)> {
             ..
         } => Some((*undoes, *undoes_version)),
         Operation::CellBatchWrite {
+            undoes: Some(undoes),
+            undoes_version: Some(version),
+            ..
+        }
+        | Operation::MergeCellsWrite {
             undoes: Some(undoes),
             undoes_version: Some(version),
             ..
@@ -342,6 +350,26 @@ async fn tail(
         return Err(JournalError::Corrupt);
     }
     Ok(events)
+}
+
+pub(super) async fn validate_merge_history(
+    db: &PgDatabase,
+    tx: &mut Transaction<'_, Postgres>,
+    document: DocumentId,
+    target: &CommittedEvent,
+    head: DocumentVersion,
+) -> Result<(), JournalError> {
+    let Operation::MergeCellsWrite { style_writes, .. } = &target.operation else {
+        return Err(JournalError::Corrupt);
+    };
+    let leaves: BTreeSet<_> = style_writes
+        .iter()
+        .flat_map(|w| w.changes.iter().map(move |p| (w.address, p.property())))
+        .collect();
+    let events = tail(db, tx, document, target.version, head).await?;
+    validate_history(target.principal, &events, |address, property| {
+        leaves.contains(&(address, property))
+    })
 }
 
 pub(super) async fn validate(

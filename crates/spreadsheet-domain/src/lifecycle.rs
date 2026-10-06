@@ -111,7 +111,7 @@ pub fn check_command_activation(book: &Workbook, command: &Command) -> Result<()
                 });
             }
         }
-        CommandPayload::SetMergeRange { range, .. } => {
+        CommandPayload::SetMergeRange { range, .. } | CommandPayload::MergeCells { range, .. } => {
             floor = floor
                 .max(book.row_activation_floor(range.first_row()))
                 .max(book.row_activation_floor(range.last_row()))

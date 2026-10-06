@@ -111,6 +111,59 @@ test('merged range is one hit target and survives reload, Undo and Redo', async 
   expect((await state(page)).sheets[0]?.merges).toHaveLength(1);
 });
 
+test('populated merge clears covered values and styles atomically and Undo restores them', async ({
+  page,
+}) => {
+  await createDocument(page);
+  await select(page, 0, 0);
+  await write(page, 'Anchor');
+  await select(page, 1, 0);
+  await write(page, '7');
+  await committed(page, () =>
+    page.getByRole('button', { name: 'Полужирный', exact: true }).click(),
+  );
+  await select(page, 0, 1);
+  await write(page, '=A2+1');
+  const original = await state(page);
+  await select(page, 0, 0);
+  await grid(page).focus();
+  await page.keyboard.press('Shift+ArrowDown');
+  const merged = await committed(page, () =>
+    page.getByRole('button', { name: 'Объединить ячейки', exact: true }).click(),
+  );
+  const sheet = merged.sheets[0]!;
+  expect(sheet.merges).toHaveLength(1);
+  expect(
+    sheet.cells.find((c) => c.row_id === sheet.rows[1] && c.column_id === sheet.columns[0]),
+  ).toBeUndefined();
+  expect(styleAt(merged, sheet.rows[1]!, sheet.columns[0]!)).toBeUndefined();
+  await select(page, 0, 1);
+  await expect(page.getByTestId('active-cell')).toHaveText('B1: 1');
+  await workerMatches(page);
+  await page.reload();
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  await expect(undo(page)).toBeEnabled();
+  const restored = await committed(page, () => undo(page).click());
+  expect(restored.sheets).toEqual(original.sheets);
+  await workerMatches(page);
+  await select(page, 0, 1);
+  await expect(page.getByTestId('active-cell')).toHaveText('B1: 8');
+  await expect(redo(page)).toBeEnabled();
+  await committed(page, () => redo(page).click());
+  await expect(page.getByTestId('active-cell')).toHaveText('B1: 1');
+  await select(page, 0, 0);
+  const unmerged = await committed(page, () =>
+    page.getByRole('button', { name: 'Разъединить ячейки', exact: true }).click(),
+  );
+  expect(unmerged.sheets[0]?.merges).toHaveLength(0);
+  expect(
+    unmerged.sheets[0]?.cells.find(
+      (c) => c.row_id === sheet.rows[1] && c.column_id === sheet.columns[0],
+    ),
+  ).toBeUndefined();
+  expect(styleAt(unmerged, sheet.rows[1]!, sheet.columns[0]!)).toBeUndefined();
+});
+
 test('formula range copy includes sparse styles in one durable batch and Undo restores both', async ({
   page,
 }) => {

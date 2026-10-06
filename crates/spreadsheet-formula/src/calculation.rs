@@ -342,7 +342,8 @@ impl CalculationProjection {
                 let changed = writes.iter().map(|write| write.address).collect();
                 return self.prepare_reconcile(book, &changed, limits);
             }
-            Operation::CellBatchWrite { content_writes, .. } => {
+            Operation::CellBatchWrite { content_writes, .. }
+            | Operation::MergeCellsWrite { content_writes, .. } => {
                 let changed = content_writes.iter().map(|write| write.address).collect();
                 return self.prepare_reconcile(book, &changed, limits);
             }

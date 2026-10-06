@@ -127,3 +127,101 @@ fn snapshot_schema_six_preserves_merge_state() -> Result<(), Box<dyn std::error:
     );
     Ok(())
 }
+
+#[test]
+fn destructive_merge_roundtrips_preimages_and_compensation()
+-> Result<(), Box<dyn std::error::Error>> {
+    use spreadsheet_domain::style::{Change, StyleChange};
+    use spreadsheet_domain::workbook::{
+        CellAddress, CellContent, CellValue, GuardedContentWrite, GuardedStyleWrite,
+    };
+    let (book, range) = fixture()?;
+    let sheet = book.sheets()[0].id();
+    let address = CellAddress {
+        sheet,
+        row: range.last_row(),
+        column: range.last_column(),
+    };
+    for inverse in [false, true] {
+        let original = Some(CellContent::Value(CellValue::Text("covered".into())));
+        let (content, previous) = if inverse {
+            (original, None)
+        } else {
+            (None, original)
+        };
+        let (changes, style_previous) = if inverse {
+            (
+                vec![StyleChange::FontBold(Change::Set(true))],
+                vec![StyleChange::FontBold(Change::Reset)],
+            )
+        } else {
+            (
+                vec![StyleChange::FontBold(Change::Reset)],
+                vec![StyleChange::FontBold(Change::Set(true))],
+            )
+        };
+        let operation = Operation::MergeCellsWrite {
+            sheet,
+            change: MergeChange {
+                range,
+                merged: !inverse,
+                previous: inverse,
+            },
+            content_writes: vec![GuardedContentWrite {
+                address,
+                content,
+                previous,
+            }],
+            style_writes: vec![GuardedStyleWrite {
+                address,
+                changes,
+                previous: style_previous,
+            }],
+            undoes: if inverse {
+                Some(OperationId::from_bytes([11; 16])?)
+            } else {
+                None
+            },
+            undoes_version: if inverse {
+                Some(DocumentVersion::new(2)?)
+            } else {
+                None
+            },
+        };
+        let version = if inverse { 3 } else { 2 };
+        let hash = crate::event_hash(&event(operation.clone(), version)?)?;
+        let mut changed = operation.clone();
+        if let Operation::MergeCellsWrite { content_writes, .. } = &mut changed {
+            let target = if inverse {
+                &mut content_writes[0].content
+            } else {
+                &mut content_writes[0].previous
+            };
+            *target = Some(CellContent::Value(CellValue::Text(
+                "changed preimage".into(),
+            )));
+        }
+        assert_ne!(hash, crate::event_hash(&event(changed, version)?)?);
+        let mut oversized = operation.clone();
+        if let Operation::MergeCellsWrite { content_writes, .. } = &mut oversized {
+            *content_writes = vec![content_writes[0].clone(); 1_001];
+        }
+        assert!(encode(&event(oversized, version)?).is_err());
+        let encoded = encode(&event(operation.clone(), version)?)?;
+        let dto = v1::EventEnvelope::decode(encoded.as_slice())?;
+        assert_eq!(dto.schema_version, if inverse { 44 } else { 43 });
+        assert_eq!(decode(&encoded)?.operation, operation);
+        let mut downgraded = dto.clone();
+        downgraded.schema_version = 34;
+        assert!(decode(&downgraded.encode_to_vec()).is_err());
+        let mut malformed = dto;
+        if let Some(v1::Operation {
+            kind: Some(v1::operation::Kind::MergeCellsWrite(write)),
+        }) = &mut malformed.operation
+        {
+            write.content_writes[0].address = None;
+        }
+        assert!(decode(&malformed.encode_to_vec()).is_err());
+    }
+    Ok(())
+}

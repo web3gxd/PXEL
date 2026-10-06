@@ -1,5 +1,9 @@
 # ADR-096: stable, guarded merged cell ranges
 
+Interactive populated-cell merging is extended by [ADR-123](123-populated-cell-merges.md)
+on 2026-10-06. Legacy events and import validation retain this ADR's conservative
+meaning; the explicit browser action clears covered data and styles atomically.
+
 Status: accepted and implemented as a bounded local slice, 2026-10-02. The
 implementation handoff is
 [`docs/handoff/merged-cells.md`](../handoff/merged-cells.md).

@@ -320,6 +320,12 @@ fn activity(entry: spreadsheet_storage::ActivityEntry) -> ActivityView {
             change,
             undoes,
             ..
+        }
+        | Operation::MergeCellsWrite {
+            sheet,
+            change,
+            undoes,
+            ..
         } => {
             addresses.extend([
                 CellAddress {

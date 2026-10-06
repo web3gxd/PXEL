@@ -1844,11 +1844,16 @@ h1 {
   transition: opacity 180ms;
 }
 .privacy-veil-revealed {
-  min-width: 210px;
-  max-width: min(360px, calc(100vw - 70px));
-  z-index: 6;
+  min-width: 0;
   background: #ffffff;
   box-shadow: inset 0 -2px #17664b;
+}
+.privacy-veil-selected {
+  background: #cfe5d9;
+  transition: none;
+}
+.privacy-veil-selected .privacy-veil-orbit {
+  opacity: 0;
 }
 .privacy-veil-revealed .privacy-veil-orbit {
   opacity: 0;

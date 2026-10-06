@@ -100,6 +100,11 @@ pub fn describe(event: &CommittedEvent, actor: ActorId) -> Result<HistoryEntry, 
             undoes,
             undoes_version,
             ..
+        }
+        | Operation::MergeCellsWrite {
+            undoes,
+            undoes_version,
+            ..
         } => match (undoes, undoes_version) {
             (Some(id), Some(version)) => Some((*id, *version)),
             (None, None) => None,

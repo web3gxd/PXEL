@@ -248,7 +248,13 @@ function drawScrollableGrid(
     const [rightRow = 0, rightColumn = 0] = right.split('/').map(Number);
     return leftRow - rightRow || rightColumn - leftColumn;
   });
-  if (previous?.geometry === geometry && previous.overlay === overlay && !sheet?.merges?.length) {
+  if (
+    previous?.geometry === geometry &&
+    previous.overlay === overlay &&
+    !sheet?.merges?.length &&
+    selection?.startRow === selection?.endRow &&
+    selection?.startColumn === selection?.endColumn
+  ) {
     if (!dirty.length) return true;
     context.save();
     context.beginPath();
@@ -514,18 +520,26 @@ function drawScrollableGrid(
       }
     context.strokeStyle = '#17664b';
     context.lineWidth = 2;
-    const activeMerge = document.mergeAt(document.selected);
-    context.strokeRect(
-      x(activeMerge?.startColumn ?? document.selected.column) + 1,
-      y(activeMerge?.startRow ?? document.selected.row) + 1,
-      (activeMerge
-        ? columnAxis!.offsetAt(activeMerge.endColumn + 1) -
-          columnAxis!.offsetAt(activeMerge.startColumn)
-        : columnAxis!.sizeAt(document.selected.column)) - 2,
-      (activeMerge
-        ? rowAxis!.offsetAt(activeMerge.endRow + 1) - rowAxis!.offsetAt(activeMerge.startRow)
-        : rowAxis!.sizeAt(document.selected.row)) - 2,
-    );
+    const multiple =
+      selection.startRow !== selection.endRow || selection.startColumn !== selection.endColumn;
+    const activeMerge = multiple ? undefined : document.mergeAt(document.selected);
+    if (multiple) context.fillStyle = 'rgba(35, 143, 98, 0.18)';
+    if (
+      !multiple ||
+      (selection.endRow - selection.startRow + 1 < document.sheet.rows.length &&
+        selection.endColumn - selection.startColumn + 1 < document.sheet.columns.length)
+    )
+      context[multiple ? 'fillRect' : 'strokeRect'](
+        x(activeMerge?.startColumn ?? document.selected.column) + 1,
+        y(activeMerge?.startRow ?? document.selected.row) + 1,
+        (activeMerge
+          ? columnAxis!.offsetAt(activeMerge.endColumn + 1) -
+            columnAxis!.offsetAt(activeMerge.startColumn)
+          : columnAxis!.sizeAt(document.selected.column)) - 2,
+        (activeMerge
+          ? rowAxis!.offsetAt(activeMerge.endRow + 1) - rowAxis!.offsetAt(activeMerge.startRow)
+          : rowAxis!.sizeAt(document.selected.row)) - 2,
+      );
     for (const peer of document.remotePresence) {
       const firstRow = Math.min(peer.anchor.row, peer.focus.row);
       const lastRow = Math.max(peer.anchor.row, peer.focus.row);
