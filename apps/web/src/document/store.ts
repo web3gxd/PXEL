@@ -1322,6 +1322,16 @@ export class DocumentStore {
     this.privacyMask = this.privacyMaskEnabled ? projection : undefined;
     this.notify();
   }
+  private advanceGeometryMask(operation: CanonicalOperation, version: string) {
+    // Confirmed axis sizing does not change any content used by recognition.
+    // Never promote an already stale mask or an operation that changes content.
+    if (
+      operation.kind.case === 'axisSizeWrite' &&
+      this.privacyMask &&
+      this.privacyMask.version === this.projection?.version
+    )
+      this.privacyMask = { ...this.privacyMask, version };
+  }
   privacyFindingAt(position: Position) {
     const sheet = this.sheet;
     return this.privacyFindingKeys.has(
@@ -1338,14 +1348,11 @@ export class DocumentStore {
     )
       return false;
     const value = this.value(position);
-    return (
-      this.privacyMask.version === this.projection?.version &&
-      value?.type === 'text' &&
-      value.value.includes('[СКРЫТО')
-    );
+    return value?.type === 'text' && value.value.includes('[СКРЫТО');
   }
   privacyOriginalDisplay(position: Position) {
-    if (!this.privacyVeilAt(position)) return undefined;
+    if (!this.privacyVeilAt(position) || this.privacyMask?.version !== this.projection?.version)
+      return undefined;
     const row = this.sheet?.rows[position.row],
       column = this.sheet?.columns[position.column];
     if (!row || !column) return undefined;
@@ -1636,8 +1643,6 @@ export class DocumentStore {
       column = this.sheet?.columns[position.column];
     if (!row || !column) return undefined;
     if (this.privacyMask) {
-      if (this.privacyMask.version !== this.projection?.version)
-        return { type: 'text' as const, value: '[МАСКА УСТАРЕЛА]' };
       return this.privacyMaskCells.get(`${this.sheet?.id}/${row}/${column}`);
     }
     return this.authoredValue(position);
@@ -4946,6 +4951,7 @@ export class DocumentStore {
           )
             throw new Error('Invalid canonical head event');
           this.apply(event.canonicalOperation);
+          this.advanceGeometryMask(event.canonicalOperation, String(hint.headVersion));
           this.projection = {
             ...this.projection,
             version: String(hint.headVersion),
@@ -5066,6 +5072,10 @@ export class DocumentStore {
       ) {
         if (payload.value.confirmedStateHash.length !== 32) throw new Error('Invalid state hash');
         this.apply(payload.value.canonicalOperation);
+        this.advanceGeometryMask(
+          payload.value.canonicalOperation,
+          String(payload.value.committedVersion),
+        );
         this.projection = {
           ...this.projection,
           version: String(payload.value.committedVersion),

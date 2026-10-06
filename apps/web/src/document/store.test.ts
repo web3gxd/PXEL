@@ -1996,6 +1996,25 @@ const historyResponse = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 describe('drag autofill', () => {
+  it('keeps the last masked view during refresh without allowing stale originals or fill', async () => {
+    const { store } = await connectedStore();
+    vi.spyOn(store, 'canShare', 'get').mockReturnValue(true);
+    const mask = projection();
+    mask.sheets[0]!.cells = [
+      { row_id: rowId, column_id: columnId, value: { type: 'text', value: '[СКРЫТО]' } },
+    ];
+    store.privacyMask = mask;
+    store.confirmed.set(`${rowId}/${columnId}`, {
+      type: 'text',
+      value: 'new.synthetic@example.invalid',
+    });
+    store.projection = { ...store.projection!, version: '2' };
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: '[СКРЫТО]' });
+    expect(store.privacyVeilAt({ row: 0, column: 0 })).toBe(true);
+    expect(store.privacyOriginalDisplay({ row: 0, column: 0 })).toBeUndefined();
+    expect(store.canAutofill).toBe(false);
+    store.dispose();
+  });
   it('permits an unmasked seed beside unrelated merges and rejects merged or masked ranges', async () => {
     const { store } = await connectedStore();
     const state = projection(),

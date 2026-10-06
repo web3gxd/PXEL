@@ -37,6 +37,38 @@ async function syntheticEmail(page: Page) {
   await page.keyboard.press('Escape');
 }
 
+test('cell edits keep the last safe masked view while analysis refreshes', async ({ page }) => {
+  await fixture(page);
+  await syntheticEmail(page);
+  await expect(page.getByText('Обновляем фильтр ПД…', { exact: true })).toBeHidden();
+  let releaseAnalysis: (() => void) | undefined;
+  const analysisHeld = new Promise<void>((resolve) => {
+    releaseAnalysis = resolve;
+  });
+  await page.route('**/privacy/analyze', async (route) => {
+    await analysisHeld;
+    await route.continue();
+  });
+  const id = new URL(page.url()).searchParams.get('document');
+  const original = await (await page.request.get(`/api/documents/${id}`)).json();
+  const before = original.version;
+  const address = page.getByRole('textbox', { name: 'Ячейка или диапазон', exact: true });
+  await address.fill('B1');
+  await address.press('Enter');
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки', exact: true });
+  await bar.fill('new.synthetic@example.invalid');
+  await bar.press('Enter');
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/documents/${id}`)).json()).version)
+    .toBe(String(Number(before) + 1));
+  await expect(page.getByText('Обновляем фильтр ПД…', { exact: true })).toBeVisible();
+  await expect(bar).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Раскрыть данные A1', exact: true })).toBeVisible();
+  releaseAnalysis?.();
+  await expect(bar).toHaveValue('[СКРЫТО]');
+  await expect(page.getByRole('button', { name: 'Раскрыть данные B1', exact: true })).toBeVisible();
+});
+
 test('enabling recognition selects every type and persists that selection', async ({ page }) => {
   await fixture(page);
   const dialog = await privacyDialog(page);
