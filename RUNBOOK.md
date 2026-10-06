@@ -1,3 +1,16 @@
+## 2026-10-06 — локальная настройка Git перед слиянием
+
+Корень Git проверен: C:/projects/PXEL. Существующая main сохранена; remote нет.
+Локальная identity по разрешению пользователя: admin <admin@localhost>.
+Установлены merge.conflictstyle=zdiff3, rerere.enabled=true, pull.rebase=true.
+.gitignore дополнен Python/cache/build/macOS и вложенными .local правилами;
+отслеживаемых файлов под ignore-правилами нет. Файлы не удалялись.
+Проверены 2565 reachable historical blobs и 787 current tracked/unignored files
+по шаблонам private keys, GitHub/AWS/OpenAI/Telegram tokens и credential URLs.
+URL-совпадения — тестовые literals и интерполяция генерируемых паролей;
+реальные секреты среди совпадений не обнаружены. Это ограниченный pattern scan,
+не доказательство отсутствия любых секретов. Локальные ключи/credentials стенда
+остаются в ignored .local. История не переписывалась; remote/push не выполнялись.
 # PXEL — RUNBOOK
 
 ## 2026-09-29 — локальный PITR до named restore point

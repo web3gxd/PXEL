@@ -13,3 +13,8 @@ coverage/
 !.env.example
 *.log
 *.tsbuildinfo
+.local/
+.venv/
+__pycache__/
+build/
+.DS_Store
