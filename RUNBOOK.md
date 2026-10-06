@@ -7450,3 +7450,8 @@ Native/browser parity PASS: 595 formula cases (включая 41 Excel golden),
 API/architecture, authorization/privacy, retries, limits и UI выполнен.
 Новых зависимостей нет. Linux/Compose/remote CI, production auth/deployment,
 XLSX sandbox/malware policy и ручной NVDA этим срезом не закрыты.
+
+После rebase main: native CSV 5/5, cargo fmt, proto:check, TypeScript,
+ESLint, Prettier и 328/328 Vitest PASS. Повтор изолированной API/PG crash
+проверки PASS (48.64 s), Chromium 6/6 DPR1/DPR2 (21.2 s). Исходники после
+этого прогона не менялись; добавлена только эта запись результатов.
