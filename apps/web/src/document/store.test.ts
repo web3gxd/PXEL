@@ -1151,6 +1151,43 @@ describe('durable Cells menu commands', () => {
     expect(store.projection?.version).toBe('1');
     store.dispose();
   });
+  it('autofits a divider target using unmerged text even when that column has a merged title', async () => {
+    const { store, sent } = await connectedStore();
+    const state = settingsProjection(),
+      sheet = state.sheets[0]!;
+    sheet.merges = [
+      {
+        first_row_id: sheet.rows[0]!,
+        last_row_id: sheet.rows[0]!,
+        first_column_id: sheet.columns[0]!,
+        last_column_id: sheet.columns[1]!,
+      },
+    ];
+    sheet.cells = [
+      {
+        row_id: sheet.rows[1]!,
+        column_id: sheet.columns[0]!,
+        value: { type: 'text', value: 'Иванов Иван Иванович' },
+      },
+    ];
+    store.load(state);
+    store.select({ row: 1, column: 1 });
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        getContext: () => ({
+          measureText: (text: string) => ({ width: text.length * 8 }),
+        }),
+      }),
+    });
+    expect(store.autoFit('column', 0)).toBe(true);
+    expect(sent).toHaveLength(1);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing autofit command');
+    expect(payload.value.setAxisSizes?.writes).toHaveLength(1);
+    expect(payload.value.setAxisSizes?.writes[0]?.sizeCssPx).toBe(174);
+    expect(store.selected).toEqual({ row: 1, column: 1 });
+    store.dispose();
+  });
   it('autofit reads new confirmed websocket text before reload', async () => {
     const { store, sent } = await connectedStore();
     const sheet = store.sheet!;
@@ -1959,6 +1996,43 @@ const historyResponse = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 describe('drag autofill', () => {
+  it('permits an unmasked seed beside unrelated merges and rejects merged or masked ranges', async () => {
+    const { store } = await connectedStore();
+    const state = projection(),
+      sheet = state.sheets[0]!;
+    sheet.rows.push(uuidV7(), uuidV7());
+    sheet.columns.push(uuidV7());
+    sheet.merges = [
+      {
+        first_row_id: sheet.rows[0]!,
+        last_row_id: sheet.rows[0]!,
+        first_column_id: sheet.columns[0]!,
+        last_column_id: sheet.columns[1]!,
+      },
+    ];
+    store.load(state);
+    store.privacyMask = structuredClone(state);
+    store.select({ row: 1, column: 0 });
+    expect(store.canAutofill).toBe(true);
+    expect(store.planAutofill(store.selectionBounds, { row: 2, column: 0 })).toBeDefined();
+    expect(store.planAutofill(store.selectionBounds, { row: 0, column: 0 })).toBeUndefined();
+    store.select({ row: 0, column: 0 });
+    expect(store.canAutofill).toBe(false);
+    store.select({ row: 1, column: 0 });
+    store.privacyMask.version = '0';
+    expect(store.canAutofill).toBe(false);
+    store.privacyMask.version = '1';
+    store.privacyMask.sheets[0]!.cells = [
+      {
+        row_id: sheet.rows[1]!,
+        column_id: sheet.columns[0]!,
+        value: { type: 'text', value: '[СКРЫТО]' },
+      },
+    ];
+    store.privacyMask = structuredClone(store.privacyMask);
+    expect(store.canAutofill).toBe(false);
+    store.dispose();
+  });
   it('assistant refuses occupied cells and disabling clears all suggestions', async () => {
     const { store } = await connectedStore();
     const state = projection();

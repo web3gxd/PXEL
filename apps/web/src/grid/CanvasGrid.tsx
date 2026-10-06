@@ -675,7 +675,19 @@ export function CanvasGrid({
             }
           }
         }}
-        onDoubleClick={() => document?.begin()}
+        onDoubleClick={(event) => {
+          if (!document?.sheet) return;
+          const box = event.currentTarget.getBoundingClientRect();
+          const x = event.clientX - box.left - GRID.rowHeaderWidth;
+          const y = event.clientY - box.top - GRID.columnHeaderHeight;
+          if (x >= 0 && y < 0 && columnAxis) {
+            const column = columnAxis.indexAt(Math.max(0, x + event.currentTarget.scrollLeft - 1));
+            const edge = columnAxis.offsetAt(column + 1) - event.currentTarget.scrollLeft;
+            if (Math.abs(x - edge) <= 5) document.autoFit('column', column);
+            return;
+          }
+          if (x >= 0 && y >= 0) document.begin();
+        }}
         onKeyDown={(event) => {
           if (
             !document?.sheet ||

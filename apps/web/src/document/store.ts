@@ -3414,7 +3414,7 @@ export class DocumentStore {
       'shiftCells',
     );
   }
-  autoFit(axis: 'row' | 'column') {
+  autoFit(axis: 'row' | 'column', targetIndex?: number) {
     const sheet = this.sheet;
     if (!sheet || !this.canChangeCells || this.allRowsHidden) return false;
     if (this.privacyMask && this.privacyMask.version !== this.projection?.version)
@@ -3428,11 +3428,12 @@ export class DocumentStore {
     const context = globalThis.document.createElement('canvas').getContext('2d');
     if (!context) return this.cellsError('Не удалось измерить текст в браузере.');
     const bounds = this.selectionBounds;
-    const start = axis === 'row' ? bounds.startRow : bounds.startColumn;
-    const end = axis === 'row' ? bounds.endRow : bounds.endColumn;
+    const start = targetIndex ?? (axis === 'row' ? bounds.startRow : bounds.startColumn);
+    const end = targetIndex ?? (axis === 'row' ? bounds.endRow : bounds.endColumn);
     if (end - start >= 1000)
       return this.cellsError('Автоподбор ограничен 1000 строками или столбцами.');
     const ids = axis === 'row' ? sheet.rows : sheet.columns;
+    if (!Number.isInteger(start) || start < 0 || end >= ids.length) return false;
     const hidden = axis === 'row' ? this.hiddenRows : this.hiddenColumns;
     const mergedAxes = new Set<number>();
     for (const merge of sheet.merges ?? []) {
@@ -3442,8 +3443,9 @@ export class DocumentStore {
         mergedAxes.add(index);
     }
     const sizes = new Map<number, number>();
+    const measuredAxes = new Set<number>();
     for (let index = start; index <= end; index++)
-      if (!hidden.has(index) && !mergedAxes.has(index)) sizes.set(index, axis === 'row' ? 28 : 24);
+      if (!hidden.has(index)) sizes.set(index, axis === 'row' ? 28 : 24);
     if (!sizes.size) return true;
     const rowPositions = new Map(sheet.rows.map((id, index) => [id, index]));
     const columnPositions = new Map(sheet.columns.map((id, index) => [id, index]));
@@ -3464,6 +3466,7 @@ export class DocumentStore {
       context.font = canvasFont(style);
       const measure = (value: string) => context.measureText(value).width;
       const index = axis === 'row' ? position.row : position.column;
+      measuredAxes.add(index);
       const size =
         axis === 'column'
           ? fitColumnWidth(text, measure)
@@ -3477,6 +3480,9 @@ export class DocumentStore {
             );
       sizes.set(index, Math.max(sizes.get(index)!, size));
     }
+    // A merged title alone cannot define a single-axis width/height.
+    for (const index of mergedAxes) if (!measuredAxes.has(index)) sizes.delete(index);
+    if (!sizes.size) return true;
     return this.setAxisSizes(
       axis,
       [...sizes].map(([index, size]) => ({ index, size })),
@@ -4015,15 +4021,37 @@ export class DocumentStore {
       this.sheet &&
       !this.editing &&
       !this.pending.length &&
-      !this.privacyMask &&
+      (!this.privacyMask || this.privacyMask.version === this.projection?.version) &&
       this.hiddenRows.size === 0 &&
       this.hiddenColumns.size === 0 &&
-      !this.sheet.merges?.length,
+      this.autofillRangeAvailable(this.selectionBounds),
     );
+  }
+  private autofillRangeAvailable(bounds: FillBounds) {
+    const sheet = this.sheet;
+    if (
+      !sheet ||
+      bounds.startRow < 0 ||
+      bounds.startColumn < 0 ||
+      bounds.endRow >= sheet.rows.length ||
+      bounds.endColumn >= sheet.columns.length ||
+      bounds.endRow < bounds.startRow ||
+      bounds.endColumn < bounds.startColumn ||
+      (bounds.endRow - bounds.startRow + 1) * (bounds.endColumn - bounds.startColumn + 1) > 1000
+    )
+      return false;
+    for (let row = bounds.startRow; row <= bounds.endRow; row++)
+      for (let column = bounds.startColumn; column <= bounds.endColumn; column++) {
+        const position = { row, column };
+        if (this.mergeAt(position)) return false;
+        const value = this.privacyMask ? this.value(position) : undefined;
+        if (value?.type === 'text' && value.value.includes('[СКРЫТО')) return false;
+      }
+    return true;
   }
   planAutofill(source: FillBounds, target: Position) {
     const sheet = this.sheet;
-    if (!sheet || !this.canAutofill) return undefined;
+    if (!sheet || !this.canAutofill || !this.autofillRangeAvailable(source)) return undefined;
     const vertical = source.startColumn === source.endColumn;
     const horizontal = source.startRow === source.endRow;
     const length = vertical
@@ -4043,7 +4071,7 @@ export class DocumentStore {
       }
     const series = seed.length === length && length >= 2 && !!numericSeries(seed, length, 1);
     const plan = fillPlan(source, target, sheet.rows.length, sheet.columns.length, series);
-    if (!plan) return undefined;
+    if (!plan || !this.autofillRangeAvailable(plan.destination)) return undefined;
     // A numeric seed only extrapolates along its own axis.
     if (series && ((vertical && plan.axis === 'row') || (horizontal && plan.axis === 'column'))) {
       const offset = vertical

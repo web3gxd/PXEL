@@ -63,7 +63,6 @@ import {
   ListNumbers,
   ShieldCheck,
   SortAscending,
-  Table,
   UserCircle,
 } from '@phosphor-icons/react';
 
@@ -319,9 +318,6 @@ function SpreadsheetApp({
       <header className="app-header">
         <div className="document-heading">
           <div className="document-title-row">
-            <span className="editor-brand" aria-hidden="true">
-              <Table size={24} weight="duotone" />
-            </span>
             <BookTitle document={document} />
             {document.sheet && (
               <span className="preview-badge" data-testid="save-status">
