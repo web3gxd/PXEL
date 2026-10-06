@@ -4,6 +4,8 @@ mod calculation_context;
 mod calculation_stream;
 mod catalog_api;
 mod config;
+mod csv_api;
+mod csv_import;
 mod delivery;
 mod disclosure_api;
 mod documents;
@@ -912,6 +914,15 @@ async fn main() -> anyhow::Result<()> {
                 .layer(axum::extract::DefaultBodyLimit::max(48 * 1024 * 1024))
                 .layer(tower_http::limit::RequestBodyLimitLayer::new(
                     48 * 1024 * 1024,
+                )),
+        )
+        .merge(
+            Router::new()
+                .route("/api/imports/csv/preview", post(csv_api::preview))
+                .route("/api/imports/csv", post(csv_api::import))
+                .layer(axum::extract::DefaultBodyLimit::max(24 * 1024 * 1024))
+                .layer(tower_http::limit::RequestBodyLimitLayer::new(
+                    24 * 1024 * 1024,
                 )),
         )
         .layer(middleware::from_fn(security_headers))

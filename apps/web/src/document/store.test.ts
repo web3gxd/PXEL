@@ -4344,6 +4344,44 @@ describe('document projection and pending intents', () => {
     expect(sent).toHaveLength(1);
     store.disconnected();
   });
+  it.each(['001', 'TRUE', '=SUM(A1)', ''])(
+    'focus and blur preserve literal text %j without a preview conversion or write',
+    async (text) => {
+      const { store, sent } = await connectedStore();
+      const state = projection();
+      state.sheets[0]!.cells = [
+        { row_id: rowId, column_id: columnId, value: { type: 'text', value: text } },
+      ];
+      store.load(state);
+      store.begin(undefined, 'bar');
+      expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'text', value: text });
+      store.commit();
+      expect(sent).toHaveLength(0);
+      expect(store.pending).toHaveLength(0);
+      expect(store.editing).toBeUndefined();
+      expect(store.confirmed.get(`${rowId}/${columnId}`)).toEqual({ type: 'text', value: text });
+      store.disconnected();
+    },
+  );
+  it('explicit typing still authors a same-value write and a changed draft is parsed', async () => {
+    const { store, sent } = await connectedStore();
+    const state = projection();
+    state.sheets[0]!.cells = [
+      { row_id: rowId, column_id: columnId, value: { type: 'number', value: 7 } },
+    ];
+    store.load(state);
+    store.begin('7');
+    store.commit();
+    expect(sent).toHaveLength(1);
+    expect(store.pending).toHaveLength(1);
+    store.begin(undefined, 'bar');
+    store.draft('8');
+    store.commit();
+    expect(sent).toHaveLength(1); // The second intent waits for the first ACK.
+    expect(store.pending).toHaveLength(2);
+    expect(store.value({ row: 0, column: 0 })).toEqual({ type: 'number', value: 8 });
+    store.disconnected();
+  });
   it('caps pending queue independently of wire retries', async () => {
     const { store } = await connectedStore();
     for (let i = 0; i < 129; i++) store.set({ row: 0, column: 0 }, { type: 'number', value: i });

@@ -21,6 +21,7 @@ import {
   type Layout,
 } from './api';
 import { PxelPanel } from '../document/PxelPanel';
+import { CsvImportPanel } from './CsvImportPanel';
 import { parseMarkdownInWorker } from '../clipboard/markdown-worker-client';
 import { uuidV7 } from '../document/store';
 import './library.css';
@@ -61,6 +62,7 @@ export function Home({ onOpen }: { onOpen: (id: string, markdown?: string) => vo
     [busy, setBusy] = useState(''),
     [error, setError] = useState(''),
     [pxel, setPxel] = useState(false),
+    [csv, setCsv] = useState(false),
     [cursor, setCursor] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null),
     generation = useRef(0),
@@ -232,6 +234,9 @@ export function Home({ onOpen }: { onOpen: (id: string, markdown?: string) => vo
             <button disabled={!ready || !!busy} onClick={() => setPxel(true)}>
               <FileArrowUpIcon size={18} />
               Импорт .pxel
+            </button>
+            <button disabled={!ready || !!busy} onClick={() => setCsv(true)}>
+              <FileArrowUpIcon size={18} /> Импорт CSV
             </button>
             <button disabled={!ready || !!busy} onClick={() => file.current?.click()}>
               Импорт Markdown
@@ -430,6 +435,7 @@ export function Home({ onOpen }: { onOpen: (id: string, markdown?: string) => vo
         </footer>
       </div>
       {pxel && <PxelPanel onClose={() => setPxel(false)} onImported={(id) => onOpen(id)} />}
+      {csv && <CsvImportPanel onClose={() => setCsv(false)} onImported={(id) => onOpen(id)} />}
     </main>
   );
 }

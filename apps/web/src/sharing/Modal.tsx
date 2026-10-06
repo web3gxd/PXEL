@@ -36,6 +36,7 @@ export function Modal({
   initialFocus,
   clipboard,
   clipboardError,
+  closeDisabled = false,
 }: {
   title: string;
   onClose: () => void;
@@ -43,6 +44,7 @@ export function Modal({
   initialFocus?: RefObject<HTMLElement | null>;
   clipboard?: 'credentials';
   clipboardError?: string;
+  closeDisabled?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const TitleIcon = icons[title] ?? Table;
@@ -91,7 +93,7 @@ export function Modal({
       }}
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        if (!closeDisabled) onClose();
       }}
     >
       <header className="sharing-dialog-header">
@@ -99,7 +101,13 @@ export function Modal({
           <TitleIcon size={22} />
         </span>
         <h2 id="sharing-dialog-title">{title}</h2>
-        <button type="button" className="sharing-close" aria-label="Закрыть окно" onClick={onClose}>
+        <button
+          type="button"
+          className="sharing-close"
+          aria-label="Закрыть окно"
+          disabled={closeDisabled}
+          onClick={onClose}
+        >
           <X size={18} aria-hidden="true" />
         </button>
       </header>

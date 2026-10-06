@@ -1395,7 +1395,8 @@ export class DocumentStore {
   selectionAnchor: Position = { row: 0, column: 0 };
   private selectionAxis: { kind: 'column'; index: number } | undefined;
   remotePresence: RemotePresence[] = [];
-  editing: { position: Position; text: string; source: 'cell' | 'bar' } | undefined;
+  editing:
+    { position: Position; text: string; source: 'cell' | 'bar'; modified: boolean } | undefined;
   // Opening the leave-confirmation dialog must not implicitly submit a draft.
   navigationGuardActive = false;
   error = '';
@@ -1771,7 +1772,7 @@ export class DocumentStore {
   private previewValue(row: string, column: string): Value {
     const edit = this.editing;
     if (
-      edit &&
+      edit?.modified &&
       this.sheet?.rows[edit.position.row] === row &&
       this.sheet?.columns[edit.position.column] === column
     )
@@ -1815,7 +1816,7 @@ export class DocumentStore {
       if (pending.kind === 'batch')
         for (const write of pending.writes) overlay.add(key(write.row, write.column));
     }
-    if (this.editing) {
+    if (this.editing?.modified) {
       const row = sheet.rows[this.editing.position.row],
         column = sheet.columns[this.editing.position.column];
       if (row && column) overlay.add(key(row, column));
@@ -2893,17 +2894,22 @@ export class DocumentStore {
     if (byteLength(text) > 512 * 1024) throw new Error('Текст выделения превышает 512 КБ.');
     return text;
   }
-  begin(text = displayValue(this.authoredValue(this.selected)), source: 'cell' | 'bar' = 'cell') {
+  begin(text?: string, source: 'cell' | 'bar' = 'cell') {
     if (!this.canEdit) return;
     if (!this.sheet) return;
-    this.editing = { position: { ...this.selected }, text, source };
+    this.editing = {
+      position: { ...this.selected },
+      text: text ?? displayValue(this.authoredValue(this.selected)),
+      source,
+      modified: text !== undefined,
+    };
     this.syncPreview();
     this.notify();
   }
   draft(text: string) {
     if (!this.canEdit) return;
     if (this.editing) {
-      this.editing = { ...this.editing, text };
+      this.editing = { ...this.editing, text, modified: true };
       this.syncPreview();
       this.notify();
     }
@@ -2918,7 +2924,8 @@ export class DocumentStore {
     const edit = this.editing;
     if (!edit) return;
     this.editing = undefined;
-    if (!this.set(edit.position, parseInput(edit.text))) this.editing = edit;
+    if (!edit.modified) this.syncPreview();
+    else if (!this.set(edit.position, parseInput(edit.text))) this.editing = edit;
     this.notify();
   }
   set(position: Position, value: Value) {

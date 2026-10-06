@@ -439,6 +439,7 @@ URL-совпадения — тестовые literals и интерполяци
 реальные секреты среди совпадений не обнаружены. Это ограниченный pattern scan,
 не доказательство отсутствия любых секретов. Локальные ключи/credentials стенда
 остаются в ignored .local. История не переписывалась; remote/push не выполнялись.
+
 # PXEL — RUNBOOK
 
 ## 2026-10-06 — вставка во всё выделение и Ctrl+D
@@ -7276,6 +7277,7 @@ standalone `just check` and `just sqlx-check` also passed after the source chang
 The earlier fresh-fixture smoke and initial loaded-fixture timeout remain
 recorded as separate runs. This is Windows-local evidence, not a startup capacity
 guarantee for arbitrarily large key histories.
+
 ## 2026-10-06 — реальные команды вкладки «Ячейки» (ADR-119)
 
 В feat/cells-functions реализованы все 14 прежних unavailable-пунктов:
@@ -7368,3 +7370,83 @@ Linux/Compose/remote CI, production deployment и ручной NVDA остают
 и PostgreSQL sheet_settings_tests. Frontend повтор: 316/316 PASS (9.37 s),
 TypeScript, ESLint, proto:check и cargo fmt PASS. Проверки выполнены после
 финальных let-chain и Show/autofit исправлений; исходники не менялись далее.
+
+## 2026-10-07 — browser CSV import, первый срез десяти улучшений (ADR-128)
+
+Пользователь разрешил последовательную E2E-реализацию всех десяти рекомендаций.
+Критерии полного объёма записаны в docs/sheets-functional-plan.md; завершение
+этого среза не означает завершение XLSX/CSV шага или остальных девяти шагов.
+
+В feat/browser-import добавлены выбор UTF-8 CSV, запятая/точка с запятой/табуляция,
+заголовки, явные text/number/boolean типы, ограниченный предпросмотр и создание
+новой книги. Default text сохраняет leading zeros и formula-looking текст.
+API schema1 повторно валидирует полный источник/options и preview digest;
+публикует через existing encrypted create_pxel_imported transaction. PostgreSQL
+остаётся authoritative; deterministic IDs и retained retry payload исключают
+дубликат при потерянном ответе. Без новых зависимостей, wire/storage миграций,
+plaintext upload files или логирования содержимого. .env и remote не менялись.
+
+Parser RED подтверждён отсутствующими функциями/типами, затем 4/4 Rust tests PASS.
+Четыре client boundary/file/retry tests PASS. TypeScript, ESLint, production build
+и весь Vitest 323/323 PASS. Workspace all-targets/all-features Clippy -D warnings
+PASS. Vite сохраняет существующее предупреждение chunk >500 kB.
+
+Изолированный tests/recovery/csv-import.test.mjs создаёт отдельные private PG,
+keyring, blob root, app/Vite ports; существующие demo books не изменяет. Первый
+запуск выявил отсутствие ACL inheritance в Windows protectLocalPath(directory):
+initdb отказал в создании вложенных папок. Directory ACL теперь наследуется
+только текущим пользователем; file ACL остаётся индивидуальным. Неудачный fixture
+сохранён для диагностики; recursive deletion не выполнялась. После исправления
+API authorization/Origin/version/unknown-field/encoding/syntax/type rejection,
+preview-no-publication, stale-digest, idempotent retry, conflicting retry и
+revoked-session checks PASS. Immediate PostgreSQL stop + server kill/restart
+сохранили state_hash/cells и idempotency. Chromium DPR1/DPR2: 4/4 PASS (46.5s).
+Это промежуточный прогон; финальные результаты приведены ниже.
+
+Общий Prettier обнаружил прежние RUNBOOK.md/docs/nvda-acceptance.md formatting
+debt (описан 2026-10-06). Документы приведены к pinned formatter; в NVDA checklist
+добавлен CSV, ручной проход по-прежнему не выполнен.
+Linux/Compose/remote CI, production auth/deployment, XLSX OS sandbox/malware gate
+и ручной NVDA остаются открытыми.
+
+Финальный parser boundary test включает ровно 100000 пустых полей, отказ на
+100001+ полях и источник >16 MiB: 5/5 native CSV tests PASS. Авторизация
+проверена до разбора malformed JSON (401); slow-body проверка с HTTP
+Expect: 100-continue удерживает единственный import/export permit, параллельный
+запрос получает 429, незавершённое тело — 408 через 15 s, следующий preview
+успешен. Permit удерживается также до завершения durable publication.
+
+Lost-committed-response E2E воспроизводит успешный server commit с потерянным
+ответом: повтор использует тот же payload и IDs, в каталоге ровно одна книга.
+Escape во время публикации сначала провалил оба DPR tests; общий Modal получил
+необязательный closeDisabled, остальные окна сохраняют прежнее поведение.
+Review редактора выявил implicit conversion при focus/blur без ввода: четыре
+RED cases для literal 001/TRUE/=SUM(A1)/empty text. Unmodified draft теперь
+не создаёт preview overlay или write; явный ввод, включая same-value rewrite,
+сохраняет прежние collaboration/history barriers. Пять новых store tests PASS.
+
+Полный just check с отдельной PostgreSQL PASS: 734 native tests, 17 ignored;
+обе Clippy конфигурации -D warnings, fmt, workspace build, wasm target check,
+proto:check, pinned WASM generation, Prettier, ESLint, TypeScript, 323 Vitest
+и production build. Лог: .local/csv-acceptance-Ofjowm/workspace-check.log.
+Этот полный прогон предшествовал последнему frontend editor исправлению;
+после него повторены frontend проверки: 328/328 Vitest, TypeScript, ESLint,
+Prettier и production build PASS. Финальная изолированная API/crash/browser
+проверка PASS (50.75 s), Chromium 6/6 при DPR1/DPR2 (24.2 s), включая focus/blur
+с неизменным state_hash, lost-response retry, Escape и viewport 390x844.
+Page errors отсутствуют. Лог: .local/reports/browser-import-final-e2e.log.
+
+Первый общий native прогон при более высокой параллельности провалил два
+существующих storage history tests с redacted activation error; оба прошли
+отдельно тем же compiled binary, затем полный профиль RUST_TEST_THREADS=4
+прошёл все 734 tests. Причина первоначального сбоя не установлена. Следующий
+общий прогон остановился на generated descriptor drift: pinned регенерация
+исправила только 11 sourceCodeInfo comment CRLF/LF различий, без изменения
+wire schema. Одновременный typecheck во время WASM regeneration ошибочно
+попал в отсутствие generated modules; последовательный повтор PASS.
+
+Native/browser parity PASS: 595 formula cases (включая 41 Excel golden),
+1027 workbooks/2037 patches и 209 workbooks/418 moves. Review correctness,
+API/architecture, authorization/privacy, retries, limits и UI выполнен.
+Новых зависимостей нет. Linux/Compose/remote CI, production auth/deployment,
+XLSX sandbox/malware policy и ручной NVDA этим срезом не закрыты.

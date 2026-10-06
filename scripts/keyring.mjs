@@ -10,8 +10,12 @@ export function protectLocalPath(path, directory = false) {
     return;
   }
   const script =
-    "$ErrorActionPreference='Stop'; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $acl=Get-Acl -LiteralPath $env:PXEL_PRIVATE_SETUP_PATH; $acl.SetAccessRuleProtection($true,$false); foreach($entry in @($acl.Access)){[void]$acl.RemoveAccessRuleSpecific($entry)}; $acl.SetOwner($sid); $rule=[System.Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','Allow'); $acl.AddAccessRule($rule); Set-Acl -LiteralPath $env:PXEL_PRIVATE_SETUP_PATH -AclObject $acl";
-  const env = { ...process.env, PXEL_PRIVATE_SETUP_PATH: resolve(path) };
+    "$ErrorActionPreference='Stop'; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $acl=Get-Acl -LiteralPath $env:PXEL_PRIVATE_SETUP_PATH; $acl.SetAccessRuleProtection($true,$false); foreach($entry in @($acl.Access)){[void]$acl.RemoveAccessRuleSpecific($entry)}; $acl.SetOwner($sid); $flags=if($env:PXEL_PRIVATE_SETUP_DIRECTORY -eq '1'){'ContainerInherit,ObjectInherit'}else{'None'}; $rule=[System.Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl',$flags,'None','Allow'); $acl.AddAccessRule($rule); Set-Acl -LiteralPath $env:PXEL_PRIVATE_SETUP_PATH -AclObject $acl";
+  const env = {
+    ...process.env,
+    PXEL_PRIVATE_SETUP_PATH: resolve(path),
+    PXEL_PRIVATE_SETUP_DIRECTORY: directory ? '1' : '0',
+  };
   delete env.PSModulePath;
   const result = spawnSync(
     'powershell.exe',

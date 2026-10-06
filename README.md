@@ -346,6 +346,21 @@ MinIO/Garage не запускаются; локальные snapshots отно�
 
 ## Репозиторий
 
+Из библиотеки доступен «Импорт CSV»: UTF-8, до 16 МиБ / 100 000 полей /
+1000 столбцов / 32 КиБ на поле. Поддерживаются запятая, точка с запятой,
+табуляция, кавычки и переносы строк внутри кавычек. По умолчанию все значения
+текстовые; числа и TRUE/FALSE выбираются явно для столбцов. Предпросмотр не
+создаёт книгу, публикация атомарна, повтор после потери ответа идемпотентен.
+`POST /api/imports/csv/preview` и `POST /api/imports/csv` требуют текущую member
+сессию и разрешённый Origin; DTO schema1 описан в ADR-128.
+
+Проверка с отдельными PostgreSQL/keyring/blob root и портами (сначала выполнить
+`. ./scripts/env.ps1` на Windows и собрать `cargo build --locked -p pxel-server
+--features dev-auth`): `node --test tests/recovery/csv-import.test.mjs`.
+С `PXEL_CSV_VERIFY_WORKSPACE=1` этот fixture также запускает `just check` на
+своей базе, сохраняя приватный `.local/csv-acceptance-*/workspace-check.log`.
+План всех десяти улучшений: [functional plan](docs/sheets-functional-plan.md).
+
 - `apps/server`, `apps/web` — executable adapters и UI.
 - `crates/spreadsheet-domain` — workbook, stable IDs, sparse cells и операции.
 - `crates/spreadsheet-application` — используемые persistence и blob ports.

@@ -4,6 +4,40 @@
   background: var(--surface);
   color: var(--ink);
 }
+.csv-preview {
+  max-height: 280px;
+  max-width: 100%;
+  overflow: auto;
+}
+.csv-preview table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.csv-preview td,
+.csv-preview th {
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  min-width: 70px;
+  max-width: 240px;
+  overflow-wrap: anywhere;
+}
+.csv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.csv-column-types {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.csv-column-types label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .library button,
 .library input {
   font: inherit;
