@@ -6,6 +6,8 @@ import { authorizeClipboard } from '../sharing/disclosure';
 import { filteredRows, type PersonalFilters } from './filters';
 import { readPersonalView, savePersonalView, type PersonalView } from './personal-view';
 import { validSortBounds, type SortBounds, type SortKey } from './sort-range';
+import { AssistantEngine, type Suggestion, type Observation } from '../assistant/engine';
+import { fillPlan, numericSeries, type FillBounds } from '../grid/fill';
 import type { HardcodeReport } from './diagnostics';
 import {
   decodeCapabilities,
@@ -619,7 +621,89 @@ export function decodeRedactedProjection(input: unknown): Projection {
 }
 
 export class DocumentStore {
-  constructor(readonly transport: { guest?: GuestSession } = {}) {}
+  readonly assistant = new AssistantEngine();
+  autofillPreview: FillBounds | undefined;
+  constructor(readonly transport: { guest?: GuestSession } = {}) {
+    try {
+      this.assistant.setEnabled(
+        globalThis.localStorage?.getItem('pxel.assistant.enabled') !== 'false',
+      );
+    } catch {
+      /* Storage may be unavailable. Session settings still work. */
+    }
+  }
+  setAssistantEnabled(enabled: boolean) {
+    this.assistant.setEnabled(enabled);
+    try {
+      globalThis.localStorage?.setItem('pxel.assistant.enabled', String(enabled));
+    } catch {
+      /* Session setting remains effective. */
+    }
+    this.notify();
+  }
+  observeAssistant(action: Observation) {
+    if (!this.privacyMask && this.canEdit) this.assistant.observe(action);
+  }
+  get assistantSuggestion() {
+    if (
+      !this.assistant.enabled ||
+      !this.canEdit ||
+      this.privacyMask ||
+      this.editing ||
+      this.pending.length
+    )
+      return undefined;
+    return this.assistant.suggest((position) => this.value(position));
+  }
+  applyAssistantSuggestion(tip: Suggestion, count: number) {
+    if (
+      !this.assistant.enabled ||
+      !tip.source ||
+      !tip.axis ||
+      !this.sheet ||
+      !Number.isInteger(count) ||
+      count < 1 ||
+      count > 1000
+    )
+      return false;
+    const current = this.assistantSuggestion;
+    if (
+      !current ||
+      current.id !== tip.id ||
+      current.axis !== tip.axis ||
+      JSON.stringify(current.source) !== JSON.stringify(tip.source)
+    )
+      return false;
+    const source =
+      tip.id === 'repeat'
+        ? {
+            startRow: tip.source.endRow,
+            endRow: tip.source.endRow,
+            startColumn: tip.source.endColumn,
+            endColumn: tip.source.endColumn,
+          }
+        : tip.source;
+    const target = {
+      row: source.endRow + (tip.axis === 'row' ? count : 0),
+      column: source.endColumn + (tip.axis === 'column' ? count : 0),
+    };
+    if (target.row >= this.sheet.rows.length || target.column >= this.sheet.columns.length)
+      return false;
+    for (let i = 1; i <= count; i++) {
+      const value = this.value({
+        row: source.endRow + (tip.axis === 'row' ? i : 0),
+        column: source.endColumn + (tip.axis === 'column' ? i : 0),
+      });
+      if (value && value.type !== 'blank') {
+        this.error = 'Помощник заполняет только пустые ячейки. Выберите другой диапазон.';
+        this.notify();
+        return false;
+      }
+    }
+    const ok = this.autofill(source, target, this.projection?.version ?? '');
+    if (ok) this.assistant.reset(false);
+    return ok;
+  }
   personalView: PersonalView = { schema_version: 1, revision: 0, settings: { filters: [] } };
   viewLoading = false;
   viewError = '';
@@ -1410,6 +1494,7 @@ export class DocumentStore {
     if (this.editing) this.commit();
     if (this.editing) return false;
     this.activeSheetId = sheetId;
+    this.assistant.reset();
     this.selected = { row: 0, column: 0 };
     this.selectionAnchor = { row: 0, column: 0 };
     this.selectionAxis = undefined;
@@ -2011,6 +2096,7 @@ export class DocumentStore {
         previousSheet.columns.some((column, index) => column !== nextSheet.columns[index])),
     );
     if (axesChanged) {
+      this.assistant.reset();
       if (this.editing) {
         this.editing = undefined;
         this.error = 'Структура таблицы изменилась. Повторите ввод в нужной ячейке.';
@@ -2018,6 +2104,7 @@ export class DocumentStore {
       this.remotePresence = [];
     }
     if (documentChanged) {
+      this.assistant.reset();
       this.privacyMask = undefined;
       this.privacyMaskEnabled = true;
       this.privacyFindings = [];
@@ -2416,6 +2503,8 @@ export class DocumentStore {
     if (hadPresence) this.notify();
   }
   dispose() {
+    this.assistant.reset();
+    this.autofillPreview = undefined;
     this.disconnected();
     this.preview.dispose();
     this.previewValues = new Map();
@@ -2773,6 +2862,7 @@ export class DocumentStore {
       return false;
     }
     this.pending.push({ kind: 'cell', id, row, column, value, bytes, attempts: 0 });
+    this.observeAssistant({ kind: 'edit', position });
     this.syncPreview();
     this.performanceMetrics.optimisticUpdateMs = performance.now() - optimisticStartedAt;
     this.error = '';
@@ -2875,6 +2965,7 @@ export class DocumentStore {
         bytes,
         attempts: 0,
       });
+      this.observeAssistant({ kind: 'format' });
       this.syncPreview();
       this.error = '';
       this.notify();
@@ -2998,6 +3089,7 @@ export class DocumentStore {
       }),
     );
     this.pending.push({ kind: 'undo', direction, id, target, bytes, attempts: 0 });
+    this.observeAssistant({ kind: 'undo' });
     this.error = '';
     this.notify();
     this.flush();
@@ -3371,6 +3463,7 @@ export class DocumentStore {
     );
     if (bytes.byteLength > 1_048_576) return false;
     this.pending.push({ kind: 'copyRange', id, bytes, attempts: 0 });
+    this.observeAssistant({ kind: 'paste' });
     this.error = '';
     this.notify();
     this.flush();
@@ -3455,6 +3548,96 @@ export class DocumentStore {
       this.formulaCopyInFlight = false;
     }
   }
+  get canAutofill() {
+    return Boolean(
+      this.canEdit &&
+      this.canCopy &&
+      this.sheet &&
+      !this.editing &&
+      !this.pending.length &&
+      !this.privacyMask &&
+      this.filterState.hidden.size === 0 &&
+      !this.sheet.merges?.length,
+    );
+  }
+  planAutofill(source: FillBounds, target: Position) {
+    const sheet = this.sheet;
+    if (!sheet || !this.canAutofill) return undefined;
+    const vertical = source.startColumn === source.endColumn;
+    const horizontal = source.startRow === source.endRow;
+    const length = vertical
+      ? source.endRow - source.startRow + 1
+      : horizontal
+        ? source.endColumn - source.startColumn + 1
+        : 0;
+    const seed: number[] = [];
+    if (length >= 2 && length <= 1000)
+      for (let i = 0; i < length; i++) {
+        const value = this.value({
+          row: source.startRow + (vertical ? i : 0),
+          column: source.startColumn + (vertical ? 0 : i),
+        });
+        if (value?.type !== 'number') break;
+        seed.push(value.value);
+      }
+    const series = seed.length === length && length >= 2 && !!numericSeries(seed, length, 1);
+    const plan = fillPlan(source, target, sheet.rows.length, sheet.columns.length, series);
+    if (!plan) return undefined;
+    // A numeric seed only extrapolates along its own axis.
+    if (series && ((vertical && plan.axis === 'row') || (horizontal && plan.axis === 'column'))) {
+      const offset = vertical
+        ? plan.destination.startRow - source.startRow
+        : plan.destination.startColumn - source.startColumn;
+      const count = vertical
+        ? plan.destination.endRow - plan.destination.startRow + 1
+        : plan.destination.endColumn - plan.destination.startColumn + 1;
+      const numbers = numericSeries(seed, offset, count);
+      return numbers ? { ...plan, numbers } : undefined;
+    }
+    return { ...plan, numbers: undefined };
+  }
+  autofill(source: FillBounds, target: Position, version: string) {
+    const sheet = this.sheet,
+      projection = this.projection;
+    if (!sheet || !projection || projection.version !== version || !this.canAutofill) return false;
+    const plan = this.planAutofill(source, target);
+    if (!plan) {
+      this.error = 'Заполнение требует целых блоков и не более 1000 новых ячеек.';
+      this.notify();
+      return false;
+    }
+    const destination = plan.destination;
+    const position = { row: destination.startRow, column: destination.startColumn };
+    const rows = destination.endRow - destination.startRow + 1,
+      columns = destination.endColumn - destination.startColumn + 1;
+    const ok = plan.numbers
+      ? this.pasteMatrix(
+          plan.axis === 'row' ? plan.numbers.map((n) => [String(n)]) : [plan.numbers.map(String)],
+          position,
+          false,
+          [],
+          { rows, columns },
+        )
+      : this.pasteRangeCopy(
+          JSON.stringify({
+            schema_version: 1,
+            document_id: projection.document_id,
+            version,
+            sheet_id: sheet.id,
+            row_id: sheet.rows[source.startRow],
+            column_id: sheet.columns[source.startColumn],
+            rows: source.endRow - source.startRow + 1,
+            columns: source.endColumn - source.startColumn + 1,
+          }),
+          position,
+          { rows, columns },
+        );
+    if (ok) {
+      this.select({ row: plan.range.startRow, column: plan.range.startColumn });
+      this.select({ row: plan.range.endRow, column: plan.range.endColumn }, true);
+    }
+    return ok;
+  }
   fillDown() {
     const sheet = this.sheet,
       projection = this.projection;
@@ -3495,6 +3678,7 @@ export class DocumentStore {
     position: Position = this.pasteOrigin,
     literal = false,
     alignment: readonly (string | null)[] = [],
+    explicitExtent?: { rows: number; columns: number },
   ) {
     if (!this.canEdit) return false;
     const sheet = this.sheet,
@@ -3517,7 +3701,7 @@ export class DocumentStore {
     }
     const width = Math.max(...rows.map((row) => row.length));
     if (width === 0) return false;
-    const extent = this.pasteExtent(rows.length, width, position);
+    const extent = explicitExtent ?? this.pasteExtent(rows.length, width, position);
     if (!extent) return false;
     if (extent.rows !== rows.length || extent.columns !== width) {
       const source = rows;
@@ -3640,6 +3824,7 @@ export class DocumentStore {
       bytes,
       attempts: 0,
     });
+    this.observeAssistant({ kind: 'paste' });
     this.syncPreview();
     this.error = '';
     this.notify();
@@ -4310,6 +4495,7 @@ export class DocumentStore {
     clearTimeout(this.timer);
     this.inflight = undefined;
     if (payload.case === 'rejected') {
+      this.assistant.reset(false);
       const rejection = payload.value;
       const sourceChanged =
         rejection.code === 17 &&

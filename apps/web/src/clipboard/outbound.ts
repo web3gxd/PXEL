@@ -95,6 +95,10 @@ export async function writeSelectionClipboard(
       new ClipboardItem({ 'text/plain': plain, 'text/html': html }),
     ]);
     const value = await prepared;
+    if (action === 'copy') {
+      document.observeAssistant({ kind: 'copy' });
+      document.notify();
+    }
     if (value.cut) document.activateCutClipboard(value.cut);
     else document.reconcileCutClipboard('');
   } catch (error) {

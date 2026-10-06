@@ -1648,6 +1648,75 @@ const historyResponse = (overrides: Record<string, unknown> = {}) => ({
   truncation_reason: null,
   ...overrides,
 });
+describe('drag autofill', () => {
+  it('assistant refuses occupied cells and disabling clears all suggestions', async () => {
+    const { store } = await connectedStore();
+    const state = projection();
+    const sheet = state.sheets[0]!;
+    sheet.rows.push(...Array.from({ length: 5 }, () => uuidV7()));
+    sheet.cells = [7, 7, 7, 99].map((value, row) => ({
+      row_id: sheet.rows[row]!,
+      column_id: columnId,
+      value: { type: 'number', value },
+    }));
+    store.load(state);
+    for (let row = 0; row < 3; row++)
+      store.observeAssistant({ kind: 'edit', position: { row, column: 0 } });
+    const tip = store.assistantSuggestion!;
+    expect(tip.id).toBe('repeat');
+    expect(store.applyAssistantSuggestion(tip, 2)).toBe(false);
+    expect(store.error).toContain('пустые');
+    expect(store.pending).toHaveLength(0);
+    expect(store.confirmed.size).toBe(4);
+    store.setAssistantEnabled(false);
+    expect(store.assistantSuggestion).toBeUndefined();
+    expect(store.applyAssistantSuggestion(tip, 2)).toBe(false);
+    store.setAssistantEnabled(true);
+    expect(store.assistantSuggestion).toBeUndefined();
+    store.dispose();
+  });
+  it('extends a numeric seed as one batch and never modifies confirmed seed cells', async () => {
+    const { store, sent } = await connectedStore();
+    const state = projection();
+    const sheet = state.sheets[0]!;
+    sheet.rows.push(...Array.from({ length: 8 }, () => uuidV7()));
+    sheet.cells = [1, 3].map((value, row) => ({
+      row_id: sheet.rows[row]!,
+      column_id: columnId,
+      value: { type: 'number', value },
+    }));
+    store.load(state);
+    store.select({ row: 1, column: 0 }, true);
+    const source = store.selectionBounds;
+    expect(store.autofill(source, { row: 5, column: 0 }, '1')).toBe(true);
+    expect(store.pending).toHaveLength(1);
+    expect(store.confirmed.size).toBe(2);
+    expect(store.value({ row: 5, column: 0 })).toEqual({ type: 'number', value: 11 });
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing autofill');
+    expect(payload.value.operation?.kind.case).toBe('setCellValues');
+    expect(store.autofill(source, { row: 6, column: 0 }, '1')).toBe(false);
+    store.dispose();
+  });
+  it('uses the server formula copy path and rejects stale, filtered or read-only gestures', async () => {
+    const { store, sent } = await connectedStore();
+    const state = projection();
+    state.sheets[0]!.rows.push(uuidV7(), uuidV7());
+    store.load(state);
+    const source = store.selectionBounds;
+    expect(store.autofill(source, { row: 2, column: 0 }, '0')).toBe(false);
+    expect(store.autofill(source, { row: 2, column: 0 }, '1')).toBe(true);
+    const payload = fromBinary(ClientEnvelopeSchema, sent.at(-1)!).payload;
+    if (payload.case !== 'command') throw new Error('Missing autofill');
+    expect(payload.value.repeatRange?.destinationRows).toBe(2);
+    store.pending = [];
+    state.capabilities = { ...state.capabilities!, can_edit: false };
+    store.load(state);
+    expect(store.autofill(source, { row: 2, column: 0 }, '1')).toBe(false);
+    store.dispose();
+  });
+});
+
 async function connectedStore(discoveredHistory = historyResponse()) {
   vi.useFakeTimers();
   vi.stubGlobal('location', { href: 'http://localhost/' });

@@ -11,6 +11,8 @@ import { SmartScrollbar } from './SmartScrollbar';
 import { axisScrollMapping } from './scrollbar';
 import { PrivacyVeil } from './PrivacyVeil';
 import { visiblePrivacyRect } from './privacy-geometry';
+import { FillHandle } from './FillHandle';
+import { AssistantPanel } from '../assistant/AssistantPanel';
 
 export function CanvasGrid({
   document,
@@ -754,6 +756,93 @@ export function CanvasGrid({
             {...veil}
           />
         ))}
+      {document?.canAutofill &&
+        rowAxis &&
+        columnAxis &&
+        (() => {
+          const bounds = document.selectionBounds;
+          const left =
+            GRID.rowHeaderWidth + columnAxis.offsetAt(bounds.endColumn + 1) - scroll.left;
+          const top = GRID.columnHeaderHeight + rowY(bounds.endRow) + rowAxis.sizeAt(bounds.endRow);
+          const topBoundary =
+            GRID.columnHeaderHeight + (bounds.endRow < frozenCount ? 0 : frozenHeight);
+          const bottomBoundary =
+            bounds.endRow < frozenCount
+              ? GRID.columnHeaderHeight + frozenHeight
+              : viewportSize.height;
+          return (
+            <FillHandle
+              document={document}
+              left={left}
+              top={top}
+              visible={
+                left > GRID.rowHeaderWidth &&
+                left < viewportSize.width - 14 &&
+                top > topBoundary &&
+                top <= bottomBoundary - 2
+              }
+              locate={(x, y, autoScroll) => {
+                const scroller = scrollRef.current;
+                if (!scroller) return document.selected;
+                const box = scroller.getBoundingClientRect();
+                if (autoScroll) {
+                  if (x > box.right - 24) scroller.scrollLeft += 12;
+                  if (x < box.left + GRID.rowHeaderWidth + 12) scroller.scrollLeft -= 12;
+                  if (y > box.bottom - 24) scroller.scrollTop += 8;
+                  if (y < box.top + GRID.columnHeaderHeight + frozenHeight + 12)
+                    scroller.scrollTop -= 8;
+                }
+                return {
+                  row: rowAt(y - box.top - GRID.columnHeaderHeight, scroller.scrollTop),
+                  column: columnAxis.indexAt(
+                    x - box.left - GRID.rowHeaderWidth + scroller.scrollLeft,
+                  ),
+                };
+              }}
+            />
+          );
+        })()}
+      {document?.autofillPreview &&
+        rowAxis &&
+        columnAxis &&
+        (() => {
+          const bounds = document.autofillPreview;
+          const parts = [
+            { start: bounds.startRow, end: Math.min(bounds.endRow, frozenCount - 1), frozen: true },
+            { start: Math.max(bounds.startRow, frozenCount), end: bounds.endRow, frozen: false },
+          ];
+          return parts
+            .filter((part) => part.start <= part.end)
+            .map((part) => {
+              const rect = visiblePrivacyRect(
+                {
+                  left: GRID.rowHeaderWidth + columnAxis.offsetAt(bounds.startColumn) - scroll.left,
+                  top: GRID.columnHeaderHeight + rowY(part.start),
+                  width:
+                    columnAxis.offsetAt(bounds.endColumn + 1) -
+                    columnAxis.offsetAt(bounds.startColumn),
+                  height: rowAxis.offsetAt(part.end + 1) - rowAxis.offsetAt(part.start),
+                },
+                {
+                  left: GRID.rowHeaderWidth,
+                  top: GRID.columnHeaderHeight + (part.frozen ? 0 : frozenHeight),
+                  width: viewportSize.width - GRID.rowHeaderWidth,
+                  height: part.frozen
+                    ? frozenHeight
+                    : viewportSize.height - GRID.columnHeaderHeight - frozenHeight,
+                },
+              );
+              return rect ? (
+                <div
+                  key={String(part.frozen)}
+                  className="autofill-preview"
+                  aria-hidden="true"
+                  style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+                />
+              ) : null;
+            });
+        })()}
+      {document?.sheet && <AssistantPanel document={document} commands={commands} />}
       {document?.cutStatus && (
         <output className="cut-status" aria-live="polite" data-testid="cut-status">
           {document.cutStatus === 'pending'

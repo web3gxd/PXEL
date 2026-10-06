@@ -539,6 +539,151 @@ h1 {
 .grid-scroll:focus-visible {
   outline: none;
 }
+.fill-handle {
+  position: absolute;
+  z-index: 6;
+  width: 16px;
+  height: 16px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  cursor: crosshair;
+  touch-action: none;
+}
+.fill-handle span {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #306343;
+  box-shadow: 0 0 0 1px white;
+}
+.fill-handle:focus-visible {
+  outline: 2px solid #306343;
+  border-radius: 50%;
+}
+.autofill-preview {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  border: 2px dashed #306343;
+  background: #30634315;
+  box-sizing: border-box;
+}
+.assistant {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 44px);
+  bottom: 22px;
+  right: 22px;
+  z-index: 7;
+  font-size: 12px;
+  max-width: calc(100% - 32px);
+}
+.assistant-toggle {
+  display: block;
+  flex-shrink: 0;
+  margin-left: auto;
+  border: 1px solid #b6cbbb;
+  border-radius: 18px;
+  padding: 7px 12px;
+  background: #f4faf5;
+  color: #284d34;
+  box-shadow: 0 2px 8px #243d3015;
+}
+.assistant-toggle span {
+  margin-right: 5px;
+}
+.assistant-panel {
+  width: 310px;
+  min-height: 0;
+  max-width: 100%;
+  max-height: min(460px, 65vh);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 16px;
+  margin-top: 8px;
+  border: 1px solid #c6d3c8;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 8px 28px #243d3024;
+}
+.assistant-heading,
+.assistant-setting,
+.assistant-fill,
+.assistant-shortcuts div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.assistant-heading {
+  margin-bottom: 12px;
+}
+.assistant-heading button {
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  font-size: 18px;
+}
+.assistant-setting {
+  justify-content: flex-start;
+  cursor: pointer;
+}
+.assistant-setting input {
+  accent-color: #306343;
+}
+.assistant-idle,
+.assistant-tip p {
+  line-height: 1.5;
+  color: #526457;
+}
+.assistant-tip {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f0f7f1;
+}
+.assistant-fill {
+  flex-wrap: wrap;
+}
+.assistant-fill input {
+  width: 58px;
+  padding: 5px;
+  border: 1px solid #b6cbbb;
+  border-radius: 5px;
+}
+.assistant-panel button:not(.assistant-heading button) {
+  padding: 6px 9px;
+  border: 1px solid #b6cbbb;
+  border-radius: 6px;
+  background: #f7faf7;
+  color: #284d34;
+}
+.assistant-panel .assistant-dismiss {
+  margin-top: 10px;
+  font-size: 11px;
+}
+.assistant-shortcuts {
+  margin: 14px 0;
+}
+.assistant-shortcuts div {
+  padding: 5px 0;
+  border-bottom: 1px solid #edf1ed;
+}
+.assistant-shortcuts dd {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  text-align: right;
+}
+.assistant-privacy {
+  color: #627067;
+  font-size: 10px;
+  line-height: 1.5;
+  margin-bottom: 0;
+}
 .formula-input {
   resize: none;
   overflow: auto;
