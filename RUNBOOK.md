@@ -7534,3 +7534,9 @@ DTO2; disclosure/privacy restart 2/2 PASS (2.11 s). CSV acceptance повтор�
 сценарий подтвердил durable preparation_failed; hash/content не изменились.
 Лог: .local/reports/csv-export-final.log. Review проверил conversion limits,
 ACL/policy delivery fences, legacy codec AAD и независимость derived values.
+
+После commit b839d99 и rebase main (up to date): 5/5 CSV native unit tests,
+cargo fmt, proto:check, ESLint, TypeScript, 334/334 Vitest PASS. Новый isolated
+CSV API/PG crash/restart + Chromium run также PASS: 16/16 DPR1/DPR2, 55.2 s;
+fixture total80.29 s. Логи .local/reports/csv-export-post-rebase-{units,e2e}.log.
+Исходники после проверки не менялись; добавлена только эта запись результатов.
