@@ -1,3 +1,12 @@
+## 2026-10-06 — завершение Git cleanup
+
+feat/two слита в main коммитом bdf2adc после проверок выше. Выполнены
+`git worktree list` и `git worktree prune`. Чистый ae91 переключён на detached
+HEAD 11cd2b0 без изменения файлов; 1af8 остаётся detached на 2ccb35e.
+Обе слитые ветки удалены через `git branch -d feat/one feat/two` (не -D).
+Каталоги worktrees, локальные данные и backup/pre-merge tag сохранены.
+Результаты проверки и cleanup оформлены отдельной документационной записью.
+Remote/push и переписывание существующей истории не выполнялись.
 ## 2026-10-06 — слияние feat/one и feat/two в main
 
 После отдельного `2af11e2 chore: git setup` создан backup/pre-merge-20261006-142752.
@@ -40,8 +49,9 @@ Windows executable, занятый существующим dev-сервисом
 
 Расширенный Chromium privacy/range-fill/styles DPR1/DPR2: 41/48 за 9.7 min.
 Все 18 privacy и остальные 18 style cases прошли на финальном product-коде.
-Падения нового range suite: старый create-book/Undo helper, отсутствие ожидания
-asynchronous clipboard и готового HTML formula payload. Старый styles case
+Перед прогоном create-book адаптирован к текущему UI. Падения range suite: Undo helper, ожидание
+asynchronous clipboard и повторение одной формулы. Финальный formula test дополнен
+проверкой текста и присутствия HTML formula payload. Старый styles case
 искал удалённую toolbar кнопку вместо Ячейки/Удалить. Helpers исправлены;
 проверки версий, формул, стилей, reload, Undo/Redo не ослаблены. Изменение test
 fixtures во время первого прогона не делает его единым финальным green run.
