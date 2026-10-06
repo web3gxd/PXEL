@@ -268,6 +268,34 @@ test(
           (cell) => cell.value.type === 'text' && cell.value.value === '=SUM(A1)',
         ),
       );
+      const exportPath = '/api/documents/' + payload.document_id;
+      const csvQuery = new URLSearchParams({
+        schema_version: '1',
+        sheet_id: before.sheets[0].id,
+        document_version: before.version,
+      });
+      const download = await call(exportPath + '/export.csv?' + csvQuery);
+      assert.equal(download.status, 200);
+      assert.ok(download.headers.get('content-type').startsWith('text/csv'));
+      assert.equal(download.headers.get('cache-control'), 'no-store');
+      const csvBefore = await download.text();
+      assert.ok(csvBefore.includes("'=SUM(A1)"));
+      const policy = await (await call(exportPath + '/disclosure-policy')).json();
+      assert.equal(policy.schema_version, 2);
+      const savedPolicy = await fetch(base + exportPath + '/disclosure-policy', {
+        method: 'PUT',
+        headers: { Origin: web, Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schema_version: 2,
+          expected_revision: policy.revision,
+          rules: policy.rules,
+        }),
+      });
+      assert.equal(savedPolicy.status, 200);
+      const persistedPolicy = await savedPolicy.json();
+      const auditBefore = await (await call(exportPath + '/audit')).json();
+      assert.equal(auditBefore.schema_version, 2);
+      assert.equal(auditBefore.events.filter((e) => e.format === 'csv' && e.allowed).length, 2);
       await killServer(server);
       server = undefined;
       run(exe('pg_ctl'), ['-D', data, '-m', 'immediate', '-w', 'stop'], env);
@@ -277,6 +305,11 @@ test(
       const recovered = await (await call('/api/documents/' + payload.document_id)).json();
       assert.equal(recovered.state_hash, before.state_hash);
       assert.deepEqual(recovered.sheets[0].cells, before.sheets[0].cells);
+      assert.deepEqual(
+        await (await call(exportPath + '/disclosure-policy')).json(),
+        persistedPolicy,
+      );
+      assert.equal(await (await call(exportPath + '/export.csv?' + csvQuery)).text(), csvBefore);
       assert.equal((await call('/api/imports/csv', publish)).status, 201);
       assert.equal(await count(), 1);
       const logout = await fetch(base + '/api/dev/session', {
@@ -310,7 +343,15 @@ test(
       const playwright = join(dirname(require.resolve('@playwright/test/package.json')), 'cli.js');
       const browser = spawn(
         process.execPath,
-        [playwright, 'test', '--config', 'apps/web/playwright.config.ts', 'csv-import.spec.ts'],
+        [
+          playwright,
+          'test',
+          '--config',
+          'apps/web/playwright.config.ts',
+          ...(process.env.PXEL_CSV_EXPORT_ONLY === '1'
+            ? ['csv-export.spec.ts']
+            : ['csv-import.spec.ts', 'csv-export.spec.ts']),
+        ],
         { env, windowsHide: true, stdio: 'inherit' },
       );
       const [code] = await once(browser, 'exit');

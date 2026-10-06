@@ -85,7 +85,13 @@ pub async fn set_policy(
     if !auth::valid_origin(&headers, &state.origins) {
         return Err(ApiError(StatusCode::FORBIDDEN, "origin_denied"));
     }
-    if input.schema_version != 1 {
+    if !matches!(input.schema_version, 1 | 2)
+        || (input.schema_version == 1
+            && input
+                .rules
+                .export_formats
+                .contains(&spreadsheet_storage::DisclosureFormat::Csv))
+    {
         return Err(ApiError(StatusCode::BAD_REQUEST, "unknown_policy_version"));
     }
     let principal = member(&state, &headers).await?;
@@ -187,6 +193,8 @@ async fn clipboard_response(
                 | DisclosureAction::ExportXlsxAnonymized
                 | DisclosureAction::ExportPxel
                 | DisclosureAction::ExportPxelAnonymized
+                | DisclosureAction::ExportCsv
+                | DisclosureAction::ExportCsvAnonymized
         )
     {
         return Err(ApiError(

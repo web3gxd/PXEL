@@ -21,6 +21,7 @@ const reasons: Record<string, string> = {
   policy_changed: 'Политика изменилась',
   version_changed: 'Версия изменилась',
   privacy_analysis_failed: 'Анализ обезличивания не завершён — данные не выданы',
+  preparation_failed: 'Подготовка файла не завершена — данные не выданы',
 };
 export function DisclosurePanel({
   document,
@@ -190,6 +191,20 @@ export function DisclosurePanel({
           <label>
             <input
               type="checkbox"
+              checked={rules.export_formats.includes('csv')}
+              onChange={(event) =>
+                update({
+                  export_formats: event.target.checked
+                    ? [...rules.export_formats.filter((f) => f !== 'csv'), 'csv']
+                    : rules.export_formats.filter((f) => f !== 'csv'),
+                })
+              }
+            />
+            Выгрузка CSV
+          </label>
+          <label>
+            <input
+              type="checkbox"
               checked={rules.allow_participant_export}
               onChange={(event) => update({ allow_participant_export: event.target.checked })}
             />
@@ -244,7 +259,7 @@ export function DisclosurePanel({
                     ? 'Копирование'
                     : event.action === 'cut'
                       ? 'Вырезание'
-                      : 'Экспорт XLSX'}{' '}
+                      : `Экспорт ${event.format.toUpperCase()}`}{' '}
                   · {reasons[event.reason] ?? 'Неизвестное решение'}
                 </strong>
                 <span>

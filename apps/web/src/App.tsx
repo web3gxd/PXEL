@@ -36,6 +36,7 @@ import { PrivacyPanel } from './document/PrivacyPanel';
 import { PrivacyMonitor } from './document/PrivacyMonitor';
 import { HistoryPanel } from './document/HistoryPanel';
 import { PxelPanel } from './document/PxelPanel';
+import { CsvExportPanel } from './document/CsvExportPanel';
 import { Home } from './library/Home';
 import { BookTitle } from './library/BookTitle';
 import { LibraryNavigation } from './library/LibraryNavigation';
@@ -151,6 +152,7 @@ function SpreadsheetApp({
   const [privacyPanel, setPrivacyPanel] = useState(false);
   const [historyPanel, setHistoryPanel] = useState(false);
   const [pxelPanel, setPxelPanel] = useState(false);
+  const [csvExportPanel, setCsvExportPanel] = useState(false);
   const previewSort = useCallback(
     (bounds?: SortBounds) => document.previewSortBounds(bounds),
     [document],
@@ -412,6 +414,21 @@ function SpreadsheetApp({
                                 document.exporting ||
                                 !!document.pending.length,
                               run: () => void document.exportXlsx(),
+                            },
+                          ]
+                        : []),
+                      ...(document.canExportCsv
+                        ? [
+                            {
+                              label: 'Скачать CSV',
+                              icon: DownloadSimple,
+                              testId: 'export-csv',
+                              disabled:
+                                !document.sheet ||
+                                state.kind !== 'online' ||
+                                !!document.pending.length ||
+                                !!document.editing,
+                              run: () => setCsvExportPanel(true),
                             },
                           ]
                         : []),
@@ -781,6 +798,9 @@ function SpreadsheetApp({
         <HistoryPanel document={document} onClose={() => setHistoryPanel(false)} />
       )}
       {pxelPanel && <PxelPanel document={document} onClose={() => setPxelPanel(false)} />}
+      {csvExportPanel && (
+        <CsvExportPanel document={document} onClose={() => setCsvExportPanel(false)} />
+      )}
       {sortPanel && document.sheet && (
         <SortPanel
           document={document}

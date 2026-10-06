@@ -13,15 +13,16 @@ use std::sync::Arc;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Delimiter {
+    #[default]
     Comma,
     Semicolon,
     Tab,
 }
 impl Delimiter {
-    fn byte(self) -> u8 {
+    pub(crate) fn byte(self) -> u8 {
         match self {
             Self::Comma => b',',
             Self::Semicolon => b';',

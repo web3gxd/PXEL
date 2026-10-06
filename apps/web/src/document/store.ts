@@ -1012,6 +1012,9 @@ export class DocumentStore {
   get canExport() {
     return !this.guestAccessClosed && (this.projection?.capabilities?.can_export ?? false);
   }
+  get canExportCsv() {
+    return !this.guestAccessClosed && (this.projection?.capabilities?.can_export_csv ?? false);
+  }
   get canCopy() {
     return (
       !this.guestAccessClosed &&

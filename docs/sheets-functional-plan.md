@@ -78,6 +78,7 @@ Linux/Compose/remote CI, production authentication/deployment and manual NVDA
 remain explicitly open until actually verified. Do not mark ten-step completion
 from an early browser prototype or a subset of green tests.
 
-Status: all ten steps remain open. Step 1's CSV sub-slice is implemented;
-its local browser/PostgreSQL checks pass. XLSX selection/public-upload safety and
-CSV export remain before step 1 can be completed. See ADR-128 and RUNBOOK.
+Status: all ten steps remain open. Step 1's CSV import/export sub-slices are
+implemented, with browser/PostgreSQL acceptance and combined workspace
+verification. XLSX selection/public-upload safety remains before
+step 1 can be completed. See ADR-128, ADR-129 and RUNBOOK.

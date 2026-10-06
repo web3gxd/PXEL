@@ -354,11 +354,22 @@ MinIO/Garage не запускаются; локальные snapshots отно�
 `POST /api/imports/csv/preview` и `POST /api/imports/csv` требуют текущую member
 сессию и разрешённый Origin; DTO schema1 описан в ADR-128.
 
+В меню «Файл» доступен «Скачать CSV» при разрешении соответствующего формата.
+Выберите лист, разделитель и режим защиты текстовых значений. Выгружаются
+подтверждённые значения и результаты формул, без оформления/комментариев;
+скрытые строки и столбцы входят в данные. Лимиты: 16 МиБ и 100 000 полей
+в прямоугольнике использованных ячеек. Скачивание проходит политику, аудит и
+проверку актуальной версии, включая обязательное обезличивание зависимостей.
+`GET /api/documents/{id}/export.csv` и `/api/shared/{link}/export.csv` требуют
+`schema_version=1`, `sheet_id`, `document_version`; доступны `delimiter`,
+`safe_text` (default true) и `anonymized`. Контракты/миграция — ADR-129.
+
 Проверка с отдельными PostgreSQL/keyring/blob root и портами (сначала выполнить
 `. ./scripts/env.ps1` на Windows и собрать `cargo build --locked -p pxel-server
 --features dev-auth`): `node --test tests/recovery/csv-import.test.mjs`.
 С `PXEL_CSV_VERIFY_WORKSPACE=1` этот fixture также запускает `just check` на
 своей базе, сохраняя приватный `.local/csv-acceptance-*/workspace-check.log`.
+Fixture проверяет CSV-импорт и экспорт, browser roundtrip и аварийный restart.
 План всех десяти улучшений: [functional plan](docs/sheets-functional-plan.md).
 
 - `apps/server`, `apps/web` — executable adapters и UI.

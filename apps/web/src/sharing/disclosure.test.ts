@@ -1,6 +1,36 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { decodePolicy, authorizeClipboard } from './disclosure';
+import { decodePolicy, decodeAuditPage, authorizeClipboard } from './disclosure';
 afterEach(() => vi.unstubAllGlobals());
+it('CSV audit entries require audit version 2', () => {
+  const page = {
+    schema_version: 2,
+    next_cursor: null,
+    events: [
+      {
+        event_id: '019a1234-5678-789a-8bcd-0123456789ab',
+        actor_id: '019a1234-5678-789a-8bcd-0123456789ac',
+        link_id: null,
+        created_at: 1,
+        document_version: 2,
+        book_revision: 1,
+        link_revision: 0,
+        action: 'export',
+        format: 'csv',
+        allowed: true,
+        reason: 'allowed',
+      },
+    ],
+  };
+  expect(decodeAuditPage(page).events[0]?.format).toBe('csv');
+  expect(() => decodeAuditPage({ ...page, schema_version: 1 })).toThrow();
+  expect(() => decodeAuditPage({ ...page, schema_version: 3 })).toThrow();
+  const preparation = {
+    ...page,
+    events: [{ ...page.events[0], format: 'xlsx', allowed: false, reason: 'preparation_failed' }],
+  };
+  expect(decodeAuditPage(preparation).events[0]?.reason).toBe('preparation_failed');
+  expect(() => decodeAuditPage({ ...preparation, schema_version: 1 })).toThrow();
+});
 it('rejects unknown versions, duplicate formats, and malformed stamps', () => {
   const policy = {
     schema_version: 1,
@@ -14,9 +44,30 @@ it('rejects unknown versions, duplicate formats, and malformed stamps', () => {
     },
   };
   expect(decodePolicy(policy).rules.allow_copy).toBe(true);
-  expect(() => decodePolicy({ ...policy, schema_version: 2 })).toThrow();
+  expect(() => decodePolicy({ ...policy, schema_version: 3 })).toThrow();
   expect(() =>
     decodePolicy({ ...policy, rules: { ...policy.rules, export_formats: ['xlsx', 'xlsx'] } }),
+  ).toThrow();
+});
+it('CSV requires policy version 2 and rejects invented formats', () => {
+  const policy = {
+    schema_version: 2,
+    revision: 1,
+    access_epoch: 1,
+    rules: {
+      allow_copy: true,
+      export_formats: ['csv'],
+      allow_participant_export: false,
+      require_anonymization: false,
+    },
+  };
+  expect(decodePolicy(policy).rules.export_formats).toEqual(['csv']);
+  expect(() => decodePolicy({ ...policy, schema_version: 1 })).toThrow();
+  expect(() =>
+    decodePolicy({ ...policy, rules: { ...policy.rules, export_formats: ['csv', 'csv'] } }),
+  ).toThrow();
+  expect(() =>
+    decodePolicy({ ...policy, rules: { ...policy.rules, export_formats: ['html'] } }),
   ).toThrow();
 });
 it('requires a matching durable authorization and exposes no response bodies in errors', async () => {

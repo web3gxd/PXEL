@@ -253,6 +253,11 @@ pub(crate) async fn safe_view(
         .can_export_pxel(identity, doc, link)
         .await
         .map_err(crate::disclosure_api::error)?;
+    let csv = state
+        .database
+        .can_export_csv(identity, doc, link)
+        .await
+        .map_err(crate::disclosure_api::error)?;
     tokio::task::spawn_blocking(move || {
         let _slot = slot;
         let analysis = analyze(&book, &policy.rules)?;
@@ -264,6 +269,7 @@ pub(crate) async fn safe_view(
                 can_copy: copy,
                 can_export: export,
                 can_export_pxel: pxel,
+                can_export_csv: csv,
                 can_comment: comment,
                 can_share: role,
                 is_guest: link.is_some(),
@@ -378,6 +384,11 @@ pub async fn analyze_owner(
         .can_export_pxel(principal.identity, doc, None)
         .await
         .map_err(crate::disclosure_api::error)?;
+    let csv = state
+        .database
+        .can_export_csv(principal.identity, doc, None)
+        .await
+        .map_err(crate::disclosure_api::error)?;
     let view = tokio::task::spawn_blocking(move || {
         let _slot = slot;
         let analysis = analyze(&book, &policy.rules)?;
@@ -389,6 +400,7 @@ pub async fn analyze_owner(
                 can_copy: copy,
                 can_export: export,
                 can_export_pxel: pxel,
+                can_export_csv: csv,
                 can_comment: false,
                 can_share: true,
                 is_guest: false,
@@ -579,6 +591,7 @@ mod tests {
                 can_copy: true,
                 can_export: false,
                 can_export_pxel: false,
+                can_export_csv: false,
                 can_comment: true,
                 can_share: false,
                 is_guest: true,

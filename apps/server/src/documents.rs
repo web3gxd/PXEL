@@ -319,6 +319,7 @@ pub(crate) struct RedactedCapabilities {
     pub can_copy: bool,
     pub can_export: bool,
     pub can_export_pxel: bool,
+    pub can_export_csv: bool,
     pub can_comment: bool,
     pub can_share: bool,
     pub is_guest: bool,
@@ -361,13 +362,14 @@ pub(crate) fn redacted_view(
         privacy_revision: policy.revision,
         sheets,
         capabilities: DocumentCapabilitiesView {
-            schema_version: 2,
+            schema_version: 3,
             can_edit: false,
             can_comment: caps.can_comment,
             can_share: caps.can_share,
             can_copy: caps.can_copy,
             can_export: caps.can_export,
             can_export_pxel: caps.can_export_pxel,
+            can_export_csv: caps.can_export_csv,
             anonymized: true,
             disclosure_stamp: caps.stamp,
             is_guest: caps.is_guest,
@@ -383,6 +385,7 @@ struct DocumentCapabilitiesView {
     can_share: bool,
     can_export: bool,
     can_export_pxel: bool,
+    can_export_csv: bool,
     can_copy: bool,
     anonymized: bool,
     disclosure_stamp: spreadsheet_storage::DisclosureStamp,
@@ -645,7 +648,7 @@ pub async fn get_document(
         .await
         .map_err(crate::disclosure_api::error)?;
     response.0.capabilities = Some(DocumentCapabilitiesView {
-        schema_version: 2,
+        schema_version: 3,
         can_edit: role.as_deref().is_some_and(|role| role != "viewer"),
         can_comment: role.as_deref().is_some_and(|role| role != "viewer"),
         can_share: role.as_deref() == Some("owner"),
@@ -656,6 +659,11 @@ pub async fn get_document(
             .await
             .map_err(crate::disclosure_api::error)?,
         can_copy,
+        can_export_csv: state
+            .database
+            .can_export_csv(principal.identity, id, None)
+            .await
+            .map_err(crate::disclosure_api::error)?,
         anonymized: false,
         disclosure_stamp,
         is_guest: false,
@@ -693,7 +701,7 @@ pub async fn guest_document_view(
         .await
         .map_err(crate::disclosure_api::error)?;
     response.0.capabilities = Some(DocumentCapabilitiesView {
-        schema_version: 2,
+        schema_version: 3,
         can_edit: role == spreadsheet_storage::ShareRole::Edit,
         can_comment: role != spreadsheet_storage::ShareRole::View,
         can_share: false,
@@ -704,6 +712,11 @@ pub async fn guest_document_view(
             .await
             .map_err(crate::disclosure_api::error)?,
         can_copy,
+        can_export_csv: state
+            .database
+            .can_export_csv(identity, document, Some(link_id))
+            .await
+            .map_err(crate::disclosure_api::error)?,
         anonymized: false,
         disclosure_stamp,
         is_guest: true,

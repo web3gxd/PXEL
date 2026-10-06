@@ -77,6 +77,13 @@ is sufficient. Integration verification is recorded in RUNBOOK.
 
 Wire schemas находятся в `proto/pxel/wire/v1`; durable schemas — отдельно в `proto/pxel/storage/v1`. Совпадение protobuf compiler не объединяет их release policy. Изменение WebSocket DTO не переписывает operation log. Transport↔domain и persisted↔domain conversions явные.
 
+CSV download (ADR-129) reads one stable sheet from an exact confirmed version,
+calculates bounded derived values separately and uses the existing audited
+disclosure delivery lease/gate. CSV has independent format permission and audit
+identity. Policy DTO2/capabilities DTO3/audit DTO2 and stored disclosure codec2
+do not change workbook/wire/snapshot codecs. Old encrypted policy rows stay
+codec1, retain their format rights and never implicitly gain CSV permission.
+
 `domain::formula` временно может владеть небольшими versioned normalized AST types. Они не зависят от parser/evaluator и не содержат source spans. Diagnostic syntax AST — отдельный тип движка. Выделение formula-model возможно при доказанной необходимости; пустого crate сейчас нет.
 
 ## Документ и identity

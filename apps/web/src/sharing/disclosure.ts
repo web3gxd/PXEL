@@ -1,12 +1,12 @@
 import { boundedJson, decodeDisclosureStamp, isUuid, type DisclosureStamp } from './api';
 export type DisclosureRules = {
   allow_copy: boolean;
-  export_formats: ('xlsx' | 'pxel')[];
+  export_formats: ('xlsx' | 'pxel' | 'csv')[];
   allow_participant_export: boolean;
   require_anonymization: boolean;
 };
 export type DisclosurePolicy = {
-  schema_version: 1;
+  schema_version: 1 | 2;
   revision: number;
   access_epoch: number;
   rules: DisclosureRules;
@@ -22,16 +22,19 @@ export function decodePolicy(value: unknown): DisclosurePolicy {
   const item = object(value),
     rules = object(item.rules);
   if (
-    item.schema_version !== 1 ||
+    (item.schema_version !== 1 && item.schema_version !== 2) ||
     !integer(item.revision) ||
     !integer(item.access_epoch) ||
     !['allow_copy', 'allow_participant_export', 'require_anonymization'].every(
       (key) => typeof rules[key] === 'boolean',
     ) ||
     !Array.isArray(rules.export_formats) ||
-    rules.export_formats.length > 2 ||
+    rules.export_formats.length > (item.schema_version === 1 ? 2 : 3) ||
     new Set(rules.export_formats).size !== rules.export_formats.length ||
-    !rules.export_formats.every((format) => format === 'xlsx' || format === 'pxel')
+    !rules.export_formats.every(
+      (format) =>
+        format === 'xlsx' || format === 'pxel' || (item.schema_version === 2 && format === 'csv'),
+    )
   )
     throw new Error('Неподдерживаемая политика выдачи.');
   return item as DisclosurePolicy;
@@ -100,7 +103,7 @@ export async function savePolicy(
   const response = await fetch(path, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ schema_version: 1, expected_revision: policy.revision, rules }),
+    body: JSON.stringify({ schema_version: 2, expected_revision: policy.revision, rules }),
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok)
@@ -121,19 +124,19 @@ export type DisclosureAuditEvent = {
   book_revision: number;
   link_revision: number;
   action: 'copy' | 'cut' | 'export';
-  format: 'clipboard' | 'xlsx' | 'pxel';
+  format: 'clipboard' | 'xlsx' | 'pxel' | 'csv';
   allowed: boolean;
   reason: string;
 };
 export type DisclosureAuditPage = {
-  schema_version: 1;
+  schema_version: 1 | 2;
   events: DisclosureAuditEvent[];
   next_cursor: string | null;
 };
 export function decodeAuditPage(value: unknown): DisclosureAuditPage {
   const item = object(value);
   if (
-    item.schema_version !== 1 ||
+    (item.schema_version !== 1 && item.schema_version !== 2) ||
     !Array.isArray(item.events) ||
     item.events.length > 100 ||
     (item.next_cursor !== null && !isUuid(item.next_cursor))
@@ -149,7 +152,9 @@ export function decodeAuditPage(value: unknown): DisclosureAuditPage {
         integer(event[key]),
       ) ||
       !['copy', 'cut', 'export'].includes(String(event.action)) ||
-      !['clipboard', 'xlsx', 'pxel'].includes(String(event.format)) ||
+      !['clipboard', 'xlsx', 'pxel', ...(item.schema_version === 2 ? ['csv'] : [])].includes(
+        String(event.format),
+      ) ||
       typeof event.allowed !== 'boolean' ||
       ![
         'allowed',
@@ -160,6 +165,7 @@ export function decodeAuditPage(value: unknown): DisclosureAuditPage {
         'policy_changed',
         'version_changed',
         'privacy_analysis_failed',
+        ...(item.schema_version === 2 ? ['preparation_failed'] : []),
       ].includes(String(event.reason))
     )
       throw new Error('Некорректный журнал выдачи.');
@@ -167,5 +173,9 @@ export function decodeAuditPage(value: unknown): DisclosureAuditPage {
   });
   if (new Set(events.map((event) => event.event_id)).size !== events.length)
     throw new Error('Повторная запись журнала выдачи.');
-  return { schema_version: 1, events, next_cursor: item.next_cursor as string | null };
+  return {
+    schema_version: item.schema_version,
+    events,
+    next_cursor: item.next_cursor as string | null,
+  };
 }

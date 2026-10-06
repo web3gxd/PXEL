@@ -602,9 +602,9 @@ impl PgDatabase {
             let bytes =
                 Zeroizing::new(serde_json::to_vec(&rules).map_err(|_| ShareError::Corrupt)?);
             let payload = self
-                .seal_record_guarded(document, 1, "disclosure-policy", link_id, 1, &bytes, 4096)
+                .seal_record_guarded(document, 1, "disclosure-policy", link_id, 2, &bytes, 4096)
                 .await?;
-            sqlx::query("INSERT INTO disclosure_policies(scope_id,document_id,link_id,revision,payload) VALUES($1,$2,$1,1,$3)").bind(link_id).bind(doc.document_id).bind(payload).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO disclosure_policies(scope_id,document_id,link_id,revision,payload,codec_version) VALUES($1,$2,$1,1,$3,2)").bind(link_id).bind(doc.document_id).bind(payload).execute(&mut *tx).await?;
         }
         let row = fetch_link(&mut tx, link_id, false)
             .await?

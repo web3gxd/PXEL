@@ -42,12 +42,13 @@ export function decodeDisclosureStamp(value: unknown): DisclosureStamp {
   return item as DisclosureStamp;
 }
 export type Capabilities = {
-  schema_version: 2;
+  schema_version: 2 | 3;
   can_edit: boolean;
   can_comment: boolean;
   can_share: boolean;
   can_export: boolean;
   can_export_pxel?: boolean;
+  can_export_csv?: boolean;
   can_copy: boolean;
   anonymized: boolean;
   disclosure_stamp: DisclosureStamp;
@@ -86,7 +87,13 @@ export const isPermission = (value: unknown): value is SharePermission =>
   value === 'view' || value === 'comment' || value === 'edit';
 export function decodeCapabilities(value: unknown): Capabilities {
   const item = record(value);
-  if (item.schema_version !== 2) throw new SharingError('invalid_response');
+  if (item.schema_version !== 2 && item.schema_version !== 3)
+    throw new SharingError('invalid_response');
+  if (
+    (item.schema_version === 3 && typeof item.can_export_csv !== 'boolean') ||
+    (item.schema_version === 2 && item.can_export_csv !== undefined)
+  )
+    throw new SharingError('invalid_response');
   if (item.can_export_pxel !== undefined && typeof item.can_export_pxel !== 'boolean')
     throw new SharingError('invalid_response');
   decodeDisclosureStamp(item.disclosure_stamp);

@@ -7455,3 +7455,82 @@ XLSX sandbox/malware policy и ручной NVDA этим срезом не за
 ESLint, Prettier и 328/328 Vitest PASS. Повтор изолированной API/PG crash
 проверки PASS (48.64 s), Chromium 6/6 DPR1/DPR2 (21.2 s). Исходники после
 этого прогона не менялись; добавлена только эта запись результатов.
+
+## 2026-10-07 — audited selected-sheet CSV export (ADR-129)
+
+В feat/csv-export добавлены member/guest GET export.csv с обязательными schema1,
+stable sheet ID и expected confirmed head. Выгружается used rectangle одного
+листа: UTF-8 BOM, CRLF, comma/semicolon/tab, quoted/doubled fields, 16 MiB и
+100000 полей. Формулы пересчитываются bounded native engine из этой же confirmed
+книги/context; content/hash не меняются. Unredacted arrays или failed calculation
+отклоняют весь файл. Safe privacy values используют existing dependency closure.
+Default safe-text mode добавляет апостроф к потенциально formula-leading тексту;
+числа остаются числами, режим можно отключить для исходного текста. Это не
+универсальная гарантия безопасности CSV после обработки другим приложением.
+
+CSV имеет собственные format/action/audit identity. Сохранённые старые политики
+не получают CSV автоматически. Effective book/link/participant permissions,
+admission/final audit, access lease и delivery gate reused; unknown version,
+stale head, missing sheet, revoked guest и anonymization failure fail closed.
+Policy DTO2, capabilities DTO3, audit DTO2 и disclosure storage codec2 независимы
+от workbook/wire/snapshot. Migration 202610070001 добавляет codec_version и CSV
+audit constraint; старый encrypted payload остаётся codec1. Все три policy writers
+(обычный, privacy, anonymous share) записывают authenticated codec2. Новых
+зависимостей нет; .env/remote и demo books не менялись.
+
+Два serializer RED tests сначала не собирались без encode; первая implementation
+проверка выявила лишний > в Option type, исправлен. 5/5 CSV export unit tests PASS:
+Unicode/quotes/newlines, explicit safe/exact text, sparse/empty sheet/field budget,
+числа/boolean/formula result/error и output quotation expansion/NUL. RAND без
+durable context уже отвергается shared engine; новый regression подтвердил это
+без дополнительной runtime логики. Два новых policy/capability tests RED→GREEN;
+три download boundary tests RED missing module→GREEN, audit version test PASS.
+
+Первый browser RED до menu wiring: 2 failed/2 passed DPR1/DPR2; direct API policy
+и exact-head guards уже работали. Следующий combined run: 10/14, два сценария
+при обоих DPR остановились на ошибках fixture expectations: imported privacy
+policy имеет revision1, а revoke endpoint возвращает 204. Исправлены только
+ожидания/чтение актуальной ревизии, product contracts не ослаблялись.
+Финальный combined run: 16/16 DPR1/DPR2 PASS, 52.8 s; isolated fixture total
+78.58 s. Покрыты скачивание/reimport, числа и formula values, safe/exact text,
+выбор двух stable sheets, missing/unknown/stale guards, book/link/guest права,
+отзыв ссылки и обязательное маскирование formula dependency. API/PG immediate
+stop/server kill/restart сохранили hash/cells, codec2 policy и CSV output/audit.
+Лог: .local/reports/csv-export-e2e-green.log. Screenshot 390x844 проверен визуально.
+
+TypeScript, ESLint, production build и 333/333 Vitest PASS до добавления последнего
+audit boundary case; затем 14/14 targeted client tests PASS. Vite сохраняет chunk
+
+> 500 kB warning. Во время browser fixture cargo test без --bin попытался заменить
+> работающий Windows server exe и получил Access denied. Повтор --bin pxel-server
+> прошёл; для общей сборки fixture сначала остановлен. Общий just check идёт на
+> отдельном PostgreSQL fixture .local/csv-acceptance-WiBJqQ с RUST_TEST_THREADS=4;
+> оба strict Clippy profiles уже PASS, остальные результаты записываются после
+> завершения. Disclosure/privacy restart regressions входят в этот private прогон.
+> Linux/Compose/remote CI, production auth/deployment, XLSX sandbox/malware policy
+> и ручной NVDA остаются открытыми. Все десять functional steps ещё не завершены.
+
+CSV export review: ошибки encode/calculation/limits теперь получают отдельную
+durable reason preparation_failed; privacy analysis сохраняет прежний reason.
+Изменившиеся policy/head имеют приоритет над preparation failure. Добавлена
+отдельная migration 202610070002, ранняя migration не переписывалась. Audit DTO2
+и UI принимают/показывают новый reason; DTO1 его отклоняет. Client regression
+RED (1/4 failed) → GREEN (4/4). Browser assertion отсутствующего sheet также
+проверяет эту точную запись; окончательный повтор ещё предстоит.
+
+Общий прогон 70316 завершился на новом RED client test, добавленном во время
+прогона: 333 passed/1 failed. Rust/Clippy/WASM до него прошли, но итоговый just
+check не прошёл. Повтор 5190 остановился на ошибке нового SQLx теста: audit DTO
+reason — String, тест сравнивал его с enum. Ожидания исправлены на literal
+reason. Финальный повтор запущен отдельно (81776); его результат не заявлен.
+
+Итоговый just check PASS: 741 Rust tests, 17 intentional ignored; оба strict
+Clippy profiles, fmt, native/WASM/proto, Prettier, ESLint, TypeScript, 334/334
+Vitest и build прошли. Отдельный disclosure restart сначала получил 400:
+fixture посылал policy DTO1 с новым CSV format. Исправлен только PUT schema на
+DTO2; disclosure/privacy restart 2/2 PASS (2.11 s). CSV acceptance повторён
+на новой изолированной PG fixture: 16/16 Chromium DPR1/DPR2 PASS, 1.0 min;
+вместе с immediate-stop/restart API checks — 86.18 s, exit0. Новый missing-sheet
+сценарий подтвердил durable preparation_failed; hash/content не изменились.
+Лог: .local/reports/csv-export-final.log. Review проверил conversion limits,
+ACL/policy delivery fences, legacy codec AAD и независимость derived values.

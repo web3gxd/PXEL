@@ -20,6 +20,7 @@ pub struct DisclosureRules {
 pub enum DisclosureFormat {
     Xlsx,
     Pxel,
+    Csv,
 }
 impl DisclosureRules {
     pub(crate) fn defaults(link: bool) -> Self {
@@ -28,14 +29,24 @@ impl DisclosureRules {
             export_formats: if link {
                 vec![]
             } else {
-                vec![DisclosureFormat::Xlsx, DisclosureFormat::Pxel]
+                vec![
+                    DisclosureFormat::Xlsx,
+                    DisclosureFormat::Pxel,
+                    DisclosureFormat::Csv,
+                ]
             },
             allow_participant_export: false,
             require_anonymization: false,
         }
     }
     fn valid(&self) -> bool {
-        self.export_formats.len() <= 2
+        self.export_formats.len() <= 3
+            && self
+                .export_formats
+                .iter()
+                .filter(|f| **f == DisclosureFormat::Csv)
+                .count()
+                <= 1
             && self
                 .export_formats
                 .iter()
@@ -67,6 +78,8 @@ pub enum DisclosureAction {
     ExportXlsxAnonymized,
     ExportPxel,
     ExportPxelAnonymized,
+    ExportCsv,
+    ExportCsvAnonymized,
 }
 impl DisclosureAction {
     fn names(self) -> (&'static str, &'static str) {
@@ -75,6 +88,7 @@ impl DisclosureAction {
             Self::Cut => ("cut", "clipboard"),
             Self::ExportXlsx | Self::ExportXlsxAnonymized => ("export", "xlsx"),
             Self::ExportPxel | Self::ExportPxelAnonymized => ("export", "pxel"),
+            Self::ExportCsv | Self::ExportCsvAnonymized => ("export", "csv"),
         }
     }
 }
@@ -89,6 +103,7 @@ pub enum DisclosureReason {
     PolicyChanged,
     VersionChanged,
     PrivacyAnalysisFailed,
+    PreparationFailed,
 }
 impl DisclosureReason {
     fn name(self) -> &'static str {
@@ -101,6 +116,7 @@ impl DisclosureReason {
             Self::PolicyChanged => "policy_changed",
             Self::VersionChanged => "version_changed",
             Self::PrivacyAnalysisFailed => "privacy_analysis_failed",
+            Self::PreparationFailed => "preparation_failed",
         }
     }
 }
@@ -166,6 +182,7 @@ pub(crate) struct DocumentRow {
 struct PolicyRow {
     revision: i64,
     payload: Vec<u8>,
+    codec_version: i32,
 }
 fn id(bytes: &[u8; 16]) -> Uuid {
     Uuid::from_bytes(*bytes)
@@ -219,13 +236,18 @@ impl PgDatabase {
     ) -> Result<DisclosurePolicy, DisclosureError> {
         let scope = link.unwrap_or(id(doc.as_bytes()));
         let row: Option<PolicyRow> = sqlx::query_as(
-            "SELECT revision,payload FROM disclosure_policies WHERE scope_id=$1 AND document_id=$2",
+            "SELECT revision,payload,codec_version FROM disclosure_policies WHERE scope_id=$1 AND document_id=$2",
         )
         .bind(scope)
         .bind(id(doc.as_bytes()))
         .fetch_optional(&mut **tx)
         .await?;
         let (revision, rules) = if let Some(row) = row {
+            let codec = match row.codec_version {
+                1 => 1,
+                2 => 2,
+                _ => return Err(DisclosureError::Corrupt),
+            };
             let revision = unsigned(row.revision)?;
             let bytes = self
                 .open_record(
@@ -233,7 +255,7 @@ impl PgDatabase {
                     revision,
                     "disclosure-policy",
                     scope,
-                    1,
+                    codec,
                     &row.payload,
                     4096,
                 )
@@ -241,7 +263,9 @@ impl PgDatabase {
                 .map_err(|_| DisclosureError::Corrupt)?;
             let rules: DisclosureRules =
                 serde_json::from_slice(&bytes).map_err(|_| DisclosureError::Corrupt)?;
-            if !rules.valid() {
+            if !rules.valid()
+                || (codec == 1 && rules.export_formats.contains(&DisclosureFormat::Csv))
+            {
                 return Err(DisclosureError::Corrupt);
             }
             (revision, rules)
@@ -249,7 +273,7 @@ impl PgDatabase {
             (0, DisclosureRules::defaults(link.is_some()))
         };
         Ok(DisclosurePolicy {
-            schema_version: 1,
+            schema_version: 2,
             revision,
             rules,
             access_epoch: epoch,
@@ -332,10 +356,10 @@ impl PgDatabase {
         let bytes =
             Zeroizing::new(serde_json::to_vec(&rules).map_err(|_| DisclosureError::InvalidInput)?);
         let payload = self
-            .seal_record_guarded(doc, revision, "disclosure-policy", scope, 1, &bytes, 4096)
+            .seal_record_guarded(doc, revision, "disclosure-policy", scope, 2, &bytes, 4096)
             .await
             .map_err(|_| DisclosureError::Unavailable)?;
-        sqlx::query("INSERT INTO disclosure_policies(scope_id,document_id,link_id,revision,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(scope_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload").bind(scope).bind(id(doc.as_bytes())).bind(link).bind(number(revision)?).bind(payload).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO disclosure_policies(scope_id,document_id,link_id,revision,payload,codec_version) VALUES($1,$2,$3,$4,$5,2) ON CONFLICT(scope_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,codec_version=EXCLUDED.codec_version").bind(scope).bind(id(doc.as_bytes())).bind(link).bind(number(revision)?).bind(payload).execute(&mut *tx).await?;
         let epoch = row
             .access_epoch
             .checked_add(1)
@@ -348,7 +372,7 @@ impl PgDatabase {
         sqlx::query("UPDATE share_guest_sessions SET revoked_at=clock_timestamp() WHERE document_id=$1 AND ($2::uuid IS NULL OR link_id=$2) AND revoked_at IS NULL").bind(id(doc.as_bytes())).bind(link).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(DisclosurePolicy {
-            schema_version: 1,
+            schema_version: 2,
             revision,
             rules,
             access_epoch: unsigned(epoch)?,
@@ -388,6 +412,9 @@ impl PgDatabase {
             DisclosureAction::ExportPxel | DisclosureAction::ExportPxelAnonymized => {
                 Some(DisclosureFormat::Pxel)
             }
+            DisclosureAction::ExportCsv | DisclosureAction::ExportCsvAnonymized => {
+                Some(DisclosureFormat::Csv)
+            }
             _ => None,
         };
         let export = format.is_some();
@@ -396,6 +423,7 @@ impl PgDatabase {
             DisclosureAction::CopyAnonymized
                 | DisclosureAction::ExportXlsxAnonymized
                 | DisclosureAction::ExportPxelAnonymized
+                | DisclosureAction::ExportCsvAnonymized
         ) || book.rules.require_anonymization
             || shared
                 .as_ref()
@@ -473,7 +501,7 @@ impl PgDatabase {
         action: DisclosureAction,
         expected: Option<DisclosureStamp>,
     ) -> Result<DisclosureReceipt, DisclosureError> {
-        self.audit_disclosure(identity, doc, link, action, expected, false)
+        self.audit_disclosure(identity, doc, link, action, expected, None)
             .await
     }
     pub async fn can_export_pxel(
@@ -495,6 +523,25 @@ impl PgDatabase {
             .await?
             .allowed)
     }
+    pub async fn can_export_csv(
+        &self,
+        identity: AuthenticatedActor,
+        doc: DocumentId,
+        link: Option<Uuid>,
+    ) -> Result<bool, DisclosureError> {
+        let mut tx = self.begin_guarded().await?;
+        Ok(self
+            .disclosure_decision(
+                &mut tx,
+                identity,
+                doc,
+                link,
+                DisclosureAction::ExportCsv,
+                None,
+            )
+            .await?
+            .allowed)
+    }
     pub async fn record_disclosure_failure(
         &self,
         identity: AuthenticatedActor,
@@ -503,8 +550,34 @@ impl PgDatabase {
         action: DisclosureAction,
         expected: DisclosureStamp,
     ) -> Result<(), DisclosureError> {
-        self.audit_disclosure(identity, doc, link, action, Some(expected), true)
-            .await?;
+        self.audit_disclosure(
+            identity,
+            doc,
+            link,
+            action,
+            Some(expected),
+            Some(DisclosureReason::PrivacyAnalysisFailed),
+        )
+        .await?;
+        Ok(())
+    }
+    pub async fn record_export_preparation_failure(
+        &self,
+        identity: AuthenticatedActor,
+        doc: DocumentId,
+        link: Option<Uuid>,
+        action: DisclosureAction,
+        expected: DisclosureStamp,
+    ) -> Result<(), DisclosureError> {
+        self.audit_disclosure(
+            identity,
+            doc,
+            link,
+            action,
+            Some(expected),
+            Some(DisclosureReason::PreparationFailed),
+        )
+        .await?;
         Ok(())
     }
     async fn audit_disclosure(
@@ -514,7 +587,7 @@ impl PgDatabase {
         link: Option<Uuid>,
         action: DisclosureAction,
         expected: Option<DisclosureStamp>,
-        analysis_failed: bool,
+        failure: Option<DisclosureReason>,
     ) -> Result<DisclosureReceipt, DisclosureError> {
         let mut tx = self.begin_guarded().await?;
         sqlx::query("SET LOCAL synchronous_commit=on")
@@ -523,9 +596,9 @@ impl PgDatabase {
         let mut result = self
             .disclosure_decision(&mut tx, identity, doc, link, action, expected)
             .await?;
-        if analysis_failed && result.allowed {
+        if let Some(reason) = failure.filter(|_| result.allowed) {
             result.allowed = false;
-            result.reason = DisclosureReason::PrivacyAnalysisFailed;
+            result.reason = reason;
         }
         let (action, format) = action.names();
         sqlx::query("INSERT INTO disclosure_audit_events(event_id,document_id,actor_id,link_id,document_version,book_revision,link_revision,action,format,allowed,reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)").bind(Uuid::now_v7()).bind(id(doc.as_bytes())).bind(id(identity.actor_id.as_bytes())).bind(link).bind(number(result.stamp.document_version)?).bind(number(result.stamp.book_revision)?).bind(number(result.stamp.link_revision)?).bind(action).bind(format).bind(result.allowed).bind(result.reason.name()).execute(&mut *tx).await?;
@@ -551,7 +624,7 @@ impl PgDatabase {
             None
         };
         Ok(DisclosureAuditPage {
-            schema_version: 1,
+            schema_version: 2,
             events,
             next_cursor,
         })

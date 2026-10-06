@@ -34,6 +34,29 @@ const guest = {
   admitted_head_version: '42',
 };
 afterEach(() => vi.unstubAllGlobals());
+it('CSV capabilities require version 3 and fail closed for older responses', () => {
+  const caps = {
+    schema_version: 3,
+    can_edit: true,
+    can_comment: true,
+    can_share: true,
+    can_export: true,
+    can_export_pxel: true,
+    can_export_csv: true,
+    can_copy: true,
+    anonymized: false,
+    is_guest: false,
+    disclosure_stamp: { document_version: 2, book_revision: 0, link_revision: 0 },
+  };
+  expect(decodeCapabilities(caps).can_export_csv).toBe(true);
+  expect(() => decodeCapabilities({ ...caps, schema_version: 2 })).toThrow();
+  expect(() =>
+    decodeCapabilities({ ...caps, schema_version: 3, can_export_csv: undefined }),
+  ).toThrow();
+  const legacy = { ...caps } as Partial<typeof caps>;
+  delete legacy.can_export_csv;
+  expect(decodeCapabilities({ ...legacy, schema_version: 2 }).can_export_csv).toBeFalsy();
+});
 describe('sharing boundary', () => {
   it('recognizes shared routes before member login, including invalid links', () => {
     expect(shareRoute('/', '')).toBeUndefined();

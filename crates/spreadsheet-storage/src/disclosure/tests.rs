@@ -3,6 +3,119 @@ use spreadsheet_application::journal::OperationJournal;
 use spreadsheet_domain::workbook::*;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+#[sqlx::test(migrations = false)]
+async fn csv_format_keeps_legacy_permissions_and_authenticates_codec_version(
+    pool: sqlx::PgPool,
+) -> TestResult {
+    let (db, owner, viewer, doc) = fixture(pool).await?;
+    assert!(db.can_export_csv(owner, doc, None).await?);
+    assert!(!db.can_export_csv(viewer, doc, None).await?);
+    let rules = DisclosureRules {
+        allow_copy: true,
+        export_formats: vec![DisclosureFormat::Xlsx, DisclosureFormat::Pxel],
+        allow_participant_export: false,
+        require_anonymization: false,
+    };
+    let scope = Uuid::from_bytes(*doc.as_bytes());
+    let bytes = Zeroizing::new(serde_json::to_vec(&rules)?);
+    let old = db
+        .seal_record_guarded(doc, 1, "disclosure-policy", scope, 1, &bytes, 4096)
+        .await?;
+    sqlx::query(
+        "INSERT INTO disclosure_policies(scope_id,document_id,revision,payload) VALUES($1,$1,1,$2)",
+    )
+    .bind(scope)
+    .bind(old)
+    .execute(&db.pool)
+    .await?;
+    let legacy = db.disclosure_policy(owner, doc, None).await?;
+    assert_eq!(legacy.schema_version, 2);
+    assert_eq!(legacy.rules, rules);
+    assert!(!db.can_export_csv(owner, doc, None).await?);
+    let denied = db
+        .authorize_disclosure(owner, doc, None, DisclosureAction::ExportCsv, None)
+        .await?;
+    assert_eq!(denied.reason, DisclosureReason::FormatDenied);
+    let csv = DisclosureRules {
+        export_formats: vec![DisclosureFormat::Csv],
+        allow_participant_export: true,
+        ..rules
+    };
+    let saved = db
+        .set_disclosure_policy(owner, doc, None, 1, csv.clone())
+        .await?;
+    assert_eq!(saved.revision, 2);
+    assert!(db.can_export_csv(owner, doc, None).await?);
+    assert!(db.can_export_csv(viewer, doc, None).await?);
+    assert!(
+        !db.authorize_disclosure(owner, doc, None, DisclosureAction::ExportXlsx, None)
+            .await?
+            .allowed
+    );
+    assert_eq!(
+        db.authorize_disclosure(
+            owner,
+            doc,
+            None,
+            DisclosureAction::ExportCsv,
+            Some(denied.stamp)
+        )
+        .await?
+        .reason,
+        DisclosureReason::PolicyChanged
+    );
+    assert!(matches!(
+        db.set_disclosure_policy(
+            owner,
+            doc,
+            None,
+            2,
+            DisclosureRules {
+                export_formats: vec![DisclosureFormat::Csv, DisclosureFormat::Csv],
+                ..csv
+            }
+        )
+        .await,
+        Err(DisclosureError::InvalidInput)
+    ));
+    let codec: i32 =
+        sqlx::query_scalar("SELECT codec_version FROM disclosure_policies WHERE scope_id=$1")
+            .bind(scope)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(codec, 2);
+    sqlx::query("UPDATE disclosure_policies SET codec_version=1 WHERE scope_id=$1")
+        .bind(scope)
+        .execute(&db.pool)
+        .await?;
+    assert!(matches!(
+        db.disclosure_policy(owner, doc, None).await,
+        Err(DisclosureError::Corrupt)
+    ));
+    sqlx::query("UPDATE disclosure_policies SET codec_version=2 WHERE scope_id=$1")
+        .bind(scope)
+        .execute(&db.pool)
+        .await?;
+    assert!(
+        db.disclosure_policy(owner, doc, None)
+            .await?
+            .rules
+            .export_formats
+            .contains(&DisclosureFormat::Csv)
+    );
+    let audit = db.disclosure_audit(owner, doc, None).await?;
+    assert_eq!(audit.schema_version, 2);
+    assert!(audit.events.iter().any(|e| e.format == "csv" && !e.allowed));
+    sqlx::query("DROP TABLE disclosure_audit_events")
+        .execute(&db.pool)
+        .await?;
+    assert!(matches!(
+        db.authorize_disclosure(owner, doc, None, DisclosureAction::ExportCsv, None)
+            .await,
+        Err(DisclosureError::Unavailable)
+    ));
+    Ok(())
+}
 async fn fixture(
     pool: sqlx::PgPool,
 ) -> Result<
@@ -220,6 +333,7 @@ async fn guest_policy_intersection_revokes_sessions_without_granting_edit(
         }
     };
     let first = login(70).await?;
+    assert!(!db.can_export_csv(first.identity, doc, Some(link)).await?);
     assert!(
         db.authorize_disclosure(
             first.identity,
@@ -256,6 +370,7 @@ async fn guest_policy_intersection_revokes_sessions_without_granting_edit(
     .await?;
     assert!(db.guest_session(link, [70; 32]).await?.is_none());
     let second = login(71).await?;
+    assert!(!db.can_export_csv(second.identity, doc, Some(link)).await?);
     assert!(
         !db.authorize_disclosure(
             second.identity,
@@ -274,7 +389,7 @@ async fn guest_policy_intersection_revokes_sessions_without_granting_edit(
         Some(link),
         0,
         DisclosureRules {
-            export_formats: vec![DisclosureFormat::Xlsx],
+            export_formats: vec![DisclosureFormat::Xlsx, DisclosureFormat::Csv],
             allow_participant_export: true,
             ..policy.rules
         },
@@ -282,6 +397,7 @@ async fn guest_policy_intersection_revokes_sessions_without_granting_edit(
     .await?;
     assert!(db.guest_session(link, [71; 32]).await?.is_none());
     let third = login(72).await?;
+    assert!(db.can_export_csv(third.identity, doc, Some(link)).await?);
     assert!(
         db.authorize_disclosure(
             third.identity,
@@ -369,6 +485,49 @@ async fn policy_change_waits_for_durable_delivery_lease(pool: sqlx::PgPool) -> T
         )
         .await?
         .allowed
+    );
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn preparation_failure_is_durable_and_preserves_policy_denials(
+    pool: sqlx::PgPool,
+) -> TestResult {
+    let (db, owner, _, doc) = fixture(pool).await?;
+    let action = DisclosureAction::ExportCsv;
+    let admission = db
+        .authorize_disclosure(owner, doc, None, action, None)
+        .await?;
+    assert!(admission.allowed);
+    db.record_export_preparation_failure(owner, doc, None, action, admission.stamp)
+        .await?;
+    let audit = db.disclosure_audit(owner, doc, None).await?;
+    assert!(
+        audit
+            .events
+            .iter()
+            .any(|event| !event.allowed && event.reason == "preparation_failed")
+    );
+    let policy = db.disclosure_policy(owner, doc, None).await?;
+    db.set_disclosure_policy(
+        owner,
+        doc,
+        None,
+        policy.revision,
+        DisclosureRules {
+            export_formats: vec![],
+            ..policy.rules
+        },
+    )
+    .await?;
+    db.record_export_preparation_failure(owner, doc, None, action, admission.stamp)
+        .await?;
+    let audit = db.disclosure_audit(owner, doc, None).await?;
+    assert!(
+        audit
+            .events
+            .iter()
+            .any(|event| !event.allowed && event.reason == "policy_changed")
     );
     Ok(())
 }

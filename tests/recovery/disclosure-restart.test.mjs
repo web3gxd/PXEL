@@ -47,7 +47,7 @@ test(
       );
       const policy = await (await api(base, cookie, `${path}/disclosure-policy`)).json();
       const saved = await api(base, cookie, `${path}/disclosure-policy`, 'PUT', {
-        schema_version: 1,
+        schema_version: 2,
         expected_revision: 0,
         rules: { ...policy.rules, allow_copy: false },
       });
@@ -71,7 +71,7 @@ test(
       assert.equal(restored.capabilities.can_copy, false);
       assert.equal(restored.version, snapshot.version);
       const audit = await (await api(base, cookie, `${path}/audit`)).json();
-      assert.equal(audit.schema_version, 1);
+      assert.equal(audit.schema_version, 2);
       assert.equal(audit.events.length, 2);
       assert.deepEqual(
         audit.events.map((event) => event.allowed),

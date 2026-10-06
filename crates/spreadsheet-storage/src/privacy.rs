@@ -237,13 +237,13 @@ impl PgDatabase {
                 policy_revision,
                 "disclosure-policy",
                 id(doc),
-                1,
+                2,
                 &bytes,
                 4096,
             )
             .await
             .map_err(|_| DisclosureError::Unavailable)?;
-        sqlx::query("INSERT INTO disclosure_policies(scope_id,document_id,link_id,revision,payload) VALUES($1,$1,NULL,$2,$3) ON CONFLICT(scope_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload").bind(id(doc)).bind(i64::try_from(policy_revision).map_err(|_| DisclosureError::InvalidInput)?).bind(payload).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO disclosure_policies(scope_id,document_id,link_id,revision,payload,codec_version) VALUES($1,$1,NULL,$2,$3,2) ON CONFLICT(scope_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,codec_version=EXCLUDED.codec_version").bind(id(doc)).bind(i64::try_from(policy_revision).map_err(|_| DisclosureError::InvalidInput)?).bind(payload).execute(&mut *tx).await?;
         let next_epoch = row
             .access_epoch
             .checked_add(1)

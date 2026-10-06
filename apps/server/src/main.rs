@@ -5,6 +5,8 @@ mod calculation_stream;
 mod catalog_api;
 mod config;
 mod csv_api;
+mod csv_export;
+mod csv_export_api;
 mod csv_import;
 mod delivery;
 mod disclosure_api;
@@ -864,6 +866,10 @@ async fn main() -> anyhow::Result<()> {
             get(documents::export_xlsx),
         )
         .route(
+            "/api/documents/{id}/export.csv",
+            get(csv_export_api::export),
+        )
+        .route(
             "/api/documents/{id}/disclosure-policy",
             get(disclosure_api::get_policy).put(disclosure_api::set_policy),
         )
@@ -887,6 +893,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/shared/{link}/export.xlsx",
             get(documents::export_shared_xlsx),
+        )
+        .route(
+            "/api/shared/{link}/export.csv",
+            get(csv_export_api::shared_export),
         )
         .route(
             "/api/documents/{id}/versions/{version}",
