@@ -36,6 +36,52 @@ async function writeAt(page: Page, row: number, column: number, text: string) {
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
 }
+test('local mask preserves owner editing and the originals choice after automatic analysis', async ({
+  page,
+}) => {
+  await fixture(page);
+  await write(page, 0, 'test@example.com');
+  await (await editorButton(page, 'Персональные данные')).click();
+  const dialog = page.getByRole('dialog', { name: 'Персональные данные' });
+  await dialog.getByRole('checkbox', { name: 'Включить распознавание' }).check();
+  await dialog.getByRole('checkbox', { name: 'Email', exact: true }).check();
+  await dialog.getByRole('button', { name: 'Сохранить настройки', exact: true }).click();
+  await expect(dialog.getByRole('status')).toContainText('Совпадений: 1');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.privacy-veil')).toHaveCount(1);
+  const veil = page.getByRole('button', { name: /^(Раскрыть|Скрыть) данные A1$/ });
+  await veil.focus();
+  await page.keyboard.press('F2');
+  const cellEditor = page.getByRole('textbox', { name: 'Редактор ячейки', exact: true });
+  await expect(cellEditor).toHaveValue('test@example.com');
+  await cellEditor.press('Escape');
+  await page.locator('.privacy-veil').first().dblclick();
+  await expect(cellEditor).toHaveValue('test@example.com');
+  await cellEditor.press('Escape');
+  const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
+  await bar.focus();
+  await expect(bar).toHaveValue('test@example.com');
+  await bar.fill('edited@example.org');
+  await bar.press('Enter');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  await expect(veil).toBeVisible();
+  await (await editorButton(page, 'Персональные данные')).click();
+  await expect(dialog.getByRole('status')).toContainText(`Версия ${(await book(page)).version}.`);
+  await dialog.getByRole('button', { name: 'Показать оригиналы', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await write(page, 1, '42');
+  const version = (await book(page)).version;
+  await (await editorButton(page, 'Персональные данные')).click();
+  await expect(dialog.getByRole('status')).toContainText(`Версия ${version}.`);
+  await expect(dialog.getByRole('button', { name: 'Локальная маска', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Обновить анализ', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Обновить анализ', exact: true })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Локальная маска', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.privacy-veil')).toHaveCount(0);
+  await write(page, 0, 'final@example.net');
+  expect(JSON.stringify((await book(page)).sheets)).toContain('final@example.net');
+});
 test('recognition safe clipboard XLSX and anonymous guest channels preserve originals', async ({
   page,
   browser,

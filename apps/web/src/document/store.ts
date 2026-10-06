@@ -793,7 +793,7 @@ export class DocumentStore {
   get canAuthor() {
     return (
       !this.creating &&
-      !this.privacyMask &&
+      this.projection?.representation !== 'anonymized' &&
       !this.guestAccessClosed &&
       (!this.isGuest || this.transport.guest?.permission === 'edit') &&
       (this.projection?.capabilities?.can_edit ?? true)
@@ -1070,6 +1070,7 @@ export class DocumentStore {
   privacyReport: import('./privacy').PrivacyReport | undefined;
   privacyPolicy: import('./privacy').PrivacyPolicy | undefined;
   private privacyMaskProjection: Projection | undefined;
+  private privacyMaskEnabled = true;
   private privacyMaskCells = new Map<string, Value>();
   get privacyMask() {
     return this.privacyMaskProjection;
@@ -1101,6 +1102,13 @@ export class DocumentStore {
     this.privacyFindingRevision++;
   }
   setPrivacyMask(projection: Projection | undefined) {
+    if (this.pending.length || this.editing) throw new Error('Сначала завершите изменения.');
+    this.validatePrivacyMask(projection);
+    this.privacyMaskEnabled = !!projection;
+    this.privacyMask = projection;
+    this.notify();
+  }
+  private validatePrivacyMask(projection: Projection | undefined) {
     if (
       projection &&
       (projection.representation !== 'anonymized' ||
@@ -1108,8 +1116,10 @@ export class DocumentStore {
         projection.version !== this.projection.version)
     )
       throw new Error('Локальная маска устарела.');
-    if (this.pending.length || this.editing) throw new Error('Сначала завершите изменения.');
-    this.privacyMask = projection;
+  }
+  refreshPrivacyMask(projection: Projection | undefined) {
+    this.validatePrivacyMask(projection);
+    this.privacyMask = this.privacyMaskEnabled ? projection : undefined;
     this.notify();
   }
   privacyFindingAt(position: Position) {
@@ -1418,6 +1428,12 @@ export class DocumentStore {
         return { type: 'text' as const, value: '[МАСКА УСТАРЕЛА]' };
       return this.privacyMaskCells.get(`${this.sheet?.id}/${row}/${column}`);
     }
+    return this.authoredValue(position);
+  }
+  private authoredValue(position: Position) {
+    const row = this.sheet?.rows[position.row],
+      column = this.sheet?.columns[position.column];
+    if (!row || !column) return undefined;
     for (let i = this.pending.length - 1; i >= 0; i--) {
       const op = this.pending[i];
       if (op?.kind === 'cell' && op.row === row && op.column === column) return op.value;
@@ -2003,6 +2019,7 @@ export class DocumentStore {
     }
     if (documentChanged) {
       this.privacyMask = undefined;
+      this.privacyMaskEnabled = true;
       this.privacyFindings = [];
       this.privacyReport = undefined;
       this.privacyPolicy = undefined;
@@ -2649,7 +2666,7 @@ export class DocumentStore {
     if (byteLength(text) > 512 * 1024) throw new Error('Текст выделения превышает 512 КБ.');
     return text;
   }
-  begin(text = displayValue(this.value(this.selected)), source: 'cell' | 'bar' = 'cell') {
+  begin(text = displayValue(this.authoredValue(this.selected)), source: 'cell' | 'bar' = 'cell') {
     if (!this.canEdit) return;
     if (!this.sheet) return;
     this.editing = { position: { ...this.selected }, text, source };
@@ -3044,6 +3061,7 @@ export class DocumentStore {
     return true;
   }
   cutRangePayload(activate = true) {
+    if (this.privacyMask) return undefined;
     if (!this.canCopy) return undefined;
     if (!this.canPrepareMove()) return undefined;
     const sheet = this.sheet,

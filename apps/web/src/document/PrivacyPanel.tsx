@@ -65,7 +65,7 @@ export function PrivacyPanel({
       document.privacyPolicy = p;
       setReport(undefined);
       document.privacyFindings = [];
-      if (!enabled && document.privacyMask) document.setPrivacyMask(undefined);
+      if (!enabled && document.privacyMask) document.refreshPrivacyMask(undefined);
       await document.refresh(BigInt(document.projection!.version));
       if (p.rules.enabled && p.rules.types.length) {
         const refreshed = await analyzePrivacy(id, document.projection!.version);
@@ -78,7 +78,7 @@ export function PrivacyPanel({
         setReport(refreshed);
         setChosen(new Set());
         document.privacyFindings = refreshed.findings;
-        document.setPrivacyMask(refreshed.projection);
+        document.refreshPrivacyMask(refreshed.projection);
       } else document.privacyReport = undefined;
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось сохранить.');
@@ -101,7 +101,7 @@ export function PrivacyPanel({
       setReport(p);
       document.privacyReport = p;
       document.privacyFindings = p.findings;
-      document.setPrivacyMask(p.projection);
+      document.refreshPrivacyMask(p.projection);
       document.notify();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось выполнить анализ.');

@@ -43,11 +43,26 @@ export function PrivacyVeil({
         document.select(position);
         setRevealed(true);
       }}
+      onDoubleClick={() => {
+        document.select(position);
+        document.begin();
+      }}
       onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing) return;
         if (event.key === 'Escape') {
           event.preventDefault();
           event.stopPropagation();
           setRevealed(false);
+        } else if (
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          (event.key === 'F2' || event.key.length === 1)
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          document.select(position);
+          document.begin(event.key === 'F2' ? undefined : event.key);
         }
       }}
     >

@@ -31,8 +31,7 @@ export function PrivacyMonitor({ document }: { document: DocumentStore }) {
           if (!policy.rules.enabled || !policy.rules.types.length) {
             document.privacyReport = undefined;
             document.privacyFindings = [];
-            if (document.privacyMask && !document.pending.length && !document.editing)
-              document.setPrivacyMask(undefined);
+            document.refreshPrivacyMask(undefined);
             return;
           }
           const report = await analyzePrivacy(id, version);
@@ -45,8 +44,7 @@ export function PrivacyMonitor({ document }: { document: DocumentStore }) {
             return;
           document.privacyReport = report;
           document.privacyFindings = report.findings;
-          if (!document.pending.length && !document.editing)
-            document.setPrivacyMask(report.projection);
+          document.refreshPrivacyMask(report.projection);
         } catch (error) {
           if (active)
             document.privacyAnalysisError =

@@ -151,7 +151,10 @@ it('keeps local masks separate from authored values and refuses stale safe copyi
   store.load(original);
   const hash = store.projection?.state_hash;
   store.setPrivacyMask(masked);
-  expect(store.canEdit).toBe(false);
+  expect(store.canEdit).toBe(true);
+  store.begin();
+  expect(store.editing?.text).toBe('original@example.com');
+  store.cancel();
   expect(store.display({ row: 0, column: 0 })).toBe('[СКРЫТО]');
   expect(store.privacyOriginalDisplay({ row: 0, column: 0 })).toBe('original@example.com');
   expect(store.confirmed.values().next().value).toEqual({
@@ -164,12 +167,27 @@ it('keeps local masks separate from authored values and refuses stale safe copyi
   expect(() => store.copyRedactedSelectionTsv({ ...masked, version: '3' })).toThrow();
   store.privacyMask = { ...masked, version: '3' };
   expect(store.privacyOriginalDisplay({ row: 0, column: 0 })).toBeUndefined();
+  store.begin();
+  expect(store.editing?.text).toBe('original@example.com');
+  store.cancel();
   store.privacyMask = masked;
   store.projection!.capabilities!.is_guest = true;
   expect(store.privacyOriginalDisplay({ row: 0, column: 0 })).toBeUndefined();
   store.projection!.capabilities!.is_guest = false;
   store.setPrivacyMask(undefined);
+  store.refreshPrivacyMask(masked);
+  expect(store.privacyMask).toBeUndefined();
   expect(store.display({ row: 0, column: 0 })).toBe('original@example.com');
+  store.setPrivacyMask(masked);
+  store.begin('replacement@example.com');
+  store.refreshPrivacyMask(masked);
+  expect(store.editing?.text).toBe('replacement@example.com');
+  expect(store.privacyMask).toBe(masked);
+  store.cancel();
+  store.projection!.capabilities!.can_edit = false;
+  expect(store.canEdit).toBe(false);
+  store.begin();
+  expect(store.editing).toBeUndefined();
   store.dispose();
 });
 it('validates opt-in types exact fingerprints and report projection revision together', () => {

@@ -57,7 +57,13 @@ Clipboard receipt adds anonymized flag and the same safe projection, after
 durable authorization audit and under the delivery lease. Safe copying issues
 only TSV/HTML scalar values and omits formula/range/move payloads. Cut is refused
 under mandatory anonymization. Owner local masking uses a separate overlay and
-disables editing; stale overlays show a placeholder until refreshed. XLSX uses
+preserves owner editing rights. An explicit edit opens the original authored
+value; masked values and stale placeholders never become edit preimages.
+The local visibility choice survives head changes and manual/automatic scans
+for the current open document; opening another document resets the default.
+Background scans refresh the overlay independently of that choice and active
+edits. Anonymous projections remain read-only. Stale overlays show a placeholder
+until refreshed. XLSX uses
 the same analyzed scalar map. Policy changes are fenced through delivery.
 
 Recognition sources: [FNS INN structure](https://www.nalog.gov.ru/rn77/fl/interest/inn/),
