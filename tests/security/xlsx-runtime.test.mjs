@@ -29,10 +29,10 @@ const manifest = {
 };
 mkdirSync('.local', { recursive: true });
 const root = mkdtempSync(resolve('.local/xlsx-runtime-'));
-function preview(input) {
+function preview(input, source = 'fixtures/xlsx/minimal_scalars.xlsx') {
   const file = join(root, 'manifest.json');
   writeFileSync(file, JSON.stringify(input));
-  return spawnSync(binary, ['xlsx-preview', resolve('fixtures/xlsx/minimal_scalars.xlsx')], {
+  return spawnSync(binary, ['xlsx-preview', resolve(source)], {
     env: { ...process.env, PXEL_XLSX_SANDBOX_MANIFEST: file },
     encoding: 'utf8',
     timeout: 15000,
@@ -44,6 +44,16 @@ test('configured WASI backend previews existing fixture without content output',
   assert.equal(output.status, 0);
   assert.equal(output.stdout.trim(), 'XLSX preview: 2 sheets, 5 cells');
   assert.equal(output.stderr, '');
+});
+
+test('configured WASI backend rejects active package parts without publishing a preview', () => {
+  for (const name of ['activex', 'control', 'macro-sheet', 'dialog-sheet']) {
+    const output = preview(manifest, `fixtures/xlsx/active-content/${name}.xlsx`);
+    assert.notEqual(output.status, 0);
+    assert.equal(output.stdout, '');
+    assert.match(output.stderr, /XLSX worker rejected the package/);
+    assert.doesNotMatch(output.stderr, /payload|Budget|hello/);
+  }
 });
 test('configured backend fails closed on bad pins, versions, paths and invented arguments', () => {
   for (const change of [

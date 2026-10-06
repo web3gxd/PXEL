@@ -298,6 +298,10 @@ fn contains_active_part(name: &str) -> bool {
     lower.contains("vbaproject")
         || lower.starts_with("xl/externallinks/")
         || lower.starts_with("xl/embeddings/")
+        || lower.starts_with("xl/activex/")
+        || lower.starts_with("xl/ctrlprops/")
+        || lower.starts_with("xl/macrosheets/")
+        || lower.starts_with("xl/dialogsheets/")
         || lower.starts_with("xl/pivottables/")
         || lower == "xl/connections.xml"
         || lower.starts_with("customxml/")
@@ -706,6 +710,23 @@ mod tests {
         assert_eq!(result.sheets[0].part, "xl/worksheets/sheet1.xml");
         assert_eq!(result.sheets[1].name, "Plan");
         assert_eq!(result.entry_count, 6);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_active_controls_and_macro_sheets() -> Result<(), Box<dyn std::error::Error>> {
+        for name in [
+            "xl/activeX/activeX1.xml",
+            "xl/ctrlProps/ctrlProp1.xml",
+            "xl/macrosheets/sheet1.xml",
+            "xl/dialogsheets/sheet1.xml",
+        ] {
+            assert_eq!(
+                inspect(package(&[(name, "<payload/>")])?),
+                Err(XlsxError::UnsupportedActiveContent),
+                "{name}"
+            );
+        }
         Ok(())
     }
 

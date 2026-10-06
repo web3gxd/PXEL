@@ -7653,3 +7653,21 @@ After commit84f790d and rebase main (up to date), just xlsx-wasi-check13/13
 PASS (4.83s), strict all-feature server Clippy and fmt PASS again. Source is
 unchanged since verification. This closes ADR-132's locally verified operator
 adapter slice; browser upload and host-resource gates remain open.
+
+## 2026-10-07 — XLSX active-content paths (ADR-133)
+
+feat/xlsx-active-content-policy: regression RED proved ActiveX XML passed package
+inspection. Added complete-package rejection for conventional xl/activeX,
+xl/ctrlProps, xl/macrosheets and xl/dialogsheets paths, case insensitive, before
+normalization. Existing external relationships/VBA/embeddings/DTD safeguards are
+retained. Four inert ZIP fixtures contain no malware or executable payload.
+ADR-133 records normalized-content-only publication policy; implementation of
+browser upload/storage remains pending, so no public-upload claim is made.
+
+Library all-feature tests30/30 PASS, strict all-target/all-feature XLSX Clippy,
+fmt and changed-test/ADR Prettier PASS. just xlsx-wasi-check14/14 PASS (8.37s),
+including actual configured backend refusal of all four fixtures with empty
+stdout, redacted error, no source echo and no native fallback. Seven existing
+XLSX profile parity cases remain passing. No new dependency or codec version.
+Review confirmed rejection occurs before part decoding and does not alter
+supported workbook semantics. Host resource and browser E2E gates remain open.
