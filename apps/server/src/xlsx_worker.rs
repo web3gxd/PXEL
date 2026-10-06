@@ -9,7 +9,7 @@ use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use spreadsheet_xlsx::NormalizedWorkbook;
 use std::{
-    io::{Read, Write},
+    io::{Cursor, Read, Write},
     path::Path,
     process::Stdio,
     time::Duration,
@@ -19,8 +19,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const REQUEST_MAGIC: &[u8; 4] = b"PXIW";
 const RESPONSE_MAGIC: &[u8; 4] = b"PXOW";
-const PROTOCOL_VERSION: u16 = 4;
-const MAX_PATH_BYTES: usize = 4096;
+const PROTOCOL_VERSION: u16 = 5;
+const MAX_SOURCE_BYTES: usize = 32 * 1024 * 1024;
 const RESPONSE_HEADER_BYTES: usize = 11;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const WORKER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -74,7 +74,7 @@ impl Drop for WorkerProcessGuard {
     }
 }
 
-/// Parent-side entry point. Only a canonical absolute path crosses the boundary.
+/// Parent-side entry point. Only bounded package bytes cross the boundary.
 pub async fn preview(path: &Path) -> Result<PreviewCounts, WorkerError> {
     let workbook = load(path).await?;
     let sheets = u32::try_from(workbook.sheets.len()).map_err(|_| WorkerError::Protocol)?;
@@ -92,17 +92,29 @@ pub async fn preview(path: &Path) -> Result<PreviewCounts, WorkerError> {
 
 /// Decode and validate worker output again before it can enter server workflows.
 pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
-    let absolute = tokio::fs::canonicalize(path)
+    let file = tokio::fs::File::open(path)
         .await
         .map_err(|_| WorkerError::InvalidInput)?;
-    let path_bytes = absolute
-        .to_str()
-        .ok_or(WorkerError::InvalidInput)?
-        .as_bytes();
-    if path_bytes.is_empty() || path_bytes.len() > MAX_PATH_BYTES {
+    let metadata = file
+        .metadata()
+        .await
+        .map_err(|_| WorkerError::InvalidInput)?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_SOURCE_BYTES as u64 {
         return Err(WorkerError::InvalidInput);
     }
-    let path_len = u16::try_from(path_bytes.len()).map_err(|_| WorkerError::InvalidInput)?;
+    let mut source = Vec::new();
+    tokio::time::timeout(
+        WORKER_TIMEOUT,
+        file.take((MAX_SOURCE_BYTES + 1) as u64)
+            .read_to_end(&mut source),
+    )
+    .await
+    .map_err(|_| WorkerError::Timeout)?
+    .map_err(|_| WorkerError::InvalidInput)?;
+    if source.is_empty() || source.len() > MAX_SOURCE_BYTES {
+        return Err(WorkerError::InvalidInput);
+    }
+    let source_len = u32::try_from(source.len()).map_err(|_| WorkerError::InvalidInput)?;
     let executable = std::env::current_exe().map_err(|_| WorkerError::Process)?;
     let mut command = tokio::process::Command::new(executable);
     command
@@ -136,11 +148,11 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
             .await
             .map_err(|_| WorkerError::Protocol)?;
         stdin
-            .write_all(&path_len.to_be_bytes())
+            .write_all(&source_len.to_be_bytes())
             .await
             .map_err(|_| WorkerError::Protocol)?;
         stdin
-            .write_all(path_bytes)
+            .write_all(&source)
             .await
             .map_err(|_| WorkerError::Protocol)?;
         stdin.shutdown().await.map_err(|_| WorkerError::Protocol)?;
@@ -189,8 +201,14 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
 /// Child-side entry point. Output is one bounded versioned IR frame.
 pub fn run() -> Result<(), WorkerError> {
     let mut stdin = std::io::stdin().lock();
-    let mut header = [0_u8; 8];
-    stdin
+    let source = read_request(&mut stdin)?;
+    let result = spreadsheet_xlsx::normalize_reader(Cursor::new(&source), source.len() as u64);
+    write_result(result)
+}
+
+fn read_request(input: &mut impl Read) -> Result<Vec<u8>, WorkerError> {
+    let mut header = [0_u8; 10];
+    input
         .read_exact(&mut header)
         .map_err(|_| WorkerError::Protocol)?;
     if &header[..4] != REQUEST_MAGIC
@@ -198,20 +216,24 @@ pub fn run() -> Result<(), WorkerError> {
     {
         return Err(WorkerError::Protocol);
     }
-    let path_len = usize::from(u16::from_be_bytes([header[6], header[7]]));
-    if path_len == 0 || path_len > MAX_PATH_BYTES {
+    let source_len = u32::from_be_bytes([header[6], header[7], header[8], header[9]]) as usize;
+    if source_len == 0 || source_len > MAX_SOURCE_BYTES {
         return Err(WorkerError::InvalidInput);
     }
-    let mut path = vec![0_u8; path_len];
-    stdin
-        .read_exact(&mut path)
+    let mut source = vec![0_u8; source_len];
+    input
+        .read_exact(&mut source)
         .map_err(|_| WorkerError::Protocol)?;
     let mut extra = [0_u8; 1];
-    if stdin.read(&mut extra).map_err(|_| WorkerError::Protocol)? != 0 {
+    if input.read(&mut extra).map_err(|_| WorkerError::Protocol)? != 0 {
         return Err(WorkerError::Protocol);
     }
-    let path = std::str::from_utf8(&path).map_err(|_| WorkerError::InvalidInput)?;
-    let result = spreadsheet_xlsx::normalize_file(Path::new(path));
+    Ok(source)
+}
+
+fn write_result(
+    result: Result<NormalizedWorkbook, spreadsheet_xlsx::XlsxError>,
+) -> Result<(), WorkerError> {
     let (status, payload) = match result {
         Ok(workbook) => {
             workbook.validate().map_err(|_| WorkerError::Protocol)?;
@@ -277,6 +299,35 @@ fn decode_payload(payload: &[u8]) -> Result<NormalizedWorkbook, WorkerError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn byte_request_rejects_old_version_lengths_truncation_and_trailing_bytes() {
+        let mut frame = b"PXIW\0\x05\0\0\0\x03abc".to_vec();
+        assert_eq!(
+            super::read_request(&mut frame.as_slice()),
+            Ok(b"abc".to_vec())
+        );
+        frame[5] = 4;
+        assert_eq!(
+            super::read_request(&mut frame.as_slice()),
+            Err(super::WorkerError::Protocol)
+        );
+        assert_eq!(
+            super::read_request(&mut b"PXIW\0\x05\0\0\0\0".as_slice()),
+            Err(super::WorkerError::InvalidInput)
+        );
+        assert_eq!(
+            super::read_request(&mut b"PXIW\0\x05\x02\0\0\x01".as_slice()),
+            Err(super::WorkerError::InvalidInput)
+        );
+        assert_eq!(
+            super::read_request(&mut b"PXIW\0\x05\0\0\0\x03ab".as_slice()),
+            Err(super::WorkerError::Protocol)
+        );
+        assert_eq!(
+            super::read_request(&mut b"PXIW\0\x05\0\0\0\x03abcd".as_slice()),
+            Err(super::WorkerError::Protocol)
+        );
+    }
     use super::{WorkerError, decode_header, decode_payload, encode_header};
     #[cfg(windows)]
     use process_wrap::tokio::JobObject;
@@ -298,7 +349,7 @@ mod tests {
         let frame = encode_header(0, 5).unwrap_or([0; 11]);
         assert_eq!(decode_header(&frame), Ok(5));
         let mut unknown = frame;
-        unknown[5] = 5;
+        unknown[5] = 6;
         assert_eq!(decode_header(&unknown), Err(WorkerError::Protocol));
         let rejected = encode_header(1, 0).unwrap_or([0; 11]);
         assert_eq!(decode_header(&rejected), Err(WorkerError::Rejected));

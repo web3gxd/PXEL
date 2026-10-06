@@ -82,3 +82,7 @@ Status: all ten steps remain open. Step 1's CSV import/export sub-slices are
 implemented, with browser/PostgreSQL acceptance and combined workspace
 verification. XLSX selection/public-upload safety remains before
 step 1 can be completed. See ADR-128, ADR-129 and RUNBOOK.
+
+XLSX preparation: ADR-130 moves the existing worker's input from filesystem
+paths to bounded package bytes. Local unit/child CLI checks passed; it does not
+complete OS sandbox, malware policy or browser XLSX publication.

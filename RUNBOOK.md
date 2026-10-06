@@ -7540,3 +7540,27 @@ cargo fmt, proto:check, ESLint, TypeScript, 334/334 Vitest PASS. Новый isol
 CSV API/PG crash/restart + Chromium run также PASS: 16/16 DPR1/DPR2, 55.2 s;
 fixture total80.29 s. Логи .local/reports/csv-export-post-rebase-{units,e2e}.log.
 Исходники после проверки не менялись; добавлена только эта запись результатов.
+
+## 2026-10-07 — XLSX worker byte input (ADR-130)
+
+feat/xlsx-byte-worker: существующий bounded normalize_reader используется через
+Cursor; protocol5 получает пакет из stdin вместо server filesystem path.
+Parent читает только regular file до32MiB, проверяет metadata и фактический
+размер (+1 byte probe), ограничивает read десятью секундами. Child проверяет
+version/length/EOF перед parsing, parent повторно validates IR. Дерево процессов,
+timeout/response limits/environment clearing/redaction сохранены. Новых
+dependencies, upload endpoints и wire/storage изменений нет.
+
+Request test RED missing read_request → GREEN. Worker4/4 и real child CLI5/5
+PASS: пакет two-sheet/five-cell parsed без path, old protocol4 и malformed/
+oversized/truncated/trailing frames rejected, preview output counts-only;
+process tree kill/drop дошёл до pipe EOF. XLSX parser29/29, strict all-feature
+server Clippy, fmt и docs Prettier PASS. Общие server units сначала80/81:
+auth fixture без согласованного keyring получила generation activation error.
+Повтор на own isolated PG/keyring fixture —81/81 PASS. Auth не менялся;
+результат среды не объявлен product regression. Private log:
+.local/csv-acceptance-WiBJqQ/xlsx-byte-check.log.
+
+Это подготовка публичного XLSX import. Hard CPU/memory caps, filesystem/network
+denial, malware policy, browser preview/selection/publication и остальные девять
+шагов остаются открытыми. OS sandbox этим изменением не заявляется.

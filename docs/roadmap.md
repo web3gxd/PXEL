@@ -1,5 +1,9 @@
 # Roadmap и gates
 
+2026-10-07: ADR-130 переводит XLSX worker на bounded stdin package bytes.
+Локальные unit/real child CLI проверки пройдены;
+sandbox/malware/browser XLSX gates этим не закрываются.
+
 2026-10-07: ADR-128 добавляет browser CSV preview/type controls/atomic new-book
 publication как первый срез утверждённых десяти функциональных улучшений.
 ADR-129 добавляет audited selected-sheet CSV export, отдельный format permission,
