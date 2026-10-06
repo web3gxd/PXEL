@@ -4,6 +4,8 @@
 mod export;
 mod normalized;
 mod styles;
+#[cfg(feature = "worker-protocol")]
+pub mod worker_protocol;
 
 pub use export::export_scalar_xlsx;
 pub use normalized::{

@@ -11,6 +11,13 @@ MVP — modular monolith: один основной Axum binary, PostgreSQL ка
 
 Сервер определяет порядок, canonical operations и результаты формул. Клиент хранит confirmed projection отдельно от pending intents; WASM preview остается предварительным. Никакой ACK committed до durable COMMIT. Все публичные и сохраненные форматы versioned; неизвестная обязательная семантика отклоняется целиком.
 
+ADR-130/131 keep XLSX package parsing outside the document actor. Optional
+worker-protocol in spreadsheet-xlsx shares bounded stdin/IR framing between
+the native child and standalone WASI executable; it depends only on ZIP/XML,
+serde/JSON and typed errors, never domain/application/storage. The parent still
+validates IR before constructing an authorized candidate. WASI guest-boundary
+tests do not imply that backend sandbox integration or public upload is ready.
+
 ```mermaid
 flowchart LR
   UI[React / Canvas / DOM editor] <--> Client[Confirmed projection + pending intents]

@@ -9,6 +9,15 @@ quick-xml.workspace = true
 zip.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+serde_json = { version = "=1.0.151", optional = true }
+
+[features]
+worker-protocol = ["dep:serde_json"]
+
+[[bin]]
+name = "pxel-xlsx-worker"
+path = "src/bin/worker.rs"
+required-features = ["worker-protocol"]
 
 [lints]
 workspace = true

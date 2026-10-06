@@ -7,22 +7,14 @@ use process_wrap::tokio::JobObject;
 #[cfg(unix)]
 use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
-use spreadsheet_xlsx::NormalizedWorkbook;
-use std::{
-    io::{Cursor, Read, Write},
-    path::Path,
-    process::Stdio,
-    time::Duration,
+use spreadsheet_xlsx::worker_protocol::{
+    MAX_SOURCE_BYTES, PROTOCOL_VERSION, REQUEST_MAGIC, RESPONSE_HEADER_BYTES,
 };
+use spreadsheet_xlsx::{NormalizedWorkbook, worker_protocol};
+use std::{path::Path, process::Stdio, time::Duration};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const REQUEST_MAGIC: &[u8; 4] = b"PXIW";
-const RESPONSE_MAGIC: &[u8; 4] = b"PXOW";
-const PROTOCOL_VERSION: u16 = 5;
-const MAX_SOURCE_BYTES: usize = 32 * 1024 * 1024;
-const RESPONSE_HEADER_BYTES: usize = 11;
-const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const WORKER_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -198,103 +190,34 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
     }
 }
 
-/// Child-side entry point. Output is one bounded versioned IR frame.
-pub fn run() -> Result<(), WorkerError> {
-    let mut stdin = std::io::stdin().lock();
-    let source = read_request(&mut stdin)?;
-    let result = spreadsheet_xlsx::normalize_reader(Cursor::new(&source), source.len() as u64);
-    write_result(result)
-}
-
-fn read_request(input: &mut impl Read) -> Result<Vec<u8>, WorkerError> {
-    let mut header = [0_u8; 10];
-    input
-        .read_exact(&mut header)
-        .map_err(|_| WorkerError::Protocol)?;
-    if &header[..4] != REQUEST_MAGIC
-        || u16::from_be_bytes([header[4], header[5]]) != PROTOCOL_VERSION
-    {
-        return Err(WorkerError::Protocol);
-    }
-    let source_len = u32::from_be_bytes([header[6], header[7], header[8], header[9]]) as usize;
-    if source_len == 0 || source_len > MAX_SOURCE_BYTES {
-        return Err(WorkerError::InvalidInput);
-    }
-    let mut source = vec![0_u8; source_len];
-    input
-        .read_exact(&mut source)
-        .map_err(|_| WorkerError::Protocol)?;
-    let mut extra = [0_u8; 1];
-    if input.read(&mut extra).map_err(|_| WorkerError::Protocol)? != 0 {
-        return Err(WorkerError::Protocol);
-    }
-    Ok(source)
-}
-
-fn write_result(
-    result: Result<NormalizedWorkbook, spreadsheet_xlsx::XlsxError>,
-) -> Result<(), WorkerError> {
-    let (status, payload) = match result {
-        Ok(workbook) => {
-            workbook.validate().map_err(|_| WorkerError::Protocol)?;
-            let payload = serde_json::to_vec(&workbook).map_err(|_| WorkerError::Protocol)?;
-            if payload.len() > MAX_RESPONSE_BYTES {
-                return Err(WorkerError::Rejected);
-            }
-            (0_u8, payload)
+impl From<worker_protocol::ProtocolError> for WorkerError {
+    fn from(error: worker_protocol::ProtocolError) -> Self {
+        match error {
+            worker_protocol::ProtocolError::InvalidInput => Self::InvalidInput,
+            worker_protocol::ProtocolError::Rejected => Self::Rejected,
+            worker_protocol::ProtocolError::Protocol => Self::Protocol,
         }
-        Err(_) => (1_u8, Vec::new()),
-    };
-    let mut stdout = std::io::stdout().lock();
-    stdout
-        .write_all(&encode_header(status, payload.len())?)
-        .map_err(|_| WorkerError::Protocol)?;
-    stdout
-        .write_all(&payload)
-        .map_err(|_| WorkerError::Protocol)?;
-    stdout.flush().map_err(|_| WorkerError::Protocol)?;
-    Ok(())
+    }
 }
 
+/// Native and WASI children share the exact bounded protocol implementation.
+pub fn run() -> Result<(), WorkerError> {
+    worker_protocol::run(&mut std::io::stdin().lock(), &mut std::io::stdout().lock())
+        .map_err(Into::into)
+}
+#[cfg(test)]
+fn read_request(input: &mut impl std::io::Read) -> Result<Vec<u8>, WorkerError> {
+    worker_protocol::read_request(input).map_err(Into::into)
+}
+#[cfg(test)]
 fn encode_header(status: u8, length: usize) -> Result<[u8; RESPONSE_HEADER_BYTES], WorkerError> {
-    if length > MAX_RESPONSE_BYTES || (status == 0 && length == 0) || (status != 0 && length != 0) {
-        return Err(WorkerError::Protocol);
-    }
-    let mut frame = [0_u8; RESPONSE_HEADER_BYTES];
-    frame[..4].copy_from_slice(RESPONSE_MAGIC);
-    frame[4..6].copy_from_slice(&PROTOCOL_VERSION.to_be_bytes());
-    frame[6] = status;
-    let length = u32::try_from(length).map_err(|_| WorkerError::Protocol)?;
-    frame[7..11].copy_from_slice(&length.to_be_bytes());
-    Ok(frame)
+    worker_protocol::encode_header(status, length).map_err(Into::into)
 }
-
 fn decode_header(frame: &[u8; RESPONSE_HEADER_BYTES]) -> Result<usize, WorkerError> {
-    if &frame[..4] != RESPONSE_MAGIC || u16::from_be_bytes([frame[4], frame[5]]) != PROTOCOL_VERSION
-    {
-        return Err(WorkerError::Protocol);
-    }
-    if frame[6] == 1 {
-        return Err(WorkerError::Rejected);
-    }
-    if frame[6] != 0 {
-        return Err(WorkerError::Protocol);
-    }
-    let length = u32::from_be_bytes([frame[7], frame[8], frame[9], frame[10]]) as usize;
-    if length == 0 || length > MAX_RESPONSE_BYTES {
-        return Err(WorkerError::Protocol);
-    }
-    Ok(length)
+    worker_protocol::decode_header(frame).map_err(Into::into)
 }
-
 fn decode_payload(payload: &[u8]) -> Result<NormalizedWorkbook, WorkerError> {
-    if payload.is_empty() || payload.len() > MAX_RESPONSE_BYTES {
-        return Err(WorkerError::Protocol);
-    }
-    let workbook: NormalizedWorkbook =
-        serde_json::from_slice(payload).map_err(|_| WorkerError::Protocol)?;
-    workbook.validate().map_err(|_| WorkerError::Protocol)?;
-    Ok(workbook)
+    worker_protocol::decode_payload(payload).map_err(Into::into)
 }
 
 #[cfg(test)]

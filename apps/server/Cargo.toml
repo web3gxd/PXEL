@@ -17,7 +17,7 @@ spreadsheet-collab.workspace = true
 spreadsheet-formula.workspace = true
 spreadsheet-storage.workspace = true
 spreadsheet-wire-protocol.workspace = true
-spreadsheet-xlsx.workspace = true
+spreadsheet-xlsx = { workspace = true, features = ["worker-protocol"] }
 anyhow.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true

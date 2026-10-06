@@ -49,6 +49,11 @@ formula-parity:
     node tests/parity/workbook.mjs
     node tests/parity/move.mjs
 
+xlsx-wasi-check:
+    cargo build --locked -p spreadsheet-xlsx --features worker-protocol --bin pxel-xlsx-worker --target wasm32-wasip1 --release
+    cargo build --locked -p pxel-server --features dev-auth
+    node --test tests/security/wasi-xlsx.test.mjs
+
 convergence:
     cargo test --locked -p spreadsheet-domain --test convergence -- --ignored --nocapture
 

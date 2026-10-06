@@ -1,5 +1,10 @@
 # PXEL
 
+Изолированный WASI XLSX worker проверяется `just xlsx-wasi-check`;
+установка закреплённого Wasmtime и ограничения —
+[XLSX WASI verification](docs/setup/xlsx-wasi.md). Backend ещё не использует
+этот worker для публичных загрузок; sandbox/malware/browser XLSX gates открыты.
+
 Самописанный collaborative spreadsheet. Работают создание документа, sparse
 Canvas, ввод значений, durable PostgreSQL CAS commit и восстановление после
 reload/restart. Формулы сохраняются как source и серверный bound AST.

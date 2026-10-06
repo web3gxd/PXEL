@@ -7568,3 +7568,46 @@ denial, malware policy, browser preview/selection/publication и остальн�
 После commit07961b4/rebase main (up to date): real child CLI5/5 повторно PASS,
 fmt, strict default-feature server Clippy и docs Prettier PASS. Исходники после
 проверок не менялись; добавлена только запись результатов.
+
+## 2026-10-07 — standalone WASI XLSX isolation candidate (ADR-131)
+
+feat/xlsx-wasi-worker: protocol5 вынесен в optional worker-protocol feature
+существующего spreadsheet-xlsx; native child и standalone WASI binary используют
+один implementation. Reader/IR/wire/storage semantics не менялись. serde_json
+1.0.151 уже был в lock; added dependency edge, новых package versions нет.
+Добавлен pinned wasm32-wasip1 target Rust1.98.1. Новый external Wasmtime49.0.2
+загружен в ignored .tools, archive SHA256 проверен по official immutable release
+digest (ADR-131). Global installation, .env/remote/серверы не менялись.
+
+WASI invocation запрещает directory/environment/network inheritance и HTTP,
+cache=n, guest memory256MiB, fuel500000000, wasm timeout5s. Only trusted built
+module, никогда uploaded Wasm/AOT. Host-process OS-wide memory cap этим не
+заявляется. Module построен из locked dependencies и существующего parser.
+RED сначала выявил неверный CLI flag --disable-cache: для49.0.2 правильный
+-C cache=n; затем RED отсутствующего module → GREEN после реализации. Две
+resource fixtures ожидали exit1, но проверенные actual traps возвращают3;
+ожидания исправлены без ослабления проверки trap cause.
+
+10/10 real Wasmtime checks PASS: two-sheet IR, directories/environment denial
+с positive controls, socket creation unavailable и sock_accept fd3=BADF,
+memory.grow отказ и positive larger-cap control, independent fuel/timeout traps,
+exact IR checksum parity seven committed XLSX fixtures, invalid framing и
+malformed source without echo. Full just xlsx-wasi-check PASS (10/10,2.77s),
+после socket-fd дополнения targeted10/10 PASS(2.71s). Native child CLI5/5,
+worker4/4, parser29/29 и strict server/all-feature XLSX Clippy PASS. Один unused
+test import найден компилятором и удалён; strict check после исправления PASS.
+fmt и docs/test Prettier PASS. Full workspace verification запускается отдельно;
+её окончательный результат пока не заявляется.
+
+Backend sandbox adapter, immutable module/runtime pin verification at startup,
+host resource policy, malware policy, browser preview/selection/publication,
+Linux/Compose/remote CI и остальные nine functional steps остаются открытыми.
+
+Combined verification candidate completed: полный just check PASS на own
+isolated PG fixture —744 Rust tests/17 ignored, оба strict Clippy profiles,
+fmt/native/wasm32/proto/WASM generation/Prettier/ESLint/TypeScript,
+334/334 Vitest и build. Disclosure/privacy hard-restart regressions2/2 PASS
+(2.32s). Wasmtime49.0.2/Rust1.98.1+wasip1 являются локально проверенным baseline
+только этого standalone guest-boundary среза, не deployment/public-upload gate.
+Vite >500kB chunk warning сохранён. Private workspace/regression logs:
+.local/csv-acceptance-WiBJqQ/{workspace,regression}-check.log.

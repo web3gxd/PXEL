@@ -1,5 +1,9 @@
 # Roadmap и gates
 
+2026-10-07: ADR-131 добавляет standalone WASI XLSX worker и shared protocol5.
+Guest filesystem/environment/memory/fuel/timeout checks прошли на Windows;
+backend integration, malware policy, browser XLSX и Linux gates ещё открыты.
+
 2026-10-07: ADR-130 переводит XLSX worker на bounded stdin package bytes.
 Локальные unit/real child CLI проверки пройдены;
 sandbox/malware/browser XLSX gates этим не закрываются.
