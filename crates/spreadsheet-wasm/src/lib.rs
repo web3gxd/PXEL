@@ -350,9 +350,53 @@ pub fn copy_formula_text_wasm(
         .map_err(|_| JsValue::from_str("InvalidFormulaCopy"))
 }
 
+pub fn diagnostic_syntax(source: &str, row: u32, column: u32) -> Result<String, AdapterError> {
+    let syntax =
+        spreadsheet_formula::diagnostics::syntax(source, (row, column)).map_err(|error| {
+            AdapterError::Parse {
+                start: error.span.start,
+                end: error.span.end,
+            }
+        })?;
+    let tokens: Vec<_> = syntax
+        .tokens
+        .iter()
+        .map(|token| {
+            let kind = match token.class {
+                spreadsheet_formula::diagnostics::TokenClass::Reference => "reference",
+                spreadsheet_formula::diagnostics::TokenClass::Number => "number",
+                spreadsheet_formula::diagnostics::TokenClass::Text => "text",
+                spreadsheet_formula::diagnostics::TokenClass::Boolean => "boolean",
+            };
+            json!({ "start": token.span.start, "end": token.span.end, "kind": kind })
+        })
+        .collect();
+    serde_json::to_string(&json!({ "schema_version": 1, "tokens": tokens }))
+        .map_err(|_| AdapterError::Serialization)
+}
+#[wasm_bindgen(js_name = diagnoseFormula)]
+pub fn diagnose_formula_wasm(source: &str, row: u32, column: u32) -> Result<String, JsValue> {
+    diagnostic_syntax(source, row, column)
+        .map_err(|_| JsValue::from_str("InvalidFormulaDiagnostics"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn diagnostic_syntax_is_versioned_and_preserves_unicode_byte_spans()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = "=IF(TRUE,\"Я😀\",A1+2)";
+        let syntax: Json = serde_json::from_str(&diagnostic_syntax(source, 0, 0)?)?;
+        assert_eq!(syntax["schema_version"], 1);
+        let tokens = syntax["tokens"].as_array().ok_or("missing syntax tokens")?;
+        assert_eq!(tokens.len(), 4);
+        let start = tokens[1]["start"].as_u64().ok_or("missing token start")? as usize;
+        let end = tokens[1]["end"].as_u64().ok_or("missing token end")? as usize;
+        assert_eq!(source.get(start..end), Some("\"Я😀\""));
+        assert!(diagnostic_syntax("=1+", 0, 0).is_err());
+        Ok(())
+    }
     #[test]
     fn fixture_calendar_profile_is_explicit_and_fail_closed()
     -> Result<(), Box<dyn std::error::Error>> {

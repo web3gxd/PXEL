@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { readFileSync, openSync, closeSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, openSync, closeSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import {
   bytes,
+  api,
   login,
   createDocument,
   connect,
@@ -28,8 +29,15 @@ const { FileDescriptorSetSchema } = require('@bufbuild/protobuf/wkt');
 const registry = createFileRegistry(
   fromBinary(FileDescriptorSetSchema, readFileSync('proto/wire-descriptor.bin')),
 );
+const cargoTarget = resolve(process.env.CARGO_TARGET_DIR ?? 'target');
+const serverBinary = resolve(
+  process.env.PXEL_RECOVERY_SERVER_BINARY ??
+    join(cargoTarget, 'debug', 'pxel-server' + (process.platform === 'win32' ? '.exe' : '')),
+);
 const clientSchema = registry.getMessage('pxel.wire.v1.ClientEnvelope');
-const snapshotSchema = registry.getMessage('pxel.storage.v1.SnapshotEnvelope');
+const s3Endpoint = process.env.PXEL_S3_TEST_ENDPOINT ?? process.env.PXEL_S3_ENDPOINT;
+const s3Bucket = process.env.PXEL_S3_TEST_BUCKET ?? process.env.PXEL_S3_BUCKET;
+const s3Region = process.env.PXEL_S3_TEST_REGION ?? process.env.PXEL_S3_REGION ?? 'us-east-1';
 
 function query(sql) {
   const database = new URL(process.env.DATABASE_URL);
@@ -53,6 +61,33 @@ function query(sql) {
   // Never include database URLs, driver stderr or connection credentials in reports.
   assert.equal(result.status, 0, 'Private snapshot metadata query failed');
   return result.stdout.trim();
+}
+function readS3Object(objectKey) {
+  assert.ok(s3Endpoint && s3Bucket, 'S3 snapshot test needs an endpoint and bucket');
+  const python =
+    process.env.PXEL_TEST_PYTHON ??
+    join(resolve('.'), '.local', 'moto-venv', 'Scripts', 'python.exe');
+  const code = [
+    'import base64,boto3,os',
+    "client=boto3.client('s3',endpoint_url=os.environ['PXEL_S3_TEST_ENDPOINT'],region_name=os.environ['PXEL_S3_TEST_REGION'])",
+    "body=client.get_object(Bucket=os.environ['PXEL_S3_TEST_BUCKET'],Key=os.environ['PXEL_TEST_S3_OBJECT'])['Body'].read()",
+    "print(base64.b64encode(body).decode('ascii'))",
+  ].join(';');
+  const result = spawnSync(python, ['-c', code], {
+    env: {
+      ...process.env,
+      PXEL_S3_TEST_ENDPOINT: s3Endpoint,
+      PXEL_S3_TEST_BUCKET: s3Bucket,
+      PXEL_S3_TEST_REGION: s3Region,
+      PXEL_TEST_S3_OBJECT: objectKey,
+    },
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 10_000,
+  });
+  assert.equal(result.status, 0, 'Private S3 snapshot read failed');
+  assert.match(result.stdout.trim(), /^[A-Za-z0-9+/=]+$/);
+  return Buffer.from(result.stdout.trim(), 'base64');
 }
 function allLeaves() {
   const set = (value) => ({ action: { case: 'set', value } });
@@ -94,12 +129,12 @@ const expectedStyle = {
   border_left: { line: 'double', color: [64, 96, 128] },
   horizontal: 'center',
   vertical: 'center',
-  wrap: true,
+  text_overflow: 'wrap',
   number_format: 'decimal2',
 };
 
 test(
-  'snapshot4 style range and journal tail survive hard kills with unobserved inverse ACK and late receipts',
+  'snapshot5 style range and journal tail survive hard kills with unobserved inverse ACK and late receipts',
   { timeout: 60000 },
   async () => {
     const base = 'http://127.0.0.1:18090';
@@ -116,24 +151,24 @@ test(
     async function start() {
       logOffset = existsSync(logPath) ? readFileSync(logPath).length : 0;
       const log = openSync(logPath, 'a');
-      child = spawn(
-        resolve(
-          process.env.PXEL_RECOVERY_SERVER_BINARY ??
-            'target/debug/pxel-server' + (process.platform === 'win32' ? '.exe' : ''),
-        ),
-        [],
-        {
-          env: {
-            ...process.env,
-            PXEL_DEV_AUTH: '1',
-            PXEL_BIND: '127.0.0.1:18090',
-            PXEL_BLOB_ROOT: blobRoot,
-            PXEL_SNAPSHOT_INTERVAL: startCount++ === 0 ? '3' : '100000',
-          },
-          stdio: ['ignore', log, log],
-          windowsHide: true,
+      child = spawn(serverBinary, [], {
+        env: {
+          ...process.env,
+          PXEL_DEV_AUTH: '1',
+          PXEL_BIND: '127.0.0.1:18090',
+          PXEL_BLOB_ROOT: blobRoot,
+          PXEL_SNAPSHOT_INTERVAL: startCount++ === 0 ? '3' : '100000',
+          ...(s3Endpoint && s3Bucket
+            ? {
+                PXEL_S3_ENDPOINT: s3Endpoint,
+                PXEL_S3_BUCKET: s3Bucket,
+                PXEL_S3_REGION: s3Region,
+              }
+            : {}),
         },
-      );
+        stdio: ['ignore', log, log],
+        windowsHide: true,
+      });
       closeSync(log);
       let failure;
       child.on('error', (error) => {
@@ -172,7 +207,25 @@ test(
             record.fields.snapshot_version === 4 &&
             record.fields.replayed_events === replayedEvents,
         ),
-        'Recovery must actually select snapshot4 and replay the expected journal tail',
+        'Recovery must actually select snapshot5 and replay the expected journal tail',
+      );
+    }
+    function recoveredImportedTail(replayedEvents) {
+      const records = readFileSync(logPath)
+        .subarray(logOffset)
+        .toString('utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      assert.ok(
+        records.some(
+          (record) =>
+            record.fields?.event === 'document_recovery' &&
+            record.fields.snapshot_version === 0 &&
+            record.fields.replayed_events === replayedEvents,
+        ),
+        'The imported workbook must recover from its durable event journal after restart',
       );
     }
     try {
@@ -228,23 +281,28 @@ test(
       } while (Date.now() < deadline);
       assert.ok(metadata, 'Scheduled snapshot did not activate');
       assert.equal(metadata.snapshot_version, '4');
-      assert.equal(metadata.snapshot_schema_version, 4);
-      assert.equal(metadata.hash, atSnapshot.state_hash);
+      assert.equal(metadata.snapshot_schema_version, 7);
+      assert.equal(metadata.hash.length, (32 + 56) * 2);
+      assert.equal(metadata.hash.slice(0, 16), Buffer.from('PXELENC\0').toString('hex'));
+      assert.notEqual(metadata.hash, atSnapshot.state_hash);
       assert.match(metadata.object_key, /^[0-9a-f-]{36}$/);
-      const file = readFileSync(join(blobRoot, metadata.object_key));
-      assert.equal(file.subarray(0, 8).toString('hex'), '5058454c424c4201');
-      const payload = file.subarray(48);
+      const storedObject =
+        s3Endpoint && s3Bucket
+          ? readS3Object(metadata.object_key)
+          : readFileSync(join(blobRoot, metadata.object_key));
+      const payload = s3Endpoint && s3Bucket ? storedObject : storedObject.subarray(48);
       assert.equal(BigInt(payload.length), BigInt(metadata.byte_length));
-      assert.equal(file.readBigUInt64LE(8), BigInt(payload.length));
       const checksum = createHash('sha256').update(payload).digest('hex');
       assert.equal(checksum, metadata.checksum);
-      assert.equal(file.subarray(16, 48).toString('hex'), checksum);
-      const frozen = fromBinary(snapshotSchema, payload);
-      assert.equal(frozen.snapshotSchemaVersion, 4);
-      assert.equal(frozen.documentVersion, 4n);
-      assert.equal(frozen.sheets[0].styles.length, 3);
-      assert.equal(frozen.sheets[0].cells.length, 2);
-      for (const cell of frozen.sheets[0].styles) assert.equal(cell.style.changes.length, 16);
+      assert.equal(payload.subarray(0, 8).toString(), 'PXELENC\0');
+      assert.equal(payload.includes(Buffer.from('Courier New')), false);
+      if (s3Endpoint && s3Bucket) {
+        assert.equal(storedObject.length, payload.length);
+      } else {
+        assert.equal(storedObject.subarray(0, 8).toString('hex'), '5058454c424c4201');
+        assert.equal(storedObject.readBigUInt64LE(8), BigInt(payload.length));
+        assert.equal(storedObject.subarray(16, 48).toString('hex'), checksum);
+      }
       await edit(setCommand(client, book, 9, { row: 1, sequence: 4 }), 5);
       const styledWithTail = book;
       const lostUndo = undoCellCommand(client, book, style.operationId, { sequence: 5 });
@@ -325,6 +383,51 @@ test(
         assert.deepEqual(await getDocument(base, cookie, book.document_id), redone);
       }
       assert.equal(JSON.parse(query(activeSql)).snapshot_version, '4');
+
+      const identity = await (await api(base, cookie, '/api/dev/identity')).json();
+      const importFile = (path) =>
+        spawnSync(serverBinary, ['xlsx-import', path, identity.workspace_id, identity.actor_id], {
+          encoding: 'utf8',
+          timeout: 30_000,
+          env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL, PXEL_DEV_AUTH: '1' },
+          windowsHide: true,
+        });
+      const initialImport = importFile(resolve('fixtures/xlsx/styled_profile.xlsx'));
+      assert.equal(initialImport.status, 0, initialImport.stderr);
+      const initialImportId = /Imported document ([0-9a-f-]+)/i.exec(initialImport.stdout)?.[1];
+      assert.ok(initialImportId);
+      const beforeImportRestart = await getDocument(base, cookie, initialImportId);
+      assert.equal(beforeImportRestart.sheets[0].styles.length, 3);
+      for (const cell of beforeImportRestart.sheets[0].styles)
+        assert.deepEqual(cell.style, expectedStyle);
+      assert.equal(beforeImportRestart.sheets[0].cells.length, 2);
+
+      client.socket.terminate();
+      client = null;
+      await kill();
+      await start();
+      const afterImportRestart = await getDocument(base, cookie, initialImportId);
+      assert.deepEqual(afterImportRestart, beforeImportRestart);
+      recoveredImportedTail(Number(afterImportRestart.version));
+
+      const exported = await api(base, cookie, `/api/documents/${initialImportId}/export.xlsx`);
+      assert.equal(exported.status, 200);
+      const roundtripPath = resolve(`.local/styles-recovery-${uuid7()}.xlsx`);
+      try {
+        writeFileSync(roundtripPath, Buffer.from(await exported.arrayBuffer()));
+        const imported = importFile(roundtripPath);
+        assert.equal(imported.status, 0, imported.stderr);
+        const importedId = /Imported document ([0-9a-f-]+)/i.exec(imported.stdout)?.[1];
+        assert.ok(importedId);
+        const importedBook = await getDocument(base, cookie, importedId);
+        assert.equal(importedBook.sheets.length, 1);
+        assert.equal(importedBook.sheets[0].styles.length, 3);
+        for (const cell of importedBook.sheets[0].styles)
+          assert.deepEqual(cell.style, expectedStyle);
+        assert.equal(importedBook.sheets[0].cells.length, 2);
+      } finally {
+        rmSync(roundtripPath, { force: true });
+      }
     } finally {
       client?.socket.terminate();
       try {

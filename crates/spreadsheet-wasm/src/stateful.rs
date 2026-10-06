@@ -250,12 +250,34 @@ impl ContextInput {
 #[serde(deny_unknown_fields)]
 struct SheetInput {
     #[serde(default, deserialize_with = "present")]
+    frozen_rows: Option<u32>,
+    #[serde(default, deserialize_with = "present")]
+    row_heights: Option<Vec<SizeInput>>,
+    #[serde(default, deserialize_with = "present")]
+    column_widths: Option<Vec<SizeInput>>,
+    #[serde(default, deserialize_with = "present")]
+    merges: Option<Vec<MergeInput>>,
+    #[serde(default, deserialize_with = "present")]
     styles: Option<Vec<StyledCellInput>>,
     id: String,
     name: String,
     rows: Vec<String>,
     columns: Vec<String>,
     cells: Vec<CellInput>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SizeInput {
+    axis_id: String,
+    size_css_px: u32,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MergeInput {
+    first_row_id: String,
+    last_row_id: String,
+    first_column_id: String,
+    last_column_id: String,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -831,7 +853,7 @@ impl PreviewWorkbook {
             return Err(PreviewError::LimitExceeded);
         }
         let init: Initialize = serde_json::from_str(json).map_err(|_| PreviewError::InvalidJson)?;
-        if !matches!(init.schema_version, 1..=4)
+        if !matches!(init.schema_version, 1..=5)
             || init.sheets.is_empty()
             || init.sheets.len() > 64
             || (init.schema_version == 1 && init.sheets.len() != 1)
@@ -840,7 +862,8 @@ impl PreviewWorkbook {
         {
             return Err(PreviewError::UnsupportedProfile);
         }
-        let exact = init.schema_version == 4;
+        let exact = init.schema_version >= 4;
+        let layout = init.schema_version == 5;
         let metadata_present = init.last_axis_change_version.is_some()
             && init.retired_row_ids.is_some()
             && init.retired_column_ids.is_some()
@@ -854,6 +877,12 @@ impl PreviewWorkbook {
         if (exact && !metadata_present)
             || (!exact && metadata_any)
             || init.sheets.iter().any(|s| s.styles.is_some() != exact)
+            || init.sheets.iter().any(|s| {
+                (s.frozen_rows.is_some() != layout)
+                    || (s.row_heights.is_some() != layout)
+                    || (s.column_widths.is_some() != layout)
+                    || (s.merges.is_some() != layout)
+            })
         {
             return Err(PreviewError::UnsupportedProfile);
         }
@@ -871,7 +900,43 @@ impl PreviewWorkbook {
         let mut sheet_cells = Vec::with_capacity(init.sheets.len());
         let mut total_cells = 0usize;
         let mut all_styles = Vec::new();
+        let mut layouts = Vec::new();
         for sheet in init.sheets {
+            if layout {
+                let sheet_id = SheetId::from_bytes(identity(&sheet.id)?)?;
+                let rows = sheet
+                    .row_heights
+                    .ok_or(PreviewError::InvalidProjection)?
+                    .into_iter()
+                    .map(|s| Ok((RowId::from_bytes(identity(&s.axis_id)?)?, s.size_css_px)))
+                    .collect::<Result<Vec<_>, PreviewError>>()?;
+                let columns = sheet
+                    .column_widths
+                    .ok_or(PreviewError::InvalidProjection)?
+                    .into_iter()
+                    .map(|s| Ok((ColumnId::from_bytes(identity(&s.axis_id)?)?, s.size_css_px)))
+                    .collect::<Result<Vec<_>, PreviewError>>()?;
+                let merges = sheet
+                    .merges
+                    .ok_or(PreviewError::InvalidProjection)?
+                    .into_iter()
+                    .map(|m| {
+                        Ok(spreadsheet_domain::MergeRange::new(
+                            RowId::from_bytes(identity(&m.first_row_id)?)?,
+                            RowId::from_bytes(identity(&m.last_row_id)?)?,
+                            ColumnId::from_bytes(identity(&m.first_column_id)?)?,
+                            ColumnId::from_bytes(identity(&m.last_column_id)?)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, PreviewError>>()?;
+                layouts.push((
+                    sheet_id,
+                    sheet.frozen_rows.ok_or(PreviewError::InvalidProjection)?,
+                    rows,
+                    columns,
+                    merges,
+                ));
+            }
             if let Some(styles) = sheet.styles {
                 if all_styles.len() + styles.len() > 100_000 {
                     return Err(PreviewError::LimitExceeded);
@@ -930,6 +995,17 @@ impl PreviewWorkbook {
         };
         if exact {
             let mut image = workbook.snapshot_image()?;
+            for (id, frozen_rows, rows, columns, merges) in layouts {
+                let sheet = image
+                    .sheets
+                    .iter_mut()
+                    .find(|s| s.sheet.id == id)
+                    .ok_or(PreviewError::InvalidProjection)?;
+                sheet.frozen_rows = frozen_rows;
+                sheet.row_heights = rows;
+                sheet.column_widths = columns;
+                sheet.merges = merges;
+            }
             image.last_axis_change_version = DocumentVersion::new(revision(
                 init.last_axis_change_version
                     .as_deref()

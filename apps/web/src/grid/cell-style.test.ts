@@ -48,7 +48,7 @@ describe('visible cell formatting', () => {
     const ctx = context();
     drawCell(
       ctx as unknown as CanvasRenderingContext2D,
-      { ...DEFAULT_STYLE, wrap: true },
+      { ...DEFAULT_STYLE, text_overflow: 'wrap' },
       'a'.repeat(32768),
       0,
       0,
@@ -74,5 +74,33 @@ describe('visible cell formatting', () => {
     expect(ctx.moveTo).toHaveBeenCalledWith(2, 0);
     expect(ctx.lineTo).toHaveBeenCalledWith(2, 28);
     expect(ctx.stroke).toHaveBeenCalledTimes(3);
+  });
+
+  it('extends the clip region only for left aligned text in overflow mode', () => {
+    const ctx = context();
+    drawCell(
+      ctx as unknown as CanvasRenderingContext2D,
+      { ...DEFAULT_STYLE, text_overflow: 'overflow' },
+      'long text',
+      0,
+      0,
+      112,
+      28,
+      false,
+      336,
+    );
+    expect(ctx.rect).toHaveBeenLastCalledWith(1, 1, 334, 26);
+    drawCell(
+      ctx as unknown as CanvasRenderingContext2D,
+      { ...DEFAULT_STYLE, text_overflow: 'clip' },
+      'long text',
+      0,
+      0,
+      112,
+      28,
+      false,
+      336,
+    );
+    expect(ctx.rect).toHaveBeenLastCalledWith(1, 1, 110, 26);
   });
 });

@@ -1,5 +1,752 @@
 # PXEL — RUNBOOK
 
+## 2026-10-06 — вложенное меню «Ячейки» и оформление окон (ADR-117)
+
+Операции строк/столбцов перенесены из «Правка», «Вставка» и «Формат» в
+«Ячейки» → «Добавить» / «Удалить» / «Форматировать». Названия локализованы,
+используются локальные Phosphor icons. Вложенные разделы остаются внутри
+прокручиваемой панели на всех ширинах. Right/Left открывают/закрывают уровень,
+Escape сначала закрывает самый глубокий уровень, затем меню; фокус возвращается
+родительской кнопке. Сохранены существующие guards и операции целой активной
+строки/столбца, создания листа и размеров. Команда ширины сразу фокусирует
+поле ширины, команда высоты — поле высоты.
+
+Полный запрошенный состав меню присутствует, но сдвиг отдельных ячеек,
+автоподбор/ширина по умолчанию, скрытие осей/листов, переименование,
+перемещение/копирование листа и цвет вкладки явно отключены с подписью
+«Недоступно» и пояснением. Сервер их сейчас не поддерживает. Это открытые
+функции, а не реализованные durable операции; wire/DTO/codecs не менялись.
+
+Общий Modal получил заголовок с соответствующей типу окна иконкой, разделитель,
+body-контейнер, вертикальные поля, оформленные ошибки и разделённые footer
+actions. Стиль оформления ячеек и окна клавиш согласован с общими заголовками
+и центрированной SVG-кнопкой закрытия. Брендированный Markdown preview и его
+защита импорта сохранены. Clipboard/credentials boundary осталась на dialog.
+
+Проверка на реальном локальном PostgreSQL: 28/28 Chromium (cells-menu,
+editor-chrome и полный privacy suite) + 4/4 обхода панелей, DPR1/DPR2.
+После финальной правки иконок/подписи недоступности — 10/10 menu/modal scenarios;
+после уточнения фокуса ширины — 6/6 cells scenarios. Проверены ширины
+390/681/1440, вложенная клавиатура/Escape, сохранение добавления строки,
+недоступные пункты, размеры, приватные гостевые каналы, безопасность копирования,
+маска и исключения. Обход окон включает вид, сортировку, аудит, константы, ПД,
+профайлер, историю, PXEL, размеры, sharing, клавиши и оформление; проверены
+Tab containment, Escape, ошибки JS и отсутствие page overflow. Снимки меню
+390 и окна размеров 681 просмотрены. 269/269 units, финальные lint и
+typecheck/build прошли; предупреждение chunk >500 kB осталось.
+Логи/снимки — ignored .local/cells-* и .local/modal-design-*.
+Полный combined smoke здесь не повторялся. NVDA/external deployment gates
+и неподдерживаемые функции меню остаются открытыми. Dev-сервисы оставлены запущенными.
+
+## 2026-10-06 — отступы и элементы окна персональных данных (ADR-117)
+
+Общий Modal использует центрированную SVG-иконку закрытия. Чекбоксы получили
+общий зелёный вид размером 20×20 px, состояния checked/indeterminate/disabled,
+клавиатурный фокус и возврат к native appearance при forced colours. Все
+sharing-actions разделены gap 10 px с переносом кнопок. Адреса совпадений
+выровнены слева рядом с чекбоксом; на 390 px исключение переносится ниже адреса.
+Массовые исключения получили семантический заголовок 16 px / weight 600.
+
+Первый браузерный проход обнаружил сброс выбранных совпадений при повторном
+автоматическом анализе. Теперь сохраняются выбранные fingerprints, присутствующие
+в обновлённом отчёте; сохранение политики по-прежнему явно очищает выбор.
+Также исправлен тест прокрутки: координаты маски сравниваются относительно
+области таблицы, поскольку временная строка состояния анализа меняет её начало
+на 15 px. Это не смещение текста внутри ячейки.
+
+Финальные адресные проверки на реальном локальном PostgreSQL: 14/14 Chromium
+сценариев DPR1/DPR2, ширины 390/681/1440, light/dark system preference при
+светлом интерфейсе. Проверены центры SVG/кнопки, размер и Space чекбокса,
+сохранение выбора после повторного анализа, все три группы отступов, левое
+выравнивание, heading, Escape/возврат фокуса/reload, массовые и диапазонные
+исключения, частично обрезанная маска и отсутствие изменения версии/оригиналов.
+Снимки 390/681 px просмотрены вручную. Модульные тесты 269/269, lint,
+typecheck/build и Prettier прошли. Предупреждение Vite о chunk >500 kB остаётся.
+Логи и снимки находятся в ignored .local/privacy-controls-*.
+Полный smoke для этой UI-правки не повторялся; результаты предыдущего combined
+прогона ниже. Реальный NVDA и внешние deployment gates остаются открытыми.
+Локальные Vite 5173 и backend 8080 оставлены работающими.
+
+## 2026-10-06 — компактные меню и дизайн элементов редактора (ADR-117)
+
+Прежний открытый список команд заменён семью меню: «Файл», «Правка», «Вид»,
+«Вставка», «Формат», «Данные», «Инструменты». Все команды используют прежние
+guards/операции. В тулбаре объединение/разъединение заменены иконками; обе команды
+есть и в «Формат». Полоса прокрутки инструментов скрыта, весь набор остаётся
+доступен на узком экране. Общие светлые зелёные tokens задают кнопкам/окнам
+hover, pressed, focus, радиусы и тени. Окно размеров переведено на общий Modal.
+Индикатор подключения — квадрат с раскрытием состояния, версии, очереди,
+актуальности расчёта и фактически измеренного отклика последнего Hello/Welcome.
+Это измерение при подключении, не непрерывный ping. Wire/DTO/codecs не менялись.
+
+Устранены обнаруженные при проверке регрессии фокуса: состояние навигации и
+защиты незавершённого ввода вынесено из условного popup; guard включается до
+перемещения фокуса. Меню сохраняют ввод при открытии мышью. Escape закрывает
+меню и возвращает opener; закрытие модального окна возвращает кнопку группы.
+E2E helpers обновлены под меню, а не постоянно видимые кнопки. После проверки
+доступности команды fixtures закрывают popup перед кликом по ячейке.
+
+Модульные frontend tests: 269/269. Финальные lint, typecheck и production build
+прошли; сохранилось предупреждение Vite о chunk >500 kB. Шесть новых Chromium
+сценариев 390/681/1440 DPR1/DPR2 проверили меню/стрелки/Escape, диалоги/фокус,
+реальную горизонтальную прокрутку колесом без scrollbar, объединение через
+иконку и разъединение через меню, подключение/измеренную задержку. PNG находятся
+под ignored `.local/editor-*`. Проверка трёх шаблонов в общем прогоне заняла
+34.7 s, поэтому acceptance запущен с явным scenario timeout 60 s; проверки
+значений/формул/оформления не ослаблялись. Финальный acceptance прошёл 46/46
+Chromium cases, exit 0 (11.8 min), включая privacy, modal disclosure, библиотеку
+и shell. Дополнительно размеры осей через общий Modal сохранились в реальном
+PostgreSQL — 2/2 DPR1/DPR2 (20.6 s). Логи: `.local/editor-chrome-browser-acceptance.log`,
+`.local/editor-axis-browser.log`, `.local/editor-lint-acceptance.log`,
+`.local/editor-typecheck-acceptance.log`, `.local/editor-chrome-build-final4.log`.
+Предыдущие прогоны выявили ошибки фокуса и старые предположения fixtures о
+постоянно видимых командах; они исправлены, финальный прогон без падений.
+Локальный dev server оставлен запущенным. Полный smoke/Rust/SQLx/audit/parity
+для клиентской UI-правки не повторялись; ручной NVDA и deployment gates открыты.
+
+## 2026-10-06 — автоматическая локальная маска ПД и прокрутка
+
+Для владельца включённое распознавание автоматически обновляет анализ и локальную
+маску на подтверждённой версии. Прямоугольная зелёная заливка раскрывает текущее
+значение при наведении/фокусе; Escape, уход указателя и потеря фокуса скрывают его.
+Рамка распознавания удалена. Частично видимая ячейка сохраняет заливку: внешний
+контейнер обрезается по viewport/заголовкам/закреплениям, внутренний текст и эффект
+привязаны к полной геометрии ячейки и уходят за край вместе с ней.
+Паспортный контекст ищется во всей строке или столбце, включая подписи ниже.
+Добавлены массовые исключения по отмеченным совпадениям, выделению и A1-диапазону;
+предел 1000 проверяется до сохранения всей партии. Оригиналы книги сохраняются,
+гостевая выдача продолжает использовать отдельную серверную проекцию.
+
+Проверки: 3 domain privacy, 2 server privacy, 269 frontend unit tests и server
+Clippy прошли. 16 Chromium privacy/disclosure сценариев DPR1/DPR2 прошли до
+последней правки геометрии; после неё отдельный сценарий с частичным отображением,
+точным смещением текста при скролле, раскрытием и массовыми исключениями прошёл
+2/2 DPR1/DPR2 (29.9 s). Финальные frontend lint и production build прошли;
+сохранилось предупреждение Vite о chunk >500 kB. Логи под ignored `.local`:
+`privacy-overlay-scroll-browser.log`, `privacy-overlay-lint-final.log`,
+`privacy-overlay-build-final.log`. Полный smoke повторно для этой UX-правки
+не запускался. Реальный NVDA и внешние deployment gates остаются открытыми.
+Локальный dev server оставлен запущенным. Автообновление пользовательской вкладки
+встроенный браузер отклонил; обновление страницы выполняется пользователем.
+
+## 2026-10-06 — только светлая тема
+
+По запросу пользователя интерфейс временно использует только светлую тему:
+`color-scheme: light`; удалены dark media overrides tokens, profiler graph
+и formula syntax. Live Chromium проверил главную с системными light и dark
+preferences: в обоих случаях computed scheme/light palette совпадают.
+Prettier для обоих CSS прошёл после форматирования. Локальный dev server
+оставлен запущенным; Vite применяет CSS через HMR.
+
+## 2026-10-06 — финальные общие проверки дополнений
+
+Финальный exact `just smoke` прошёл, exit 0
+(`.local/additions-final-smoke7.log`): 77/77 HTTP/integration, 9/9 hard-restart,
+318/318 Chromium DPR1/DPR2 (27.7 min browser suite). Проверены все девять
+дополнений вместе с прежними formula/collaboration/Undo contracts. Свежая
+изолированная fixture — `pxel_additions_final_20261006`; private connection
+и keyring остаются под ignored `.local`, реквизиты здесь не приводятся.
+Smoke остановил временный dev server. Финальный размер рабочего дерева,
+включая `.local`, `.tools`, зависимости и `.git`, — 22.39 ГиБ. Standard cargo
+clean удалил примерно 119 ГиБ старых generated build artifacts; исходные tests,
+входные незакоммиченные изменения, keys и PostgreSQL data сохранены.
+
+Structured runtime log содержит 5712 записей только с техническими полями:
+events/reasons/error categories, session IDs, versions/epochs, counters,
+durations и listen address. Отдельный `just share-log-redaction` прошёл 1/1
+(`additions-final-redaction2.log`). Проверки логов не заменяют production audit.
+Automated keyboard/focus/ARIA/layout покрытие 390/1440, light/dark и DPR1/2
+прошло; реальный NVDA walkthrough не выполнен (NVDA отсутствует). Linux/Compose/
+remote CI, production authentication, целевое storage/deployment и browser XLSX
+upload остаются отдельными открытыми gates.
+Повторный completion audit подтвердил отсутствие NVDA в PATH и стандартных
+Windows install paths. Для обязательной ручной проверки подготовлен
+[сценарий NVDA](docs/nvda-acceptance.md); фактического отчёта пока нет,
+поэтому полная приёмка с этим пунктом не объявляется завершённой.
+
+После исправления lifetime гостевого gate повторный exact `just check` прошёл
+(`.local/additions-final-check5.log`): 698 Rust tests passed, 17 explicitly
+ignored, оба Clippy режима, workspace build, WASM/protocol checks,
+format/lint/typecheck, 266 frontend tests и production build. Ранее пройденные
+SQLx/audit/parity остаются актуальны: исправление не меняет queries, dependencies или ядро
+формул. Финальный exact smoke выше выполнен на той же изолированной PostgreSQL
+fixture с RUST_LOG=info (`.local/additions-final-smoke7.log`).
+
+Шестой полный smoke: 77/77 HTTP/integration, 9/9 hard-restart и 316/318
+Chromium cases. Два отказа при повторном входе обезличенного гостя выявили
+ошибку lifetime WebSocket delivery gate: watch receiver не удерживает sender,
+а каталог gates хранит Weak. Сокет теперь удерживает Arc до закрытия;
+повторные и запоздалые epochs не создают ложного уведомления. Rust regression
+2/2 прошёл (`additions-final-guest-gate-rust1.log`). Browser regression 2/2
+при DPR1/2 проверяет новый вход после закрытия owner editor, безопасный `.pxel`
+и последующий отзыв изменением политики при отсутствии owner socket
+(`additions-final-guest-gate-browser2.log`). Полный check/smoke после этого
+исправления фиксируются ниже по фактическому завершению.
+
+`just check` прошёл (`.local/additions-final-check4.log`): оба Clippy режима,
+workspace tests/build (697 passed, 17 explicitly ignored), WASM,
+protocol/format/lint/typecheck, 265 frontend tests
+и production build. `just sqlx-check`, `just audit`, `just formula-parity`
+прошли; логи `additions-final-sqlx1.log`, `additions-final-audit1.log`,
+`additions-final-parity1.log`. Audit содержит разрешённое предупреждение о
+yanked yoke-derive 0.8.3; Vite предупреждает о размере основного JS chunk.
+
+Промежуточный check обнаружил нестабильный порядок sparse cells при `.pxel`
+round trip с новыми ID. Экспорт упорядочивает cells/styles/axis sizes/merges по
+координатам; адресные adapter tests 3/3 и повторный полный check прошли.
+Copy/Cut текста generic dialogs теперь используют durable guard; unmapped
+formula-derived text не выдаётся при обязательном обезличивании. Credentials
+имеют явную классификацию, history/title сохраняют свои guards. Два новых unit
+cases проверяют отказ без изменения clipboard/input. Browser regression и
+полный smoke фиксируются после завершения отдельно.
+
+Первый smoke прошёл 77 HTTP/integration и 9 hard-restart cases; browser run
+остановлен после обнаружения ошибки повторного создания книги: URL указывал на
+новую книгу, а refresh выбирал ID старой projection. После durable create ACK
+используется полная навигация с отдельным состоянием книги, старая projection
+снимается. При loading save-status не сообщает «Сохранено». Addressed browser
+regressions — 12/12 (axis Undo/Redo и modal Copy/Cut, DPR1/2), лог
+`additions-final-browser-regression1.log`. После UI исправлений format/lint/
+typecheck/265 units/build повторно прошли (`additions-final-web-after-fix.log`).
+Visual inspection обнаружил сжатое поле поиска при 390px; tabs теперь занимают
+отдельную строку. Четыре screenshots light/dark 390/1440 сохранены как
+`.local/additions-home-*.png`; все четыре варианта просмотрены.
+Share log redaction 1/1 прошёл (`additions-final-redaction2.log`); первая попытка
+с фильтром логирования не захватила startup event, повтор выполнен с RUST_LOG=info.
+
+Повторный smoke выявил overlapping header actions на 390px: sharing button
+перекрывала create action. Header/title теперь переносятся, mobile sharing actions
+расположены отдельной строкой. При создании книги authoring временно блокируется;
+это отдельный creating flag, не loading, чтобы сохранить offline intents/reconnect.
+Новый unit проверяет запрет старых edits, восстановление после failed create,
+идемпотентную identity повторной попытки и отдельную навигацию после ACK.
+Тест первого варианта выявил нарушение reconnect; broad loading guard снят.
+266 units/typecheck прошли (`additions-final-mobile-units3.log`,
+`additions-final-mobile-typecheck3.log`); format/lint/build также прошли
+(`additions-final-web-latest.log`).
+Addressed browser matrix дала 33 passed/1 fixture failure: trace подтвердил HTTP
+429 в диагностическом fixture после серии 100 formulas. Fixture теперь ограниченно
+повторяет только 429 и явно проверяет остальные HTTP ошибки. Diagnostics browser
+повторно 10/10 passed (`additions-final-diagnostics-browser2.log`); library и modal
+cases 24/24 прошли в первом matrix (`additions-final-mobile-browser1.log`).
+
+Третий smoke: API 77/77, restart 9/9, DPR1 157/159. Остановлен после полного DPR1
+для исправления двух старых fixture contracts: WASM инициализируется отдельно на
+каждой из двух открытых editor pages; Tab проходит encryption/new panel actions
+перед hotkeys/import и достигает Canvas через остальные controls. Новые assertions
+сохраняют точную проверку загрузок и реальную клавиатурную достижимость. Addressed
+cases 4/4 DPR1/2 прошли (`additions-final-fixtures-browser1.log`), lint/typecheck
+после fixture edits также прошли. Следующий полный smoke выполняется отдельно.
+
+Дополнительное удаление неиспользуемой копии `.local/runtime/pxel-server.exe`
+(360.6 МиБ) отклонено automatic approval review: `blocked by policy`, более
+подробная причина инструментом не предоставлена. Копия сохранена; это не отменяет
+уже успешный standard cargo clean примерно 119 ГиБ. Обход запрета не выполнялся.
+
+Четвёртый smoke: API 77/77, restart 9/9; DPR1 158/159. Один fixture начал DOM
+paste на старой blank page до асинхронного create ACK/navigation, что разрушило
+execution context. Добавлен общий `e2e/create-book.ts`: создание ждёт новый URL,
+load, online connection и confirmed save-status. Fresh-book calls всех suites
+используют этот контракт; production semantics не менялись. Бounded fixtures
+не полагаются на старую A1 и не скрывают ошибки retries. Views/shell/sharing
+24/24 и WASM preview 2/2 прошли (`additions-final-create-helper-browser1.log`),
+format/lint/typecheck прошли. Полный smoke с этим fixture contract выполняется
+отдельно (`additions-final-smoke5.log`).
+
+Последняя security review распространила unmapped guard с dialogs на generic
+DOM/editor copy и formula-bar Cut: scalar text не доказывает отсутствие зависимости
+от sensitive cell. Native status selection и formula source не выдаются при
+mandatory anonymization, сервер отклоняет Cut, исходный ввод остаётся. Safe range
+copy продолжает выдавать dependency mask. Expanded browser cases 4/4 прошли
+(`additions-final-native-clipboard-browser2.log`); вариант с blur/focus на body
+также 2/2 (`additions-final-body-clipboard-browser1.log`). Первая проверка ожидала
+client-side отказ Cut, но сервер уже возвращал более строгий 403; assertion
+уточнён. После source change format/lint/typecheck/266 units/build прошли
+(`additions-final-native-clipboard-web.log`). Пятый smoke до review прошёл
+API/restart и первые browser cases, остановлен для применения guard.
+
+После cleanup размер каталогов проекта около 22 ГиБ: .local 16.43, .tools 5.59,
+node_modules 0.29 ГиБ. Новая компактная сборка target-merge — 4.27 ГиБ на момент
+измерения; активные PostgreSQL данные и исходные тесты сохранены.
+
+## 2026-10-06 — домашняя библиотека и очистка локальных артефактов (ADR-116)
+
+Прочитаны RUNBOOK/roadmap/architecture и ADR-096/102/108/115. Root URL теперь
+открывает библиотеку текущего workspace; document query и guest share routes
+сохранены. Catalog/metadata/preference/layout DTO 1 имеют отдельные revisions.
+PostgreSQL проверяет текущие ACL и удерживает delivery lease страницы; inaccessible
+названия не расшифровываются. Названия и личные favorite/recent preferences
+зашифрованы DEK книги, layout — ограниченный технический enum с user CAS.
+Metadata/prefs не меняют workbook head/hash/context/Undo. Template и PXEL import
+атомарно создают encrypted metadata вместе с новой книгой и настройками.
+PXEL export фиксирует title revision и проверяет её перед выдачей.
+
+UI: поиск, recent/favorite/shared, cards/list, создание, PXEL preview/import и
+существующий Markdown parser/preview. Budget/Tasks/Sales имеют реальные формулы,
+styles, header merge и frozen rows. Retry сохраняет creation identity. Догрузка
+каталога сохраняет более новые локально подтверждённые preference revisions.
+Копирование названий использует durable disclosure guard; multi-book selection
+и Cut каталога не выдают данные. Navigation guard удерживает черновик при открытии
+диалога и возврате фокуса; save ждёт ACK, explicit discard не отправляет ввод.
+Нативные dialogs поддерживают Escape/focus trap/return и initial focus после
+showModal, включая StrictMode повторное монтирование.
+
+Прошли: template native 1 (все три шаблона), PostgreSQL 1 (encrypted metadata,
+личные prefs, concurrent CAS, current ACL/revoke, страницы 100+2 без duplicates),
+hard restart 1 (title/favorite/recent/layout/template и retry), library units 4,
+typecheck. Core browser cases — 12/12, затем keyboard/layout/focus matrix — 8/8
+при DPR1/2, 390/1440 light/dark. Логи: `.local/additions-library-server3.log`,
+`additions-library-pg3.log`, `additions-library-recovery1.log`,
+`additions-library-vitest1.log`, `additions-library-browser4.log` (12 core passed;
+matrix initial-focus failures), `additions-library-browser5.log` (8 matrix passed),
+`additions-library-typecheck11.log`. Финальные общие gates выполняются отдельно.
+
+Первый template fixture выявил требование persisted codec: guarded content/style
+writes должны быть sorted по stable address, а не по видимым координатам. Import
+adapter исправлен; duplicate total style у Sales объединён. Browser fixtures
+исправлены под реальные accessible names, обязательный Origin dev identity и
+strict policy body. Реальные UI ошибки: blur/return focus сохраняли или сбрасывали
+draft; parent autofocus терялся при StrictMode повторном showModal. Исправлены
+общая обработка draft и initialFocus ref непосредственно в Modal.
+
+По запросу пользователя стандартный cargo clean удалил около 119 ГиБ generated
+outputs из root target и старых .local/target-* (включая 77.4 ГиБ target-merge).
+Исходные тесты, private keys, инструменты и действующие PostgreSQL стенды сохранены.
+PowerShell recursive delete отклонён automatic command policy; Cargo штатно
+очистил build outputs. Нехватка диска прервала build1; build2 прошёл после появления
+свободного места. Текущая verification setup использует CARGO_INCREMENTAL=0 и
+debug=0 для dev/test: дальнейшие проверки не создают прежний объём символов/кеша.
+Для финального smoke создана новая isolated DB, credential URL только под .local.
+Linux/Compose/remote CI, production auth/storage/deploy, XLSX upload и NVDA открыты.
+
+## 2026-10-06 — самостоятельный зашифрованный формат .pxel (ADR-115)
+
+Прочитаны RUNBOOK/roadmap/architecture, ADR-096/102/108/113/114. File DTO/header
+v1 независим от wire/persisted codecs. Позиции заменяют старые ID, формулы
+перепривязываются на новой книге. Переносятся current content/full typed style,
+merges, axis sizes, frozen rows, личные filters/hardcode dismissals и recognition
+settings/exceptions пользователя. История, комментарии, users/ACL/links/keys и
+calculation seed исключены. Новые права имеют safe defaults. Preview полностью
+валидирует кандидат; новая книга и encrypted personal/privacy settings публикуются
+одной synchronous durable transaction. Digest файла входит в retry-stable ID.
+
+Пароль обязателен, 12–128 Unicode scalars без trim/normalization. Argon2id v19
+KDF API pinned 0.6.0, 65536 KiB / 3 / 1, XChaCha20-Poly1305 pinned 0.11.0;
+fresh salt/nonce, authenticated 56-byte header, plaintext cap 32 MiB. Все
+пароли — только POST body, zeroizing включая early refusal. Admission сохраняет
+permits при cancellation. Только file import routes допускают 48 МиБ base64 JSON.
+Import quotas: 100k sparse addresses, 1M axes, 96 МиБ encoded journal, 4 МиБ/event.
+Book/link PXEL policy intersection, durable audit и final stamp/ACL lease защищают
+выдачу. Capabilities2 additive can_export_pxel; явная прежняя XLSX-only policy
+не расширяется. Anonymous file содержит safe scalars, masked strings и safe
+settings; private predicates/dismissals исключены, preview сообщает omitted filters.
+
+Прошли: crypto 1, adapter 3 (round trip/layout/style/merge/filter/rebinding,
+invalid shape/duplicate/version/style и marker-free safe file), Chromium 12/12
+плюс 2/2 anonymized guest: реальные скачивание/preview/new-book, неверный пароль,
+повреждение, unknown version, atomic refusal, retry, format denial/audit,
+book/link intersection, только safe values; 390/1440 light/dark keyboard и DPR1/2.
+Hard restart 1/1 сохранил импорт, настройки, formula binding и retry receipt.
+Vitest 259/259; typecheck/lint/Clippy прошли. Логи: `.local/additions-pxel-crypto3.log`,
+`additions-pxel-server2.log`, `additions-pxel-browser6.log`,
+`additions-pxel-browser9.log`, `additions-pxel-recovery3.log`,
+`additions-pxel-vitest2.log`, `additions-pxel-typecheck5.log`,
+`additions-pxel-lint2.log`, `additions-pxel-clippy3.log`.
+
+Fixture corrections: API error field code; absent document returns 404; helper
+api принимает method/body отдельными аргументами; formula text находится в
+value.value.current_text. Playwright response.body для browser attachment оказался
+пустым; тест теперь импортирует реальный download.path. Расширение временного файла
+не служит проверкой формата: сервер проверяет magic/version/AEAD. После отзыва
+guest policy новая страница открывает полную ссылку, поскольку token уже удалён
+из URL активной страницы. Аргумент -- в pnpm script запускал весь suite; прерванный
+прогон не считается проверкой. Адресный запуск использует pnpm exec playwright.
+Lock обновлён для уже pinned cached crypto/base64 dependency; combined baseline
+записывается только после общих финальных gates. Далее — домашняя библиотека.
+Linux/Compose/remote CI, production auth/storage/deploy, XLSX upload и NVDA открыты.
+
+## 2026-10-06 — журнал действий и визуальный diff (ADR-114)
+
+Прочитаны RUNBOOK, roadmap, architecture и ADR-085/086/096/100. Activity DTO 1
+читает существующий encrypted append-only журнал потоковыми страницами по 100
+на frozen through_version, проверяет checksum/AEAD/canonical hash/identity и
+непрерывность; budget страницы — 32 МиБ ciphertext. Storage требует текущего
+owner, final owner delivery lease удерживает ACL до конца HTTP body. Нет новой
+таблицы истории, workbook event, snapshot или wire schema.
+
+Historical DTO 1 с read_only оборачивает прежний authored projection и отдельные
+calculated values. Snapshot/replay и расчёт работают на частной книге; context
+не инициализируется. Diff DTO 1 сравнивает stable IDs листов, осей, ячеек/merges,
+values, authored/current formula text и AST binding fingerprint, результаты,
+16 свойств style, размеры и закрепления. Отсутствующий style сравнивается с
+canonical defaults. Структурный сдвиг ссылки получает явный context. Лимиты —
+1M identities, 100000 изменений и 16 МиБ ответа, без частичного отчёта.
+
+UI показывает отдельную историческую таблицу (30×12 с навигацией), формулы и
+результаты, признаки merge/layout/style, постраничную ленту с автором/временем/
+версией/типом/footprint, цвет и знаки before/after с фильтрами типов. Текущие
+DocumentStore, pending intents и Worker не получают историческую проекцию.
+Копирование исторического текста проходит durable guard; при обязательном
+обезличивании оно блокируется, поскольку current graph не доказывает безопасность
+старого derived значения. Cut в режиме чтения не создаёт intent.
+
+Прошли: 1 pure diff test со всеми девятью категориями, структурным A1→A2,
+точными style leaves, reverse/empty comparison и неизменными hash/context;
+1 real PostgreSQL pagination test (frozen 102 при head 103, две страницы,
+owner downgrade, final lease refusal и authenticated corruption); hard restart
+1/1 дал одинаковые activity/historical/calculated/diff/Undo DTO после перезапуска
+без изменений текущей книги. Chromium — 12/12 DPR1/DPR2: historical result 14,
+текущий 16, structural/style diff, неизменные head/hash/context/Undo, owner/viewer/
+outsider guards, unknown schemas/version, клавиатура и 390/1440 light/dark.
+Vitest — 257/257; typecheck/lint и all-target server Clippy прошли.
+Логи: `.local/additions-history-server2.log`, `additions-history-pg2.log`,
+`additions-history-recovery1.log`, `additions-history-browser2.log`,
+`additions-history-vitest2.log`, `additions-history-typecheck6.log`,
+`additions-history-lint3.log`, `additions-history-clippy3.log`.
+
+Первый PG corruption fixture встретил действующий append-only trigger. Тест
+теперь симулирует повреждение в отдельной privileged test transaction с SET LOCAL
+session_replication_role; production trigger сохранён. Первый browser прогон
+прошёл 10/12, два identity fixture не передавали обязательный Origin. После
+исправления endpoint guards прошли 12/12. Historical reader отдавал capabilities
+null: отдельный read_only adapter проверяет контейнер и убирает отсутствие live
+capabilities, сохраняя оригинальную authored проекцию и не делая её editable.
+Общие финальные gates и ручной NVDA открыты. Следующий срез — формат .pxel.
+
+## 2026-10-06 — распознавание и отдельные обезличенные представления (ADR-113)
+
+Прочитаны RUNBOOK, roadmap, architecture, ADR-102/106/107/108. Распознавание
+выключено по умолчанию; шесть типов, контрольные суммы ИНН/СНИЛС/карт и контекст
+паспорта проверяются чистым bounded scanner. Encrypted privacy policy DTO 1
+с точными fingerprint exceptions сохраняется head/revision CAS; меняет stamp,
+access_epoch и закрывает guest sessions, сохраняя workbook head/context/history.
+Миграция 202610060002 добавляет policy и атомарный режим создания ссылки.
+Обезличенные ссылки разрешают view/comment; storage независимо запрещает writes.
+
+Отдельная calculated scalar projection DTO 1 исключает исходные формулы/AST,
+authored hash, context/seed, историю и preimages. Маскируются потенциальные
+зависимости, formula literals, комментарии, названия листов и текстовые style
+metadata. REST, WS hints, clipboard, XLSX и доступные grid тексты используют
+безопасные значения. Clipboard не выдаёт formula/range/move payloads; Cut
+отклоняется. Локальная маска — отдельный read-only overlay; устаревшая маска
+показывает placeholder. Analysis budgets отказывают целиком; recognition
+остаётся эвристикой с явно указанными возможными ошибками и пропусками.
+
+Прошли: 2 domain scanner tests; 1 server projection test (условные ветви,
+литералы, исключения, отсутствие оригиналов/AST/context, неизменный hash);
+1 PostgreSQL case (encryption, CAS, atomic anonymous link, idempotency mode,
+guest write guard, session invalidation, durable failure audit); 1 hard restart.
+Chromium — 10/10 DPR1/DPR2: реальные safe clipboard/XLSX, owner/guest comments,
+guest REST/WS, отказ context/history/recalc, обновление и отзыв, false-positive
+exception/reload, keyboard/focus и 390/1440 light/dark. Vitest — 254/254;
+typecheck/lint и server/WASM all-target Clippy прошли.
+Логи: `.local/additions-privacy-domain2.log`, `additions-privacy-server-test3.log`,
+`additions-privacy-pg3.log`, `additions-privacy-recovery1.log`,
+`additions-privacy-browser3.log`, `additions-privacy-vitest5.log`,
+`additions-privacy-typecheck6.log`, `additions-privacy-lint3.log`,
+`additions-privacy-clippy2.log`.
+
+Первый PG отказ выявил неверный каталог новой миграции: файл перенесён в root
+migrations. Первый browser прогон выявил реальный lock inversion: final delivery
+lease брался перед actor read с FOR UPDATE. Теперь durable audit предшествует
+analysis, затем повторный stamp guard берёт lease до выдачи; ошибки анализа
+записываются как отказ. Второй browser отказ был ошибочным fixture URL link policy,
+исправленным на существующий query endpoint. Оба последних полных сценария
+safe copy/export прошли. Общие финальные gates и ручной NVDA остаются открыты.
+Следующий срез — владельческий журнал действий и визуальный diff.
+
+## 2026-10-06 — владельческий профайлер формул (ADR-112)
+
+Прочитаны RUNBOOK, roadmap, architecture и ADR-003/006/100. POST profile DTO 1
+захватывает fixed head/context через новый read_confirmed без bootstrap epoch,
+рассчитывает отдельную CalculationProjection и не публикует её результаты.
+Pure observer API сообщает start/end и work; monotonic Instant находится только
+в серверном executor. Обычный calculate использует no-op observer. Измеряются
+graph preparation, formula durations/start offsets, calculation/total time,
+graph/evaluation work и result bytes. Slow list ограничен 1000 с пояснением;
+potential graph — 500 узлов / 2000 рёбер с truncation flag. Учитываются обе
+условные ветви и cycle-blocked downstream. Панель даёт временные полосы,
+интерактивную выбранную цепочку, keyboard SVG nodes и текстовый эквивалент.
+После изменений отчёт помечается устаревшим; повтор запускается явно.
+
+Read-only capture не инициализирует отсутствующий volatile context. Для такой
+старой книги profile возвращает typed profile_context_missing без изменений;
+обычное открытие сохраняет прежний bootstrap контракт. Diagnostics также
+переведены на confirmed capture. Owner guard, bounded CPU admission и конечный
+delivery ACL lease действуют на сервере. Логи содержат только event/counters/us.
+
+Прошли: 3 pure profiler tests (exact results включая cycles, static branches,
+500-node range cap, dense 2000-edge cap), 25 calculation regressions, 1 actor
+test no-bootstrap read, 1 server executor test (отдельная проекция и missing
+context refusal). Chromium — 12/12 DPR1/DPR2: exact result hash совпал с normal
+server calculation, fixed RAND context/head/history неизменны, отказ outsider
+и viewer, stale/unknown DTO, graph truncation, stale mark после explicit recalc,
+клавиатура и 390/1440 light/dark. Typecheck/lint и 251/251 Vitest прошли; server/
+WASM all-target Clippy прошёл. Логи: `.local/additions-profiler-observer.log`,
+`additions-profiler-graph2.log`, `additions-profiler-confirmed-read.log`,
+`additions-profiler-server-test.log`, `additions-profiler-browser.log`,
+`additions-profiler-typecheck4.log`, `additions-profiler-lint2.log`,
+`additions-profiler-vitest.log`, `additions-profiler-clippy2.log`.
+
+Первый red test выявил отсутствие observer API и ошибки fixture declarations;
+после реализации API и приведения fixture к текущим domain signatures прошёл.
+Clippy потребовал заменить loop на for; правило не подавлено. Прежнее обычное
+session.read могло создавать первый context: найдено при review, заменено
+отдельным confirmed-read для анализа, проверено регрессией. Общие финальные
+gates/NVDA открыты. Следующий срез — распознавание данных и гостевые маски.
+
+## 2026-10-06 — подсветка формул и диагностика констант (ADR-111)
+
+Прочитаны RUNBOOK, roadmap, architecture и ADR-003/009. Общий диагностический
+Rust AST выдаёт leaf spans для ссылок, чисел, строк и Boolean. WASM export
+diagnoseFormula и отдельный Worker подсвечивают строку формул без изменения
+текста/результатов; UTF-8 byte offsets проверяются и переводятся в UTF-16 DOM
+offsets. Native POST diagnostics DTO 1 захватывает confirmed head, работает на
+отдельной проекции с CPU admission и delivery ACL lease. В журнал не пишет.
+Автоматическая эвристика включается для серий от 100 формул при dominant template
+не менее 90%, нормализуя относительные ссылки. Типовые константы не предупреждают.
+Редкое отклонение с отличающимися константами получает доступный знак и пояснение.
+Скрытие конкретного fingerprint сохраняется в encrypted personal-view revision;
+фильтры сохраняют его. Budget — 100000 formulas, 16 МиБ sources, 2M AST nodes,
+1000 warnings. Устаревший отчёт не показывает актуальный знак.
+
+Проверки: 2/2 native diagnostic tests, 1/1 native WASM syntax adapter; 2/2
+PostgreSQL personal-view tests с encrypted dismissal; hard restart 1/1
+восстановил dismissal/frozen rows/filters. Chromium — 10/10 DPR1/DPR2: 99/100
+реальных durable formulas, dismiss/reload, unknown DTO/stale version refusal,
+неизменные head/hash/context/history; Unicode input и диалог при 390/1440
+light/dark. Typecheck, lint, 249/249 Vitest и server/WASM all-target Clippy прошли.
+Логи: `.local/additions-hardcode-rust.log`, `additions-hardcode-wasm-test.log`,
+`additions-hardcode-private-pg2.log`, `additions-hardcode-recovery.log`,
+`additions-hardcode-browser2.log`, `additions-hardcode-typecheck3.log`,
+`additions-hardcode-lint2.log`, `additions-hardcode-vitest.log`,
+`additions-hardcode-clippy2.log`.
+
+Первый server check выявил Workbook/Arc mismatch, исправлен adapter. Первый
+Chromium fixture не передавал обязательный Origin dev identity/POST requests;
+после исправления прошёл полный повтор. Lint выявил лишние escapes fixture и
+неявный getter return; Clippy — вложенный if. Исправлено без подавления правил.
+Общие финальные gates и ручной NVDA остаются открыты. Следующий срез — профайлер.
+
+## 2026-10-06 — атомарная сортировка диапазона (ADR-110)
+
+Прочитаны RUNBOOK, roadmap, architecture и ADR-086/093/094/096. SortRange имеет
+собственный command schema 1 в additive wire поле 17; журнал использует отдельные
+authored/inverse families 37/38. Snapshot writer остаётся 7. Planner сортирует
+подтверждённые значения нескольких ключей стабильно, оставляет пустые и ошибки
+в конце, исключает заголовок и включает скрытые строки. Формулы перемещаются
+общим copy transformer; внешние формулы не переписываются. Exact preimages
+содержимого и отдельных свойств оформления дают один Undo/Redo target.
+Candidate, PostgreSQL CAS и durable commit предшествуют публикации. Storage
+независимо проверяет footprint, перестановку, scalar preimages и оформление.
+Лимиты — 100000 выбранных ячеек и 4 МиБ события; пересечение тела с merge
+отклоняется целиком. В UI границы и предложенное расширение подтверждаются явно.
+
+Проверено: 4 domain, 2 formula, 3 codec, 1 calculation executor, 1 server command
+test; 2/2 PostgreSQL cases (concurrent rejection, forged scalar rejection без
+commit, encrypted payload, receipt retry, Undo/Redo/recovery). Workspace all
+features cargo check прошёл. Chromium Sort acceptance — 12/12 DPR1/DPR2,
+включая multi-key formula results, внешнюю зависимость, header, скрытую строку,
+Undo/Redo/reload и клавиатуру при 390/1440 light/dark. Hard-restart Sort — 1/1:
+сортировка восстановлена после аварийного перезапуска, Undo восстановил точные
+preimages; после второго перезапуска Redo снова дал отсортированное содержимое.
+Frontend typecheck и полный Vitest прошли: 247/247.
+Логи: `.local/additions-sort-browser3.log`, `additions-sort-pg4.log`,
+`additions-sort-recovery2.log`, `additions-sort-server2.log`,
+`additions-sort-typecheck2.log`, `additions-sort-vitest.log`.
+
+Первый Chromium выявил race тестовой вставки до загрузки новой книги; fixture
+теперь ждёт новую identity, подключение и подтверждённое первое значение.
+Второй отказ был реальным: suggestion читал исходный HTTP snapshot вместо
+текущих confirmed cells после WS writes. Suggestion и formula-key admission
+теперь читают live confirmed map; отдельная unit regression проверяет это.
+Сборка unit fixture потребовала исправить поле Command.operation; два TS
+fixtures были поправлены по фактическим типам. Первый recovery запуск использовал
+server binary без dev-auth после cargo test; повтор с feature dev-auth прошёл.
+Общие финальные check/sqlx/audit/parity/exact smoke, NVDA и external gates остаются
+открыты. Следующий срез — диагностическая подсветка и эвристика констант.
+
+## 2026-10-06 — закрепление строк и личные фильтры (ADR-109)
+
+Прочитаны RUNBOOK, roadmap, architecture, ADR-090/091/096 и контракты первого
+среза. Реализованы SetFrozenRows/FrozenRowsWrite с exact preimage, candidate/CAS,
+одним durable событием schema 36 и snapshot writer 7. Старые snapshot readers
+сохранены; нулевое закрепление не меняет legacy hash. Wire protocol 1 получил
+отдельные additive поля, authored projection — schema 7. Worker init profile 5
+передаёт hash-covered закрепления, размеры и объединения; профили 1–4 сохранены.
+Закрепление не обновляет calculation epoch и не является Undo target, как
+существующие размеры осей. Сортировка с собственным Undo остаётся следующим срезом.
+
+Личные представления schema 1 сохраняются в PostgreSQL по document/user под DEK
+книги, purpose personal-view и независимой revision. Readable principal меняет
+только своё представление; revision/head CAS проверяет геометрию stable ID.
+Поддержаны до пяти диапазонов, 100000 ячеек в каждом, выбранные значения,
+blank/nonblank, текст и конечные числовые условия с AND по столбцам. Заголовок
+остаётся видимым. Подтверждённые формулы фильтруются по подтверждённому расчёту;
+до его готовности фильтр приостановлен. Pending intents/Worker preview не влияют
+на скрытые строки. Частично скрываемое вертикальное объединение остаётся целиком
+видимым с пояснением. Canvas, hit testing, resize, клавиатура и selection используют
+общую геометрию; Copy пропускает скрытые строки, Cut требует снять фильтр.
+
+Пока завершены: 2 PostgreSQL personal-view теста (private encryption, revision
+и head conflict, отсутствие workbook events, отзыв ACL); 1 domain frozen-row
+тест и 1 codec test (event 36, snapshot 7, отклонение downgrade); 9/9 native WASM
+styles/layout tests; 22/22 адресных TypeScript tests. Hard-restart сценарий
+views-restart прошёл 1/1: восстановлены frozen rows и private filters, сохранение
+фильтра не меняет head/hash/context, stale revision отклонена целиком.
+Повтор адресного Chromium после исправлений — 38/38 на DPR1/DPR2, включая
+закрепление после scroll/reload, hidden-row keyboard navigation, private view
+без workbook commit, 390/1440 light/dark, audit/clipboard и связанные формулы.
+Общая проверка ещё выполняется; полный успех не заявлен.
+
+Отказы первого браузерного прогона привели к исправлениям: новые event/snapshot
+версии сначала не были включены в PostgreSQL CHECK; добавлена отдельная миграция.
+SQLx incremental build не замечал новый файл в каталоге migrations: build.rs теперь
+отслеживает весь каталог. Canvas до появления sheet обращался к отсутствующему
+rowAxis: пустая геометрия теперь обрабатывается явно. Точные ARIA names селекторов
+границ заданы отдельно от option text. Изменение политики может пересоздать socket
+и supersede HTTP refresh; панель проверяет итоговую revision и повторяет refresh
+в пределах трёх попыток. Это не ослабляет серверный guard.
+
+Общий `just check` после исправления fixtures прошёл: 664 Rust tests passed,
+17 intentional ignored, 242 Vitest tests passed, native/WASM builds, Clippy,
+protocol generation, formatting, lint, typecheck и web build. `just sqlx-check`,
+`just audit` и последовательный `just formula-parity` также прошли; audit сохранил
+разрешённое предупреждение yanked yoke-derive 0.8.3, новых known vulnerabilities нет.
+Это baseline первых двух срезов до следующего SortRange increment.
+
+Последующий `just smoke` прошёл 77/77 integration и 4/4 recovery. Chromium
+выявил два отказа: устаревшее ожидание Worker init schema 4 вместо 5 и сценарий
+Cut, читавший предыдущий clipboard до завершения durable authorization/write.
+Прогон остановлен после диагностики; полного browser success ещё нет. Cut E2E
+теперь ожидает фактическую запись системного clipboard до смены selection.
+
+Добавлена регрессия для полностью скрытого листа: formula bar и accessibility
+не показывают скрытую активную ячейку, ввод/Copy выключены. Активный personal
+filter запрещает автоматический ExtendRows, чтобы scroll clamping после фильтра
+не менял общую книгу. Typecheck и все 243 Vitest tests прошли; браузерный
+сценарий проверяется отдельно. Первый typecheck был ошибочно запущен во время
+перегенерации WASM и увидел временно отсутствующий generated module; после
+окончания генерации последовательный повтор прошёл.
+
+Предыдущие отказы общего Rust-прогона и их исправления:
+
+Третий combined `just check`: storage 155 passed / 4 intentional ignored,
+включая расширенную гонку DEK и legacy migration. Затем codec suite обнаружил
+ещё одно устаревшее ожидание: неизвестной версией считалась 7, уже текущая.
+Negative fixture теперь использует SNAPSHOT_SCHEMA_VERSION + 1; отказ неизвестного
+формата остаётся обязательным. Codec и общий прогон повторяются.
+
+Второй combined `just check` повторно прошёл Clippy, но обнаружил существующую
+гонку first DEK creation: storage 154 passed / 1 failed / 4 intentional ignored.
+PostgreSQL сообщил конфликт partial unique index document_crypto_keys_one_active,
+тогда как INSERT обрабатывал только generation PK. ON CONFLICT DO NOTHING теперь
+учитывает все уникальные arbiters; после commit по-прежнему читается и проверяется
+действительный winner key и его workspace. Существующий тест расширен до 33 пар
+параллельных first creations: адресный прогон прошёл 1/1. Поведение соответствует
+[PostgreSQL 18 INSERT](https://www.postgresql.org/docs/18/sql-insert.html).
+Никакой сервер или production keyring не изменён. Проверки повторяются.
+
+Первый combined `just check` второго среза завершился exit 1 после успешных
+Clippy: storage suite 149 passed / 6 failed / 4 intentional ignored. Пять отказов
+в legacy migration fixture были вызваны записью нового snapshot 7 в точную старую
+схему 6; fixture теперь явно строит schema-6 envelope и проверяет его текущим
+reader. Ещё одно ожидание snapshot writer обновлено с 6 на 7. Inventories
+проверки пустой destination учитывают новые disclosure/personal-view таблицы;
+проверка наличия данных остаётся обязательной. Для генерации legacy envelope
+используется уже закреплённый Prost как dev dependency, runtime dependency не
+добавлена. Общие gates повторяются после адресной проверки исправлений.
+
+Завершённый отдельный full Chromium rerun после исправлений: 224/224 passed
+(13.3 min), DPR1/DPR2; `.local/additions-slice2-browser-full.log`. Включены все
+14 view cases, четыре режима 390/1440 light/dark, Copy/Cut, sharing, формулы и
+история. Focused rerun: 10/10 Cut/WASM cases passed; all-hidden regression после
+запрета навигации по невидимому листу прошла 2/2. Rust/common baseline,
+77/77 integration и 4/4 recovery записаны выше. Exact `just smoke` был прерван
+на диагностированном браузерном отказе; финальный exact recipe ещё обязателен
+после всех дополнений. Следующий SortRange increment не включён в эти counts.
+Ручной проход NVDA, Linux/Compose/remote CI и production gates остаются открыты.
+
+## 2026-10-05 — дополнения: политики выдачи и durable аудит (ADR-108)
+
+Первый срез принятого плана реализован поверх существующих незакоммиченных
+изменений; они сохранены. Перед работой прочитаны RUNBOOK, roadmap,
+architecture и ADR-096/102/106/107. Второй срез описан выше; остальные семь пока не реализованы;
+порядок и контракты сохранены в `docs/handoff/additions-20261005.md`.
+
+Добавлены зашифрованные правила книги и отдельных ссылок с revision CAS,
+пересечение текущей роли и обеих политик, schema-2 capabilities, общий guard
+Copy/Cut/XLSX и отдельный неизменяемый PostgreSQL аудит попыток. Политики не
+меняют head, расчётный контекст или Undo/Redo. Изменение политики инвалидирует
+гостевые сессии; выдача удерживает существующий PostgreSQL delivery lease до
+завершения тела ответа, включая межпроцессный конфликт с изменением доступа.
+Отказ аудита закрывает выдачу. Запрещённый Cut не создаёт намерения перемещения.
+Default export остаётся владельческим; участники и гости получают его только
+после разрешения владельцем. Согласованность capabilities и XLSX endpoint
+исправлена. Для clipboard сохранены существующие сериализаторы: после аудита
+promise-backed ClipboardItem переносит TSV/HTML и экранированные внутренние
+метаданные. Формульная строка, редактор и комментарии используют тот же guard.
+
+Владельцу доступны настройки и постраничный технический аудит. Badge прямо
+говорит «Зашифровано при хранении» и объясняет серверную расшифровку. Перед
+созданием ссылки показаны права, срок, текущая выдача оригиналов и предупреждение
+о передаче секрета отдельно и невозможности отозвать полученные копии. Четыре
+срока, обязательное подтверждение бессрочного доступа и идемпотентность сохранены.
+`require_anonymization` пока блокирует регулируемую выдачу; отдельной безопасной
+гостевой проекции ещё нет, обычный просмотр оригиналов этим флагом не маскируется.
+Это явно отражено в ADR и интерфейсе, обезличивание не объявлено реализованным.
+
+Проверки выполняются на изолированной acceptance PostgreSQL 18.6, loopback
+59445, с её приватным keyring и `.local/target-merge`. Обычная dev DB и production
+не изменялись. Локальный `.local/additions-env.ps1` читает существующий приватный
+URL из файла; реквизиты не включены в документы или отчёты.
+
+Фактические завершённые проверки:
+
+- SQLx PostgreSQL: 3 новых policy/audit теста прошли (defaults, роли, link/book
+  intersection, CAS, stale stamps, отзыв сессий, шифрование правил, immutable
+  audit, отсутствие таблицы аудита и delivery lease). Адресный restart — 1/1:
+  deny policy и allow/deny audit сохраняются после hard restart без изменения head.
+- `just check` — exit 0: оба Clippy, workspace Rust 659 passed / 17 intentional
+  ignored, default build, wasm32 boundaries, generated proto/WASM, Prettier,
+  ESLint, TypeScript, 236 Vitest и production web build. Сохраняется прежнее
+  предупреждение размера web chunk; оно не равно провалу сборки.
+- `just sqlx-check` — exit 0 на обновлённой offline metadata. `just audit` —
+  exit 0; Cargo сохраняет ранее разрешённое предупреждение yanked yoke-derive
+  0.8.3, новых известных vulnerabilities не найдено, pnpm audit чистый.
+- Адресные Chromium disclosure + sharing — 18/18 на DPR1/DPR2 без retries,
+  включая 390/1440, light/dark, Tab/Escape и возврат фокуса. Это автоматические
+  ARIA/keyboard проверки, реальное озвучивание NVDA не выполнялось. Chrome
+  DevTools MCP не подключился к локальному Chrome (DevToolsActivePort отсутствует);
+  реальный браузерный прогон выполнен Playwright Chromium.
+- Расширенный `node scripts/verify-share-log-redaction.mjs` — 1/1: разрешённые
+  Copy/XLSX, запрещённый Cut, PIN/password/cookies/link tokens и synthetic cell
+  marker не появились в application stdout/stderr и новых строках acceptance
+  PostgreSQL log. Тексты аудита также не содержат cell marker.
+
+Промежуточные отказы исправлены: capabilities после обычной записи сохраняли
+старую версию для Copy; теперь используется текущая confirmed version. Tab на
+границе modal выходил наружу; добавлен явный boundary trap. Canonical formula
+ожидания теста приведены к действительному Rust formatter. Конкурирующие
+Playwright прогоны конфликтовали по artifacts/HMR, поэтому браузерные suites
+запускаются последовательно. Recovery helper учитывает переданный child env
+`PXEL_TEST_SERVER_BIN`, а не только родительский process.env.
+
+Первый общий `just smoke` завершился exit 1: integration 77/77, recovery 3/3,
+Chromium 198/210. Одиннадцать clipboard сценариев не ожидали asynchronous audit
+и системный ClipboardItem; один RAND сценарий попал в гонку confirmed calculation.
+Тесты копирования ждут завершения записи, выдача сохраняет запрет изменения
+selection во время аудита. Windows clipboard меняет LF на CRLF: внешние текстовые
+проверки нормализуют системные переводы строк, внутренний TSV сохраняет оригиналы.
+Новые browser regressions второго среза и их исправления записаны выше.
+Параллельный `just formula-parity` получил
+ENOENT при одновременном пересоздании generated WASM smoke-процессом; это не
+успешная сверка. Последовательный повтор прошёл exit 0: 595 formula fixtures,
+1027 workbook fixtures / 2037 patches и 209 move fixtures. Повтор общих проверок
+на коде второго среза ещё требуется. Linux,
+Compose, remote CI, production auth/storage/deploy и NVDA speech остаются
+отдельными открытыми gates.
+
 ## 2026-09-29 — локальный PITR до named restore point
 
 Перед срезом прочитаны AGENTS.md, RUNBOOK, roadmap, ADR-004/041, recovery
@@ -4390,8 +5137,7 @@ active/incomplete; nextminimalstage independentstyles inclstyledblanks anddurabl
 stylewrites, thenrangeformatting/history/merges/fullXLSXprofile. Localruntime25768
 retained; PG55432 preserved. ADR086acceptedonlythislocallyverifiedslice.
 
-ADR086 committed d41a7bb, gitworktreeclean immediatelyaftercommit, localready/web
-200. Nextstagepreplanningreadroadmap/ADR086/currentdomain/Worker. Appliedthink-
+ADR086 committed d41a7bb, gitworktreeclean immediatelyaftercommit, localready/web 200. Nextstagepreplanningreadroadmap/ADR086/currentdomain/Worker. Appliedthink-
 tank skill inonecontext (fictionalmoderator/domain/UX/recovery/testroles), user
 alreadyauthorizedautonomousallphases so no repeatedapprovalpause. NewADR087
 PROPOSEDrecordsstyleproperty/sparseblank/legacycopy/axispreimages/snapshot/Worker
@@ -4617,3 +5363,1349 @@ route. On DPR1 and DPR2, both requests returned HTTP422 with
 `{code:"xlsx_styles_not_supported"}` and the canonical projection remained
 byte-for-byte equal. Focused gate passed2/2; styles-aware XLSX import/export is
 still the next implementation slice.
+
+2026-09-30 handoff finalized: User clarified that the next large XLSX
+style-roundtrip block should be handed off, not implemented in this slice. Any
+uncommitted exploratory IR/test edits were removed; the worktree returned to the
+last verified committed state. Added `docs/handoff/xlsx-styles-roundtrip.md`
+with the current boundary, supported 16-leaf profile, worker/IR versions,
+relationships, import atomicity, deterministic export, security/resource limits,
+implementation sequence, and explicit acceptance gates. ADR-088 now says
+HANDED OFF / NOT IMPLEMENTED; roadmap distinguishes completed ADR-087 from the
+future XLSX work. During exploration, this red-first test failed at the expected
+current behavior: the reader reports cell formatting as unsupported.
+
+```powershell
+cargo test --locked -p spreadsheet-xlsx normalizes_supported_cell_styles_and_preserves_a_styled_blank -- --nocapture
+cargo test --locked -p spreadsheet-xlsx --no-run
+```
+
+The temporary normalized-model edit compiled, but did not implement reader
+behavior; all exploratory source and test edits were then restored at the user's
+direction. The final change is documentation-only: targeted Prettier
+checks for the handoff, ADR, and roadmap passed, as did `git diff --check`.
+The existing RUNBOOK already fails whole-file Prettier on HEAD, so it was not
+rewritten wholesale; no final product behavior test was needed or claimed.
+
+2026-10-01 browser interoperability/render-invalidation slice: Added stateful
+TSV/CSV parsing and rectangular HTML/TSV serialization, with HTML table
+precedence, quoted multiline values, escaped quotes, CRLF/LF, blanks and bounded
+paste. GFM Markdown is parsed as AST in a worker; whole Markdown remains text,
+and selected tables preview/commit at a chosen cell with overwrite confirmation
+and one value-batch undo. Added typed command registry and shortcut help/settings,
+Canvas-only focus-outline removal, compact style controls using Phosphor icons,
+confirmed formula fallback, incremental optimistic cell-map updates, dirty-cell
+Canvas drawing, and per-patch timing/region counters. No wire or persisted
+operation codec changed. Smart scrollbars remain queued as `SMART-SCROLLBARS`.
+
+The web verification on the final worktree passed: typecheck, lint, 203/203 unit
+tests, production build, and focused Playwright `shell.spec.ts` plus
+`clipboard-markdown.spec.ts` at DPR1/DPR2 (22/22). This covers quoted multiline
+copy/paste, HTML preference, Markdown preview/selection/target/overwrite/undo,
+file drop and picker, keyboard shortcut reassignment, formula instrumentation,
+Tab focus through the new menu actions, and the green-outline condition. The
+first full Playwright run executed 168 cases and passed 166; two `shell.spec.ts`
+assertions still expected Tab from “Создать таблицу” to skip the new accessible
+“Горячие клавиши” and “Импорт Markdown” buttons. Updated the test to verify both
+menu actions are focusable before the grid, and removed the visually hidden file
+input from the tab order. The focused affected suite passed 22/22; the final full
+`corepack pnpm --filter @pxel/web test:e2e` run passed 170/170 in 18.7 min. The
+quoted multiline question/answer example is now a dedicated TSV fixture;
+Markdown fixtures cover no tables, one/multiple tables, code-adjacent, invalid
+and 1002-row input.
+
+Known protocol boundaries recorded in ADR-089/roadmap: GFM alignment is parsed,
+but its style cannot share an atomic durable operation/undo with imported cell
+values; calculation patches remain a complete server-confirmed formula set;
+the style model has wrap/clip behavior but no distinct overflow mode. The
+composite content/style operation, dependency invalidation contract and
+clip/overflow/wrap style leaf remain follow-up architecture work. No claim is
+made that aligned tables currently apply formatting or that formula edits only
+recalculate dependency cells.
+
+## 2026-10-01 — стабильные размеры осей и возобновление XLSX style handoff
+
+Перед срезом прочитаны корневые инструкции, RUNBOOK, roadmap, ADR-087/088/089
+и `docs/handoff/xlsx-styles-roundtrip.md`. В запросе пользователя сначала
+поставлены изменение ширины/высоты, выбор целого столбца и оформление Markdown
+import popup, затем продолжение roadmap и handoff. Скроллбары оставлены в очереди
+по более раннему прямому указанию. Инварианты: оси адресуются stable ID, размер
+является authored state на сервере, не участвует в формулах; XLSX parser IR не
+становится domain model, а styled export 422 остаётся до прохождения всех gates.
+
+Размеры осей реализованы как sparse row-height/column-width overrides с default
+28/112 CSS px, диапазонами 12..1000/24..2000 px, event schema 25 и snapshot
+schema 5. Они включены в domain hash, candidate validation с exact preimage,
+snapshot hydration, server projection и additive migration. Обновлены Canvas
+metrics/renderer, hit testing, selection и editor overlay; resizing доступен
+drag по заголовку и через доступную панель. Заголовок столбца выбирает весь
+столбец. Решение записано в ADR-090.
+
+Для XLSX handoff реализованы schema-2 IR, parent validation, worker v4,
+relationship-bound `styles.xml` parser и deterministic OOXML writer. Parser
+покрывает 16 style leaves и сохраняет supported leaves при typed issue для
+unsupported компонентов. Import adapter применяет нормализованные properties
+через durable `StyleWrite` с preimages; весь импорт идёт текущим
+`create_imported` transaction. Runtime export projection всё ещё отвечает
+typed 422 для стилей: его guard не снят до DB recovery/browser gates. Handoff и
+roadmap перечисляют оставшуюся интеграционную проверку.
+
+Фактически запущено: `cargo test --locked -p spreadsheet-domain --test axis_size`
+2/2; `cargo test --locked -p spreadsheet-storage-codec` 56/56 до добавления
+schema-5 axis regression, плюс этот regression 1/1; `cargo test --locked -p
+spreadsheet-xlsx` 17/17 и `cargo clippy --locked -p spreadsheet-xlsx
+--all-targets -- -D warnings` прошли; `cargo test --locked -p pxel-server
+--features dev-auth xlsx_import::tests` 2/2; worker codec tests 2/2;
+frontend Vitest 205/205, typecheck и lint прошли.
+Playwright `clipboard-markdown.spec.ts -g "row heights and column widths resize"`
+прошёл 2/2 при DPR 1/2: drag, серверное сохранение, доступная настройка.
+Первый прогон IR unit test выявил неверный ожидаемый error class для schema 1;
+validator уточнён и последующий XLSX suite прошёл. Полный workspace/SQLx,
+полный browser suite и handoff parser/export/recovery gates в этом срезе не
+запускались/не пройдены. Сборка dev server для Playwright прошла, migration
+применена штатным startup path; dev процессы остановлены после адресной проверки.
+
+## 2026-10-01 — завершён локальный XLSX style round trip
+
+Закрыт bounded profile-1 handoff из `docs/handoff/xlsx-styles-roundtrip.md`.
+Экспортная проекция теперь сериализует sparse authored style records, в том числе
+для пустых ячеек. Runtime style-specific 422 снят после проверки полного пути.
+При первом живом импортном прогоне обнаружилось, что `create_imported` допускал
+только content operations, поэтому отклонял `StyleWrite`; transactional allowlist
+расширен этими events, число допустимых событий ограничено размерами import, а
+union адресов content/style повторно проверяется в PostgreSQL boundary.
+
+Добавлен hand-authored `fixtures/xlsx/styled_profile.xlsx` со всеми 16 leaves,
+формулой, текстом и styled blank; генератор находится рядом. Интеграционный тест
+проверяет полный импорт, авторизованный XLSX export и повторный импорт. После
+reimport браузер проверяет bold toolbar state и фактический RGB пиксель Canvas в
+пустой B1. Recovery test импортирует fixture через CLI, делает hard restart,
+подтверждает replay 6 событий, экспортирует восстановленный документ и
+импортирует его повторно. PostgreSQL transaction test теперь принудительно
+отказывает на `StyleWrite` после candidate validation и проверяет отсутствие
+частичного документа.
+
+Фактически выполнено:
+
+- `cargo test --locked --target-dir .local/target-xlsx-style --workspace --all-features` — завершился успешно; storage 97 passed / 4 ignored, storage-codec 57/57, spreadsheet-xlsx 17/17, остальные workspace crates без ошибок. S3 integration cases были ignored, потому что требуют endpoint и credentials.
+- `cargo test --locked --target-dir .local/target-xlsx-style -p spreadsheet-storage journal::tests::imported_events_publish_atomically_and_retry_exactly` — 1/1; искусственный отказ на style event откатил весь импорт.
+- XLSX integration suite — 6/6; после добавления проверки Canvas styled blank целевой test повторён и прошёл 1/1.
+- `tests/recovery/styles-restart.test.mjs` — 1/1; импорт, hard restart, replay, export и reimport прошли на PostgreSQL.
+- Полный `corepack pnpm --filter @pxel/web test:e2e` — 174/174 на Chromium DPR 1 и 2 за 24.6 минуты. После удаления Node-only byte assertion (который TypeScript конфигурация не поддерживает) targeted browser download повторён: 2/2.
+- Frontend Vitest — 205/205; typecheck и ESLint прошли. XLSX native, storage и server all-target Clippy прошли с `-D warnings`; `cargo fmt --all -- --check` и `git diff --check` прошли.
+
+Style-specific XLSX contracts обновлены в ADR-088/handoff, текущий размер осей
+помечен локально проверенным в ADR-090. README и roadmap больше не описывают
+styled export как 422. Browser upload, coverage-guided fuzzing, Excel golden
+совместимость и import latency benchmark не добавлялись/не заявляются.
+Smart scrollbars остались только в roadmap queue по указанию пользователя.
+Временные процессы для isolated verification (`127.0.0.1:18091`, `:5175`)
+остановлены; уже работавшие `:8080` и `:5173` не останавливались.
+
+## 2026-10-02 — adaptive axis scrollbars (ADR-091)
+
+Добавлены вертикальный и горизонтальный custom scrollbar tracks над тем же DOM
+scroll container и AxisMetrics. Оси не выводятся из количества DOM-ячеек; Canvas
+остаётся viewport-rendered. Данные, формулы и nondefault styles формируют
+95-percentile effective used range отдельно по строкам и столбцам. Выбросы выше
+границы остаются достижимы по хвосту шкалы. Отображение на треке кусочно-линейное:
+used/empty segments соединяются в общей точке и используют обратные функции.
+Доля used segment адаптируется примерно от 65% до 95% на разреженных книгах и
+сходится к identity возле 90% scroll extent. Mapping используется только при
+track drag/click. DOM wheel остается pixel-linear; PageUp/PageDown/стрелки на
+scrollbar перемещают лист линейно. ARIA labels/value text, keyboard focus, min
+thumb 32px и tooltip строки/колонки покрыты browser tests.
+
+Фактически проверено на локальном Windows dev stack с PostgreSQL 18.6 и Chromium
+DPR1/DPR2:
+
+- `corepack pnpm --filter @pxel/web exec vitest run src/grid/viewport.test.ts src/grid/scrollbar.test.ts` — 18/18.
+- `corepack pnpm --filter @pxel/web test` — 215/215.
+- `corepack pnpm --filter @pxel/web lint`, `typecheck`, `build` — прошли. Vite сообщил, что JS chunk 506.63 kB превышает default warning threshold 500 kB; этот срез не добавил отдельного budget gate и не заявляет bundle optimization.
+- `corepack pnpm --filter @pxel/web exec playwright test e2e/clipboard-markdown.spec.ts` — 28/28 на двух DPR, включая мышиный wheel, оба направления drag, page paging и adaptive empty-tail на 1 000 используемых строк в расширенном листе.
+- Полный `corepack pnpm --filter @pxel/web test:e2e` — 180/180 за 14.1 min на Chromium DPR1/DPR2. После него повторный запуск одного target сначала не стартовал из-за уже остановленных dev ports; сервер штатно поднят для проверки, `smart row scrollbar` прошёл 2/2. Это startup-only ECONNREFUSED до теста, не продуктовая ошибка.
+- Браузерный mapping test импортирует реальный Vite module и проверяет 20/1 000/100 000 used rows, обратимость и монотонность. Это модельный тест, не performance benchmark книги с 100 000 заполненными ячейками.
+
+Первый adaptive browser assertion ожидал строку с префиксом `1`; лист автоматически
+расширился на два durable chunks и tooltip корректно указал дальнюю строку.
+Ожидание исправлено на любой номер за пределами 1 000, после чего DPR1/2 passed.
+Отдельный runbook/ADR не утверждает freeze panes: у редактора есть фиксированные
+заголовки осей, но нет freeze data panes.
+
+Итог записан в ADR-091 и в верхнюю часть roadmap. Следующие приоритеты: structural
+style preimages/rich Copy-Move; затем atomic content+style batch, включая GFM
+alignment. Browser XLSX upload отложен до sandbox, scanning policy и import report.
+Linux/Compose/remote CI, production S3, combined stress, Excel goldens/широкая
+OOXML совместимость и performance/resource isolation остаются открытыми.
+
+## 2026-10-02 — structural style preimages (ADR-092)
+
+AxisEdit/AxisCompensation теперь включают отдельные exact sparse-style preimages.
+Удаление строки или столбца удаляет оформленные ячейки из текущей projection;
+guarded Undo восстанавливает полные CellStyle, включая оформленные blanks, а
+Redo повторно удаляет их. New event schemas 26/27 и semantic hash tags 27/28
+аддитивны: style-free schemas 21/22 и их hash tags 23/24 не изменены. Добавлена
+storage protobuf field и PostgreSQL constraint migration для новых user events.
+History ledger учитывает style property на затронутых stable IDs; поздний стиль
+блокирует structural undo/redo, а точная same-author compensation нейтрализует
+собственную пару.
+
+Фактически проверено:
+
+- Сначала новый domain test упал на ожидаемом `UnsupportedStructuralDependency`;
+  после реализации row и column deletion/undo/redo восстанавливают точные styles.
+- `cargo test --locked -p spreadsheet-domain --test style_write
+styled_axis_deletion_undo_and_redo_preserve_exact_style_preimages` — 1/1.
+- `cargo test --locked -p spreadsheet-domain
+axis_inverse_conflicts_with_later_style_on_revived_axis_ids` — 1/1, включая
+  conflict после позднего форматирования и успешную history validation после
+  точной авторской отмены этого форматирования.
+- `cargo test --locked -p spreadsheet-storage-codec` — 58/58; schema 26/27
+  round-trip and style hash binding passed, existing schema 21/22 golden hashes
+  remain unchanged.
+- `cargo test --locked -p spreadsheet-domain --test axis_edit` — 8/8.
+- Browser test «deleting a styled row preserves its styles through durable
+  undo, reload, and redo» — 1/1 on DPR1 and 1/1 on DPR2 against isolated local
+  PostgreSQL-backed server using migration 202610020001.
+- Первый browser attempt использовал занятый общий порт; после переноса test
+  stack на 18080/5180 первый серверный прогон показал PostgreSQL schema allowlist
+  1..=25. Добавлена migration и расширен journal decoder до 27; последующие
+  DPR1/2 browser runs прошли.
+
+Фактически также проверено после этого среза:
+
+- `cargo test --locked --workspace --all-features` с `CARGO_TARGET_DIR=.local/target-xlsx-style` завершился успешно. Storage: 97 passed / 4 ignored; storage-codec: 58/58; spreadsheet-xlsx: 17/17; S3 integration cases ignored из-за отсутствия endpoint/credentials.
+- `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` прошёл. Первый проход нашёл `cloned_ref_to_slice_refs` в тесте; slice передан через `std::slice::from_ref`, повторный проход успешен.
+- `corepack pnpm --filter @pxel/web test` — 215/215; lint и typecheck прошли.
+- `corepack pnpm --filter @pxel/web build` прошёл; Vite сообщил JS chunk 506.63 kB при warning limit 500 kB, bundle warning остаётся открытым.
+- `corepack pnpm proto:check`, `cargo fmt --all -- --check` и `git diff --check` прошли.
+- Полный `corepack pnpm --filter @pxel/web test:e2e` — 182/182 на Chromium DPR1/DPR2 за 14.1 минуты, включая clipboard/Markdown, smart scrollbars, formatting и durable structural-style Undo/Redo/reload.
+
+Isolated test processes on `127.0.0.1:18080` / `:5180` stopped after browser suite.
+Pre-existing user processes on `:8080`, `:5173` and `:5174` were left running.
+Remote/Linux/Compose gates are not exercised on this Windows host. Rich style
+Copy/Move remains the next functional task; composite content/style batch is
+implemented in ADR-093 below.
+
+## 2026-10-02 — ADR-093 atomic GFM alignment batches
+
+GFM table alignment and imported values now commit as one typed, bounded
+`SetCellBatch` command and one durable event. Authored schema 28 and inverse
+schema 29 are additive; style writes must be within the content footprint.
+One Undo restores imported values and alignments together. A PostgreSQL journal
+test exposed that inverse batches were being incorrectly validated as authored
+style commands with no target; validation now routes inverse style preimages
+through the target-aware compensation guard.
+
+Verified on this Windows host:
+
+- `cargo test --locked --workspace --all-features` — passed; includes domain,
+  codec, storage PostgreSQL integration and doc tests. Four opt-in storage tests
+  were ignored because they require external S3/long-running benchmark setup.
+- `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings`
+  and `cargo fmt --all -- --check` — passed.
+- Focused domain batch Undo, codec schema/hash/footprint, and PostgreSQL durable
+  batch commit + Undo tests — passed.
+- Web unit tests — 215/215; lint, typecheck, production build and `proto:check`
+  passed. Vite still reports the main JavaScript chunk just above its 500 kB
+  advisory threshold.
+- `git diff --check` passed. Prettier check passed for `README.md`,
+  `docs/roadmap.md`, ADR-093, and changed TypeScript files. The long-running
+  `RUNBOOK.md` contains pre-existing formatting outside the Prettier output; it
+  is kept in its existing runbook style.
+- `$env:PXEL_WEB_URL='http://127.0.0.1:5180'; corepack pnpm --filter @pxel/web
+test:e2e` — 184/184 passed on Chromium DPR1/DPR2 in 18.7 minutes. Includes
+  clipboard rectangularity, Markdown import and overwrite/undo, GFM alignment
+  plus undo, shortcut remapping, scrollbar sizes, formula invalidation and the
+  established durable-history/XLSX/style regressions.
+
+The local PostgreSQL-backed test app runs only at `127.0.0.1:18080` and Vite at
+`:5180`; unrelated pre-existing services on `:8080`, `:5173` and `:5174` are
+left untouched. Both isolated processes were stopped after the suite. Linux,
+Compose, remote CI and production gates remain open.
+
+## 2026-10-02 — ADR-094 styled range copy
+
+`CopyRange` now normalizes to a composite content/style batch. The server freezes
+translated formulas, destination preimages, and all 16 sparse style leaves;
+absent source styles reset destination-only formatting. PostgreSQL commit,
+same-ID retry, event replay, and one Undo use the existing CAS and journal flow.
+Additive schemas 30/31 preserve earlier event/hash meanings; migration
+`202610020003_styled_copy_batches.sql` was applied by the isolated local test app.
+
+Verified: domain/collab normalization, codec schema/hash round-trip, and the
+PostgreSQL journal CopyRange commit/idempotent retry/Undo test passed. The full
+Rust workspace all-features suite and workspace Clippy passed in this run (see
+ADR-095 verification immediately below for exact totals). Focused Chromium test
+for formula translation, exact sparse styles and one Undo passed 2/2 across DPR1
+and DPR2. Full browser suite 184/184 is the ADR-093 run above, not a rerun for
+this slice.
+
+## 2026-10-02 — ADR-095 styled range move
+
+New `MoveRange` commands normalize to one `CellBatchWrite`: moved cell contents,
+rewritten inbound formulas, all 16 style leaves at source and destination, and
+exact preimages share one event/version/Undo. Destination style is replaced from
+the frozen source; source-only cells reset to defaults. Overlap uses the same
+simultaneous source snapshot as content. Existing schema 19/20 move events remain
+content-only; schemas 32/33 add an explicit move intent marker. Migration
+`202610020004_styled_move_batches.sql` was applied by the isolated app.
+
+Verified on this Windows host:
+
+- `cargo test --locked --workspace --all-features` passed. Storage journal: 99
+  passed / 4 ignored; codec: 62 passed; collaboration: 31 passed / 2 ignored.
+  Eight opt-in tests were ignored across storage and collaboration because they
+  require external S3 credentials or release timing/stress setup.
+- `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings`
+  passed.
+- After the history regression below was fixed, `cargo test --locked --workspace
+--all-features` was repeated for the final code and passed again; this includes
+  the 8/8 application history integration tests. The focused domain/collab/codec
+  run after the size-limit change also passed.
+- `cargo test --locked -p spreadsheet-domain -p spreadsheet-collab
+-p spreadsheet-storage-codec` passed after the final MoveRange size-limit
+  adjustment. New checks cover style transfer/source reset, inverse candidate,
+  and schema/hash 32/33 round-trip.
+- `PXEL_WEB_URL=http://127.0.0.1:5181 pnpm --filter @pxel/web exec playwright
+test e2e/styles.spec.ts -g "range cut moves all sparse styles"` passed 2/2 on
+  Chromium DPR1/DPR2 against isolated PostgreSQL. It checks replacement of an
+  existing destination style, reload persistence, and Undo/Redo restoring both
+  cells.
+  The first attempt caught an assertion mismatch: the canonical projection
+  explicitly stores `font_italic: false`; the assertion now checks that value.
+- `PXEL_WEB_URL=http://127.0.0.1:5181 pnpm --filter @pxel/web exec playwright
+test e2e/cut-move.spec.ts e2e/move-history.spec.ts e2e/move-preview.spec.ts`
+  passed 22/22 at DPR1/2 after the history fix. The initial run had 20/22 pass;
+  both failures were the same bug: `history::describe` treated a `CellBatchWrite`
+  compensation as a new original, so Redo did not enter the durable history
+  stack. Added validation of paired `undoes`/`undoes_version` metadata and an
+  application history unit regression. The formerly failing overlap Undo/Redo
+  browser case then passed 2/2 at DPR1/2, and the full 22-case Move suite passed.
+- `cargo check --locked --workspace`, `cargo fmt --all`, and `git diff --check`
+  passed. Full Playwright suite was not rerun after this slice; Linux/Compose,
+  remote CI, production S3 and deployment gates remain open.
+
+## 2026-10-02 — merge-range contract and sparse-style sample
+
+Added ADR-096 and `docs/handoff/merged-cells.md` after confirming that current
+Domain, operation history, Canvas and XLSX code have no merge model. The contract
+defines stable endpoint IDs, bounds/overlap, preservation of hidden content and
+style, cell/axis edit guards, guarded Undo/Redo, snapshots/hash, browser rendering
+and OOXML stages. This is specification only: no merge behavior or tests are
+claimed. Merge implementation remains open.
+
+Release Criterion benchmark on Windows 11 / Intel Core Ultra 9 185H / 16 GiB,
+10 samples, 0.2 s warm-up and 1 s per case passed (`CARGO_TARGET_DIR=.local/target-style-memory`;
+see `docs/benchmarks/2026-10-02-sparse-style-local.md`). It measured applying
+one leaf 14.283–14.787 ns, 16 leaves 61.752–68.134 ns, 100k map build
+14.601–18.261 ms, and 100k canonical style encode 2.7624–3.1812 ms. Layout
+lower bound is 11.2 MB/100k (64-byte CellStyle + 48-byte CellAddress); BTree and
+allocator overhead are not measured. A follow-up isolated release-process probe
+held 100,000 CellAddress values for three seconds, then held those addresses plus
+100,000 compact or mixed full CellStyle entries. The mixed fixture cycles four
+styles across all 16 properties and four font families. After readiness, three
+fresh processes per mode were sampled 100 times at 10 ms intervals via
+PowerShell PrivateMemorySize64 / WorkingSet64. Median stable private bytes were
+8.11 MiB for addresses alone, 18.46 MiB for compact styles, and 20.46 MiB for
+mixed full styles: 10.35 MiB and 12.35 MiB deltas over the same address vector.
+Maximum working sets were 9.57, 19.59 and 21.54 MiB. The release example and
+rebuild command are in the benchmark report. This measures the process envelope,
+not complete workbook/server memory; end-to-end large-workbook measurement and
+an agreed budget remain open. Criterion reported outliers; no optimization
+threshold is claimed.
+
+`CARGO_TARGET_DIR=.local/target-style-memory cargo test --locked
+-p spreadsheet-xlsx` passed 17/17. This covers package bounds, malformed/hostile
+OOXML, parent IR validation, typed compatibility reporting, and deterministic
+style-aware export; it does not provide process memory isolation or merge support.
+
+Environment check: WSL reports not installed and `docker` is absent from PATH;
+Linux/Compose verification is unavailable in this Windows environment. Remote
+CI, production S3, deployment and production auth/sharing remain open.
+
+## 2026-10-02 — ADR-096 conservative durable merged cells (implementation)
+
+This entry supersedes the preceding “merge-range contract” entry's status-only
+statement. Implemented stable-ID rectangular merge state in the domain, guarded
+merge/unmerge events, canonical hash and snapshot schema6, storage schemas34/35,
+projection/schema validation, Canvas span/hit target, toolbar merge controls,
+and bounded OOXML read/write. Merge limits are 10,000 ranges/sheet,
+10,000 cells/range and 100,000 covered cells/sheet. Non-anchor content or style
+blocks merge; covered-cell writes and structural edits touching a merge are
+rejected. The additive migration `202610020005_merge_ranges.sql` was applied by
+the isolated local PostgreSQL app. Formula targets are unchanged.
+
+Verification on this Windows host:
+
+- `. .\scripts\env.ps1; $env:DATABASE_URL=(Get-Content .local/database-url -Raw).Trim(); $env:CARGO_TARGET_DIR='.local/target-merge'; $env:CARGO_INCREMENTAL='0'; $env:CARGO_PROFILE_TEST_DEBUG='0'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test --locked --workspace --all-features` passed. Storage: 100 passed / 4 ignored; codec: 64/64; XLSX: 20/20, with all other workspace unit/integration/doc test binaries passing. The ignored storage timing tests and S3 tests require separate release timing setup or credentials.
+- `. .\scripts\env.ps1; $env:CARGO_TARGET_DIR='.local/target-merge'; $env:CARGO_INCREMENTAL='0'; $env:CARGO_PROFILE_TEST_DEBUG='0'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` passed.
+- `cargo fmt --all` passed. `pnpm --filter @pxel/web test -- --run` passed 216/216; web typecheck, lint, `pnpm proto:check`, and production build passed. Production main JS bundle: 513.93 kB (Vite's 500 kB advisory threshold remains informational).
+- Against an isolated dev server on `127.0.0.1:18081` and Vite `:5181`, the first full `corepack pnpm --filter @pxel/web test:e2e` run executed 190 cases across Chromium DPR1/DPR2: 189 passed, with one overlapping Move Undo/Redo test timing out after 5 s on DPR1 (projection stayed v7 instead of v8). The same case passed on DPR2; the focused test passed 2/2 and `playwright test e2e/move-history.spec.ts -g "own overlapping move undo and redo" --repeat-each=5` passed 10/10. The complete browser suite was then rerun unchanged and passed 190/190 in 14.6 minutes at DPR1/DPR2. The first timeout was not reproduced; both full-run outcomes are retained here.
+- The focused merge browser command `corepack pnpm --filter @pxel/web exec playwright test e2e/styles.spec.ts -g "merged range is one hit target"` passed 2/2 on DPR1/DPR2. It verifies the covered cell maps to the anchor and the merge survives Undo, Redo and reload.
+- `. .\scripts\env.ps1; $env:CARGO_TARGET_DIR='.local/target-merge'; $env:CARGO_INCREMENTAL='0'; $env:CARGO_PROFILE_TEST_DEBUG='0'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test --locked -p spreadsheet-domain --test convergence -- --ignored --nocapture` passed the full seeded domain convergence test: 100 seeds × 1,000 commands × 3 replicas in 71.818 s. This does not replace cross-host/database/load stress.
+- Local Moto 5.2.3 was bound only to `127.0.0.1:5000` with a temporary bucket and dummy SDK credentials. `cargo test --locked -p spreadsheet-storage --features s3 --test s3_contract -- --ignored --nocapture` passed 8/8, covering readiness/missing object, streams and limits, checksums/metadata tampering, idempotent retry/conflict, concurrent conditional put and delete. Moto was stopped after the run; the eight cases remain ignored by the general workspace command because they need an explicit endpoint/bucket.
+- Existing whole-XLSX profile tests cover merge import/export. In addition, `cargo test --locked -p spreadsheet-xlsx --all-features` passed 20/20 after the final parser cleanup.
+
+The first full run exposed stale test expectations for snapshot schema5 and for
+unknown schema6; these were corrected to current schema6 and unsupported schema7,
+then the workspace rerun passed. Clippy first identified two style issues in
+the XLSX merge validator/parser; both were corrected and the strict rerun passed.
+The initial default-debug build exhausted remaining disk space after creating a
+19.9 GiB task-local Cargo target. Only that task-created target cache was cleaned;
+the final verification used no incremental artifacts/debug symbols and left
+about 17 GiB free. Only this task's isolated app processes were stopped.
+
+The browser upload gate remains blocked on OS sandbox and malware-scanning
+policy. Linux/Compose and remote CI could not be run because WSL/Docker are not
+available. Broad Excel golden compatibility, representative sparse-style memory budget and
+combined stress gates, production S3/deployment, and production auth/sharing
+remain open; this slice does not claim the entire MVP/roadmap is closed.
+
+## 2026-10-02 follow-up — merge crash and physical restore
+
+Extended the recovery helpers with `mergeRangeCommand` and proved that a stable-
+ID merged range survives a hard PostgreSQL stop and a physical backup restore.
+The existing dev server on `127.0.0.1:8080` held `target/debug/pxel-server.exe`,
+so it was left running; recovery tests now accept `PXEL_TEST_SERVER_BIN` to select
+an isolated binary. The isolated `.local/target-merge/debug/pxel-server.exe` was
+built with `cargo build --locked -p pxel-server --features dev-auth`.
+
+Command:
+
+```powershell
+. .\scripts\env.ps1
+$env:CARGO_TARGET_DIR = '.local/target-merge'
+$env:PXEL_TEST_SERVER_BIN = (Resolve-Path '.local/target-merge/debug/pxel-server.exe').Path
+node --test --test-concurrency=1 tests/recovery/postgres-immediate-stop.test.mjs tests/recovery/backup-restore.test.mjs
+```
+
+All three tests passed (3/3) in 33.8 s:
+
+- Immediate PostgreSQL stop after the commit at v4 recovered the merged v3
+  snapshot plus one journal-tail event. The restored current projection and
+  historical v3 both retained the exact stable-ID merge range and state hash.
+- Physical `pg_basebackup` plus `pg_verifybackup` restored v5 from snapshot v3
+  plus two journal-tail events. Its current projection and historical v3 retained
+  the merge, and the restored state hash matched the pre-backup ACK. A later
+  source-only v6 write did not leak into the restored database.
+- Named-point PITR restored exactly v4 from merged snapshot v3 plus the v4 tail,
+  excluding the later v5 write. Current projection and historical v3 retained
+  the merge and matched their pre-recovery hashes.
+
+The first crash-test revision added two extra writes and correctly observed a
+newer v5 snapshot with no tail to replay; that did not exercise the intended
+hard-stop-after-tail case. The fixture was reduced to one post-snapshot tail
+event, keeping the test's recovery assertion specific. A first rebuild into the
+locked shared `target/debug` also failed with Windows access denied; using the
+isolated target succeeded without stopping or overwriting the running server.
+
+## 2026-10-02 follow-up — Microsoft Excel OOXML golden profile
+
+Generated `fixtures/xlsx/excel-profile1.xlsx` from Microsoft Excel 16.0.20326.20158
+in an isolated COM process. The fixture contains two sheets, Unicode, quoted and
+multiline values, formulas, a merge, and the full 16-leaf style profile. The new
+golden test exercises both normalization and PXEL export/re-import. It exposed
+Excel's SpreadsheetML `_xHHHH_` character escapes: CR inside a cell is encoded as
+`_x000D_` before LF. The XLSX boundary now decodes these escapes (including
+surrogate pairs and the `_x005F_` literal-escape rule), normalizes cell CRLF/CR
+to LF, and leaves formula newlines untouched. Invalid surrogate pairs reject as
+an invalid package; lookalike non-hex text remains literal. No document content
+is included in logs.
+
+Verified on this Windows host:
+
+- `. .\scripts\env.ps1; cargo test --locked -p spreadsheet-xlsx --all-features excel_golden_tests:: -- --nocapture` passed 3/3, including the real Excel profile and escape-code unit tests.
+- `. .\scripts\env.ps1; cargo test --locked -p spreadsheet-xlsx --all-features` passed 23/23.
+- `. .\scripts\env.ps1; cargo clippy --locked -p spreadsheet-xlsx --all-targets --all-features -- -D warnings` passed.
+- `. .\scripts\env.ps1; cargo fmt --all` passed after applying formatting to the touched XLSX module.
+
+This is one bounded Excel-generated profile, not broad OOXML compatibility or
+Excel calculation/display parity. Browser upload remains gated on OS sandbox and
+malware scanning; Linux/Compose/remote CI, production and combined load gates
+remain open.
+
+## 2026-10-02 follow-up — Excel criteria golden and formula engine 0.15
+
+An isolated Microsoft Excel COM worksheet checked 15 `COUNTIF`, `SUMIF`,
+`COUNTIFS` and `SUMIFS` cases over a numeric value, numeric text, an actual blank,
+a formula returning `""`, a boolean, an error, and sum values. Results and exact
+workbook values are recorded in `fixtures/formulas/excel-criteria-2026-10-02.json`;
+metadata records Excel 16.0.20326.20158, Windows 11 Pro build 26100, en-US and
+the default 1900 date system. This produced two confirmed differences: Excel's
+`"<>"` includes formula-empty text but excludes an actual blank, while `"*"`
+does not match formula-empty text. The evaluator now distinguishes these cases.
+The preexisting shared corpus expectations for those two cases were updated but
+remain marked `verified_in_excel: false`; the separate golden fixture is the
+source of that evidence. Remaining criteria coercion, collation and locale rules
+are still provisional.
+
+Because calculation semantics changed, the server and browser calculation identity
+advanced from `pxel-formula-0.14.0` to `pxel-formula-0.15.0`. The existing
+version-mismatch path recalculates legacy contexts before publishing results; the
+`engine_upgrade_requires_a_new_persisted_context` test passed. No wire or journal
+schema changed.
+
+Verification on this Windows host:
+
+- `. .\scripts\env.ps1; cargo test --locked -p spreadsheet-formula` passed; all 144 formula unit/integration/property cases passed.
+- `. .\scripts\env.ps1; $env:CARGO_TARGET_DIR='.local/target-merge'; $env:CARGO_INCREMENTAL='0'; $env:CARGO_PROFILE_TEST_DEBUG='0'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test --locked --workspace --all-features` passed on the final code. Storage: 100 passed / 4 ignored; codec 64/64; XLSX 23/23; all other workspace test binaries and doc tests passed. The 10,000-event history boundary test took 71.49 s in this final run.
+- Strict workspace Clippy passed with `--all-features --all-targets -- -D warnings`; `cargo fmt --all --check` passed.
+- `. .\scripts\env.ps1; $env:CARGO_TARGET_DIR='.local/target-merge'; cargo check --locked -p spreadsheet-wasm --target wasm32-unknown-unknown` passed, confirming the updated evaluator builds for the browser worker.
+- `. .\scripts\env.ps1; node scripts/wasm.mjs; node tests/parity/formula.mjs` passed in Chromium. The parity harness compared 569 cases (including all 15 Excel goldens) across native Rust and the real WASM Worker; all expected results matched. One WASM load initialized the worker, and the negative missing-WASM fallback check also passed. Environment: Chromium 153.0.8010.12, Windows 11 build 26100, Intel Core Ultra 9 185H, Node 24.18.0. `.local/formula-parity.json` contains the measured timings.
+- Web Vitest passed 216/216, TypeScript typecheck and ESLint passed; production build and `pnpm proto:check` passed. Vite still reports its informational 500 kB chunk advisory (main JS 513.93 kB).
+
+Linux/Compose, remote CI, production and broad Excel parity remain open.
+
+## 2026-10-02 follow-up — formula 0.15 application verification
+
+Rebuilt the dev-auth server into `.local/target-merge` and used a temporary
+PostgreSQL 18 cluster, PXEL server, blob root and Vite instance under a unique
+`.local/engine-015-app-*` directory. The test runner allocated free loopback
+ports and shut down only the processes and cluster it created. Existing server
+processes, including the service on `127.0.0.1:8080`, were left untouched.
+
+The first full integration attempt exposed two regressions after ADR-095
+normalized MoveRange into `CellBatchWrite { intent: MoveRange }`: the durable
+history guard did not cancel the move and its compensation when checking an
+older formula undo, and `AxisHistory` did not advance its formula binding
+relocation floor. Fixed both classifiers to recognize the normalized intent,
+and added a Rust unit regression for stale delayed formula binding. The focused
+PostgreSQL cases then passed 2/2; the full integration suite passed 80/80 with
+the fix. `spreadsheet-collab` unit tests passed 32/32 (two documented benchmark
+tests ignored), and strict Clippy passed for `spreadsheet-collab` and
+`spreadsheet-storage`.
+
+Commands (server and Vite were launched on temporary free loopback ports by the
+ignored local harness; its temporary `DATABASE_URL` and random password were
+not printed):
+
+```powershell
+. .\scripts\env.ps1
+$env:CARGO_TARGET_DIR = '.local/target-merge'
+$env:CARGO_INCREMENTAL = '0'
+$env:CARGO_PROFILE_DEV_DEBUG = '0'
+cargo build --locked -p pxel-server --features dev-auth
+cargo fmt --all -- --check
+cargo test --locked -p spreadsheet-collab
+cargo clippy --locked -p spreadsheet-collab -p spreadsheet-storage --all-targets -- -D warnings
+corepack pnpm test:integration
+corepack pnpm --filter @pxel/web test:e2e
+```
+
+The PostgreSQL/WebSocket integration command passed 80/80 in 112.1 s on pinned
+local PostgreSQL 18.6. The focused normalized-move rerun passed 2/2 in 3.1 s;
+the first full run had failed those two before the fix (78/80). The full
+Playwright Chromium application suite against the isolated server passed
+190/190 across DPR1 and DPR2 in 14.7 minutes. This includes the
+clipboard/Markdown, smart scrollbar, resize/selection, shortcuts, Canvas focus,
+formula invalidation, history, formatting, XLSX download and formula 0.15
+application flows. `cargo fmt --all -- --check` passed. The engine 0.15 native/
+WASM parity and web unit/type/lint/build results above were also recorded after
+the identity change. These local Windows results do not close Linux/Compose,
+remote CI, production, controlled load, malware scanning or broad Excel
+compatibility gates.
+
+## 2026-10-02 follow-up — release PostgreSQL collaboration latency
+
+Ran the phase-3 real-database ACK and second-client visibility benchmark on a
+fresh isolated PostgreSQL 18.6 cluster and release `pxel-server`. The cluster
+used `synchronous_commit=on`, `fsync=on`, and `full_page_writes=on`; a unique
+loopback server port and document per measured run were used. Existing servers
+and databases were not contacted. The test performed 5 runs × (100 warm-up +
+1,000 measured) same-cell scalar writes and checked every committed version and
+second-client head notification. All 5,500 commands passed.
+
+Exact commands, executed from a PowerShell session on the pinned Windows host:
+
+```powershell
+. .\scripts\env.ps1
+$env:CARGO_TARGET_DIR = '.local/target-perf'
+$env:CARGO_INCREMENTAL = '0'
+$env:CARGO_PROFILE_RELEASE_DEBUG = '0'
+cargo build --locked --release -p pxel-server --features dev-auth
+& .\.local\run-collab-benchmark.ps1
+```
+
+The isolated runner selected temporary free loopback ports, initialized and
+migrated a new cluster, and stopped only its own server and PostgreSQL in its
+`finally` block. Node 24.18.0, Windows 11 build 26100, Intel Core Ultra 9 185H
+(22 logical CPUs), and 15.61 GiB available RAM were recorded. Benchmark result:
+the median of the five run-level ACK p95s was 10.077 ms (range 9.262–11.030 ms);
+the median second-client visibility p95 was 14.033 ms (range 12.718–15.669 ms).
+The complete 5,000-sample benchmark passed in 58.3 s. Full per-run p50/p95/p99
+values and topology limits are in
+[the benchmark report](docs/benchmarks/2026-10-02-collaboration-local.md).
+
+This is an optimized single-host loopback baseline for one scalar hot cell. It
+does not close production latency, multi-host/network, formula-heavy, browser
+rendering, or combined-load gates; the host was not CPU-isolated and this is not
+a production SLA.
+
+## 2026-10-02 follow-up — Excel shared-formula groups
+
+The XLSX worker previously rejected ordinary Excel shared-formula attributes.
+IR schema 3 now records each shared follower by its direct master coordinate;
+the server expands the formula using the existing `spreadsheet_formula` copy
+engine before binding. Exported workbooks contain independent formulas, so the
+storage optimization is not part of PXEL's document model. The committed Excel
+16 fixture covers three groups, mixed/absolute references, ranges and string
+literals. Its unrelated metadata and style features are reported and this
+compatibility test passes `--allow-loss` explicitly.
+
+Verification on this Windows host:
+
+```powershell
+. .\scripts\env.ps1
+$env:CARGO_TARGET_DIR = '.local/target-xlsx-shared'
+cargo fmt --all -- --check
+cargo test --locked -p spreadsheet-xlsx --all-features
+cargo test --locked -p pxel-server --features dev-auth
+cargo clippy --locked -p spreadsheet-xlsx -p pxel-server --features dev-auth --all-targets -- -D warnings
+. .\.local\verify-shared-xlsx.ps1
+```
+
+Results: 25/25 XLSX crate tests passed; 26/26 server unit tests and 3/3 XLSX
+worker CLI tests passed; strict Clippy passed. The focused real PostgreSQL
+integration passed: Excel fixture import, translated formula assertions, XLSX
+export and reimport with formulas intact. The runner used its own temporary
+loopback PostgreSQL cluster and server and stopped both in `finally`; it did not
+contact the existing app/database. The first integration attempt exposed a
+stale schema version in `export_projection`; that projection was bumped to IR
+schema 3 and the complete export/reimport check then passed. An earlier unit
+expectation was updated to compare canonical formula output, and the focused
+test runner was fixed to preserve the response body while reading exported
+bytes. These are resolved test/contract issues, not open failures.
+
+This is narrow shared-formula coverage. Browser upload remains gated on process
+sandboxing and malware policy, and broad OOXML compatibility/resource isolation
+remain open.
+
+## 2026-10-02 follow-up — sparse-style memory reference budget
+
+Added `scripts/verify-style-memory.ps1`. It builds the existing release probe,
+measures 100,000-axis-address and 100,000 mixed-full-style processes three times
+each, and samples private bytes/working set 100 times per process. The script
+fails if median incremental private bytes exceed a 16 MiB Windows reference
+budget. That threshold gives roughly 29% headroom over the first 12.35 MiB
+incremental measurement; it is not a production or cross-platform cap.
+
+Executed with `. .\scripts\verify-style-memory.ps1` on Windows 11 build 26100,
+Intel Core Ultra 9 185H, 22 logical CPUs. The three-run medians were 8.09 MiB
+private / 9.54 MiB working set for axis-only and 20.49 MiB private / 21.55 MiB
+working set with mixed full styles. Incremental private bytes were 12.40 MiB,
+under the 16 MiB threshold. Criterion timings and limitations remain in
+[`docs/benchmarks/2026-10-02-sparse-style-local.md`](docs/benchmarks/2026-10-02-sparse-style-local.md).
+The model excludes workbook/server/PostgreSQL/browser overhead. A focused local
+combined-stress run partially closes the DB/network/load gate:
+
+```powershell
+corepack pnpm exec node --test --test-concurrency=1 tests/performance/combined-stress.test.mjs
+```
+
+On a fresh isolated PostgreSQL-backed debug app, the test passed 600 sequential
+30,005-byte same-cell writes, 120 concurrent HTTP reads, 600 second-client
+durable notifications, and bounded disconnection of a paused subscriber. All
+committed versions reached 601. Loopback HTTP read p50/p95/max was
+21.75/40.63/181.12 ms, durable ACK was 21.54/35.49/161.46 ms, and second-client
+visibility was 29.14/44.60/180.68 ms. Test duration was 37.82 s (38.03 s process
+duration). Full setup, values and limitations are in
+[`docs/benchmarks/2026-10-02-combined-stress-local.md`](docs/benchmarks/2026-10-02-combined-stress-local.md).
+Formula-heavy, multi-document, release, network-impairment, Linux and production
+stress remain open.
+
+## 2026-10-02 follow-up — XLSX parser adversarial boundary regressions
+
+Added focused adversarial tests around the existing ZIP/XML parser bounds without
+changing production parsing behavior. They construct test-only packages for a
+high-expansion-ratio DEFLATE entry, the 257th archive entry, case-insensitive
+duplicate part names, a real ZIP symlink entry, XML nesting beyond depth 64, and
+129 attributes on one XML element. Existing tests continue covering DTD,
+external relationships, traversal, unknown entities and expanded shared-string
+budgets. A first symlink test used Unix permission bits only; inspection of the
+`zip` writer API showed it did not encode the file type, so the test was corrected
+to use its explicit `add_symlink` API before counting as valid coverage.
+
+Executed on Windows 11 using the isolated `.local/target-xlsx-shared` target:
+
+```powershell
+. .\scripts\env.ps1
+$env:CARGO_TARGET_DIR = '.local/target-xlsx-shared'
+cargo fmt --all
+cargo test --locked -p spreadsheet-xlsx --all-features
+cargo clippy --locked -p spreadsheet-xlsx --all-features --all-targets -- -D warnings
+cargo fmt --all -- --check
+```
+
+Results: XLSX crate tests passed 29/29, strict crate Clippy passed, and formatting
+check passed. These are generated boundary regressions, not a broad third-party
+hostile workbook corpus. They do not demonstrate hard CPU/RAM/process limits or
+OS filesystem/network isolation; browser upload remains gated on those controls,
+malware-scanning policy and a complete import report. Linux/Compose/remote CI,
+large-workbook and production import-load verification remain open.
+
+## 2026-10-02 follow-up — XLSX worker process-tree termination
+
+The timeout path previously killed only the direct Tokio child, leaving a
+descendant able to outlive the worker and hold inherited pipes open. Added the
+pinned `process-wrap` 10.0.1 Tokio adapter. Windows uses its suspended-create,
+Job Object assignment and resume sequence with kill-on-close; Unix workers join
+a new process group. `WorkerProcessGuard` synchronously requests tree termination
+on cancellation, and explicit timeout/protocol cleanup terminates and waits for
+the wrapped tree. The worker framing and parent IR validation are unchanged.
+
+A test launches a same-executable descendant that inherits stdout, waits for a
+readiness line, terminates the process tree, and requires EOF on the pipe. The
+targeted Windows test passed. Full
+`cargo test --locked -p pxel-server --features dev-auth` passed 27/27 unit tests and 3/3 worker CLI tests; strict
+all-target Clippy passed. `cargo fmt --all -- --check` passed. The first compile
+attempt caught using Tokio Child fields/method futures through the new wrapper;
+the code now takes streams through `ChildWrapper` and uses its pinned wait future.
+
+This adds process-tree lifecycle control only. It does not configure hard Job
+Object memory/CPU limits, cgroups, filesystem/network restrictions, private
+input staging or descriptor limits. Linux runtime verification, malware-scanning
+policy and full import reports are still required before browser upload; broad
+hostile corpus and production stress gates also remain open. Contract details:
+[ADR-099](docs/adr/099-xlsx-worker-process-tree.md).
+
+## 2026-10-02 follow-up — versioned cell text overflow
+
+Extended the canonical 16-leaf style model with Clip, Wrap and Overflow while
+preserving legacy profile-1 boolean `wrap`. Durable property tag 15 is unchanged;
+new overflow state is encoded as profile 2, and old style hashes retain their
+bytes. Wire, storage event/snapshot readers and projections accept their prior
+profile. The browser maps legacy projections and writes the new `text_overflow`
+leaf through the existing guarded style operation, including range mixed state
+and Undo/Redo.
+
+Canvas Overflow paints text across visible, empty, default-style neighbor cells
+with left/general alignment. Authored content (including a formula with an
+empty displayed result), a style, or a merge stops the span. Optimistic display
+is also checked: the first blocker attempt exposed a gap where a formula-bar
+draft had changed the visible signature but not yet entered `DocumentStore.value`;
+after server confirmation the visible signature was unchanged, so the dirty path
+could miss the stale spill. The renderer now checks both the authored value and
+current display. It invalidates old and new spans, clears downstream cells,
+then paints the source. No projection or formula protocol changed. The existing
+bounded XLSX profile can encode `wrapText` only, so it does not round-trip PXEL's
+distinct Clip versus Overflow choice; wider XLSX compatibility remains open.
+
+Commands run:
+
+```powershell
+. .\scripts\env.ps1
+cargo test --locked -p spreadsheet-domain --test style
+cargo test --locked -p spreadsheet-wire-protocol
+cargo test --locked -p spreadsheet-storage-codec
+cargo test --locked -p spreadsheet-wasm --test styles
+$env:CARGO_TARGET_DIR = '.local/target-merge'
+cargo build --locked -p pxel-server --features dev-auth
+node scripts/wasm.mjs
+corepack pnpm --filter @pxel/web test
+corepack pnpm --filter @pxel/web lint
+corepack pnpm --filter @pxel/web build
+corepack pnpm proto:check
+corepack pnpm --filter @pxel/web exec playwright test e2e/styles.spec.ts
+```
+
+The last command was executed through the local isolated-app harness
+`.local/verify-engine-015-app.ps1 -Styles`, with the target directory set as
+above; it creates and tears down its own PostgreSQL cluster and local app
+processes.
+
+Executed focused Rust checks on Windows 11: domain style 8/8, wire protocol
+12/12, storage codec 65/65 and WASM preview 8/8. The browser WASM artifact was
+rebuilt with `node scripts/wasm.mjs` (engine 0.2.129). Frontend Vitest passed
+218/218; ESLint, TypeScript/production build and `proto:check` passed. The
+complete formatting Playwright file passed 20/20 on Chromium DPR1/DPR2 against
+a fresh temporary PostgreSQL cluster and an isolated server/Vite pair. It
+includes the new pixel check: text reaches B1/C1, stops at occupied B1, returns
+after Undo, survives reload, and stops overflowing after style Undo. The
+isolation script stopped only its own PostgreSQL/server/Vite processes.
+
+Three preliminary browser failures informed the final fix: the default E2E URL
+reached an already running old server binary that did not know style profile 2;
+the first isolated run found a stale generated WASM artifact; and the first
+authored-value-only blocker check missed the optimistic formula-bar draft. The
+old service was left untouched. After building the current server in
+`.local/target-merge`, rebuilding WASM and checking both authored value and
+optimistic display, the focused regression passed 2/2 and the full formatting
+suite passed 20/20.
+
+The roadmap removes completed smart-scrollbar, Markdown composite style and
+text-overflow items from the open-task list. Versioned dependency-scoped
+calculation delivery is now implemented in ADR-100. Full-state hashing and
+snapshot fallback remain linear in the number of formula results.
+
+## 2026-10-02 follow-up — version-guarded calculation delta stream
+
+The evaluator's `CalculationPatch` now reaches the collaboration state and
+WebSocket response with its changed/cleared addresses, evaluated formula count,
+and dirty-set size. `RequestCalculation.base_input_version` is optional and
+advisory: the server emits a delta only when it equals the calculation worker's
+exact prior calculated version; absent, stale, rebuilt or skipped bases receive
+a complete snapshot. Ordered chunks retain the 256 KiB frame limit, repeat
+uniform base/metrics metadata, and carry the full calculated-state hash only on
+the final successful chunk. A delta cell without a value clears a removed
+formula result.
+
+The browser keeps the last confirmed cache while a new head is pending, sends
+that cache's version as its requested base, and stages patches without changing
+the displayed map. It rejects stale bases, duplicate addresses, mixed chunk
+metadata, clears for active formulas, malformed empty values, missing formula
+results and cached keys that are no longer formulas. The staged result set is
+published only after the complete current formula set validates. Server
+calculation errors always use full error frames. Older clients omit the base
+and continue to receive full snapshots.
+
+On a synthetic 10,000-result stream with one changed result and one clear, the
+encoded delta was 255 bytes and the full snapshot was 690,250 bytes across three
+bounded frames (2,706.9x smaller). This measures wire transfer only. The server
+still hashes the complete result map and retains it for snapshot fallback, so
+this stage does not claim sublinear hashing or faster cache-miss recovery.
+
+Checks run on Windows 11:
+
+- `cargo test --locked -p pxel-server --features dev-auth calculation_stream::tests::` — 3/3.
+- `cargo test --locked -p spreadsheet-collab queued_versions_coalesce_without_losing_dependency_updates` — 1/1.
+- `cargo test --locked -p spreadsheet-formula --test calculation changing_one_of_ten_thousand_independent_inputs_evaluates_one_formula` — 1/1.
+- `cargo test --locked -p spreadsheet-wire-protocol` — 12/12, including optional-base validation.
+- `corepack pnpm --filter @pxel/web test` — 221/221.
+- `corepack pnpm --filter @pxel/web lint`, TypeScript/production build and `corepack pnpm proto:check` — passed. Vite retains its existing advisory for the 519 kB application chunk.
+- The isolated-app harness ran the complete Chromium suite against temporary PostgreSQL/WebSocket services: 192/192 on DPR1/DPR2. After the final protocol guards, the targeted formula case passed 2/2 on DPR1/DPR2.
+- `cargo fmt --all -- --check` — passed after applying workspace rustfmt.
+
+The targeted harness stops only its own temporary PostgreSQL/server/Vite
+processes. The existing local service was not used or modified. Linux,
+Compose/remote CI and production deployment gates remain open as recorded in the
+project contract.
+
+## 2026-10-02 follow-up — Excel numeric literal precision
+
+An isolated Microsoft Excel COM capture found that Excel normalizes formula
+numeric constants to at most 15 significant decimal digits before evaluation.
+For example, Excel rewrites `=ROUNDUP(1.0000000000000002,0)` to
+`=ROUNDUP(1,0)`, returning `1` where PXEL previously returned `2`. The 26-case
+fixture also covers selected ROUND/ROUNDUP/ROUNDDOWN cases, integer precision,
+scientific notation and one subnormal-scale decimal. Excel build, locale and
+normalized formula text are recorded in
+`fixtures/formulas/excel-number-precision-2026-10-02.json`.
+
+The formula lexer now zeroes mantissa digits beyond the 15th significant digit
+before binary64 parsing; numeric cell values and computed results are unchanged.
+The formula engine identity is `pxel-formula-0.16.0`, so persisted `0.15.0`
+calculation contexts use the existing durable epoch migration path. No AST,
+operation, wire or storage schema changed. One observed tiny result differs by
+1 ULP; its Excel fixture alone allows absolute tolerance `1e-30`.
+
+The first targeted parity run found a one-ULP mismatch in the native fixture
+runner: it parsed and reserialized evaluator JSON through `serde_json::Value`.
+The runner now preserves the raw JSON value, so it does not alter a floating
+result before comparison. This only changes the test harness.
+
+Checks run on Windows 11:
+
+- Excel COM capture via `scripts/capture-excel-number-precision.ps1` — 26
+  observations recorded from Microsoft Excel for Microsoft 365 build
+  `16.0.20430.20092`, locale `en-US`.
+- `cargo test --locked -p spreadsheet-formula --quiet` — 145/145 passed.
+- `corepack pnpm --filter @pxel/web exec vitest run src/calculation/client.test.ts src/document/store.test.ts` — 139/139 passed.
+- `corepack pnpm --filter @pxel/web lint` and `typecheck` — passed.
+- `corepack pnpm --filter @pxel/web build` — passed; Vite retains its existing
+  advisory for the 519 kB application chunk.
+- `node scripts/wasm.mjs` — rebuilt Rust/WASM bindings (0.2.129).
+- `node tests/parity/formula.mjs` — 595/595 native and browser Worker results
+  agreed, including 15 Excel criteria and 26 Excel numeric cases. This is the
+  targeted browser Worker parity harness; the full Playwright E2E suite was not
+  run for this formula-only change.
+- `cargo fmt --all -- --check` and `git diff --check` — passed.
+
+The fixture covers only observed numeric literal and selected rounding behavior;
+general Excel floating-point parity and the wider numeric compatibility profile
+remain open.
+
+## 2026-10-02 security slices — authenticated storage and KEK rotation
+
+Implemented ADR-102 and ADR-103: the used application KeyProvider port, explicit
+private keyring configuration, independent document DEKs, authenticated
+XChaCha20-Poly1305 envelopes, durable nonce reservations, encrypted journal
+payloads/fingerprints/hashes, encrypted snapshots before BlobStore, and protected
+export preparation metadata. Existing candidate validation, CAS and durable
+commit ordering are retained. Runtime rejects legacy plaintext; migration must
+use a separate destination cluster. KEK rotation resumes durable per-wrapper
+progress and changes no document ciphertext or versions.
+
+Verification uses a dedicated, private PostgreSQL 18.6 cluster under
+`.local/crypto-verification`, with its own URL file, keyring, and loopback port.
+The original development service is not the test target. Load `scripts/env.ps1`
+first, then explicitly override DATABASE_URL from the isolated URL file under
+`$ErrorActionPreference='Stop'`. Set PXEL_KEYRING_FILE to its private keyring,
+CARGO_TARGET_DIR to `.local/target-merge`, SQLX_OFFLINE to `false`, and test with
+two threads to bound database load. Never print those configuration contents.
+
+Executed Windows results so far:
+
+- Crypto tests: 12/12 passed, including wrong key/AAD/header, durable aborted
+  reservations, forced collision/retry/concurrency, limits, workspace binding,
+  retained generations and private Windows file permissions.
+- Rotation tests: 4/4 passed, including unchanged ciphertext, interrupted resume,
+  absent target without mutation and exclusion of an active writer.
+- Snapshot tests after the final fix: 5/5 passed with the default Rust test stack.
+- STREAM archive adapter tests: 4/4 passed, including boundary round trips,
+  nonce consumption on output failure, header/body tampering, reordered/removed
+  frames, truncation, missing final tag, trailing bytes and wrong keys.
+- The new journal at-rest/authentication regression passed. Combined storage,
+  server, SQLx and dependency audit gates are still in progress.
+
+Independent crypto review found and corrected error-path keyring zeroization
+and missing authoritative workspace binding. Windows keyring fixture setup was
+corrected to avoid inherited incompatible PowerShell module paths and SACL
+privileges; the production private-file check now passes positive and negative
+tests. The user chose to continue with this review without an external-model CLI.
+
+Earlier verification attempts are retained as failures: an isolated-cluster
+startup script had not finished when a URL-file read failed, leaving the old
+development URL inherited from env.ps1. Migration 006 was inadvertently applied
+to that original schema. Before any encrypted records were inserted, a schema
+backup was saved and a checked transaction removed only migration 006 objects
+and restored its previous constraints/migration record. Original document data
+was not rewritten. Subsequent commands use a failing guard and explicit isolated
+configuration. Native pg_ctl process waiting was corrected to wait for the
+launcher rather than its postmaster descendants.
+
+An initial combined run exhausted the disk (PostgreSQL 53100); its failures do
+not count as correctness results. Reproducible old formula/collaboration Cargo
+artifacts were removed through `cargo clean -p`, freeing about 10 GiB, and the
+isolated cluster recovered its WAL. The next run exposed a Windows async-stack
+overflow in snapshot recovery. Large futures are now boxed, and complete blob
+publication/cleanup lifetimes hold the shared maintenance fence with keepalives.
+Focused snapshot verification then passed at the unchanged default stack size.
+
+The implementation and focused local tests for backup, restore barriers, offline
+migration, guest shares, revocation, encrypted comments and sharing UI are present.
+Encrypted recovery, immediate-stop and named-point PITR drills passed locally; a
+representative legacy-cluster migration remains open. Production owner authentication, distributed maintenance, Linux/
+Compose/remote CI and target S3 remain open. Attachments and disk export caching
+remain absent; their future encryption contract is documented without a completion claim.
+
+## 2026-10-03 security acceptance follow-up
+
+Fixed three defects found while exercising the new guest flow against the private
+Windows PostgreSQL 18.6 acceptance cluster. Axum's extracted `Bytes` may be shared,
+so `try_into_mut()` rejected valid secret-bearing JSON bodies; parsing now copies
+into an owned `Zeroizing<Vec<u8>>`, and a regression test uses a shared `Bytes`
+reference. Guest-session insertion hashed the raw 32-byte token while subsequent
+authentication hashed its cookie's hexadecimal text; both now hash the same text
+representation. The dev-auth loopback cookie omits `Secure` only under the explicit
+runtime/compile-time development mode; non-development cookies retain `Secure`.
+Finally, the guest projection intentionally sends `last_axis_change_version="0"`
+to hide historical axis metadata; the browser decoder now accepts zero as the
+no-known-axis-change sentinel while still bounding it by the document head.
+
+The real Chromium scenario creates a comment-only PIN link, opens it in a clean
+guest context, confirms edit/share controls are unavailable, adds a comment,
+revokes the link and verifies that the idle guest is closed. It passed on DPR1 and
+DPR2. The flow exposed the body parser, token-hash, and projection metadata issues
+before this pass. The test waits for the guest projection's comments control after
+the connection indicator because the WebSocket welcome precedes the HTTP snapshot.
+
+Final Windows checks against the isolated acceptance database/keyring:
+
+- `just check` passed Rust formatting, both workspace Clippy profiles, all-features
+  Rust workspace tests (storage: 148 passed, 4 ignored), default build, wasm32 and
+  proto checks. It stopped at global `pnpm format:check`: 24 files elsewhere in the
+  already-dirty workspace need formatting. No unrelated files were reformatted.
+- Separate server unit run: 49/49. Web Vitest: 232/232; lint, typecheck and
+  production build passed. Sharing Playwright: 2/2 (Chromium DPR1/2).
+- `just sqlx-check`, `just audit` and scoped Prettier over server/web/security docs
+  passed. Audit reported no known vulnerabilities; cargo audit retained one allowed
+  yanked `yoke-derive 0.8.3` warning. Build retains the existing 551 kB Vite chunk
+  warning.
+- The previous failure before the fresh run was Clippy's `items_after_test_module`
+  on the new request-body test; moving it to the end of `shares_api.rs` fixed it.
+
+The test stack was stopped after browser verification. Local acceptance DB fixtures
+remain in the ignored `.local/crypto-verification` area; no production service or
+database was touched. Global formatting has not passed because unrelated dirty
+files remain. The separate-cluster migration CLI smoke test passed after this
+earlier run; representative legacy migration and open deployment gates remain
+unpassed.
+
+## 2026-10-03 encrypted backup recovery verification
+
+Completed the encrypted physical-recovery gate against the isolated private
+Windows PostgreSQL 18.6 fixture. The end-to-end test
+`tests/recovery/encrypted-storage.test.mjs` passed: it committed journal data,
+created and authenticated the encrypted PostgreSQL+blob bundle, rejected
+tampered, truncated and wrong-key archives, restored the snapshot plus Undo tail,
+verified the recovered head, activated a fresh write generation, and rotated it.
+The restored cluster was stopped before its stage became complete. The existing
+plaintext physical backup/restore, named-point PITR and immediate-stop drills also
+passed earlier in this verification window; they remain separate test gates from
+the encrypted archive test.
+
+The encrypted test exposed Windows-only recovery issues that are now covered by
+regressions: PostgreSQL utilities need the canonical path without the Windows
+extended prefix to locate sibling tools; `pg_verifybackup` needs its pinned
+`pg_waldump` on the isolated PATH and `ComSpec`; protected directory handles must
+allow writes to directory contents while continuing to deny directory deletion;
+and an extracted `postgresql.auto.conf` must be quarantined without renaming inside
+the held data-directory guard. Recovery now preserves that file privately, writes
+a comment-only replacement, and bounds it at 1 MiB. `pg_ctl start` hands its
+postmaster to the explicit recovery lifecycle rather than killing it with the
+short-lived launcher. The private recovery config suppresses statement and
+parameter logs; PostgreSQL startup stderr remains in the private staging log.
+
+Final affected-code results:
+
+- `rustfmt --edition 2024 --check apps/server/src/storage_maintenance.rs apps/server/src/storage_restore.rs` — passed.
+- `cargo clippy -p pxel-server --all-targets --features dev-auth -- -D warnings` — passed.
+- `cargo test -p pxel-server --bin pxel-server` — 46/46 passed, including the
+  extended-path and protected-directory auto-config quarantine regressions.
+- `node --test tests/recovery/encrypted-storage.test.mjs` — 1/1 passed in 79.0 s.
+- `node --test --test-concurrency=1 tests/recovery/postgres-immediate-stop.test.mjs tests/recovery/backup-restore.test.mjs tests/recovery/pitr-restore.test.mjs` — 3/3 passed in 62.1 s.
+- `cargo test -p pxel-server --features legacy-migration --test storage_migration_cli` — 5/5 passed. These are configuration and refusal tests; they do not count as a representative legacy data migration.
+- `cargo test -p spreadsheet-storage --features legacy-migration --lib legacy_migration::tests:: -- --test-threads=2` — 5/5 passed against the isolated acceptance PostgreSQL. The fixture moved authored history, an active snapshot, a rejected missing blob, and export audit into encrypted target storage; verified the rollback archive nonce reservation; and checked failure barriers, same-cluster refusal and nonempty-target refusal.
+
+The first all-features unit-test attempt inherited the development URL from
+`scripts/env.ps1`; the auth fixture correctly stopped at the database's missing
+write-generation activation before issuing a session. No session or document was
+written. The test was rerun with explicit `.local/crypto-verification` acceptance
+URL and keyring. Both gates passed:
+
+```powershell
+cargo clippy -p pxel-server --all-targets --all-features -- -D warnings
+cargo test -p pxel-server --bin pxel-server --all-features
+```
+
+The all-features tests passed 52/52. The legacy-storage tests create their own
+temporary databases in the isolated acceptance cluster; their default migration
+fixture uses the explicit same-cluster test seam. The separate-cluster acceptance
+below runs this content-bearing fixture through the actual `storage migrate-legacy`
+CLI between two physical clusters, including rollback recovery and post-restart
+verification. It uses synthetic legacy content and does not claim a representative
+frozen-service migration. The isolated acceptance cluster is local test data, not
+production.
+
+The repeatable separate-cluster runner first exercises the storage API and then
+the actual CLI, each against its own empty database on a distinct target cluster.
+The API pass also checks authored undo history. Both passes use a content-bearing
+source with three journal operations, an active snapshot, a rejected missing
+snapshot object, ACL and audit metadata, and one export audit. The actual CLI created and authenticated the
+encrypted PostgreSQL+blob rollback archive, recovered it into an isolated third
+cluster, migrated into a fresh physically distinct target, restarted the target
+read-only, and verified the migrated contents against the source. The test checked
+the exact report (1 document, 3 journal records, 2 snapshot records, 1 export
+audit, 11 metadata rows, 1 missing inactive blob), head version, encrypted
+fingerprints/payloads, snapshot ciphertext and the rejected tombstone. No
+production service or data was used. A representative legacy database and a real
+stopped-service maintenance window remain open gates, along with Linux/Compose/
+remote CI, distributed maintenance, target S3 and deployment
+verification.
+
+The repeatable runner is `tests/recovery/legacy-migration-separate-clusters.ps1`.
+It initializes private PostgreSQL 18.6 source and target clusters, uses two
+independent target databases for API/CLI and a third recovery port. An initial run refused because `.local/database-url` has broad ACLs;
+the runner now supplies private fixture secret-file paths. The successful run
+removed its temporary cluster fixture. The content-bearing CLI pass now keeps
+stdout and stderr in private temporary files and rejects the synthetic cell
+marker or source/target/recovery database URLs in either stream; the latest
+separate-cluster run passed with this scan enabled.
+
+Final checks after removing temporary diagnostics and formatting the affected
+Rust source:
+
+- `rustfmt --edition 2024 --check apps/server/src/storage_maintenance.rs apps/server/src/storage_restore.rs apps/server/src/storage_migration.rs` — passed.
+- `cargo clippy -p pxel-server --all-targets --all-features -- -D warnings` — passed.
+- `cargo test -p pxel-server --bin pxel-server --all-features` — 52/52 passed against the isolated acceptance database/keyring.
+- `corepack pnpm exec prettier --check RUNBOOK.md docs/roadmap.md docs/adr/105-offline-legacy-migration.md` — passed.
+- `git diff --check` — passed (Git emitted only existing CRLF normalization warnings for unrelated dirty files).
+- `tests/recovery/legacy-migration-separate-clusters.ps1` — passed: content-bearing CLI migration across physical clusters, encrypted rollback recovery, and post-restart verification.
+- `cargo test -p spreadsheet-storage --features legacy-migration --lib legacy_migration::tests:: -- --test-threads=2` — 5/5 passed.
+- `cargo clippy -p spreadsheet-storage --all-targets --features legacy-migration -- -D warnings` — passed.
+
+## 2026-10-03 — full Windows acceptance after security slices
+
+The previous workspace check stopped at global Prettier because 25 already
+modified source, fixture, test and documentation files were not formatted. Ran
+Prettier only on those reported files; global `pnpm format:check` then passed.
+The full check also exposed two environment requirements: server auth tests need
+the isolated acceptance database/keyring with active write generations, and the
+SQLx PostgreSQL harness must stay below its shared 20-connection limit. The
+successful run used `.local/crypto-verification/acceptance-database-url`, its
+private `keyring.json`, `CARGO_TARGET_DIR=.local/target-merge` and
+`RUST_TEST_THREADS=2`. Credentials were read from private files and not printed.
+
+Using a non-default Cargo target directory also exposed that `scripts/wasm.mjs`
+read the generated release artifact from hard-coded `target/` even though Cargo
+honored `CARGO_TARGET_DIR`. The script now resolves the WASM artifact under the
+configured target directory. `node --check scripts/wasm.mjs` and a real binding
+generation using `.local/target-merge` passed.
+
+The final local acceptance passed:
+
+- `just check` — passed formatting, both all-target Clippy profiles, all-feature
+  workspace tests, build, wasm32, proto check, global Prettier, web lint,
+  typecheck, 232 Vitest tests and production build. Storage passed 148 tests;
+  four benchmark/timing cases were intentionally ignored. Vite still reports its
+  informational 551 kB main-chunk warning.
+- `just sqlx-check` — passed with the complete workspace/all features.
+- `just audit` — passed. `cargo deny` reports existing duplicate-version warnings;
+  `cargo audit` reports the allowed yanked `yoke-derive 0.8.3`; pnpm audit found
+  no known vulnerabilities.
+- Chromium share E2E — `e2e/sharing.spec.ts` passed 6/6 at DPR1 and DPR2. It
+  verified guest unlock and revocation, server expiry display, PIN paste across
+  six cells, keyboard TTL/ARIA behavior, dialog focus containment and return,
+  separate link/PIN clipboard copies, required indefinite confirmation and
+  warning/badge styling, light/dark system palettes, and no external HTTP(S)
+  asset requests. The added sharing cases passed web lint, typecheck and all
+  232 Vitest tests.
+- Encrypted physical recovery — `node --test tests/recovery/encrypted-storage.test.mjs`
+  passed 1/1 in 74.7 s: archive authentication, tamper/truncation/wrong-key
+  rejection, recovery of snapshot plus Undo tail, fresh write lineage and KEK
+  rotation.
+- Plaintext physical backup/restore, named-point PITR and immediate-stop recovery
+  — 3/3 passed in 64.4 s.
+- Content-bearing legacy migration — the separate-cluster Storage API and actual
+  CLI runner passed; see the preceding migration record for exact counts and
+  rollback recovery details.
+
+The temporary development server was stopped after the browser run. WSL/Linux,
+Docker/Compose and a Git remote are unavailable on this host; Linux/Compose/
+remote-CI verification, target S3, distributed maintenance, a
+representative frozen-service legacy database and its real maintenance window
+remain open. Production owner authentication remains a future roadmap stage.
+Chrome DevTools MCP page inspection did not respond in this session; the listed
+browser result comes from the real Chromium Playwright run, not DevTools inspection.
+
+The live package integration suite was rerun with the development stack active on
+its documented ports, using the same isolated acceptance database and keyring:
+`corepack pnpm test:integration` passed 80/80. This includes health/security
+headers, dev-auth/session checks, document/formula/history/move behavior and
+three seeded WebSocket/PostgreSQL convergence scenarios with 100 committed writes
+each. An earlier invocation while the stack was stopped was not a product failure;
+these package tests target an already-running server. The local stack was stopped
+after the successful run.
+
+The optional S3 HTTP contract was rerun against Moto 5.2.3 bound to loopback with
+a dedicated synthetic bucket and dummy SDK credentials: `just s3-contract`
+passed 8/8 (streaming, limits, metadata/body tampering, checksums, idempotent
+retry/conflict, conditional concurrent put and delete). Moto was stopped after
+the run. This validates the adapter contract against Moto only; no selected
+production S3 endpoint or Garage deployment was available. `just
+share-log-redaction` then built and launched a separate loopback dev-auth server,
+created PIN- and password-protected links, attempted a wrong secret, unlocked
+each link, revoked them and scanned captured application stdout/stderr. The
+generated member/guest cookies, PINs, passwords, wrong guesses, link tokens,
+URLs and a committed synthetic cell value were absent. The script creates
+secrets in process memory and emits only a pass/fail summary. With
+`PXEL_TEST_POSTGRES_LOG` set to the isolated cluster's `postgres.log`, the test
+also scanned the bytes appended during the scenario; no canaries appeared.
+The live settings were `log_statement=none`, `log_min_duration_statement=-1`
+and `log_parameter_max_length_on_error=0`. The encrypted WAL CLI integration
+also asserts that archive, retry, valid restore, replacement and tampered-restore
+stdout/stderr never contain the full synthetic WAL segment; `cargo test -p
+pxel-server --features dev-auth --test
+storage_maintenance_cli wal_archive_cli_is_authenticated_idempotent_and_never_publishes_bad_plaintext
+-- --ignored --exact` passed 1/1. These local checks do not scan a production
+PostgreSQL deployment or every maintenance CLI invocation.
+
+## 2026-10-03 — encrypted S3 snapshot hard-restart acceptance
+
+`just s3-encrypted-snapshot` passed against Moto 5.2.3 on loopback with an
+isolated acceptance database, keyring, synthetic bucket and dummy SDK
+credentials. The test writes a styled workbook, confirms the S3 object itself
+is the AEAD envelope (without the local filesystem adapter's outer framing),
+and checks its stored byte count and ciphertext checksum against PostgreSQL.
+The synthetic style marker is absent from object bytes. After an immediate
+server hard stop, restart recovers the active snapshot and its tail events;
+undo/redo receipts remain valid. The same recovery test passed against the
+local filesystem adapter. Moto was stopped after the run. No production S3
+endpoint or Garage target was configured, so those remain unverified.
+
+## 2026-10-03 — PostgreSQL fixture concurrency in Linux CI
+
+The combined local suite previously required `RUST_TEST_THREADS=2` because
+SQLx-backed tests share the acceptance PostgreSQL server's 20-connection cap.
+The GitHub Actions job now sets both `RUST_TEST_THREADS=2` for libtest and
+`NEXTEST_TEST_THREADS=2` for the separate nextest gate. `actionlint
+.github/workflows/ci.yml` passed. The exact CI nextest command was run locally
+against the isolated acceptance database/keyring: 652 passed, 16 skipped, with
+one expected slow 10,000-event boundary test; elapsed test time was 251.9 s.
+The updated workflow has not run remotely because this checkout has no Git
+remote. WSL is not installed and Docker is unavailable here, so the Ubuntu/
+Compose job itself remains an external verification gate.
+
+## 2026-10-03 — encrypted PostgreSQL named-point PITR CLI
+
+Extended the encrypted backup CLI with private WAL archive and restore commands,
+then changed `tests/recovery/pitr-restore.test.mjs` to exercise the real encrypted
+physical base plus encrypted WAL objects. Each WAL object has an authenticated
+manifest binding its canonical PostgreSQL filename, byte length and SHA-256;
+retries decrypt and compare the source before treating an existing archive as
+idempotent. Restore authenticates the full envelope before writing to the private
+cluster. PostgreSQL 18 on Windows passes `RECOVERYXLOG` and `RECOVERYHISTORY` as
+`%p` basenames instead of the requested `%f`; the helper accepts these exact
+reserved names only for the matching WAL/history object kind, while the
+encrypted manifest remains bound to `%f`. Existing private WAL target files are
+replaced only after successful authentication and synced before the restore
+command succeeds. The private restore waits up to 30 seconds for the restored
+database pools to accept connections.
+
+The first runs exposed and fixed the Windows temporary-name behavior and a
+readiness race. The full PITR test passed 1/1 in 92.5 s on the isolated local
+Windows PostgreSQL 18.6 fixture. It verified v4 head/hash and exact authenticated
+ciphertext, historical v3, snapshot v3 plus one v4 replay event, and exclusion
+of the later committed v5. The separate WAL CLI integration test passed 1/1 in
+6.18 s with the acceptance database's matching keyring: encrypted output did not
+contain the synthetic marker, archive retry preserved ciphertext, restore
+replaced a stale target, and a tampered tag produced no plaintext publication.
+An initial CLI-test attempt used the unrelated development keyring and correctly
+failed database preflight; the rerun used `.local/crypto-verification/keyring.json`.
+The ordinary encrypted `recovery-check` also passed against a fresh port.
+
+`cargo fmt --all --check`, `cargo clippy --locked -p pxel-server --features
+dev-auth --all-targets -- -D warnings`, and the server build passed. Linux/
+Compose/remote CI, production/off-site WAL retention, RPO/RTO, and crash or
+power-loss interruption during replacement of a preexisting WAL path remain
+unverified. The local staging tree remains unpublished until the restore CLI
+verifies it and stops the cluster.
+
+## 2026-10-03 — cross-process share revocation
+
+Document `access_epoch` changes now emit a transactional PostgreSQL notification.
+The server starts its LISTEN connection before accepting HTTP traffic; each
+instance advances its local delivery gate and closes matching subscribed
+WebSockets after a committed change. Listener loss closes active subscriptions
+before the reconnect loop resumes, so a missed notification cannot leave an
+idle connection trusted indefinitely. Document payload sends and bounded shared
+HTTP responses keep an authorization row-lock lease through body delivery; a
+remote revoke waits for an already-authorized send to finish, then queued sends
+fail the final database check.
+
+Verification against the isolated Windows PostgreSQL 18.6 acceptance cluster:
+
+- `cargo test --locked -p spreadsheet-storage --lib shares::tests:: -- --test-threads=2` — 13/13 passed, including two independent listeners, commit-only notification delivery, and revoke fencing behind a delivery lease.
+- `cargo clippy --locked -p pxel-server --all-targets --features dev-auth -- -D warnings` — passed.
+- `node --test tests/recovery/distributed-share-revocation.test.mjs` — 1/1 passed with two live `pxel-server` processes sharing PostgreSQL. A guest opened an idle WebSocket on the second process; revocation on the first closed it with terminal code 4003, and the second process returned the common unavailable response on a subsequent document read.
+- `corepack pnpm --filter @pxel/web exec playwright test e2e/sharing.spec.ts` — 6/6 passed at DPR1/DPR2. The idle-revocation browser scenario rendered the terminal closed-access state after the server's 4003 close.
+
+This verifies two local server processes and one shared PostgreSQL cluster. It
+does not substitute for Linux/Compose/remote-CI or production deployment checks.
+
+The following all-features `just check` exposed a history-read regression: the
+10,000-event scan exceeded the existing 30-second endpoint budget because each
+event and its canonical hash independently queried and unwrapped the same DEK.
+History scans now keep a zeroizing DEK cache scoped to that scan and keyed by
+envelope generation. AEAD authentication, per-record AAD and hash verification
+remain per-record. The exact 10,000-event boundary test passed in isolation
+after the change (1/1, 268.58 s including durable fixture writes); the complete
+workspace gate passed on 2026-10-04; its final counts are recorded below.
+
+## 2026-10-05 — final local acceptance after history and sharing UI fixes
+
+The complete `just check` gate passed against the isolated Windows PostgreSQL
+18.6 acceptance cluster with `CARGO_TARGET_DIR=.local/target-merge` and
+`RUST_TEST_THREADS=2`: both strict workspace Clippy profiles, all-feature tests,
+workspace build, wasm32 check and bindings, proto check, formatting, ESLint,
+TypeScript, 232 Vitest tests and production Vite build. Storage passed 150
+tests with four timing/benchmark tests intentionally ignored. The exact 10,000
+event history boundary passed as part of this run (449 s for the storage test
+group, including durable fixture construction). Vite reports its informational
+551.21 kB main-chunk warning.
+
+`just sqlx-check` passed for all workspace targets/features. `just audit` passed:
+`cargo deny`, RustSec scan and `pnpm audit`; the previously documented duplicate
+transitive-version warnings and allowed yanked `yoke-derive 0.8.3` remain. The
+RustSec scan covered 389 locked dependencies and reported no disallowed
+advisories; pnpm reported no known vulnerabilities.
+
+The initial `just smoke` attempt passed the 77 live HTTP/WebSocket/XLSX
+integration tests and both recovery tests, but its interrupted browser run
+exposed four axis-history failures involving principal capabilities and an
+overlapping sharing action row. After those fixes, the first complete Chromium
+run reached 196/198: two durable-history assertions still compared
+principal-specific `can_share` capability metadata as though it were workbook
+state. The menu now wraps instead of allowing overlap. The history tests compare
+persisted workbook projections separately and explicitly assert each principal's
+capabilities. Focused axis-history verification passed 8/8 at DPR1/DPR2.
+
+After these fixes the full browser command
+`corepack pnpm --filter @pxel/web exec playwright test --config
+playwright.config.ts` passed all 198 cases at Chromium DPR1 and DPR2 in 13.9
+minutes. This includes guest comment-link creation, comment entry, idle-session
+revocation, TTL/PIN/password controls, clipboard behavior, indefinite-link
+confirmation, keyboard/ARIA behavior, external-asset blocking, structural
+history and XLSX/style rendering. The browser suite was run against the real
+local dev server; `scripts/dev.mjs` was stopped after the test. Final source
+format, ESLint and typecheck checks passed after the E2E assertion changes.
+
+These are Windows-local results. Remote Linux/Compose CI, production S3/Garage,
+production owner authentication, a representative frozen-service legacy
+database and its maintenance window remain unverified deployment/operator
+gates.
+
+### Combined smoke rerun and projection-readiness race (2026-10-05)
+
+A subsequent exact `just smoke` run passed 77 integration and both recovery
+tests, then finished Chromium at 197/198. The one failure occurred before the
+foreign-move authorization assertion: after reload, the test sent keyboard input
+while the document GET was still in flight. Trace timing showed grid focus at
+431975 ms and document response completion at approximately 432024 ms.
+WebSocket connectivity alone is not projection readiness. The test now waits
+for the saved-document indicator before interacting with the grid. All server
+refusal and unchanged-version assertions remain intact. The corrected scenario
+passed three repetitions at each DPR (6/6); web ESLint and typecheck passed.
+The earlier complete 198/198 browser result and this failed combined rerun are
+separate observations. The final exact combined recipe result is recorded below.
+
+The next combined attempt again passed 77/77 integration tests but the
+24-restart recovery scenario hit its 180 s timeout; the convergence recovery
+scenario passed. Browser tests were not reached. The reused acceptance database
+contained 1,812 retained key generations, each verified at every server startup.
+A separate empty local test database was created for a fresh-fixture combined
+verification; existing acceptance data was preserved and the timeout was not
+increased. The subsequent retained-key readiness fix and rerun on the accumulated
+fixture are recorded below.
+
+The final exact `just smoke` completed with exit code 0 on the fresh isolated
+Windows PostgreSQL fixture: integration 77/77 (195.1 s), recovery 2/2
+(76.8 s total; the 24-restart scenario 68.1 s), and Chromium DPR1/DPR2
+198/198 (20.3 min), with retries disabled. The fixture uses the same checked
+server binary, keyring and unchanged 180 s recovery timeout. This establishes
+functional acceptance on a fresh fixture; startup scaling for accumulated key
+generations remains a performance limitation, not a passed load gate.
+The recipe stopped its dev stack; ports 8080, 5173, 18082 and 18083 had no
+listeners afterward. Existing acceptance data was not deleted.
+
+The local implementation covers ADR-102 encryption and snapshot boundaries,
+ADR-103 KEK rotation, ADR-104 physical backup/recovery and fresh write
+generations, ADR-105 offline migration, ADR-106 scoped guest sharing and
+revocation, and ADR-107 independent encrypted cell comments. Prior physical
+recovery/PITR, separate-cluster migration, log-redaction, two-process revocation
+and Moto S3 results retain their stated fixture limits. Production owner auth,
+Linux/Compose/remote CI, target production S3, representative legacy maintenance
+migration, coordinated distributed maintenance and off-site WAL/RPO verification
+remain open. Attachments and disk export caches remain absent.
+
+### Startup retained-key readiness query fan-out (2026-10-05)
+
+A combined smoke on the reused acceptance database hit the 180 s hard-restart
+recovery-test timeout. Inspection found startup readiness issued a metadata
+query for each retained DEK generation after streaming the generation IDs. The
+readiness path now fetches all wrapper records and durable workspace IDs using
+one ordered LEFT JOIN stream, then authenticates every wrapper and verifies its
+physical key identity in process. Ordinary active-key lookup also uses one JOIN
+query instead of separate wrapper/workspace reads. Orphan pre-genesis generations
+remain included. No cryptographic checks, AAD inputs, or fail-closed errors were
+removed.
+
+After the change, that 24-restart recovery test passed on the same accumulated
+acceptance database in 45.2 s, retaining its 180 s timeout. The full combined
+smoke then passed integration 77/77 in 152.4 s, recovery 2/2 and Chromium
+198/198 at DPR1/DPR2 in 20.8 min, with exit code 0 and retries disabled. The
+standalone `just check` and `just sqlx-check` also passed after the source change.
+The earlier fresh-fixture smoke and initial loaded-fixture timeout remain
+recorded as separate runs. This is Windows-local evidence, not a startup capacity
+guarantee for arbitrarily large key histories.

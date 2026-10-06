@@ -1,7 +1,7 @@
 use crate::{AppState, auth, delivery::DeliveryGate};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, stream::SplitSink};
-use spreadsheet_application::journal::{DocumentAccess, OperationJournal};
+use spreadsheet_application::journal::DocumentAccess;
 use spreadsheet_domain::workbook::DocumentId;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{Semaphore, mpsc, watch};
@@ -88,18 +88,22 @@ pub fn start(
         while let Some(frame) = receiver.recv().await {
             let sent = if let Some(delivery) = frame.delivery {
                 let _read = delivery.gate.lock.read().await;
-                let access = state
+                let lease = state
                     .database
-                    .access(principal.identity, delivery.document)
+                    .lease_delivery_access(principal.identity, delivery.document)
                     .await;
-                if !matches!(access, Ok(current)
-                    if current.document_access_epoch == delivery.ticket.document_access_epoch
-                    && current.membership_access_epoch == delivery.ticket.membership_access_epoch)
+                if !matches!(&lease, Ok(current)
+                    if current.access().document_access_epoch == delivery.ticket.document_access_epoch
+                    && current.access().membership_access_epoch == delivery.ticket.membership_access_epoch)
                     || !matches!(state.auth.active(&principal).await, Ok(true))
                 {
                     false
+                } else if let Ok(lease) = lease {
+                    let sent = send_bounded(&mut sink, frame.message).await;
+                    let released = lease.release().await.is_ok();
+                    sent && released
                 } else {
-                    send_bounded(&mut sink, frame.message).await
+                    false
                 }
             } else {
                 send_bounded(&mut sink, frame.message).await

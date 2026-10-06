@@ -4,7 +4,10 @@ ADR085 introduces frozen AxisEdit/AxisCompensation schemas21/22 with semantic
 hash tags23/24. Explicit insert/delete operations store stable placements and
 content/formula preimages; automatic ExtendRows remains legacy/nonundoable.
 ADR085 introduced snapshot writer3 with per-ID activation floors and readers1/2.
-ADR087 now uses writer4 and retains readers1..4, as specified below.
+ADR087 now uses snapshot writer4 and retains readers1..4. ADR-096 adds merge
+metadata in snapshot schema6 while continuing to read schemas1..5; durable
+merge/unmerge events use additive schemas34/35. The journal migration and
+round-trip details are recorded in RUNBOOK.
 `documents.axis_activation_version` is a transactional derived marker: after
 restoration every new command requires hash-verified current projection context.
 Reference admission uses hash-covered floors, and snapshot restore rejects an

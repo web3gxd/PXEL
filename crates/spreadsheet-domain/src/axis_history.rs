@@ -75,6 +75,10 @@ pub fn validate_axis_inverse_cancellable(
     // every patch is a literal historical content swap.
     let mut axis_stack: Vec<usize> = Vec::new();
     let mut neutralized = BTreeSet::new();
+    let mut style_ledger: BTreeMap<
+        (CellAddress, crate::style::StyleProperty),
+        Vec<StyleEntry<'_>>,
+    > = BTreeMap::new();
     let mut work = MAX_WORK;
     let addresses: BTreeSet<_> = change.writes.iter().map(|write| write.address).collect();
     let axis_ids = AxisIds::from_change(change);
@@ -87,6 +91,13 @@ pub fn validate_axis_inverse_cancellable(
                 return Err(AxisHistoryError::Conflict);
             }
             for write in &current.writes {
+                charge(&mut work, 1)?;
+                check_cancel(&mut cancelled)?;
+                if addresses.contains(&write.address) || axis_ids.contains(write.address) {
+                    charge(&mut touches, 1)?;
+                }
+            }
+            for write in &current.style_writes {
                 charge(&mut work, 1)?;
                 check_cancel(&mut cancelled)?;
                 if addresses.contains(&write.address) || axis_ids.contains(write.address) {
@@ -119,8 +130,46 @@ pub fn validate_axis_inverse_cancellable(
         } else if event.operation.changes_axes() {
             return Err(AxisHistoryError::Conflict);
         }
+        for write in style_writes(&event.operation) {
+            if !axis_ids.contains(write.address) {
+                continue;
+            }
+            for (previous, changes) in write.previous.iter().zip(&write.changes) {
+                charge(&mut work, 1)?;
+                charge(&mut touches, 1)?;
+                check_cancel(&mut cancelled)?;
+                if previous.property() != changes.property() {
+                    return Err(AxisHistoryError::InvalidHistory);
+                }
+                let stack = style_ledger
+                    .entry((write.address, changes.property()))
+                    .or_default();
+                let cancels = event.principal == target.principal
+                    && event.operation.is_inverse_target()
+                    && stack.last().is_some_and(|old| {
+                        old.event.principal == target.principal
+                            && old.event.operation.is_inverse_target()
+                            && inverse_identity(&event.operation)
+                                == Some((old.event.operation_id, old.event.version))
+                            && old.previous == changes
+                            && old.changes == previous
+                    });
+                if cancels {
+                    stack.pop();
+                } else {
+                    stack.push(StyleEntry {
+                        event,
+                        previous,
+                        changes,
+                    });
+                }
+            }
+        }
     }
     if !axis_stack.is_empty() {
+        return Err(AxisHistoryError::Conflict);
+    }
+    if style_ledger.values().any(|stack| !stack.is_empty()) {
         return Err(AxisHistoryError::Conflict);
     }
     let current_index = Footprint::new(book, &addresses, &axis_ids)?;
@@ -208,6 +257,23 @@ pub fn validate_axis_inverse_cancellable(
     check_cancel(&mut cancelled)
 }
 
+struct StyleEntry<'a> {
+    event: &'a CommittedEvent,
+    previous: &'a crate::style::StyleChange,
+    changes: &'a crate::style::StyleChange,
+}
+fn style_writes(operation: &Operation) -> &[GuardedStyleWrite] {
+    match operation {
+        Operation::StyleWrite { writes, .. }
+        | Operation::StyleCompensation { writes, .. }
+        | Operation::CellBatchWrite {
+            style_writes: writes,
+            ..
+        } => writes,
+        _ => &[],
+    }
+}
+
 fn axis_change(operation: &Operation) -> Option<&AxisChange> {
     match operation {
         Operation::AxisEdit { change } | Operation::AxisCompensation { change, .. } => Some(change),
@@ -271,12 +337,22 @@ fn inverse_identity(operation: &Operation) -> Option<(OperationId, DocumentVersi
             undoes_version: Some(version),
             ..
         }
+        | Operation::CellBatchWrite {
+            undoes: Some(id),
+            undoes_version: Some(version),
+            ..
+        }
         | Operation::MoveCompensation {
             undoes: id,
             undoes_version: version,
             ..
         }
         | Operation::AxisCompensation {
+            undoes: id,
+            undoes_version: version,
+            ..
+        }
+        | Operation::StyleCompensation {
             undoes: id,
             undoes_version: version,
             ..
@@ -483,6 +559,16 @@ fn entries(event: &CommittedEvent) -> Vec<Entry<'_>> {
                 add(write.address, None, None, formula(write.content.as_ref()));
             }
         }
+        Operation::CellBatchWrite { content_writes, .. } => {
+            for write in content_writes {
+                add(
+                    write.address,
+                    write.content.as_ref(),
+                    write.previous.as_ref(),
+                    formula(write.content.as_ref()),
+                );
+            }
+        }
         _ => {}
     }
     entries
@@ -512,6 +598,8 @@ fn charge(work: &mut usize, amount: usize) -> Result<(), AxisHistoryError> {
 mod tests {
     use super::*;
     use crate::axis_edit::{prepare_axis_edit, prepare_axis_inverse};
+    use crate::style::{Change, StyleChange};
+    use crate::style_write::{StyleWriteKind, prepare_style_write};
 
     type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
     fn apply(book: &mut Workbook, operation: Operation) -> TestResult<CommittedEvent> {
@@ -573,6 +661,74 @@ mod tests {
         };
         tail.push(written);
         tail.push(apply(book, inverse)?);
+        Ok(())
+    }
+    #[test]
+    fn axis_inverse_conflicts_with_later_style_on_revived_axis_ids() -> TestResult {
+        let sheet = SheetId::from_bytes([2; 16])?;
+        let removed = RowId::from_bytes([3; 16])?;
+        let survivor = RowId::from_bytes([4; 16])?;
+        let column = ColumnId::from_bytes([5; 16])?;
+        let mut book = Workbook::hydrate_sheets(
+            DocumentId::from_bytes([1; 16])?,
+            DocumentVersion::new(1)?,
+            [SheetSeed {
+                id: sheet,
+                name: "History".into(),
+                rows: vec![removed, survivor],
+                columns: vec![column],
+            }],
+            [],
+        )?;
+        let delete = prepare_axis_edit(
+            &book,
+            &Operation::DeleteRows {
+                sheet,
+                rows: vec![removed],
+            },
+            DocumentVersion::new(2)?,
+        )?;
+        let target = apply(&mut book, delete)?;
+        let compensation = prepare_axis_inverse(&book, &target, DocumentVersion::new(3)?)?;
+        let undo = apply(&mut book, compensation)?;
+        let address = CellAddress {
+            sheet,
+            row: removed,
+            column,
+        };
+        let style = prepare_style_write(
+            &book,
+            &[address],
+            &[StyleChange::FontBold(Change::Set(true))],
+            StyleWriteKind::Cell,
+        )?;
+        let style_event = apply(&mut book, style)?;
+        let proposed_operation = prepare_axis_inverse(&book, &undo, DocumentVersion::new(5)?)?;
+        let proposed = book.candidate(&proposed_operation, DocumentVersion::new(5)?)?;
+        assert!(matches!(
+            validate_axis_inverse(&book, &undo, std::slice::from_ref(&style_event), &proposed),
+            Err(AxisHistoryError::Conflict)
+        ));
+        let Operation::StyleWrite { kind, writes } = style_event.operation.clone() else {
+            return Err("expected style write".into());
+        };
+        let style_compensation = Operation::StyleCompensation {
+            kind,
+            writes: writes
+                .iter()
+                .map(|write| GuardedStyleWrite {
+                    address: write.address,
+                    previous: write.changes.clone(),
+                    changes: write.previous.clone(),
+                })
+                .collect(),
+            undoes: style_event.operation_id,
+            undoes_version: style_event.version,
+        };
+        let style_undo = apply(&mut book, style_compensation)?;
+        let proposed_operation = prepare_axis_inverse(&book, &undo, DocumentVersion::new(6)?)?;
+        let proposed = book.candidate(&proposed_operation, DocumentVersion::new(6)?)?;
+        validate_axis_inverse(&book, &undo, &[style_event, style_undo], &proposed)?;
         Ok(())
     }
     #[test]

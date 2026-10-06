@@ -1,3 +1,5 @@
+import { createBookFromUi } from './create-book';
+import { cutSelection } from './clipboard';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import {
@@ -26,8 +28,9 @@ function uuidV7() {
 async function createDocument(page: Page) {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
 }
 async function select(page: Page, row: number, column: number) {
@@ -54,7 +57,7 @@ async function state(page: Page) {
 async function move(page: Page, from: [number, number], to: [number, number], columns = 1) {
   await select(page, ...from);
   for (let i = 1; i < columns; i++) await page.keyboard.press('Shift+ArrowRight');
-  await page.keyboard.press('ControlOrMeta+X');
+  await cutSelection(page);
   await expect(page.getByTestId('cut-status')).toContainText('Исходные ячейки пока сохранены');
   await select(page, ...to);
   await page.keyboard.press('ControlOrMeta+V');
@@ -252,6 +255,8 @@ test('a document owner cannot use an inverse command to undo another actor move'
     );
     await editor.reload();
     await expect(editor.getByTestId('connection-status')).toHaveText('Подключено');
+    // The WebSocket can connect before the HTTP projection hydrates the grid.
+    await expect(editor.getByTestId('save-status')).toHaveText('Сохранено');
     await editor.bringToFront();
     // The security assertion below is independent of pointer hit-testing. After
     // this page reload, select B2 through the keyboard so DPR-specific canvas

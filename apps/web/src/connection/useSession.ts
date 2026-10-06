@@ -2,18 +2,32 @@ import { useEffect, useState } from 'react';
 import { fromBinary } from '@bufbuild/protobuf';
 import { ServerEnvelopeSchema } from '../generated/pxel/wire/v1/session_pb';
 import type { DocumentStore } from '../document/store';
+import { boundedJson, decodeGuest, guestPath, type GuestSession } from '../sharing/api';
 import { decodeWelcome, encodeHello, reconnectDelay, SessionProtocolError } from './protocol';
 
 type ConnectionKind =
-  'connecting' | 'online' | 'reconnecting' | 'offline' | 'unauthorized' | 'incompatible';
-export type ConnectionState = { kind: ConnectionKind; label: string };
+  'connecting' | 'online' | 'reconnecting' | 'offline' | 'unauthorized' | 'incompatible' | 'closed';
+export type ConnectionState = {
+  kind: ConnectionKind;
+  label: string;
+  latencyMs?: number | undefined;
+};
 
 const CONNECTING: ConnectionState = {
   kind: 'connecting',
   label: 'Подключение…',
 };
 
-export function useSession(document?: DocumentStore) {
+export function sessionEndpoints(guest?: Pick<GuestSession, 'linkId'>) {
+  return guest
+    ? {
+        session: `${guestPath(guest.linkId)}/session`,
+        method: 'GET',
+        websocket: `${guestPath(guest.linkId)}/ws`,
+      }
+    : { session: '/api/dev/session', method: 'POST', websocket: '/api/ws' };
+}
+export function useSession(document?: DocumentStore, guest = document?.transport.guest) {
   const [state, setState] = useState<ConnectionState>(CONNECTING);
   const [generation, setGeneration] = useState(0);
 
@@ -27,13 +41,32 @@ export function useSession(document?: DocumentStore) {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
     const cancellation = new AbortController();
+    const endpoints = sessionEndpoints(guest);
+    let accessClosed = false;
+    const closeAccess = () => {
+      if (!active || accessClosed) return;
+      accessClosed = true;
+      clearTimeout(retryTimer);
+      clearTimeout(handshakeTimer);
+      cancellation.abort();
+      document?.closeGuestAccess();
+      setState({ kind: 'closed', label: 'Доступ по ссылке закрыт' });
+      socket?.close(4003, 'Access closed');
+    };
+    const stopAccessListener = document?.onGuestAccessClosed(closeAccess);
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+    if (guest)
+      expiryTimer = setTimeout(
+        closeAccess,
+        Math.max(0, Math.min(2147483647, guest.expiresAt * 1000 - Date.now())),
+      );
     // The instance identity is transient; cookies are HttpOnly and never read here.
     const instanceId = crypto.getRandomValues(new Uint8Array(16));
     instanceId[6] = ((instanceId[6] ?? 0) & 0x0f) | 0x40;
     instanceId[8] = ((instanceId[8] ?? 0) & 0x3f) | 0x80;
 
     const retry = () => {
-      if (!active) return;
+      if (!active || accessClosed) return;
       if (attempts >= 6) {
         setState({ kind: 'offline', label: 'Нет подключения' });
         return;
@@ -47,8 +80,9 @@ export function useSession(document?: DocumentStore) {
     const connect = async () => {
       let response: Response;
       try {
-        response = await fetch('/api/dev/session', {
-          method: 'POST',
+        if (accessClosed) return;
+        response = await fetch(endpoints.session, {
+          method: endpoints.method,
           credentials: 'same-origin',
           signal: AbortSignal.any([cancellation.signal, AbortSignal.timeout(5_000)]),
         });
@@ -58,6 +92,10 @@ export function useSession(document?: DocumentStore) {
       }
       if (!active) return;
       if (response.status === 401 || response.status === 403 || response.status === 404) {
+        if (guest) {
+          closeAccess();
+          return;
+        }
         setState({ kind: 'unauthorized', label: 'Требуется авторизация' });
         return;
       }
@@ -65,14 +103,33 @@ export function useSession(document?: DocumentStore) {
         retry();
         return;
       }
+      if (guest) {
+        try {
+          const restored = decodeGuest(await boundedJson(response, 4096), guest.linkId);
+          if (
+            restored.documentId !== guest.documentId ||
+            restored.actorId !== guest.actorId ||
+            restored.permission !== guest.permission ||
+            restored.admittedHeadVersion !== guest.admittedHeadVersion
+          ) {
+            closeAccess();
+            return;
+          }
+        } catch {
+          closeAccess();
+          return;
+        }
+      }
+      if (!active || accessClosed) return;
 
-      const url = new URL('/api/ws', window.location.href);
+      const url = new URL(endpoints.websocket, window.location.href);
       url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(url);
       socket = ws;
       ws.binaryType = 'arraybuffer';
       let terminal = false;
       let welcomed = false;
+      let helloSentAt: number | undefined;
       let documentMessages = Promise.resolve();
       const started = performance.now();
       handshakeTimer = setTimeout(() => ws.close(1000, 'Handshake timeout'), 5_000);
@@ -82,6 +139,7 @@ export function useSession(document?: DocumentStore) {
           return;
         }
         const hello = encodeHello(instanceId);
+        helloSentAt = performance.now();
         ws.send(new Uint8Array(hello).buffer);
       };
       ws.onmessage = (event: MessageEvent<unknown>) => {
@@ -113,6 +171,10 @@ export function useSession(document?: DocumentStore) {
               })
               .catch(() => {
                 terminal = true;
+                if (guest) {
+                  closeAccess();
+                  return;
+                }
                 setState({ kind: 'incompatible', label: 'Не удалось согласовать соединение' });
                 ws.close(4002, 'Invalid document message');
               });
@@ -130,7 +192,12 @@ export function useSession(document?: DocumentStore) {
             });
           welcomed = true;
           clearTimeout(handshakeTimer);
-          setState({ kind: 'online', label: 'Подключено' });
+          setState({
+            kind: 'online',
+            label: 'Подключено',
+            latencyMs:
+              helloSentAt === undefined ? undefined : Math.round(performance.now() - helloSentAt),
+          });
         } catch (error) {
           if (error instanceof SessionProtocolError && error.code === 'server_busy') {
             ws.close(1000, 'Retry later');
@@ -139,6 +206,10 @@ export function useSession(document?: DocumentStore) {
           terminal = true;
           const unauthorized =
             error instanceof SessionProtocolError && error.code === 'auth_required';
+          if (guest && unauthorized) {
+            closeAccess();
+            return;
+          }
           setState(
             unauthorized
               ? { kind: 'unauthorized', label: 'Требуется авторизация' }
@@ -153,10 +224,15 @@ export function useSession(document?: DocumentStore) {
       ws.onerror = () => {
         /* The close event owns reconnect; never log payloads. */
       };
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        if (guest && event.code === 4003) {
+          terminal = true;
+          closeAccess();
+          return;
+        }
         document?.disconnected();
         clearTimeout(handshakeTimer);
-        if (!active || terminal) return;
+        if (!active || terminal || accessClosed) return;
         if (welcomed && performance.now() - started > 30_000) attempts = 0;
         retry();
       };
@@ -168,11 +244,14 @@ export function useSession(document?: DocumentStore) {
       cancellation.abort();
       clearTimeout(retryTimer);
       clearTimeout(handshakeTimer);
+      clearTimeout(expiryTimer);
+      stopAccessListener?.();
       socket?.close(1000, 'Client closed');
     };
-  }, [generation, document]);
+  }, [generation, document, guest]);
 
   const reconnect = () => {
+    if (document?.guestAccessClosed) return;
     setState(CONNECTING);
     setGeneration((previous) => previous + 1);
   };

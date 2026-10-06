@@ -32,12 +32,17 @@ spreadsheet-xlsx = { path = "crates/spreadsheet-xlsx", version = "=0.1.0" }
 anyhow = "=1.0.104"
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.12.1"
+chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc", "zeroize"] }
+aead-stream = "=0.6.0"
+getrandom = "=0.4.3"
+zeroize = "=1.9.0"
+argon2 = { version = "=0.6.0", features = ["zeroize"] }
 futures-util = { version = "=0.3.34", features = ["sink"] }
 prost = "=0.14.4"
 prost-build = "=0.14.4"
 prost-types = "=0.14.4"
 serde = { version = "=1.0.229", features = ["derive"] }
-sha2 = "=0.11.0"
+sha2 = { version = "=0.11.0", features = ["zeroize"] }
 sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "migrate", "macros", "uuid"] }
 thiserror = "=2.0.21"
 tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
@@ -45,7 +50,7 @@ tower = { version = "=0.5.3", features = ["util", "limit"] }
 tower-http = { version = "=0.7.1", features = ["set-header", "limit", "timeout", "fs"] }
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "json"] }
-uuid = { version = "=1.26.1", features = ["v7"] }
+uuid = { version = "=1.26.1", features = ["v7", "serde"] }
 url = "=2.5.8"
 tempfile = "=3.27.0"
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
@@ -62,3 +67,16 @@ panic = "deny"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Keep bounded crypto-heavy history reads within the existing 30s deadline in
+# local debug builds as well. Release builds already optimize these primitives.
+[profile.dev.package.chacha20]
+opt-level = 3
+[profile.dev.package.poly1305]
+opt-level = 3
+[profile.dev.package.chacha20poly1305]
+opt-level = 3
+[profile.dev.package.spreadsheet-storage]
+opt-level = 1
+[profile.dev.package.argon2]
+opt-level = 3

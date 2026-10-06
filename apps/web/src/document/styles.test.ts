@@ -17,8 +17,8 @@ import { decodeProjection, uuidV7, type Projection } from './store';
 export function authoredProjection(): Projection {
   return {
     authored_projection_schema_version: 4,
-    style_schema_version: 1,
-    style_profile_version: 1,
+    style_schema_version: 2,
+    style_profile_version: 2,
     document_id: uuidV7(),
     version: '1',
     state_hash: '0'.repeat(64),
@@ -47,7 +47,7 @@ describe('style profile boundary', () => {
       { font_bold: 1 },
       { font_italic: 'true' },
       { font_strike: null },
-      { wrap: 0 },
+      { text_overflow: 'nowrap' },
       { font_family: '' },
       { font_family: ' Arial' },
       { font_family: 'A\nB' },
@@ -88,7 +88,7 @@ describe('style profile boundary', () => {
       border_left: { line: 'dashed', color: [0, 0, 0] },
       horizontal: 'right',
       vertical: 'top',
-      wrap: true,
+      text_overflow: 'wrap',
       number_format: 'date_iso',
     };
     const changes = Object.entries(style).map(([property, value]) => ({
@@ -112,7 +112,7 @@ describe('style profile boundary', () => {
       'borderLeft',
       'horizontal',
       'vertical',
-      'wrap',
+      'textOverflow',
       'numberFormat',
     ]);
     expect(restored.changes.every((c) => c.kind.value?.action.case === 'set')).toBe(true);
@@ -138,6 +138,10 @@ describe('style profile boundary', () => {
   it('requires full schema4 metadata and rejects legacy styles or inconsistent revival', () => {
     const projection = authoredProjection();
     const sheet = projection.sheets[0]!;
+    expect(
+      decodeProjection({ ...structuredClone(projection), last_axis_change_version: '0' })
+        .last_axis_change_version,
+    ).toBe('0');
     sheet.styles = [
       {
         row_id: sheet.rows[0]!,
@@ -148,7 +152,7 @@ describe('style profile boundary', () => {
     expect(decodeProjection(structuredClone(projection)).sheets[0]?.styles).toHaveLength(1);
     for (const patch of [
       { authored_projection_schema_version: 3 },
-      { style_schema_version: 2 },
+      { style_schema_version: 3 },
       { style_profile_version: 0 },
       { last_axis_change_version: '2' },
       { retired_row_ids: [sheet.rows[0]] },
@@ -179,6 +183,11 @@ describe('style profile boundary', () => {
       undefined,
     ])
       expect(() => decodeProjection({ ...projection, sheets: [{ ...sheet, styles }] })).toThrow();
+  });
+  it('migrates legacy boolean wrap styles to the canonical mode', () => {
+    const { text_overflow: _mode, ...legacyBase } = DEFAULT_STYLE;
+    expect(decodeStyle({ ...legacyBase, wrap: true }).text_overflow).toBe('wrap');
+    expect(decodeStyle({ ...legacyBase, wrap: false }).text_overflow).toBe('clip');
   });
   it('requires bounded exact formula wire metadata for authored projections', () => {
     const projection = authoredProjection(),

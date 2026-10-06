@@ -16,7 +16,7 @@ use std::{
 };
 use thiserror::Error;
 
-pub const ENGINE_VERSION: &str = "pxel-formula-0.14.0";
+pub const ENGINE_VERSION: &str = "pxel-formula-0.16.0";
 pub const COMPATIBILITY_PROFILE: &str = "pxel-excel-subset-v1";
 
 #[derive(Clone, Copy, Debug)]
@@ -197,6 +197,17 @@ pub struct CalculationProjection {
     result_bytes: usize,
     dirty: BTreeSet<CellAddress>,
     cleared: BTreeSet<CellAddress>,
+    preparation_work: usize,
+}
+/// Runtime adapters may observe work. The kernel does not read clocks or perform IO.
+pub trait CalculationObserver {
+    fn formula_started(&mut self, address: CellAddress);
+    fn formula_finished(&mut self, address: CellAddress, work: u64, cycle_or_blocked: bool);
+}
+struct NoObserver;
+impl CalculationObserver for NoObserver {
+    fn formula_started(&mut self, _: CellAddress) {}
+    fn formula_finished(&mut self, _: CellAddress, _: u64, _: bool) {}
 }
 impl CalculationProjection {
     pub fn from_workbook(
@@ -241,16 +252,33 @@ impl CalculationProjection {
             result_bytes: 0,
             dirty: cells.into_iter().collect(),
             cleared: BTreeSet::new(),
+            preparation_work: limits.graph_work.min(1_000_000) - work,
         })
     }
     pub fn input_version(&self) -> DocumentVersion {
         self.input_version
+    }
+    pub fn preparation_work(&self) -> usize {
+        self.preparation_work
     }
     pub fn calculated_version(&self) -> Option<DocumentVersion> {
         self.calculated_version
     }
     pub fn results(&self) -> &BTreeMap<CellAddress, Value> {
         &self.results
+    }
+    /// Potential downstream dependencies, including both conditional branches.
+    /// This read-only traversal neither dirties nor calculates the projection.
+    pub fn dependent_closure(
+        &self,
+        book: &Workbook,
+        seeds: impl IntoIterator<Item = CellAddress>,
+        work: usize,
+    ) -> Result<BTreeSet<CellAddress>, CalculationError> {
+        if book.document_id() != self.document_id || book.version() != self.input_version {
+            return Err(CalculationError::VersionMismatch);
+        }
+        self.structure.dirty(book, seeds, &mut { work })
     }
     /// Hash only a fully calculated input version, never a partially updated cache.
     pub fn result_hash(&self) -> Result<[u8; 32], CalculationError> {
@@ -314,6 +342,10 @@ impl CalculationProjection {
                 let changed = writes.iter().map(|write| write.address).collect();
                 return self.prepare_reconcile(book, &changed, limits);
             }
+            Operation::CellBatchWrite { content_writes, .. } => {
+                let changed = content_writes.iter().map(|write| write.address).collect();
+                return self.prepare_reconcile(book, &changed, limits);
+            }
             Operation::CopyRange { writes } => {
                 let changed = writes.iter().map(|write| write.address).collect();
                 return self.prepare_reconcile(book, &changed, limits);
@@ -336,7 +368,10 @@ impl CalculationProjection {
             }
             Operation::AdvanceCalculationEpoch { .. }
             | Operation::StyleWrite { .. }
-            | Operation::StyleCompensation { .. } => {
+            | Operation::StyleCompensation { .. }
+            | Operation::AxisSizeWrite { .. }
+            | Operation::FrozenRowsWrite { .. }
+            | Operation::MergeWrite { .. } => {
                 return self.prepare_reconcile(book, &BTreeSet::new(), limits);
             }
         };
@@ -456,6 +491,15 @@ impl CalculationProjection {
         limits: CalculationLimits,
         cancelled: &AtomicBool,
     ) -> Result<CalculationPatch, CalculationError> {
+        self.calculate_observed(book, limits, cancelled, &mut NoObserver)
+    }
+    pub fn calculate_observed(
+        &mut self,
+        book: &Workbook,
+        limits: CalculationLimits,
+        cancelled: &AtomicBool,
+        observer: &mut impl CalculationObserver,
+    ) -> Result<CalculationPatch, CalculationError> {
         if book.document_id() != self.document_id || book.version() != self.input_version {
             return Err(CalculationError::VersionMismatch);
         }
@@ -507,8 +551,12 @@ impl CalculationProjection {
             let Some(CellContent::Formula(formula)) = content(book, cell) else {
                 return Err(CalculationError::InvalidProjection);
             };
+            let remaining = budget.remaining();
+            observer.formula_started(cell);
             let value =
-                evaluate_bound_with_overlay(formula, book, &self.results, &overlay, &mut budget)?;
+                evaluate_bound_with_overlay(formula, book, &self.results, &overlay, &mut budget);
+            observer.formula_finished(cell, remaining - budget.remaining(), false);
+            let value = value?;
             let size = result_size(&value)?;
             result_bytes = result_bytes
                 .checked_sub(self.result_sizes.get(&cell).copied().unwrap_or(0))
@@ -520,7 +568,9 @@ impl CalculationProjection {
             evaluated += 1;
         }
         for cell in order.blocked {
+            observer.formula_started(cell);
             let value = Value::Error(FormulaError::Cycle);
+            observer.formula_finished(cell, 0, true);
             let size = result_size(&value)?;
             result_bytes = result_bytes
                 .checked_sub(self.result_sizes.get(&cell).copied().unwrap_or(0))

@@ -236,7 +236,7 @@ test('volatile formulas use durable context and survive epoch change and reload'
         .digest();
       const expected = Number(digest.readBigUInt64BE(0) >> 11n) / 9007199254740992;
       assert.deepEqual(at(2), { type: 'number', value: expected });
-      assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+      assert.equal(result.engine_version, 'pxel-formula-0.16.0');
       return { context, random: expected, hash: result.calculated_state_hash };
     };
     const first = await verify(8);
@@ -287,7 +287,7 @@ test('VLOOKUP and HLOOKUP commit selected returns and recalculate source edits',
     );
     const result = await calculation(base, cookie, snapshot.document_id, 5);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 28 });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(command)).case, 'receipt');
     const restored = await getDocument(base, cookie, snapshot.document_id);
     assert.equal(restored.version, '5');
@@ -332,7 +332,7 @@ test('XLOOKUP returns references and commits source recalculation', async () => 
     );
     const result = await calculation(base, cookie, snapshot.document_id, 5);
     assert.deepEqual(result.values[0].value, { type: 'error', value: '#N/A' });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(command)).case, 'receipt');
     const restored = await getDocument(base, cookie, snapshot.document_id);
     assert.equal(restored.version, '5');
@@ -369,7 +369,7 @@ test('calendar formulas persist and recalculate leap century rules', async () =>
     );
     const result = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 21000301 });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(command)).case, 'receipt');
     const restored = await getDocument(base, cookie, snapshot.document_id);
     assert.equal(restored.version, '4');
@@ -406,7 +406,7 @@ test('Unicode text formulas persist and incrementally recalculate', async () => 
     );
     const result = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(result.values[0].value, { type: 'text', value: 'Дяab1' });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(command)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -435,7 +435,7 @@ test('POWER and fractional exponent operator persist and recalculate', async () 
     );
     const result = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 6 });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(command)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -496,7 +496,7 @@ test('SUMIFS and COUNTIFS persist and recalculate every criterion range', async 
     );
     const result = await calculation(base, cookie, snapshot.document_id, 8);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 0 });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(command)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -548,7 +548,7 @@ test('SUMIF implicit sum range commits and recalculates an expanded source edit'
     );
     const result = await calculation(base, cookie, snapshot.document_id, 7);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 62 });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(command)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -579,7 +579,7 @@ test('INDEX reference selection commits and recalculates a source edit', async (
     );
     const result = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 26 });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(command)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -610,7 +610,7 @@ test('MATCH lookup modes persist and recalculate after a source edit', async () 
     );
     const result = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 10 });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(command)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -641,7 +641,7 @@ test('ROUND family commits and incrementally recalculates a referenced input', a
     );
     const result = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(result.values[0].value, { type: 'number', value: 0 });
-    assert.equal(result.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(result.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(formula)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -670,7 +670,7 @@ test('ABS and MOD commit and recalculate after a referenced value changes', asyn
     );
     const calculated = await calculation(base, cookie, snapshot.document_id, 4);
     assert.deepEqual(calculated.values[0].value, { type: 'number', value: 0 });
-    assert.equal(calculated.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(calculated.engine_version, 'pxel-formula-0.16.0');
     assert.equal((await client.send(formula)).case, 'receipt');
   } finally {
     client.socket.terminate();
@@ -2142,7 +2142,7 @@ test('explicit recalc persists one system epoch per operation identity and survi
     assert.equal(head.calculation_context.epoch, '1');
     const context = head.calculation_context;
     assert.equal(context.schema_version, 1);
-    assert.equal(context.engine_version, 'pxel-formula-0.14.0');
+    assert.equal(context.engine_version, 'pxel-formula-0.16.0');
     assert.equal(context.compatibility_profile, 'pxel-excel-subset-v1');
     assert.equal(context.reason, 'explicit');
     assert.match(context.random_seed, /^[0-9a-f]{64}$/);
@@ -2386,7 +2386,7 @@ test('logical functions commit, recalculate and survive a persisted context adva
     const valueAt = async (version) => {
       const state = await calculation(base, cookie, snapshot.document_id, version);
       assert.equal(state.status, 'complete');
-      assert.equal(state.engine_version, 'pxel-formula-0.14.0');
+      assert.equal(state.engine_version, 'pxel-formula-0.16.0');
       return state.values.find((cell) => cell.column_id === snapshot.sheets[0].columns[2])?.value;
     };
     assert.deepEqual(await valueAt(4), { type: 'boolean', value: true });

@@ -35,5 +35,12 @@ message SnapshotSheet {
   repeated SnapshotCell cells = 2;
   // Schema 4 adds independent non-default styles, including styled blanks.
   repeated SnapshotStyle styles = 3;
+  // Schema 5 stores sparse row-height and column-width overrides in CSS pixels.
+  repeated AxisSizeOverride axis_sizes = 4;
+  // Schema 6 stores stable-ID merge rectangles.
+  repeated MergeRange merges = 5;
+  // Schema 7 adds the requested top-row freeze count.
+  uint32 frozen_rows = 6;
 }
 message SnapshotStyle { CellAddress address = 1; CellStyle style = 2; }
+message AxisSizeOverride { uint32 axis_kind = 1; bytes axis_id = 2; uint32 size_css_px = 3; }

@@ -7,6 +7,7 @@ publish.workspace = true
 [features]
 default = []
 dev-auth = []
+legacy-migration = ["spreadsheet-storage/legacy-migration"]
 s3 = ["spreadsheet-storage/s3"]
 
 [dependencies]
@@ -19,9 +20,18 @@ spreadsheet-wire-protocol.workspace = true
 spreadsheet-xlsx.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
+zeroize.workspace = true
+argon2.workspace = true
+chacha20poly1305.workspace = true
+base64 = "=0.22.1"
+getrandom.workspace = true
+url.workspace = true
+percent-encoding = "=2.3.2"
+same-file = "=1.0.6"
 axum.workspace = true
 futures-util.workspace = true
 prost.workspace = true
+process-wrap = { version = "=10.0.1", default-features = false, features = ["job-object", "kill-on-drop", "process-group", "tokio1"] }
 serde.workspace = true
 serde_json = "=1.0.151"
 sha2.workspace = true
@@ -33,6 +43,9 @@ uuid = { workspace = true, features = ["v4"] }
 
 [lints]
 workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winapi-util = "=0.1.11"
 
 [dev-dependencies]
 tempfile.workspace = true

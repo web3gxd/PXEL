@@ -80,6 +80,7 @@ pub(super) fn validate(
     if version == Some(DocumentVersion::ZERO)
         || change.before_order_hash == change.after_order_hash
         || change.writes.len() > 10_000
+        || change.style_writes.len() > 10_000
     {
         return Err(CodecError::Invalid);
     }
@@ -92,8 +93,19 @@ pub(super) fn validate(
             .writes
             .windows(2)
             .any(|pair| pair[0].address >= pair[1].address)
+        || change
+            .style_writes
+            .windows(2)
+            .any(|pair| pair[0].address >= pair[1].address)
     {
         return Err(CodecError::Invalid);
+    }
+    for write in &change.style_writes {
+        for style in [&write.previous, &write.style].into_iter().flatten() {
+            if style.is_default() {
+                return Err(CodecError::Invalid);
+            }
+        }
     }
     let mut incoming = 0usize;
     let mut previous = 0usize;
@@ -241,6 +253,15 @@ pub(super) fn encode_change(change: &AxisChange) -> Result<v1::AxisChange, Codec
         writes: move_codec::encode_writes(&change.writes)?,
         before_order_hash: change.before_order_hash.to_vec(),
         after_order_hash: change.after_order_hash.to_vec(),
+        style_writes: change
+            .style_writes
+            .iter()
+            .map(|write| v1::GuardedAxisStyleWrite {
+                address: Some(addr(&write.address)),
+                previous: write.previous.as_ref().map(style_codec::encode_style),
+                style: write.style.as_ref().map(style_codec::encode_style),
+            })
+            .collect(),
     })
 }
 pub(super) fn decode_change(change: v1::AxisChange) -> Result<AxisChange, CodecError> {
@@ -271,6 +292,17 @@ pub(super) fn decode_change(change: v1::AxisChange) -> Result<AxisChange, CodecE
             .collect::<Result<_, CodecError>>()?,
         before_order_hash: id(&change.before_order_hash)?,
         after_order_hash: id(&change.after_order_hash)?,
+        style_writes: change
+            .style_writes
+            .into_iter()
+            .map(|write| {
+                Ok(GuardedAxisStyleWrite {
+                    address: decode_addr(write.address.ok_or(CodecError::Invalid)?)?,
+                    previous: write.previous.map(style_codec::decode_style).transpose()?,
+                    style: write.style.map(style_codec::decode_style).transpose()?,
+                })
+            })
+            .collect::<Result<_, CodecError>>()?,
     })
 }
 fn hash_delta(hash: &mut Sha256, delta: &AxisDelta) {
@@ -311,7 +343,11 @@ pub(super) fn hash(hash: &mut Sha256, operation: &Operation) -> Result<(), Codec
     validate(operation, None)?;
     let (change, inverse) = match operation {
         Operation::AxisEdit { change } => {
-            hash.update([23]);
+            hash.update([if change.style_writes.is_empty() {
+                23
+            } else {
+                27
+            }]);
             (change, None)
         }
         Operation::AxisCompensation {
@@ -319,7 +355,11 @@ pub(super) fn hash(hash: &mut Sha256, operation: &Operation) -> Result<(), Codec
             undoes,
             undoes_version,
         } => {
-            hash.update([24]);
+            hash.update([if change.style_writes.is_empty() {
+                24
+            } else {
+                28
+            }]);
             (change, Some((undoes, undoes_version)))
         }
         _ => return Err(CodecError::Invalid),
@@ -330,6 +370,26 @@ pub(super) fn hash(hash: &mut Sha256, operation: &Operation) -> Result<(), Codec
     hash.update(change.before_order_hash);
     hash.update(change.after_order_hash);
     move_codec::hash_writes(hash, &change.writes)?;
+    if !change.style_writes.is_empty() {
+        hash.update((change.style_writes.len() as u64).to_le_bytes());
+        for write in &change.style_writes {
+            hash.update(write.address.sheet.as_bytes());
+            hash.update(write.address.row.as_bytes());
+            hash.update(write.address.column.as_bytes());
+            for style in [&write.previous, &write.style] {
+                match style {
+                    Some(style) => {
+                        hash.update([1]);
+                        let mut bytes = Vec::new();
+                        style.append_to(&mut bytes);
+                        hash.update((bytes.len() as u64).to_le_bytes());
+                        hash.update(bytes);
+                    }
+                    None => hash.update([0]),
+                }
+            }
+        }
+    }
     if let Some((undoes, version)) = inverse {
         hash.update(undoes.as_bytes());
         hash.update(version.get().to_le_bytes());

@@ -11,11 +11,16 @@ mod axis_tests;
 mod discovery;
 #[cfg(test)]
 mod discovery_tests;
+mod merge_guard;
+#[cfg(test)]
+mod merge_tests;
 mod move_guard;
 #[cfg(test)]
 mod move_tests;
 #[cfg(test)]
 mod range_history_tests;
+#[cfg(test)]
+mod sort_tests;
 mod style_guard;
 #[cfg(test)]
 mod style_tests;
@@ -52,25 +57,84 @@ const MAX_UNDO_TAIL_BYTES: usize = 64 * 1024 * 1024;
 const MAX_UNDO_ADDRESS_TOUCHES: usize = 100_000;
 const MAX_IMPORT_CELLS: usize = 1_000;
 const MAX_IMPORT_ENCODED_BYTES: usize = 32 * 1024 * 1024;
-struct StoredEventRow<'a> {
-    document: DocumentId,
-    committed_version: i64,
-    operation_id: Uuid,
-    actor_id: Option<Uuid>,
-    principal_kind: &'a str,
-    schema_version: i32,
-    payload: &'a [u8],
-    payload_checksum: &'a [u8],
-    canonical_event_hash: &'a [u8],
+fn encrypted_plaintext_length(length: usize) -> Result<usize, JournalError> {
+    length
+        .checked_sub(crate::crypto::ENVELOPE_OVERHEAD)
+        .filter(|n| *n <= 4 * 1024 * 1024)
+        .ok_or(JournalError::Corrupt)
 }
-fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalError> {
-    if !matches!(row.schema_version, 1..=24) {
+pub(crate) struct StoredEventRow<'a> {
+    pub(crate) document: DocumentId,
+    pub(crate) committed_version: i64,
+    pub(crate) operation_id: Uuid,
+    pub(crate) actor_id: Option<Uuid>,
+    pub(crate) principal_kind: &'a str,
+    pub(crate) schema_version: i32,
+    pub(crate) payload: &'a [u8],
+    pub(crate) payload_checksum: &'a [u8],
+    pub(crate) canonical_event_hash: &'a [u8],
+}
+fn crypto_error(error: crate::CryptoError) -> JournalError {
+    match error {
+        crate::CryptoError::UnsupportedVersion => JournalError::UnsupportedSchema,
+        crate::CryptoError::LimitExceeded { .. } => JournalError::PayloadTooLarge,
+        crate::CryptoError::Database(_)
+        | crate::CryptoError::NonceExhausted
+        | crate::CryptoError::KeyProvider(
+            spreadsheet_application::keys::KeyProviderError::KeyUnavailable
+            | spreadsheet_application::keys::KeyProviderError::ProviderUnavailable
+            | spreadsheet_application::keys::KeyProviderError::RandomnessUnavailable,
+        ) => JournalError::Unavailable,
+        _ => JournalError::Corrupt,
+    }
+}
+pub(crate) async fn verified_event(
+    db: &PgDatabase,
+    row: StoredEventRow<'_>,
+) -> Result<CommittedEvent, JournalError> {
+    verified_event_cached(db, &mut crate::crypto::ReadKeyCache::default(), row).await
+}
+
+pub(crate) async fn verified_event_cached(
+    db: &PgDatabase,
+    keys: &mut crate::crypto::ReadKeyCache,
+    row: StoredEventRow<'_>,
+) -> Result<CommittedEvent, JournalError> {
+    if !matches!(row.schema_version, 1..=38) {
         return Err(JournalError::UnsupportedSchema);
     }
     if codec::checksum(row.payload).as_slice() != row.payload_checksum {
         return Err(JournalError::Corrupt);
     }
-    let event = codec::decode(row.payload).map_err(|error| match error {
+    let stored_version = version(row.committed_version)?.get();
+    let schema = u32::try_from(row.schema_version).map_err(|_| JournalError::Corrupt)?;
+    let payload = db
+        .open_record_cached(
+            keys,
+            row.document,
+            stored_version,
+            "journal",
+            row.operation_id,
+            schema,
+            row.payload,
+            4 * 1024 * 1024,
+        )
+        .await
+        .map_err(crypto_error)?;
+    let hash = db
+        .open_record_cached(
+            keys,
+            row.document,
+            stored_version,
+            "journal-hash",
+            row.operation_id,
+            schema,
+            row.canonical_event_hash,
+            32,
+        )
+        .await
+        .map_err(crypto_error)?;
+    let event = codec::decode(&payload).map_err(|error| match error {
         codec::CodecError::UnsupportedSchema => JournalError::UnsupportedSchema,
         _ => JournalError::Corrupt,
     })?;
@@ -86,7 +150,7 @@ fn verified_event(row: StoredEventRow<'_>) -> Result<CommittedEvent, JournalErro
             }
             EventPrincipal::System => row.principal_kind != "system" || row.actor_id.is_some(),
         }
-        || codec::event_hash(&event).map_err(invalid)?.as_slice() != row.canonical_event_hash
+        || codec::event_hash(&event).map_err(invalid)?.as_slice() != hash.as_slice()
     {
         return Err(JournalError::Corrupt);
     }
@@ -113,6 +177,7 @@ fn target_writes(
         Operation::RangeWrite { writes, .. }
         | Operation::MoveRange { writes, .. }
         | Operation::MoveCompensation { writes, .. } => Ok(writes.clone()),
+        Operation::CellBatchWrite { content_writes, .. } => Ok(content_writes.clone()),
         Operation::AxisEdit { change } | Operation::AxisCompensation { change, .. } => {
             Ok(change.writes.clone())
         }
@@ -149,6 +214,11 @@ fn touched_addresses(
             .map(|w| w.address)
             .filter(|a| targets.contains_key(a))
             .collect(),
+        Operation::CellBatchWrite { content_writes, .. } => content_writes
+            .iter()
+            .map(|w| w.address)
+            .filter(|a| targets.contains_key(a))
+            .collect(),
         Operation::AxisEdit { change } | Operation::AxisCompensation { change, .. } => change
             .writes
             .iter()
@@ -173,13 +243,29 @@ fn touched_addresses(
         | Operation::InsertColumnsRebased { .. }
         | Operation::AdvanceCalculationEpoch { .. }
         | Operation::StyleWrite { .. }
-        | Operation::StyleCompensation { .. } => Vec::new(),
+        | Operation::StyleCompensation { .. }
+        | Operation::AxisSizeWrite { .. }
+        | Operation::FrozenRowsWrite { .. }
+        | Operation::MergeWrite { .. } => Vec::new(),
     }
 }
 fn inverse_shape_matches(target: &Operation, inverse: &Operation) -> bool {
     match (target, inverse) {
         (Operation::CellWrite { .. }, Operation::CellWrite { .. })
         | (Operation::RangeWrite { .. }, Operation::RangeWrite { .. }) => true,
+        (Operation::CellBatchWrite { .. }, Operation::CellBatchWrite { .. }) => true,
+        (
+            Operation::MergeWrite {
+                sheet: a,
+                change: ac,
+                ..
+            },
+            Operation::MergeWrite {
+                sheet: b,
+                change: bc,
+                ..
+            },
+        ) => a == b && ac.range == bc.range && ac.merged != bc.merged,
         (
             Operation::MoveRange {
                 source: a,
@@ -211,6 +297,19 @@ async fn access_locked(
     identity: AuthenticatedActor,
     document: DocumentId,
 ) -> Result<DocumentAccess, JournalError> {
+    let identity_kind =
+        sqlx::query_scalar::<_, String>("SELECT identity_kind FROM users WHERE user_id=$1")
+            .bind(uuid(identity.actor_id.as_bytes()))
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(error)?
+            .ok_or(JournalError::Unauthorized)?;
+    if identity_kind == "share_guest" {
+        return crate::shares::guest_access_locked(tx, identity, document).await;
+    }
+    if identity_kind != "member" {
+        return Err(JournalError::Unauthorized);
+    }
     let membership = sqlx::query!(
         "SELECT access_epoch FROM memberships WHERE workspace_id=$1 AND user_id=$2 FOR SHARE",
         uuid(identity.workspace_id.as_bytes()),
@@ -242,31 +341,173 @@ async fn access_locked(
         can_edit: permission.role != "viewer",
     })
 }
+
+/// Authorization snapshot whose shared PostgreSQL row locks remain held while
+/// the caller sends one bounded document payload. This extends the delivery
+/// fence across server processes, where an in-memory RwLock is insufficient.
+pub struct DocumentAccessLease {
+    transaction: Transaction<'static, Postgres>,
+    access: DocumentAccess,
+}
+
+impl DocumentAccessLease {
+    pub fn access(&self) -> DocumentAccess {
+        self.access
+    }
+
+    pub async fn release(self) -> Result<(), JournalError> {
+        self.transaction.commit().await.map_err(error)
+    }
+}
+
+pub(crate) async fn access_for_delivery_locked(
+    tx: &mut Transaction<'_, Postgres>,
+    identity: AuthenticatedActor,
+    document: DocumentId,
+) -> Result<DocumentAccess, JournalError> {
+    let identity_kind =
+        sqlx::query_scalar::<_, String>("SELECT identity_kind FROM users WHERE user_id=$1")
+            .bind(uuid(identity.actor_id.as_bytes()))
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(error)?
+            .ok_or(JournalError::Unauthorized)?;
+    if identity_kind == "share_guest" {
+        return crate::shares::guest_delivery_access_locked(tx, identity, document).await;
+    }
+    if identity_kind != "member" {
+        return Err(JournalError::Unauthorized);
+    }
+    let membership = sqlx::query!(
+        "SELECT access_epoch FROM memberships WHERE workspace_id=$1 AND user_id=$2 FOR SHARE",
+        uuid(identity.workspace_id.as_bytes()),
+        uuid(identity.actor_id.as_bytes())
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(error)?
+    .ok_or(JournalError::Unauthorized)?;
+    let doc = sqlx::query_as::<_, (i64, i64, String)>(
+        "SELECT head_version,access_epoch,state FROM documents WHERE workspace_id=$1 AND document_id=$2 FOR SHARE",
+    )
+    .bind(uuid(identity.workspace_id.as_bytes()))
+    .bind(uuid(document.as_bytes()))
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(error)?
+    .ok_or(JournalError::NotFound)?;
+    if doc.2 != "active" {
+        return Err(JournalError::Unavailable);
+    }
+    let permission = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM document_permissions WHERE document_id=$1 AND user_id=$2 FOR SHARE",
+    )
+    .bind(uuid(document.as_bytes()))
+    .bind(uuid(identity.actor_id.as_bytes()))
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(error)?
+    .ok_or(JournalError::Unauthorized)?;
+    Ok(DocumentAccess {
+        head: version(doc.0)?,
+        document_access_epoch: u64::try_from(doc.1).map_err(|_| JournalError::Corrupt)?,
+        membership_access_epoch: u64::try_from(membership.access_epoch)
+            .map_err(|_| JournalError::Corrupt)?,
+        can_edit: permission != "viewer",
+    })
+}
+
+impl PgDatabase {
+    pub async fn lease_delivery_access(
+        &self,
+        identity: AuthenticatedActor,
+        document: DocumentId,
+    ) -> Result<DocumentAccessLease, JournalError> {
+        let mut transaction = self.pool.begin().await.map_err(error)?;
+        self.guard_transaction(&mut transaction)
+            .await
+            .map_err(error)?;
+        let access = access_for_delivery_locked(&mut transaction, identity, document).await?;
+        Ok(DocumentAccessLease {
+            transaction,
+            access,
+        })
+    }
+
+    pub async fn lease_owner_delivery_access(
+        &self,
+        identity: AuthenticatedActor,
+        document: DocumentId,
+    ) -> Result<DocumentAccessLease, JournalError> {
+        let mut lease = self.lease_delivery_access(identity, document).await?;
+        let role: Option<String> = sqlx::query_scalar(
+            "SELECT role FROM document_permissions WHERE document_id=$1 AND user_id=$2 FOR SHARE",
+        )
+        .bind(uuid(document.as_bytes()))
+        .bind(uuid(identity.actor_id.as_bytes()))
+        .fetch_optional(&mut *lease.transaction)
+        .await
+        .map_err(error)?;
+        if role.as_deref() != Some("owner") {
+            return Err(JournalError::Unauthorized);
+        }
+        Ok(lease)
+    }
+}
 async fn existing(
+    db: &PgDatabase,
     tx: &mut Transaction<'_, Postgres>,
     document: DocumentId,
     operation: OperationId,
     fingerprint: [u8; 32],
     head: DocumentVersion,
 ) -> Result<Option<CommitReceipt>, JournalError> {
-    let row=sqlx::query!("SELECT committed_version, command_fingerprint, canonical_event_hash FROM document_operations WHERE document_id=$1 AND operation_id=$2",uuid(document.as_bytes()),uuid(operation.as_bytes())).fetch_optional(&mut **tx).await.map_err(error)?;
-    row.map(|r| {
-        if r.command_fingerprint != fingerprint {
+    let row=sqlx::query!("SELECT committed_version, schema_version, command_fingerprint, canonical_event_hash FROM document_operations WHERE document_id=$1 AND operation_id=$2",uuid(document.as_bytes()),uuid(operation.as_bytes())).fetch_optional(&mut **tx).await.map_err(error)?;
+    if let Some(r) = row {
+        let stored_version = version(r.committed_version)?.get();
+        let schema = u32::try_from(r.schema_version).map_err(|_| JournalError::Corrupt)?;
+        let stored_fingerprint = db
+            .open_record(
+                document,
+                stored_version,
+                "journal-fingerprint",
+                uuid(operation.as_bytes()),
+                schema,
+                &r.command_fingerprint,
+                32,
+            )
+            .await
+            .map_err(crypto_error)?;
+        let stored_hash = db
+            .open_record(
+                document,
+                stored_version,
+                "journal-hash",
+                uuid(operation.as_bytes()),
+                schema,
+                &r.canonical_event_hash,
+                32,
+            )
+            .await
+            .map_err(crypto_error)?;
+        if stored_fingerprint.as_slice() != fingerprint {
             return Err(JournalError::IdempotencyConflict);
         }
-        Ok(CommitReceipt {
+        Ok(Some(CommitReceipt {
             operation_id: operation,
             committed_version: version(r.committed_version)?,
-            canonical_event_hash: r
-                .canonical_event_hash
+            canonical_event_hash: stored_hash
+                .as_slice()
                 .try_into()
                 .map_err(|_| JournalError::Corrupt)?,
             current_head_version: head,
-        })
-    })
-    .transpose()
+        }))
+    } else {
+        Ok(None)
+    }
 }
 async fn undo_target_locked(
+    db: &PgDatabase,
     tx: &mut Transaction<'_, Postgres>,
     document: DocumentId,
     target_id: OperationId,
@@ -282,17 +523,21 @@ async fn undo_target_locked(
     .await
     .map_err(error)?
     .ok_or(JournalError::UndoConflict)?;
-    let event = verified_event(StoredEventRow {
-        document,
-        committed_version: row.committed_version,
-        operation_id: row.operation_id,
-        actor_id: row.actor_id,
-        principal_kind: &row.principal_kind,
-        schema_version: row.schema_version,
-        payload: &row.payload,
-        payload_checksum: &row.payload_checksum,
-        canonical_event_hash: &row.canonical_event_hash,
-    })?;
+    let event = verified_event(
+        db,
+        StoredEventRow {
+            document,
+            committed_version: row.committed_version,
+            operation_id: row.operation_id,
+            actor_id: row.actor_id,
+            principal_kind: &row.principal_kind,
+            schema_version: row.schema_version,
+            payload: &row.payload,
+            payload_checksum: &row.payload_checksum,
+            canonical_event_hash: &row.canonical_event_hash,
+        },
+    )
+    .await?;
     if event.principal != EventPrincipal::User(actor) || !event.operation.is_inverse_target() {
         return Err(JournalError::NotUndoable);
     }
@@ -307,6 +552,7 @@ async fn undo_target_locked(
     Ok(event)
 }
 async fn guard_undo_tail(
+    db: &PgDatabase,
     tx: &mut Transaction<'_, Postgres>,
     document: DocumentId,
     target: &CommittedEvent,
@@ -340,23 +586,32 @@ async fn guard_undo_tail(
     let mut movement_history = Vec::new();
     while let Some(row) = rows.try_next().await.map_err(error)? {
         payload_bytes = payload_bytes
-            .checked_add(row.payload.len())
+            .checked_add(encrypted_plaintext_length(row.payload.len())?)
             .filter(|n| *n <= MAX_UNDO_TAIL_BYTES)
             .ok_or(JournalError::UndoWindowExceeded)?;
         expected = expected.checked_add(1).ok_or(JournalError::Corrupt)?;
-        let event = verified_event(StoredEventRow {
-            document,
-            committed_version: row.committed_version,
-            operation_id: row.operation_id,
-            actor_id: row.actor_id,
-            principal_kind: &row.principal_kind,
-            schema_version: row.schema_version,
-            payload: &row.payload,
-            payload_checksum: &row.payload_checksum,
-            canonical_event_hash: &row.canonical_event_hash,
-        })?;
+        let event = verified_event(
+            db,
+            StoredEventRow {
+                document,
+                committed_version: row.committed_version,
+                operation_id: row.operation_id,
+                actor_id: row.actor_id,
+                principal_kind: &row.principal_kind,
+                schema_version: row.schema_version,
+                payload: &row.payload,
+                payload_checksum: &row.payload_checksum,
+                canonical_event_hash: &row.canonical_event_hash,
+            },
+        )
+        .await?;
         if event.version.get() != expected {
             return Err(JournalError::Corrupt);
+        }
+        if matches!(event.operation, Operation::MergeWrite { sheet, .. }
+            if effective_writes.keys().any(|address| address.sheet == sheet))
+        {
+            return Err(JournalError::UndoConflict);
         }
         for address in touched_addresses(&event.operation, &effective_writes) {
             address_touches = address_touches
@@ -376,6 +631,11 @@ async fn guard_undo_tail(
                     ..
                 }
                 | Operation::RangeWrite {
+                    undoes: Some(id),
+                    undoes_version: Some(version),
+                    ..
+                }
+                | Operation::CellBatchWrite {
                     undoes: Some(id),
                     undoes_version: Some(version),
                     ..
@@ -407,15 +667,20 @@ async fn guard_undo_tail(
         {
             return Err(JournalError::NotUndoable);
         }
-        if formula_history
-            && matches!(
-                event.operation,
-                Operation::MoveRange { .. }
-                    | Operation::MoveCompensation { .. }
-                    | Operation::AxisEdit { .. }
-                    | Operation::AxisCompensation { .. }
-            )
-        {
+        let changes_formula_binding_context = matches!(
+            event.operation,
+            Operation::MoveRange { .. }
+                | Operation::MoveCompensation { .. }
+                | Operation::AxisEdit { .. }
+                | Operation::AxisCompensation { .. }
+        ) || matches!(
+            &event.operation,
+            Operation::CellBatchWrite {
+                intent: spreadsheet_domain::workbook::CellBatchIntent::MoveRange { .. },
+                ..
+            }
+        );
+        if formula_history && changes_formula_binding_context {
             if event.principal != target.principal {
                 return Err(JournalError::NotUndoable);
             }
@@ -428,6 +693,12 @@ async fn guard_undo_tail(
                 | Operation::AxisCompensation {
                     undoes,
                     undoes_version,
+                    ..
+                } => movement_history.last() == Some(&(undoes, undoes_version)),
+                Operation::CellBatchWrite {
+                    intent: spreadsheet_domain::workbook::CellBatchIntent::MoveRange { .. },
+                    undoes: Some(undoes),
+                    undoes_version: Some(undoes_version),
                     ..
                 } => movement_history.last() == Some(&(undoes, undoes_version)),
                 _ => false,
@@ -451,6 +722,7 @@ async fn guard_undo_tail(
     Ok(())
 }
 async fn insert(
+    db: &PgDatabase,
     tx: &mut Transaction<'_, Postgres>,
     event: &CommittedEvent,
     fingerprint: [u8; 32],
@@ -459,8 +731,46 @@ async fn insert(
         codec::CodecError::EventTooLarge => JournalError::PayloadTooLarge,
         _ => JournalError::Corrupt,
     })?;
-    let checksum = codec::checksum(&payload);
     let hash = codec::event_hash(event).map_err(invalid)?;
+    let schema = codec::schema_version(&event.operation);
+    let object = uuid(event.operation_id.as_bytes());
+    let payload = db
+        .seal_record_guarded(
+            event.document_id,
+            event.version.get(),
+            "journal",
+            object,
+            schema,
+            &payload,
+            4 * 1024 * 1024,
+        )
+        .await
+        .map_err(crypto_error)?;
+    let stored_fingerprint = db
+        .seal_record_guarded(
+            event.document_id,
+            event.version.get(),
+            "journal-fingerprint",
+            object,
+            schema,
+            &fingerprint,
+            32,
+        )
+        .await
+        .map_err(crypto_error)?;
+    let stored_hash = db
+        .seal_record_guarded(
+            event.document_id,
+            event.version.get(),
+            "journal-hash",
+            object,
+            schema,
+            &hash,
+            32,
+        )
+        .await
+        .map_err(crypto_error)?;
+    let checksum = codec::checksum(&payload);
     let (actor, principal_kind) = match event.principal {
         EventPrincipal::User(actor) => (Some(uuid(actor.as_bytes())), "user"),
         EventPrincipal::System => (None, "system"),
@@ -470,7 +780,7 @@ async fn insert(
         uuid(event.document_id.as_bytes()), number(event.version.get())?,
         uuid(event.operation_id.as_bytes()), actor, principal_kind,
         i32::try_from(codec::schema_version(&event.operation)).map_err(|_|JournalError::Corrupt)?,
-        payload, &checksum[..], &fingerprint[..], &hash[..]
+        payload, &checksum[..], stored_fingerprint, stored_hash
     ).execute(&mut **tx).await.map_err(error)?;
     Ok(CommitReceipt {
         operation_id: event.operation_id,
@@ -504,33 +814,40 @@ impl OperationJournal for PgDatabase {
         }
         let row = sqlx::query!("SELECT committed_version,operation_id,actor_id,principal_kind,schema_version,payload,payload_checksum,canonical_event_hash FROM document_operations WHERE document_id = $1 AND committed_version <= $2 AND principal_kind = 'system' ORDER BY committed_version DESC LIMIT 1", uuid(document_id.as_bytes()), number(through.get())?)
             .fetch_optional(&self.pool).await.map_err(error)?;
-        row.map(|row| {
-            let event = verified_event(StoredEventRow {
-                document: document_id,
-                committed_version: row.committed_version,
-                operation_id: row.operation_id,
-                actor_id: row.actor_id,
-                principal_kind: &row.principal_kind,
-                schema_version: row.schema_version,
-                payload: &row.payload,
-                payload_checksum: &row.payload_checksum,
-                canonical_event_hash: &row.canonical_event_hash,
-            })?;
+        if let Some(row) = row {
+            let event = verified_event(
+                self,
+                StoredEventRow {
+                    document: document_id,
+                    committed_version: row.committed_version,
+                    operation_id: row.operation_id,
+                    actor_id: row.actor_id,
+                    principal_kind: &row.principal_kind,
+                    schema_version: row.schema_version,
+                    payload: &row.payload,
+                    payload_checksum: &row.payload_checksum,
+                    canonical_event_hash: &row.canonical_event_hash,
+                },
+            )
+            .await?;
             if !matches!(event.operation, Operation::AdvanceCalculationEpoch { .. }) {
                 return Err(JournalError::Corrupt);
             }
-            Ok(event.version)
-        })
-        .transpose()
+            Ok(Some(event.version))
+        } else {
+            Ok(None)
+        }
     }
     async fn quarantine(&self, document_id: DocumentId) -> Result<(), JournalError> {
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         sqlx::query!(
             "UPDATE documents SET state='quarantined' WHERE document_id=$1",
             uuid(document_id.as_bytes())
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(error)?;
+        tx.commit().await.map_err(error)?;
         Ok(())
     }
     async fn access(
@@ -538,7 +855,7 @@ impl OperationJournal for PgDatabase {
         identity: AuthenticatedActor,
         document_id: DocumentId,
     ) -> Result<DocumentAccess, JournalError> {
-        let mut tx = self.pool.begin().await.map_err(error)?;
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         let result = access_locked(&mut tx, identity, document_id).await?;
         tx.commit().await.map_err(error)?;
         Ok(result)
@@ -551,9 +868,10 @@ impl OperationJournal for PgDatabase {
         if identity.actor_id != command.actor_id {
             return Err(JournalError::Unauthorized);
         }
-        let mut tx = self.pool.begin().await.map_err(error)?;
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         let access = access_locked(&mut tx, identity, command.document_id).await?;
         let result = existing(
+            self,
             &mut tx,
             command.document_id,
             command.operation_id,
@@ -580,7 +898,7 @@ impl OperationJournal for PgDatabase {
         candidate
             .apply_event(&event)
             .map_err(|_| JournalError::Corrupt)?;
-        let mut tx = self.pool.begin().await.map_err(error)?;
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         let member = sqlx::query!(
             "SELECT role FROM memberships WHERE workspace_id=$1 AND user_id=$2 FOR UPDATE",
             uuid(identity.workspace_id.as_bytes()),
@@ -603,6 +921,7 @@ impl OperationJournal for PgDatabase {
         if already.is_some() {
             let access = access_locked(&mut tx, identity, event.document_id).await?;
             let receipt = existing(
+                self,
                 &mut tx,
                 event.document_id,
                 event.operation_id,
@@ -614,6 +933,9 @@ impl OperationJournal for PgDatabase {
             tx.commit().await.map_err(error)?;
             return Ok(receipt);
         }
+        self.ensure_document_key_guarded(identity.workspace_id, event.document_id)
+            .await
+            .map_err(crypto_error)?;
         sqlx::query!(
             "INSERT INTO documents(document_id,workspace_id,head_version) VALUES($1,$2,1)",
             uuid(event.document_id.as_bytes()),
@@ -627,7 +949,7 @@ impl OperationJournal for PgDatabase {
             .execute(&mut *tx)
             .await
             .map_err(error)?;
-        let receipt = insert(&mut tx, &event, codec::genesis_fingerprint(&event)).await?;
+        let receipt = insert(self, &mut tx, &event, codec::genesis_fingerprint(&event)).await?;
         tx.commit().await.map_err(error)?;
         Ok(receipt)
     }
@@ -654,6 +976,44 @@ impl OperationJournal for PgDatabase {
             return Err(JournalError::Corrupt);
         }
         let canonical_payload = match &e.operation {
+            Operation::FrozenRowsWrite { sheet, rows, .. } => {
+                let expected = CommandPayload::SetFrozenRows {
+                    sheet: *sheet,
+                    rows: *rows,
+                };
+                if c.operation != expected {
+                    return Err(JournalError::Corrupt);
+                }
+                expected
+            }
+            Operation::AxisSizeWrite { sheet, writes } => {
+                let expected = CommandPayload::SetAxisSizes {
+                    sheet: *sheet,
+                    writes: writes
+                        .iter()
+                        .map(|write| (write.target, write.size))
+                        .collect(),
+                };
+                if c.operation != expected {
+                    return Err(JournalError::Corrupt);
+                }
+                expected
+            }
+            Operation::MergeWrite {
+                sheet,
+                change,
+                undoes,
+                ..
+            } => match undoes {
+                Some(id) => CommandPayload::UndoCell {
+                    target_operation_id: *id,
+                },
+                None => CommandPayload::SetMergeRange {
+                    sheet: *sheet,
+                    range: change.range,
+                    merged: change.merged,
+                },
+            },
             Operation::StyleWrite { .. } => match &c.operation {
                 CommandPayload::SetCellStyle { .. } | CommandPayload::SetRangeStyle { .. } => {
                     c.operation.clone()
@@ -682,6 +1042,82 @@ impl OperationJournal for PgDatabase {
             },
             Operation::SetCellValues { writes } => CommandPayload::SetCellValues {
                 writes: writes.clone(),
+            },
+            Operation::CellBatchWrite {
+                undoes: Some(undoes),
+                ..
+            } => CommandPayload::UndoCell {
+                target_operation_id: *undoes,
+            },
+            Operation::CellBatchWrite {
+                intent: spreadsheet_domain::workbook::CellBatchIntent::SortRange { range, .. },
+                undoes: None,
+                ..
+            } => match &c.operation {
+                CommandPayload::SortRange { range: selected }
+                    if range == selected && c.base_version == request.expected_head =>
+                {
+                    c.operation.clone()
+                }
+                _ => return Err(JournalError::Corrupt),
+            },
+            Operation::CellBatchWrite {
+                intent: spreadsheet_domain::workbook::CellBatchIntent::SetValues,
+                undoes: None,
+                ..
+            } => match &c.operation {
+                CommandPayload::SetCellBatch { .. } => c.operation.clone(),
+                _ => return Err(JournalError::Corrupt),
+            },
+            Operation::CellBatchWrite {
+                intent:
+                    spreadsheet_domain::workbook::CellBatchIntent::CopyRange {
+                        source,
+                        destination,
+                        rows,
+                        columns,
+                    },
+                undoes: None,
+                ..
+            } => match &c.operation {
+                CommandPayload::CopyRange {
+                    source: command_source,
+                    destination: command_destination,
+                    rows: command_rows,
+                    columns: command_columns,
+                } if source == command_source
+                    && destination == command_destination
+                    && rows == command_rows
+                    && columns == command_columns =>
+                {
+                    c.operation.clone()
+                }
+                _ => return Err(JournalError::Corrupt),
+            },
+            Operation::CellBatchWrite {
+                intent:
+                    spreadsheet_domain::workbook::CellBatchIntent::MoveRange {
+                        source,
+                        destination,
+                        rows,
+                        columns,
+                    },
+                undoes: None,
+                ..
+            } => match &c.operation {
+                CommandPayload::MoveRange {
+                    source: command_source,
+                    destination: command_destination,
+                    rows: command_rows,
+                    columns: command_columns,
+                } if source == command_source
+                    && destination == command_destination
+                    && rows == command_rows
+                    && columns == command_columns =>
+                {
+                    c.operation.clone()
+                }
+                _ => return Err(JournalError::Corrupt),
             },
             Operation::CopyRange { .. } => match &c.operation {
                 CommandPayload::CopyRange { .. } => c.operation.clone(),
@@ -836,12 +1272,30 @@ impl OperationJournal for PgDatabase {
             return Err(JournalError::Corrupt);
         }
         let fingerprint = codec::command_fingerprint(c).map_err(invalid)?;
-        let mut tx = self.pool.begin().await.map_err(error)?;
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         let access = access_locked(&mut tx, request.identity, c.document_id).await?;
+        self.deny_anonymized_guest_write(&mut tx, request.identity, c.document_id)
+            .await?;
+        let identity_kind =
+            sqlx::query_scalar::<_, String>("SELECT identity_kind FROM users WHERE user_id=$1")
+                .bind(uuid(request.identity.actor_id.as_bytes()))
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(error)?;
+        if identity_kind == "share_guest" {
+            crate::shares::guest_command_floor_locked(
+                &mut tx,
+                request.identity,
+                c.document_id,
+                c.base_version,
+            )
+            .await?;
+        }
         if !access.can_edit {
             return Err(JournalError::Unauthorized);
         }
         if let Some(receipt) = existing(
+            self,
             &mut tx,
             c.document_id,
             c.operation_id,
@@ -890,7 +1344,7 @@ impl OperationJournal for PgDatabase {
                 .inverse_projection
                 .as_deref()
                 .ok_or(JournalError::UndoConflict)?;
-            axis_guard::verified_projection(&mut tx, c.document_id, access.head, projection)
+            axis_guard::verified_projection(self, &mut tx, c.document_id, access.head, projection)
                 .await?;
             if spreadsheet_domain::lifecycle::max_activation_version(projection).get()
                 != u64::try_from(activation).map_err(|_| JournalError::Corrupt)?
@@ -900,11 +1354,16 @@ impl OperationJournal for PgDatabase {
             axis_guard::check_floors(projection, c)?;
             axis_guard::check_formulas(projection, c, &e.operation)?;
         }
-        if matches!(e.operation, Operation::StyleWrite { .. }) {
-            style_guard::validate(&mut tx, request, access.head, None).await?;
+        if matches!(e.operation, Operation::StyleWrite { .. })
+            || matches!(&e.operation, Operation::CellBatchWrite { style_writes, undoes: None, .. } if !style_writes.is_empty())
+        {
+            style_guard::validate(self, &mut tx, request, access.head, None).await?;
         }
         if matches!(e.operation, Operation::AxisEdit { .. }) {
-            axis_guard::validate(&mut tx, request, access.head, None).await?;
+            axis_guard::validate(self, &mut tx, request, access.head, None).await?;
+        }
+        if matches!(e.operation, Operation::MergeWrite { undoes: None, .. }) {
+            merge_guard::validate(self, &mut tx, request, access.head, None).await?;
         }
         let inverse_target = match &e.operation {
             Operation::CellWrite {
@@ -929,15 +1388,26 @@ impl OperationJournal for PgDatabase {
                 undoes_version: version,
                 ..
             }
+            | Operation::CellBatchWrite {
+                undoes: Some(id),
+                undoes_version: Some(version),
+                ..
+            }
             | Operation::AxisCompensation {
                 undoes: id,
                 undoes_version: version,
+                ..
+            }
+            | Operation::MergeWrite {
+                undoes: Some(id),
+                undoes_version: Some(version),
                 ..
             } => Some((*id, *version)),
             _ => None,
         };
         if let Some((target_id, target_version)) = inverse_target {
             let target = undo_target_locked(
+                self,
                 &mut tx,
                 c.document_id,
                 target_id,
@@ -946,10 +1416,16 @@ impl OperationJournal for PgDatabase {
             )
             .await?;
             if matches!(e.operation, Operation::StyleCompensation { .. }) {
-                style_guard::validate(&mut tx, request, access.head, Some(&target)).await?;
+                style_guard::validate(self, &mut tx, request, access.head, Some(&target)).await?;
             } else if matches!(e.operation, Operation::AxisCompensation { .. }) {
-                axis_guard::validate(&mut tx, request, access.head, Some(&target)).await?;
+                axis_guard::validate(self, &mut tx, request, access.head, Some(&target)).await?;
+            } else if matches!(e.operation, Operation::MergeWrite { .. }) {
+                merge_guard::validate(self, &mut tx, request, access.head, Some(&target)).await?;
             } else {
+                if matches!(e.operation, Operation::CellBatchWrite { .. }) {
+                    style_guard::validate(self, &mut tx, request, access.head, Some(&target))
+                        .await?;
+                }
                 let original = target_writes(&target, request.identity.actor_id)?;
                 let inverse = target_writes(e, request.identity.actor_id)?;
                 if target.version != target_version
@@ -961,14 +1437,30 @@ impl OperationJournal for PgDatabase {
                 {
                     return Err(JournalError::UndoConflict);
                 }
-                guard_undo_tail(&mut tx, c.document_id, &target, access.head).await?;
-                if matches!(e.operation, Operation::MoveCompensation { .. }) {
+                guard_undo_tail(self, &mut tx, c.document_id, &target, access.head).await?;
+                if matches!(e.operation, Operation::MoveCompensation { .. })
+                    || matches!(
+                        &e.operation,
+                        Operation::CellBatchWrite {
+                            intent: spreadsheet_domain::workbook::CellBatchIntent::MoveRange { .. },
+                            undoes: Some(_),
+                            ..
+                        }
+                    )
+                {
                     let projection = request
                         .inverse_projection
                         .as_deref()
                         .ok_or(JournalError::Corrupt)?;
-                    move_guard::validate(&mut tx, c.document_id, &target, access.head, projection)
-                        .await?;
+                    move_guard::validate(
+                        self,
+                        &mut tx,
+                        c.document_id,
+                        &target,
+                        access.head,
+                        projection,
+                    )
+                    .await?;
                 }
             }
         }
@@ -989,7 +1481,7 @@ impl OperationJournal for PgDatabase {
             .execute(&mut *tx)
             .await
             .map_err(error)?;
-        let receipt = insert(&mut tx, e, fingerprint).await?;
+        let receipt = insert(self, &mut tx, e, fingerprint).await?;
         tx.commit().await.map_err(error)?;
         Ok(CommitOutcome::Committed(receipt))
     }
@@ -1000,15 +1492,24 @@ impl OperationJournal for PgDatabase {
         operation_id: OperationId,
         sampled_context: &CalculationContext,
     ) -> Result<Option<CommitReceipt>, JournalError> {
-        let mut tx = self.pool.begin().await.map_err(error)?;
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         let access = access_locked(&mut tx, identity, document_id).await?;
         if sampled_context.reason() == CalculationReason::Explicit && !access.can_edit {
             return Err(JournalError::Unauthorized);
         }
+        self.deny_anonymized_guest_write(&mut tx, identity, document_id)
+            .await?;
         let fingerprint =
             codec::system_trigger_fingerprint(document_id, operation_id, sampled_context);
-        let receipt =
-            existing(&mut tx, document_id, operation_id, fingerprint, access.head).await?;
+        let receipt = existing(
+            self,
+            &mut tx,
+            document_id,
+            operation_id,
+            fingerprint,
+            access.head,
+        )
+        .await?;
         tx.commit().await.map_err(error)?;
         Ok(receipt)
     }
@@ -1029,8 +1530,10 @@ impl OperationJournal for PgDatabase {
             return Err(JournalError::Corrupt);
         }
         let fingerprint = codec::system_fingerprint(event).map_err(invalid)?;
-        let mut tx = self.pool.begin().await.map_err(error)?;
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         let access = access_locked(&mut tx, request.identity, event.document_id).await?;
+        self.deny_anonymized_guest_write(&mut tx, request.identity, event.document_id)
+            .await?;
         if matches!(&event.operation, Operation::AdvanceCalculationEpoch { context } if context.reason() == CalculationReason::Explicit)
             && !access.can_edit
         {
@@ -1038,6 +1541,7 @@ impl OperationJournal for PgDatabase {
         }
         let head = access.head;
         if let Some(receipt) = existing(
+            self,
             &mut tx,
             event.document_id,
             event.operation_id,
@@ -1070,7 +1574,7 @@ impl OperationJournal for PgDatabase {
             .execute(&mut *tx)
             .await
             .map_err(error)?;
-        let receipt = insert(&mut tx, event, fingerprint).await?;
+        let receipt = insert(self, &mut tx, event, fingerprint).await?;
         tx.commit().await.map_err(error)?;
         Ok(CommitOutcome::Committed(receipt))
     }
@@ -1080,12 +1584,13 @@ impl OperationJournal for PgDatabase {
         document_id: DocumentId,
         target_operation_id: OperationId,
     ) -> Result<CommittedEvent, JournalError> {
-        let mut tx = self.pool.begin().await.map_err(error)?;
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         let access = access_locked(&mut tx, identity, document_id).await?;
         if !access.can_edit {
             return Err(JournalError::Unauthorized);
         }
         let target = undo_target_locked(
+            self,
             &mut tx,
             document_id,
             target_operation_id,
@@ -1106,23 +1611,27 @@ impl OperationJournal for PgDatabase {
         if limit == 0 || limit > 1000 {
             return Err(JournalError::Corrupt);
         }
-        let mut tx = self.pool.begin().await.map_err(error)?;
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         let access = access_locked(&mut tx, identity, document_id).await?;
         let rows=sqlx::query!("SELECT committed_version, operation_id, actor_id, principal_kind, schema_version, payload, payload_checksum, canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version>$2 ORDER BY committed_version LIMIT $3",uuid(document_id.as_bytes()),number(after.get())?,i64::from(limit)).fetch_all(&mut *tx).await.map_err(error)?;
         let mut events = Vec::with_capacity(rows.len());
         let mut expected = after.get();
         for r in rows {
-            let e = verified_event(StoredEventRow {
-                document: document_id,
-                committed_version: r.committed_version,
-                operation_id: r.operation_id,
-                actor_id: r.actor_id,
-                principal_kind: &r.principal_kind,
-                schema_version: r.schema_version,
-                payload: &r.payload,
-                payload_checksum: &r.payload_checksum,
-                canonical_event_hash: &r.canonical_event_hash,
-            })?;
+            let e = verified_event(
+                self,
+                StoredEventRow {
+                    document: document_id,
+                    committed_version: r.committed_version,
+                    operation_id: r.operation_id,
+                    actor_id: r.actor_id,
+                    principal_kind: &r.principal_kind,
+                    schema_version: r.schema_version,
+                    payload: &r.payload,
+                    payload_checksum: &r.payload_checksum,
+                    canonical_event_hash: &r.canonical_event_hash,
+                },
+            )
+            .await?;
             expected = expected.checked_add(1).ok_or(JournalError::Corrupt)?;
             if e.version.get() != expected {
                 return Err(JournalError::Corrupt);
@@ -1151,7 +1660,38 @@ impl PgDatabase {
         identity: AuthenticatedActor,
         events: &[CommittedEvent],
     ) -> Result<CommitReceipt, JournalError> {
-        if events.is_empty() || events.len() > MAX_IMPORT_CELLS + 64 {
+        self.publish_import(identity, events, None).await
+    }
+    pub async fn create_pxel_imported(
+        &self,
+        identity: AuthenticatedActor,
+        events: &[CommittedEvent],
+        personal: &crate::PersonalFilters,
+        privacy: &crate::PrivacyRules,
+        title: &str,
+    ) -> Result<CommitReceipt, JournalError> {
+        self.publish_import(identity, events, Some((personal, privacy, title)))
+            .await
+    }
+    async fn publish_import(
+        &self,
+        identity: AuthenticatedActor,
+        events: &[CommittedEvent],
+        settings: Option<(&crate::PersonalFilters, &crate::PrivacyRules, &str)>,
+    ) -> Result<CommitReceipt, JournalError> {
+        let cells_limit = if settings.is_some() {
+            MAX_CELLS
+        } else {
+            MAX_IMPORT_CELLS
+        };
+        let total_bytes_limit = if settings.is_some() {
+            96 * 1024 * 1024
+        } else {
+            MAX_IMPORT_ENCODED_BYTES
+        };
+        // At most one formula and one style event per imported address, plus
+        // one value batch, bounded merge events, and 64 sheet-creation events.
+        if events.is_empty() || events.len() > cells_limit * 2 + 10_000 + 65 {
             return Err(JournalError::Corrupt);
         }
         let genesis = events.first().ok_or(JournalError::Corrupt)?;
@@ -1161,7 +1701,7 @@ impl PgDatabase {
         let mut seen = std::collections::BTreeSet::new();
         let mut candidate = Workbook::empty(document_id);
         let mut hashes = Vec::with_capacity(events.len());
-        let mut written_cells = 0_usize;
+        let mut imported_addresses = std::collections::BTreeSet::new();
         let mut encoded_bytes = 0_usize;
         for (index, event) in events.iter().enumerate() {
             let permitted = if index == 0 {
@@ -1172,7 +1712,24 @@ impl PgDatabase {
                     Operation::AddSheet { .. }
                         | Operation::SetCellValues { .. }
                         | Operation::SetCellFormula { .. }
-                )
+                        | Operation::StyleWrite { .. }
+                        | Operation::MergeWrite {
+                            undoes: None,
+                            undoes_version: None,
+                            ..
+                        }
+                ) || (settings.is_some()
+                    && matches!(
+                        event.operation,
+                        Operation::AxisSizeWrite { .. }
+                            | Operation::FrozenRowsWrite { .. }
+                            | Operation::CellBatchWrite {
+                                intent: CellBatchIntent::SetValues,
+                                undoes: None,
+                                undoes_version: None,
+                                ..
+                            }
+                    ))
             };
             if !permitted
                 || event.document_id != document_id
@@ -1183,14 +1740,27 @@ impl PgDatabase {
             {
                 return Err(JournalError::Corrupt);
             }
-            written_cells = written_cells
-                .checked_add(match &event.operation {
-                    Operation::SetCellValues { writes } => writes.len(),
-                    Operation::SetCellFormula { .. } => 1,
-                    _ => 0,
-                })
-                .ok_or(JournalError::PayloadTooLarge)?;
-            if written_cells > MAX_IMPORT_CELLS {
+            match &event.operation {
+                Operation::SetCellValues { writes } => {
+                    imported_addresses.extend(writes.iter().map(|write| write.address));
+                }
+                Operation::SetCellFormula { address, .. } => {
+                    imported_addresses.insert(*address);
+                }
+                Operation::StyleWrite { writes, .. } => {
+                    imported_addresses.extend(writes.iter().map(|write| write.address));
+                }
+                Operation::CellBatchWrite {
+                    content_writes,
+                    style_writes,
+                    ..
+                } => {
+                    imported_addresses.extend(content_writes.iter().map(|w| w.address));
+                    imported_addresses.extend(style_writes.iter().map(|w| w.address));
+                }
+                _ => {}
+            }
+            if imported_addresses.len() > cells_limit {
                 return Err(JournalError::PayloadTooLarge);
             }
             let encoded = codec::encode(event).map_err(|error| match error {
@@ -1200,7 +1770,7 @@ impl PgDatabase {
             encoded_bytes = encoded_bytes
                 .checked_add(encoded.len())
                 .ok_or(JournalError::PayloadTooLarge)?;
-            if encoded_bytes > MAX_IMPORT_ENCODED_BYTES {
+            if encoded_bytes > total_bytes_limit {
                 return Err(JournalError::PayloadTooLarge);
             }
             candidate
@@ -1208,7 +1778,16 @@ impl PgDatabase {
                 .map_err(|_| JournalError::Corrupt)?;
             hashes.push(codec::event_hash(event).map_err(invalid)?);
         }
-        let mut tx = self.pool.begin().await.map_err(error)?;
+        if let Some((personal, privacy, title)) = settings {
+            if !crate::valid_title(title) {
+                return Err(JournalError::Corrupt);
+            }
+            personal
+                .validate_geometry(&candidate)
+                .map_err(|_| JournalError::Corrupt)?;
+            privacy.kinds().map_err(|_| JournalError::Corrupt)?;
+        }
+        let mut tx = self.begin_guarded().await.map_err(error)?;
         let member = sqlx::query!(
             "SELECT role FROM memberships WHERE workspace_id=$1 AND user_id=$2 FOR UPDATE",
             uuid(identity.workspace_id.as_bytes()),
@@ -1231,24 +1810,35 @@ impl PgDatabase {
         if already.is_some() {
             let access = access_locked(&mut tx, identity, document_id).await?;
             let rows = sqlx::query!(
-                "SELECT committed_version,operation_id,canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version<=$2 ORDER BY committed_version",
+                "SELECT committed_version,operation_id,schema_version,canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version<=$2 ORDER BY committed_version",
                 uuid(document_id.as_bytes()),
                 number(last.version.get())?
             )
             .fetch_all(&mut *tx)
             .await
             .map_err(error)?;
-            if rows.len() != events.len()
-                || rows
-                    .iter()
-                    .zip(events.iter().zip(&hashes))
-                    .any(|(row, (event, hash))| {
-                        row.committed_version != event.version.get() as i64
-                            || row.operation_id != uuid(event.operation_id.as_bytes())
-                            || row.canonical_event_hash.as_slice() != hash
-                    })
-            {
+            if rows.len() != events.len() {
                 return Err(JournalError::IdempotencyConflict);
+            }
+            for (row, (event, hash)) in rows.iter().zip(events.iter().zip(&hashes)) {
+                let stored_hash = self
+                    .open_record(
+                        document_id,
+                        version(row.committed_version)?.get(),
+                        "journal-hash",
+                        row.operation_id,
+                        u32::try_from(row.schema_version).map_err(|_| JournalError::Corrupt)?,
+                        &row.canonical_event_hash,
+                        32,
+                    )
+                    .await
+                    .map_err(crypto_error)?;
+                if row.committed_version != number(event.version.get())?
+                    || row.operation_id != uuid(event.operation_id.as_bytes())
+                    || stored_hash.as_slice() != hash
+                {
+                    return Err(JournalError::IdempotencyConflict);
+                }
             }
             tx.commit().await.map_err(error)?;
             return Ok(CommitReceipt {
@@ -1258,6 +1848,9 @@ impl PgDatabase {
                 current_head_version: access.head,
             });
         }
+        self.ensure_document_key_guarded(identity.workspace_id, document_id)
+            .await
+            .map_err(crypto_error)?;
         sqlx::query!(
             "INSERT INTO documents(document_id,workspace_id,head_version) VALUES($1,$2,$3)",
             uuid(document_id.as_bytes()),
@@ -1279,7 +1872,37 @@ impl PgDatabase {
             } else {
                 *hashes.get(index).ok_or(JournalError::Corrupt)?
             };
-            receipt = Some(insert(&mut tx, event, fingerprint).await?);
+            receipt = Some(insert(self, &mut tx, event, fingerprint).await?);
+        }
+        if let Some((personal, privacy, title)) = settings {
+            self.initial_metadata(&mut tx, document_id, title)
+                .await
+                .map_err(|_| JournalError::Corrupt)?;
+            let user = uuid(identity.actor_id.as_bytes());
+            let plain = zeroize::Zeroizing::new(
+                serde_json::to_vec(personal).map_err(|_| JournalError::Corrupt)?,
+            );
+            let payload = self
+                .seal_record_guarded(document_id, 1, "personal-view", user, 1, &plain, 128 * 1024)
+                .await
+                .map_err(crypto_error)?;
+            sqlx::query("INSERT INTO personal_document_views(document_id,user_id,revision,payload) VALUES($1,$2,1,$3)").bind(uuid(document_id.as_bytes())).bind(user).bind(payload).execute(&mut *tx).await.map_err(error)?;
+            let plain = zeroize::Zeroizing::new(
+                serde_json::to_vec(privacy).map_err(|_| JournalError::Corrupt)?,
+            );
+            let payload = self
+                .seal_record_guarded(
+                    document_id,
+                    1,
+                    "privacy-policy",
+                    uuid(document_id.as_bytes()),
+                    1,
+                    &plain,
+                    128 * 1024,
+                )
+                .await
+                .map_err(crypto_error)?;
+            sqlx::query("INSERT INTO document_privacy_policies(document_id,revision,payload) VALUES($1,1,$2)").bind(uuid(document_id.as_bytes())).bind(payload).execute(&mut *tx).await.map_err(error)?;
         }
         tx.commit().await.map_err(error)?;
         receipt.ok_or(JournalError::Corrupt)
@@ -1422,17 +2045,22 @@ mod tests {
     async fn imported_events_publish_atomically_and_retry_exactly(
         pool: sqlx::PgPool,
     ) -> TestResult {
+        use spreadsheet_domain::{
+            style::{Change, StyleChange},
+            style_write::prepare_style_write,
+        };
         let (db, identity, _) = fixture(pool).await?;
         let document = DocumentId::from_bytes([21; 16])?;
         let sheet = SheetId::from_bytes([22; 16])?;
         let row = RowId::from_bytes([23; 16])?;
         let column = ColumnId::from_bytes([24; 16])?;
+        let second_column = ColumnId::from_bytes([27; 16])?;
         let genesis_operation = Operation::CreateWorkbook {
             sheet: SheetSeed {
                 id: sheet,
                 name: "Imported".into(),
                 rows: vec![row],
-                columns: vec![column],
+                columns: vec![column, second_column],
             },
         };
         let first =
@@ -1462,9 +2090,43 @@ mod tests {
             operation: content_operation,
             state_hash: second.hash(),
         };
-        let events = [genesis.clone(), content.clone()];
+        let style_operation = prepare_style_write(
+            &second,
+            &[address],
+            &[StyleChange::FontBold(Change::Set(true))],
+            StyleWriteKind::Cell,
+        )?;
+        let third = second.candidate(&style_operation, DocumentVersion::new(3)?)?;
+        let style = CommittedEvent {
+            document_id: document,
+            operation_id: OperationId::from_bytes([28; 16])?,
+            principal: EventPrincipal::User(identity.actor_id),
+            version: third.version(),
+            operation: style_operation,
+            state_hash: third.hash(),
+        };
+        let merge_operation = Operation::MergeWrite {
+            sheet,
+            change: spreadsheet_domain::merge::MergeChange {
+                range: spreadsheet_domain::merge::MergeRange::new(row, row, column, second_column),
+                merged: true,
+                previous: false,
+            },
+            undoes: None,
+            undoes_version: None,
+        };
+        let fourth = third.candidate(&merge_operation, DocumentVersion::new(4)?)?;
+        let merge = CommittedEvent {
+            document_id: document,
+            operation_id: OperationId::from_bytes([29; 16])?,
+            principal: EventPrincipal::User(identity.actor_id),
+            version: fourth.version(),
+            operation: merge_operation,
+            state_hash: fourth.hash(),
+        };
+        let events = [genesis.clone(), content.clone(), style, merge];
         let receipt = db.create_imported(identity, &events).await?;
-        assert_eq!(receipt.committed_version, DocumentVersion::new(2)?);
+        assert_eq!(receipt.committed_version, DocumentVersion::new(4)?);
         assert_eq!(
             db.load_events(identity, document, DocumentVersion::ZERO, 10)
                 .await?,
@@ -1484,11 +2146,11 @@ mod tests {
                 .await,
             Err(JournalError::IdempotencyConflict)
         ));
-        sqlx::query("CREATE FUNCTION fail_import_second_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.committed_version=2 THEN RAISE EXCEPTION 'injected'; END IF; RETURN NEW; END $$")
+        sqlx::query("CREATE FUNCTION fail_import_style_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.committed_version=3 THEN RAISE EXCEPTION 'injected'; END IF; RETURN NEW; END $$")
             .execute(&db.pool).await?;
-        sqlx::query("CREATE TRIGGER fail_import_second_event BEFORE INSERT ON document_operations FOR EACH ROW EXECUTE FUNCTION fail_import_second_event()")
+        sqlx::query("CREATE TRIGGER fail_import_style_event BEFORE INSERT ON document_operations FOR EACH ROW EXECUTE FUNCTION fail_import_style_event()")
             .execute(&db.pool).await?;
-        let other = DocumentId::from_bytes([27; 16])?;
+        let other = DocumentId::from_bytes([29; 16])?;
         let mut failed_events = events;
         let mut candidate = Workbook::empty(other);
         for event in &mut failed_events {
@@ -1507,7 +2169,7 @@ mod tests {
     pub(super) async fn fixture(
         pool: sqlx::PgPool,
     ) -> Result<(PgDatabase, AuthenticatedActor, Workbook), Box<dyn std::error::Error>> {
-        let db = PgDatabase { pool };
+        let db = PgDatabase::for_test(pool)?;
         db.migrate().await?;
         let identity = AuthenticatedActor {
             actor_id: ActorId::from_bytes([1; 16])?,
@@ -2350,6 +3012,67 @@ mod tests {
         Ok(())
     }
     #[sqlx::test(migrations = false)]
+    async fn journal_payload_fingerprints_and_hashes_are_authenticated_ciphertext(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        let (db, identity, book) = fixture(pool).await?;
+        let req = request(&db, identity, &book, 29).await?;
+        db.commit(&req).await?;
+        let row = sqlx::query!("SELECT payload,payload_checksum,command_fingerprint,canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version=2",uuid(book.document_id().as_bytes())).fetch_one(&db.pool).await?;
+        assert!(
+            !row.payload
+                .windows(b"retained".len())
+                .any(|bytes| bytes == b"retained")
+        );
+        assert!(codec::decode(&row.payload).is_err());
+        assert_eq!(
+            row.command_fingerprint.len(),
+            32 + crate::crypto::ENVELOPE_OVERHEAD
+        );
+        assert_eq!(
+            row.canonical_event_hash.len(),
+            32 + crate::crypto::ENVELOPE_OVERHEAD
+        );
+        assert_ne!(
+            row.command_fingerprint.as_slice(),
+            codec::command_fingerprint(&req.command)?.as_slice()
+        );
+        assert_ne!(
+            row.canonical_event_hash.as_slice(),
+            codec::event_hash(&req.event)?.as_slice()
+        );
+        assert_eq!(
+            codec::checksum(&row.payload).as_slice(),
+            row.payload_checksum
+        );
+        let events = db
+            .load_events(identity, book.document_id(), DocumentVersion::ZERO, 10)
+            .await?;
+        assert_eq!(events.last(), Some(&req.event));
+        // Isolated administrator simulates an altered ciphertext with a matching
+        // outer checksum. AEAD must still reject before codec/publication.
+        let mut changed = row.payload;
+        let last = changed.last_mut().ok_or("empty ciphertext")?;
+        *last ^= 1;
+        sqlx::raw_sql(
+            "ALTER TABLE document_operations DISABLE TRIGGER document_operations_immutable",
+        )
+        .execute(&db.pool)
+        .await?;
+        sqlx::query("UPDATE document_operations SET payload=$1,payload_checksum=$2 WHERE document_id=$3 AND committed_version=2").bind(&changed).bind(codec::checksum(&changed).as_slice()).bind(uuid(book.document_id().as_bytes())).execute(&db.pool).await?;
+        sqlx::raw_sql(
+            "ALTER TABLE document_operations ENABLE TRIGGER document_operations_immutable",
+        )
+        .execute(&db.pool)
+        .await?;
+        assert!(matches!(
+            db.load_events(identity, book.document_id(), DocumentVersion::ZERO, 10)
+                .await,
+            Err(JournalError::Corrupt)
+        ));
+        Ok(())
+    }
+    #[sqlx::test(migrations = false)]
     async fn retry_100_times_is_one_event_and_replay_survives_new_adapter(
         pool: sqlx::PgPool,
     ) -> TestResult {
@@ -2364,6 +3087,7 @@ mod tests {
         }
         let restarted = PgDatabase {
             pool: db.pool.clone(),
+            ..db.clone()
         };
         let events = restarted
             .load_events(identity, w.document_id(), DocumentVersion::ZERO, 1000)
@@ -2519,6 +3243,7 @@ mod tests {
         );
         let restarted = PgDatabase {
             pool: db.pool.clone(),
+            ..db.clone()
         };
         let session = restarted
             .find_development_session([3; 32])
@@ -2549,6 +3274,7 @@ mod tests {
                     (*db.pool.connect_options()).clone(),
                 ))
                 .await?,
+            ..db.clone()
         };
         let settings=sqlx::query!(r#"SELECT current_setting('statement_timeout') AS "statement!", current_setting('lock_timeout') AS "lock!", current_setting('idle_in_transaction_session_timeout') AS "idle!""#)
             .fetch_one(&bounded.pool).await?;
@@ -2685,6 +3411,7 @@ mod tests {
         assert_eq!(metadata.schema_version, 2);
         let restarted = PgDatabase {
             pool: db.pool.clone(),
+            ..db.clone()
         };
         let events = restarted
             .load_events(identity, w.document_id(), DocumentVersion::ZERO, 1000)
@@ -2769,6 +3496,7 @@ mod tests {
         assert_eq!(metadata.schema_version, 3);
         let restarted = PgDatabase {
             pool: db.pool.clone(),
+            ..db.clone()
         };
         let events = restarted
             .load_events(identity, book.document_id(), DocumentVersion::ZERO, 1000)
@@ -3790,7 +4518,7 @@ mod tests {
                     0,
                     0,
                     [93; 32],
-                    "pxel-formula-0.14.0".into(),
+                    "pxel-formula-0.16.0".into(),
                     "pxel-excel-subset-v1".into(),
                     reason,
                 )?,
@@ -3862,7 +4590,7 @@ mod tests {
                 0,
                 0,
                 [96; 32],
-                "pxel-formula-0.14.0".into(),
+                "pxel-formula-0.16.0".into(),
                 "pxel-excel-subset-v1".into(),
                 CalculationReason::Open,
             )?,

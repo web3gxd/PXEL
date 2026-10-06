@@ -44,7 +44,7 @@ merged_parts["xl/worksheets/sheet1.xml"] = merged_parts[
     "xl/worksheets/sheet1.xml"
 ].replace(
     "</worksheet>",
-    '<mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells></worksheet>',
+    '<mergeCells count="1"><mergeCell ref="E1:F1"/></mergeCells></worksheet>',
 )
 with ZipFile(ROOT / "single_sheet_merge.xlsx", "w") as archive:
     for name, content in sorted(merged_parts.items()):

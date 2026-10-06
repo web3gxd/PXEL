@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use spreadsheet_application::journal::AuthenticatedActor;
 #[cfg(feature = "dev-auth")]
 use spreadsheet_domain::workbook::{ActorId, WorkspaceId};
-use spreadsheet_storage::{DatabaseError, PgDatabase};
+use spreadsheet_storage::{DatabaseError, GuestSession, PgDatabase};
 use std::time::{Duration, Instant};
 #[cfg(feature = "dev-auth")]
 use uuid::Uuid;
@@ -13,6 +13,16 @@ pub struct Principal {
     pub identity: AuthenticatedActor,
     pub expires_at: Instant,
     session_token_hash: [u8; 32],
+    pub scope: PrincipalScope,
+}
+
+#[derive(Clone)]
+pub enum PrincipalScope {
+    Member,
+    ShareGuest {
+        session: GuestSession,
+        token_hash: [u8; 32],
+    },
 }
 
 pub struct Auth {
@@ -26,6 +36,10 @@ impl Auth {
             enabled: enabled && cfg!(feature = "dev-auth"),
             database,
         }
+    }
+
+    pub fn share_cookie(&self, token: &str, link_id: uuid::Uuid, remaining: u64) -> String {
+        share_cookie(token, link_id, remaining, !self.enabled)
     }
 
     #[cfg(feature = "dev-auth")]
@@ -96,6 +110,9 @@ impl Auth {
         &self,
         headers: &HeaderMap,
     ) -> Result<Option<Principal>, DatabaseError> {
+        if contains_share_cookie(headers) {
+            return Ok(None);
+        }
         if !self.enabled {
             return Ok(None);
         }
@@ -110,6 +127,32 @@ impl Auth {
                 identity: session.identity,
                 expires_at: Instant::now() + Duration::from_secs(session.remaining_seconds),
                 session_token_hash: token_hash(token),
+                scope: PrincipalScope::Member,
+            }))
+    }
+
+    pub async fn authenticate_share(
+        &self,
+        headers: &HeaderMap,
+        link_id: uuid::Uuid,
+    ) -> Result<Option<Principal>, DatabaseError> {
+        let Some(token) = share_session_token(headers) else {
+            return Ok(None);
+        };
+        let hash = token_hash(token);
+        Ok(self
+            .database
+            .guest_session(link_id, hash)
+            .await
+            .map_err(|_| DatabaseError::SchemaNotReady)?
+            .map(|session| Principal {
+                identity: session.identity,
+                expires_at: Instant::now() + Duration::from_millis(session.remaining_millis),
+                session_token_hash: hash,
+                scope: PrincipalScope::ShareGuest {
+                    session,
+                    token_hash: hash,
+                },
             }))
     }
 
@@ -117,11 +160,26 @@ impl Auth {
         if Instant::now() >= principal.expires_at {
             return Ok(false);
         }
-        Ok(self
-            .database
-            .find_development_session(principal.session_token_hash)
-            .await?
-            .is_some_and(|session| session.identity == principal.identity))
+        match &principal.scope {
+            PrincipalScope::Member => Ok(self
+                .database
+                .find_development_session(principal.session_token_hash)
+                .await?
+                .is_some_and(|session| session.identity == principal.identity)),
+            PrincipalScope::ShareGuest {
+                session,
+                token_hash,
+            } => Ok(self
+                .database
+                .guest_session(session.link_id, *token_hash)
+                .await
+                .is_ok_and(|current| {
+                    current.is_some_and(|current| {
+                        current.session_id == session.session_id
+                            && current.identity == principal.identity
+                    })
+                })),
+        }
     }
 }
 
@@ -148,6 +206,42 @@ fn session_token(headers: &HeaderMap) -> Option<&str> {
         .then_some(token)
 }
 
+fn share_session_token(headers: &HeaderMap) -> Option<&str> {
+    let mut found = None;
+    for value in headers.get_all(header::COOKIE).iter() {
+        let cookies = value.to_str().ok()?;
+        for cookie in cookies.split(';') {
+            if let Some(token) = cookie.trim().strip_prefix("pxel_share_session=") {
+                if found.is_some()
+                    || token.len() != 64
+                    || !token.bytes().all(|byte| byte.is_ascii_hexdigit())
+                {
+                    return None;
+                }
+                found = Some(token);
+            }
+        }
+    }
+    found
+}
+
+pub fn contains_share_cookie(headers: &HeaderMap) -> bool {
+    headers.get_all(header::COOKIE).iter().any(|value| {
+        value.to_str().is_ok_and(|cookies| {
+            cookies
+                .split(';')
+                .any(|cookie| cookie.trim().starts_with("pxel_share_session="))
+        })
+    })
+}
+
+fn share_cookie(token: &str, link_id: uuid::Uuid, remaining: u64, secure: bool) -> String {
+    format!(
+        "pxel_share_session={token}; HttpOnly{}; SameSite=Strict; Path=/api/shared/{link_id}; Max-Age={remaining}",
+        if secure { "; Secure" } else { "" }
+    )
+}
+
 pub fn valid_origin(headers: &HeaderMap, allowed: &[String]) -> bool {
     let mut origins = headers.get_all(header::ORIGIN).iter();
     let Some(value) = origins.next() else {
@@ -163,6 +257,16 @@ pub fn valid_origin(headers: &HeaderMap, allowed: &[String]) -> bool {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+    #[test]
+    fn guest_cookie_is_scoped_and_secure_outside_development() {
+        let link = uuid::Uuid::now_v7();
+        let production = share_cookie("a".repeat(64).as_str(), link, 120, true);
+        let development = share_cookie("a".repeat(64).as_str(), link, 120, false);
+        assert!(production.contains("; Secure;"));
+        assert!(development.contains("HttpOnly; SameSite=Strict;"));
+        assert!(!development.contains("; Secure;"));
+        assert!(production.contains(&format!("Path=/api/shared/{link};")));
+    }
     #[test]
     fn origin_requires_exact_single_match() {
         let allowed = vec!["http://localhost:5173".into()];

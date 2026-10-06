@@ -15,9 +15,10 @@ it proves parser behavior only, not Excel compatibility.
 sheet. It exercises the bounded local document import. The two-sheet fixture
 is also accepted by the current bounded scalar import profile.
 
-`single_sheet_merge.xlsx` adds a merge region. The scalar import reports this
-as `WorksheetMetadata` and rejects it by default. The local operator may use
-`--allow-loss` to import only the supported cells after seeing that warning.
+`single_sheet_merge.xlsx` adds an empty `E1:F1` merge region alongside the
+scalar cells. The bounded import preserves that merge through PostgreSQL and
+XLSX export/reimport; non-anchor cells inside a merge remain required to be
+empty.
 
 `cross_sheet_formula.xlsx` contains Budget!A1 = `Plan!A1+2` and Plan!A1 =
 `3`, with a deliberately false cached formula result `999`. It tests import,

@@ -79,6 +79,18 @@ sqlx-check:
 s3-contract:
     cargo test --locked -p spreadsheet-storage --features s3 --test s3_contract -- --ignored --nocapture
 
+s3-encrypted-snapshot:
+    cargo build --locked -p pxel-server --features s3,dev-auth
+    node --test tests/recovery/styles-restart.test.mjs
+
+share-log-redaction:
+    cargo build --locked -p pxel-server --features dev-auth
+    node scripts/verify-share-log-redaction.mjs
+
+distributed-share-revocation:
+    cargo build --locked -p pxel-server --features dev-auth
+    node --test tests/recovery/distributed-share-revocation.test.mjs
+
 crash-recovery-postgres:
     cargo build --locked -p pxel-server --features dev-auth
     node --test tests/recovery/postgres-immediate-stop.test.mjs

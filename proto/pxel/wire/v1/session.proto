@@ -109,6 +109,9 @@ message CanonicalOperation {
     DeleteColumns delete_columns = 8;
     SetCellValues set_cell_values = 9;
     AddSheet add_sheet = 10;
+    AxisSizeWrite axis_size_write = 11;
+    MergeWrite merge_write = 12;
+    FrozenRowsWrite frozen_rows_write = 13;
   }
 }
 
@@ -177,7 +180,48 @@ message DocumentCommand {
   MoveRangeCommand move_range = 10;
   SetCellStyleCommand set_cell_style = 11;
   SetRangeStyleCommand set_range_style = 12;
+  SetAxisSizesCommand set_axis_sizes = 13;
+  SetCellBatchCommand set_cell_batch = 14;
+  SetMergeRangeCommand set_merge_range = 15;
+  SetFrozenRowsCommand set_frozen_rows = 16;
+  SortRangeCommand sort_range = 17;
 }
+
+message MergeRange {
+  bytes first_row_id = 1;
+  bytes last_row_id = 2;
+  bytes first_column_id = 3;
+  bytes last_column_id = 4;
+}
+message MergeWrite {
+  bytes sheet_id = 1;
+  MergeRange range = 2;
+  bool merged = 3;
+}
+message SetMergeRangeCommand {
+  bytes sheet_id = 1;
+  MergeRange range = 2;
+  bool merged = 3;
+}
+
+message AxisSizeWrite { bytes sheet_id = 1; repeated AxisSizeSet writes = 2; }
+message AxisSizeSet {
+  uint32 axis_kind = 1; // 1=row, 2=column
+  bytes axis_id = 2;
+  optional uint32 size_css_px = 3; // absent resets to default
+}
+message SetAxisSizesCommand { bytes sheet_id = 1; repeated AxisSizeSet writes = 2; }
+message SetFrozenRowsCommand { bytes sheet_id = 1; uint32 rows = 2; }
+message SortRangeCommand {
+ uint32 schema_version = 1;
+ CellAddress source = 2;
+ uint32 rows = 3;
+ uint32 columns = 4;
+ uint32 header_rows = 5;
+ repeated SortKey keys = 6;
+}
+message SortKey { bytes column_id = 1; bool descending = 2; }
+message FrozenRowsWrite { bytes sheet_id = 1; uint32 rows = 2; }
 
 // Public formatting profile, independent of persisted event/snapshot schemas.
 // An absent leaf is unchanged. A present leaf has exactly one Set or Reset.
@@ -203,8 +247,9 @@ message StyleChange {
     BorderStyleChange border_left = 12;
     HorizontalStyleChange horizontal = 13;
     VerticalStyleChange vertical = 14;
-    BooleanStyleChange wrap = 15;
+    BooleanStyleChange wrap = 15; // legacy profile-1 spelling
     NumberFormatChange number_format = 16;
+    TextOverflowChange text_overflow = 17;
   }
 }
 message FontFamilyChange { oneof action { string set = 1; bool reset = 2; } }
@@ -218,6 +263,7 @@ message BorderStyleChange { oneof action { StyleBorder set = 1; bool reset = 2; 
 message HorizontalStyleChange { oneof action { StyleHorizontal set = 1; bool reset = 2; } }
 message VerticalStyleChange { oneof action { StyleVertical set = 1; bool reset = 2; } }
 message NumberFormatChange { oneof action { StyleNumberFormat set = 1; bool reset = 2; } }
+message TextOverflowChange { oneof action { StyleTextOverflow set = 1; bool reset = 2; } }
 message StyleBorder { StyleBorderLine line = 1; bytes color = 2; }
 enum StyleUnderline {
   STYLE_UNDERLINE_UNSPECIFIED = 0;
@@ -257,6 +303,12 @@ enum StyleNumberFormat {
   STYLE_NUMBER_FORMAT_SCIENTIFIC2 = 6;
   STYLE_NUMBER_FORMAT_DATE_ISO = 7;
 }
+enum StyleTextOverflow {
+  STYLE_TEXT_OVERFLOW_UNSPECIFIED = 0;
+  STYLE_TEXT_OVERFLOW_CLIP = 1;
+  STYLE_TEXT_OVERFLOW_WRAP = 2;
+  STYLE_TEXT_OVERFLOW_OVERFLOW = 3;
+}
 message SetCellStyleCommand {
   CellAddress address = 1;
   StylePatch patch = 2;
@@ -264,6 +316,15 @@ message SetCellStyleCommand {
 // Explicit stable targets, 1..1000 unique cells on one sheet; no A1 geometry.
 message SetRangeStyleCommand {
   repeated CellAddress addresses = 1;
+  StylePatch patch = 2;
+}
+// One server-authoritative operation writes values and their imported styles.
+message SetCellBatchCommand {
+  repeated SetCellValue writes = 1;
+  repeated CellBatchStyle styles = 2;
+}
+message CellBatchStyle {
+  CellAddress address = 1;
   StylePatch patch = 2;
 }
 
@@ -330,6 +391,7 @@ enum RejectionCode {
   REJECTION_CODE_PAYLOAD_TOO_LARGE = 16;
   REJECTION_CODE_SOURCE_VERSION_CHANGED = 17;
   REJECTION_CODE_UNSUPPORTED_MOVE_DEPENDENCY = 18;
+  REJECTION_CODE_CALCULATION_UNAVAILABLE = 19;
 }
 
 message OperationRejected {
@@ -344,6 +406,9 @@ message OperationRejected {
 message RequestCalculation {
   bytes document_id = 1;
   uint64 input_version = 2;
+  // Ask for a dependency-scoped delta only when this is the client's exact
+  // prior calculated input version. Omitted means a full snapshot.
+  optional uint64 base_input_version = 3;
 }
 
 // A subscription captures a barrier and replays up to 128 representable
@@ -389,6 +454,7 @@ message CalculatedValue {
 }
 message CalculatedCell {
   CellAddress address = 1;
+  // Absent only for a delta clear of a formula removed from the current head.
   CalculatedValue value = 2;
 }
 enum CalculationErrorCode {
@@ -400,7 +466,8 @@ enum CalculationErrorCode {
   CALCULATION_ERROR_CODE_INVALID_PROJECTION = 4;
   CALCULATION_ERROR_CODE_TIMEOUT = 5;
 }
-// v1 sends a complete result set across ordered chunks, each <=256 KiB.
+// Full snapshots and version-guarded deltas use ordered chunks <=256 KiB.
+// Deltas are valid only when base_input_version exactly matches the request.
 // Publish atomically only after is_final. Hash is present only on final success.
 // Legacy documents without a persisted context use epoch=0 and document ID.
 message CalculationCommitted {
@@ -416,6 +483,9 @@ message CalculationCommitted {
   repeated CalculatedCell cells = 10;
   bool full_snapshot = 11;
   CalculationErrorCode error_code = 12;
+  optional uint64 base_input_version = 13;
+  uint32 evaluated_cells = 14;
+  uint32 dirty_cells = 15;
 }
 
 // Independent public formula DTOs; never import the persisted event schema.

@@ -74,7 +74,7 @@ fn history_scheduling_preserves_unknown_user_and_system_semantics() -> TestResul
         180,
         19_676,
         [8; 32],
-        "pxel-formula-0.14.0".into(),
+        "pxel-formula-0.16.0".into(),
         "pxel-excel-subset-v1".into(),
         CalculationReason::Explicit,
     )?;

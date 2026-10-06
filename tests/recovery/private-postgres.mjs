@@ -36,7 +36,9 @@ export async function freePort() {
 }
 
 export async function startServer(env, base, logFile) {
-  const binary = resolve('target/debug/pxel-server' + (process.platform === 'win32' ? '.exe' : ''));
+  const binary = env.PXEL_TEST_SERVER_BIN
+    ? resolve(env.PXEL_TEST_SERVER_BIN)
+    : resolve('target/debug/pxel-server' + (process.platform === 'win32' ? '.exe' : ''));
   const log = openSync(logFile, 'a');
   const child = spawn(binary, [], { env, stdio: ['ignore', log, log], windowsHide: true });
   closeSync(log);

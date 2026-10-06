@@ -1,7 +1,7 @@
 //! Independently verify property-level style intent and durable inverse history.
 use super::*;
 use spreadsheet_domain::{
-    style::{StyleChange, StyleProperty},
+    style::{CellStyle, StyleChange, StyleProperty},
     style_write::prepare_style_write,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,6 +10,9 @@ fn style_writes(operation: &Operation) -> Option<(StyleWriteKind, &[GuardedStyle
     match operation {
         Operation::StyleWrite { kind, writes }
         | Operation::StyleCompensation { kind, writes, .. } => Some((*kind, writes)),
+        Operation::CellBatchWrite { style_writes, .. } if !style_writes.is_empty() => {
+            Some((StyleWriteKind::Range, style_writes))
+        }
         _ => None,
     }
 }
@@ -20,6 +23,11 @@ fn inverse(operation: &Operation) -> Option<(OperationId, DocumentVersion)> {
             undoes_version,
             ..
         } => Some((*undoes, *undoes_version)),
+        Operation::CellBatchWrite {
+            undoes: Some(undoes),
+            undoes_version: Some(version),
+            ..
+        } => Some((*undoes, *version)),
         _ => None,
     }
 }
@@ -31,6 +39,184 @@ struct Touch<'a> {
     change: &'a StyleChange,
 }
 type Leaf = (CellAddress, StyleProperty);
+
+fn copy_style_writes(
+    book: &Workbook,
+    source: CellAddress,
+    destination: CellAddress,
+    rows: u32,
+    columns: u32,
+) -> Result<Vec<GuardedStyleWrite>, JournalError> {
+    let count = rows
+        .checked_mul(columns)
+        .filter(|count| *count > 0 && *count <= 1_000)
+        .ok_or(JournalError::Corrupt)?;
+    if source.sheet != destination.sheet {
+        return Err(JournalError::Corrupt);
+    }
+    let sheet = book
+        .sheets()
+        .iter()
+        .find(|sheet| sheet.id() == source.sheet)
+        .ok_or(JournalError::UndoConflict)?;
+    let source_row = sheet
+        .row_position(source.row)
+        .ok_or(JournalError::UndoConflict)?;
+    let source_column = sheet
+        .column_position(source.column)
+        .ok_or(JournalError::UndoConflict)?;
+    let destination_row = sheet
+        .row_position(destination.row)
+        .ok_or(JournalError::UndoConflict)?;
+    let destination_column = sheet
+        .column_position(destination.column)
+        .ok_or(JournalError::UndoConflict)?;
+    let properties = [
+        StyleProperty::FontFamily,
+        StyleProperty::FontSize,
+        StyleProperty::FontBold,
+        StyleProperty::FontItalic,
+        StyleProperty::FontUnderline,
+        StyleProperty::FontStrike,
+        StyleProperty::FontColor,
+        StyleProperty::Fill,
+        StyleProperty::BorderTop,
+        StyleProperty::BorderRight,
+        StyleProperty::BorderBottom,
+        StyleProperty::BorderLeft,
+        StyleProperty::Horizontal,
+        StyleProperty::Vertical,
+        StyleProperty::TextOverflow,
+        StyleProperty::NumberFormat,
+    ];
+    let mut writes = Vec::with_capacity(count as usize);
+    for row in 0..rows {
+        for column in 0..columns {
+            let source_address = CellAddress {
+                sheet: source.sheet,
+                row: *sheet
+                    .rows()
+                    .get((source_row + row) as usize)
+                    .ok_or(JournalError::UndoConflict)?,
+                column: *sheet
+                    .columns()
+                    .get((source_column + column) as usize)
+                    .ok_or(JournalError::UndoConflict)?,
+            };
+            let destination_address = CellAddress {
+                sheet: destination.sheet,
+                row: *sheet
+                    .rows()
+                    .get((destination_row + row) as usize)
+                    .ok_or(JournalError::UndoConflict)?,
+                column: *sheet
+                    .columns()
+                    .get((destination_column + column) as usize)
+                    .ok_or(JournalError::UndoConflict)?,
+            };
+            let source_default = CellStyle::default();
+            let destination_default = CellStyle::default();
+            let source_style = sheet
+                .styles()
+                .get(&source_address)
+                .unwrap_or(&source_default);
+            let destination_style = sheet
+                .styles()
+                .get(&destination_address)
+                .unwrap_or(&destination_default);
+            writes.push(GuardedStyleWrite {
+                address: destination_address,
+                previous: properties
+                    .iter()
+                    .map(|property| destination_style.change(*property))
+                    .collect(),
+                changes: properties
+                    .iter()
+                    .map(|property| source_style.change(*property))
+                    .collect(),
+            });
+        }
+    }
+    writes.sort_by_key(|write| write.address);
+    Ok(writes)
+}
+
+fn move_style_writes(
+    book: &Workbook,
+    source: CellAddress,
+    destination: CellAddress,
+    rows: u32,
+    columns: u32,
+) -> Result<Vec<GuardedStyleWrite>, JournalError> {
+    let mut writes = copy_style_writes(book, source, destination, rows, columns)?;
+    let destinations: BTreeSet<_> = writes.iter().map(|write| write.address).collect();
+    let count = rows
+        .checked_mul(columns)
+        .filter(|n| *n > 0 && *n <= 1_000)
+        .ok_or(JournalError::Corrupt)?;
+    let sheet = book
+        .sheets()
+        .iter()
+        .find(|sheet| sheet.id() == source.sheet)
+        .ok_or(JournalError::UndoConflict)?;
+    let source_row = sheet
+        .row_position(source.row)
+        .ok_or(JournalError::UndoConflict)?;
+    let source_column = sheet
+        .column_position(source.column)
+        .ok_or(JournalError::UndoConflict)?;
+    let properties = [
+        StyleProperty::FontFamily,
+        StyleProperty::FontSize,
+        StyleProperty::FontBold,
+        StyleProperty::FontItalic,
+        StyleProperty::FontUnderline,
+        StyleProperty::FontStrike,
+        StyleProperty::FontColor,
+        StyleProperty::Fill,
+        StyleProperty::BorderTop,
+        StyleProperty::BorderRight,
+        StyleProperty::BorderBottom,
+        StyleProperty::BorderLeft,
+        StyleProperty::Horizontal,
+        StyleProperty::Vertical,
+        StyleProperty::TextOverflow,
+        StyleProperty::NumberFormat,
+    ];
+    let default = CellStyle::default();
+    for index in 0..count {
+        let row = source_row + index / columns;
+        let column = source_column + index % columns;
+        let address = CellAddress {
+            sheet: source.sheet,
+            row: *sheet
+                .rows()
+                .get(row as usize)
+                .ok_or(JournalError::UndoConflict)?,
+            column: *sheet
+                .columns()
+                .get(column as usize)
+                .ok_or(JournalError::UndoConflict)?,
+        };
+        if destinations.contains(&address) {
+            continue;
+        }
+        let previous = sheet.styles().get(&address).cloned().unwrap_or_default();
+        writes.push(GuardedStyleWrite {
+            address,
+            previous: properties
+                .iter()
+                .map(|property| previous.change(*property))
+                .collect(),
+            changes: properties
+                .iter()
+                .map(|property| default.change(*property))
+                .collect(),
+        });
+    }
+    writes.sort_by_key(|write| write.address);
+    Ok(writes)
+}
 
 /// Filtered leaf stacks never cancel foreign writes, including equal-value resets.
 fn validate_history<'a>(
@@ -110,6 +296,7 @@ pub(super) fn validate_axis_styles(
 }
 
 async fn tail(
+    db: &PgDatabase,
     tx: &mut Transaction<'_, Postgres>,
     document: DocumentId,
     from: DocumentVersion,
@@ -124,24 +311,28 @@ async fn tail(
     let mut expected = from.get();
     while let Some(row) = rows.try_next().await.map_err(error)? {
         bytes = bytes
-            .checked_add(row.payload.len())
+            .checked_add(encrypted_plaintext_length(row.payload.len())?)
             .filter(|n| *n <= MAX_UNDO_TAIL_BYTES)
             .ok_or(JournalError::UndoWindowExceeded)?;
         if events.len() >= UNDO_WINDOW as usize {
             return Err(JournalError::UndoWindowExceeded);
         }
         expected = expected.checked_add(1).ok_or(JournalError::Corrupt)?;
-        let event = verified_event(StoredEventRow {
-            document,
-            committed_version: row.committed_version,
-            operation_id: row.operation_id,
-            actor_id: row.actor_id,
-            principal_kind: &row.principal_kind,
-            schema_version: row.schema_version,
-            payload: &row.payload,
-            payload_checksum: &row.payload_checksum,
-            canonical_event_hash: &row.canonical_event_hash,
-        })?;
+        let event = verified_event(
+            db,
+            StoredEventRow {
+                document,
+                committed_version: row.committed_version,
+                operation_id: row.operation_id,
+                actor_id: row.actor_id,
+                principal_kind: &row.principal_kind,
+                schema_version: row.schema_version,
+                payload: &row.payload,
+                payload_checksum: &row.payload_checksum,
+                canonical_event_hash: &row.canonical_event_hash,
+            },
+        )
+        .await?;
         if event.version.get() != expected {
             return Err(JournalError::Corrupt);
         }
@@ -154,6 +345,7 @@ async fn tail(
 }
 
 pub(super) async fn validate(
+    db: &PgDatabase,
     tx: &mut Transaction<'_, Postgres>,
     request: &CommitRequest,
     head: DocumentVersion,
@@ -163,7 +355,7 @@ pub(super) async fn validate(
         .inverse_projection
         .as_deref()
         .ok_or(JournalError::UndoConflict)?;
-    axis_guard::verified_projection(tx, request.command.document_id, head, book).await?;
+    axis_guard::verified_projection(db, tx, request.command.document_id, head, book).await?;
     axis_guard::check_floors(book, &request.command)?;
     let expected = match (&request.event.operation, target) {
         (Operation::StyleWrite { .. }, None) => match &request.command.operation {
@@ -176,6 +368,270 @@ pub(super) async fn validate(
             _ => return Err(JournalError::Corrupt),
         }
         .map_err(|_| JournalError::UndoConflict)?,
+        (
+            Operation::CellBatchWrite {
+                intent,
+                content_writes,
+                ..
+            },
+            None,
+        ) => match intent {
+            CellBatchIntent::SortRange { range, order } => {
+                let CommandPayload::SortRange { range: selected } = &request.command.operation
+                else {
+                    return Err(JournalError::Corrupt);
+                };
+                if range != selected || request.command.base_version != head {
+                    return Err(JournalError::Corrupt);
+                }
+                let bounds = range
+                    .validate_order(book, order)
+                    .map_err(|_| JournalError::UndoConflict)?;
+                book.candidate(&request.event.operation, request.event.version)
+                    .map_err(|_| JournalError::UndoConflict)?;
+                let sheet = book
+                    .sheets()
+                    .iter()
+                    .find(|s| s.id() == range.source.sheet)
+                    .ok_or(JournalError::Corrupt)?;
+                let expected_content = content_writes
+                    .iter()
+                    .map(|write| {
+                        let destination = sheet
+                            .row_position(write.address.row)
+                            .ok_or(JournalError::Corrupt)?;
+                        let offset = destination
+                            .checked_sub(bounds.row + range.header_rows)
+                            .ok_or(JournalError::Corrupt)?;
+                        let source = CellAddress {
+                            row: *order.get(offset as usize).ok_or(JournalError::Corrupt)?,
+                            ..write.address
+                        };
+                        let content = match book
+                            .cell_content(source)
+                            .map_err(|_| JournalError::Corrupt)?
+                        {
+                            Some(CellContent::Formula(_)) => match &write.content {
+                                Some(CellContent::Formula(_)) => write.content.clone(),
+                                _ => return Err(JournalError::Corrupt),
+                            },
+                            content => content.cloned(),
+                        };
+                        Ok(GuardedContentWrite {
+                            address: write.address,
+                            content,
+                            previous: book
+                                .cell_content(write.address)
+                                .map_err(|_| JournalError::Corrupt)?
+                                .cloned(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, JournalError>>()?;
+                Operation::CellBatchWrite {
+                    intent: intent.clone(),
+                    content_writes: expected_content,
+                    style_writes: spreadsheet_domain::sort::style_writes(book, range, order)
+                        .map_err(|_| JournalError::UndoConflict)?,
+                    undoes: None,
+                    undoes_version: None,
+                }
+            }
+            CellBatchIntent::SetValues => {
+                let CommandPayload::SetCellBatch { writes, styles } = &request.command.operation
+                else {
+                    return Err(JournalError::Corrupt);
+                };
+                let mut expected_content = Vec::with_capacity(writes.len());
+                for write in writes {
+                    let value = write
+                        .value
+                        .clone()
+                        .normalized()
+                        .map_err(|_| JournalError::UndoConflict)?;
+                    expected_content.push(GuardedContentWrite {
+                        address: write.address,
+                        content: (value != CellValue::Blank).then_some(CellContent::Value(value)),
+                        previous: book
+                            .cell_content(write.address)
+                            .map_err(|_| JournalError::UndoConflict)?
+                            .cloned(),
+                    });
+                }
+                let mut style_writes = Vec::with_capacity(styles.len());
+                for (address, changes) in styles {
+                    let Operation::StyleWrite { writes, .. } =
+                        prepare_style_write(book, &[*address], changes, StyleWriteKind::Cell)
+                            .map_err(|_| JournalError::UndoConflict)?
+                    else {
+                        return Err(JournalError::Corrupt);
+                    };
+                    style_writes.extend(writes);
+                }
+                style_writes.sort_by_key(|write| write.address);
+                Operation::CellBatchWrite {
+                    intent: intent.clone(),
+                    content_writes: expected_content,
+                    style_writes,
+                    undoes: None,
+                    undoes_version: None,
+                }
+            }
+            CellBatchIntent::CopyRange {
+                source,
+                destination,
+                rows,
+                columns,
+            } => {
+                let CommandPayload::CopyRange {
+                    source: command_source,
+                    destination: command_destination,
+                    rows: command_rows,
+                    columns: command_columns,
+                } = &request.command.operation
+                else {
+                    return Err(JournalError::Corrupt);
+                };
+                if (source, destination, rows, columns)
+                    != (
+                        command_source,
+                        command_destination,
+                        command_rows,
+                        command_columns,
+                    )
+                {
+                    return Err(JournalError::Corrupt);
+                }
+                let expected_styles =
+                    copy_style_writes(book, *source, *destination, *rows, *columns)?;
+                let expected_content = content_writes
+                    .iter()
+                    .map(|write| {
+                        Ok(GuardedContentWrite {
+                            address: write.address,
+                            content: write.content.clone(),
+                            previous: book
+                                .cell_content(write.address)
+                                .map_err(|_| JournalError::UndoConflict)?
+                                .cloned(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, JournalError>>()?;
+                Operation::CellBatchWrite {
+                    intent: intent.clone(),
+                    content_writes: expected_content,
+                    style_writes: expected_styles,
+                    undoes: None,
+                    undoes_version: None,
+                }
+            }
+            CellBatchIntent::MoveRange {
+                source,
+                destination,
+                rows,
+                columns,
+            } => {
+                let CommandPayload::MoveRange {
+                    source: command_source,
+                    destination: command_destination,
+                    rows: command_rows,
+                    columns: command_columns,
+                } = &request.command.operation
+                else {
+                    return Err(JournalError::Corrupt);
+                };
+                if (source, destination, rows, columns)
+                    != (
+                        command_source,
+                        command_destination,
+                        command_rows,
+                        command_columns,
+                    )
+                {
+                    return Err(JournalError::Corrupt);
+                }
+                let Operation::CellBatchWrite { .. } = &request.event.operation else {
+                    return Err(JournalError::Corrupt);
+                };
+                book.candidate(&request.event.operation, request.event.version)
+                    .map_err(|_| JournalError::UndoConflict)?;
+                let expected_content = content_writes
+                    .iter()
+                    .map(|write| {
+                        Ok(GuardedContentWrite {
+                            address: write.address,
+                            content: write.content.clone(),
+                            previous: book
+                                .cell_content(write.address)
+                                .map_err(|_| JournalError::UndoConflict)?
+                                .cloned(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, JournalError>>()?;
+                Operation::CellBatchWrite {
+                    intent: intent.clone(),
+                    content_writes: expected_content,
+                    style_writes: move_style_writes(book, *source, *destination, *rows, *columns)?,
+                    undoes: None,
+                    undoes_version: None,
+                }
+            }
+        },
+        (Operation::CellBatchWrite { .. }, Some(target)) => {
+            if target.operation_id
+                != match &request.event.operation {
+                    Operation::CellBatchWrite {
+                        undoes: Some(id), ..
+                    } => *id,
+                    _ => return Err(JournalError::Corrupt),
+                }
+                || target.principal != EventPrincipal::User(request.identity.actor_id)
+            {
+                return Err(JournalError::UndoConflict);
+            }
+            let Operation::CellBatchWrite {
+                intent,
+                content_writes,
+                style_writes,
+                ..
+            } = &target.operation
+            else {
+                return Err(JournalError::NotUndoable);
+            };
+            let tail = tail(db, tx, request.command.document_id, target.version, head).await?;
+            let leaves: BTreeSet<_> = style_writes
+                .iter()
+                .flat_map(|write| {
+                    write
+                        .changes
+                        .iter()
+                        .map(move |change| (write.address, change.property()))
+                })
+                .collect();
+            validate_history(target.principal, &tail, |address, property| {
+                leaves.contains(&(address, property))
+            })?;
+            Operation::CellBatchWrite {
+                intent: intent.clone(),
+                content_writes: content_writes
+                    .iter()
+                    .map(|write| GuardedContentWrite {
+                        address: write.address,
+                        content: write.previous.clone(),
+                        previous: write.content.clone(),
+                    })
+                    .collect(),
+                style_writes: style_writes
+                    .iter()
+                    .map(|write| GuardedStyleWrite {
+                        address: write.address,
+                        previous: write.changes.clone(),
+                        changes: write.previous.clone(),
+                    })
+                    .collect(),
+                undoes: Some(target.operation_id),
+                undoes_version: Some(target.version),
+            }
+        }
         (
             Operation::StyleCompensation {
                 undoes,
@@ -192,7 +648,7 @@ pub(super) async fn validate(
             }
             let (kind, writes) =
                 style_writes(&target.operation).ok_or(JournalError::NotUndoable)?;
-            let tail = tail(tx, request.command.document_id, target.version, head).await?;
+            let tail = tail(db, tx, request.command.document_id, target.version, head).await?;
             let leaves: BTreeMap<_, _> = writes
                 .iter()
                 .flat_map(|w| {

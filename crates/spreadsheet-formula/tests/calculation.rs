@@ -621,7 +621,7 @@ fn engine_upgrade_requires_a_new_persisted_context() -> TestResult {
     };
     book = book.candidate(
         &Operation::AdvanceCalculationEpoch {
-            context: context(1, "pxel-formula-0.1.0")?,
+            context: context(1, "pxel-formula-0.15.0")?,
         },
         DocumentVersion::new(2)?,
     )?;

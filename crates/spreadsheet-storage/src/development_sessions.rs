@@ -11,12 +11,14 @@ impl PgDatabase {
     /// Revokes only this bearer session. Account identity and other sessions survive.
     /// Repeated revocation succeeds without revealing whether the token existed.
     pub async fn revoke_development_session(&self, hash: [u8; 32]) -> Result<(), DatabaseError> {
+        let mut tx = self.begin_guarded().await?;
         sqlx::query!(
             "DELETE FROM development_sessions WHERE token_hash=$1",
             &hash[..]
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(())
     }
     pub async fn find_development_session(
@@ -78,7 +80,7 @@ impl PgDatabase {
         {
             return Err(DatabaseError::InvalidConfiguration);
         }
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.begin_guarded().await?;
         // Serialize only local development-session issuance, including the capacity check.
         sqlx::query!("SELECT pg_advisory_xact_lock(718034812)")
             .execute(&mut *tx)

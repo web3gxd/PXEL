@@ -1,13 +1,20 @@
 import { defineConfig } from 'vite';
 
+const runtimeEnvironment = (
+  globalThis as unknown as { process: { env: Record<string, string | undefined> } }
+).process.env;
+const apiTarget = runtimeEnvironment.PXEL_API_TARGET ?? 'http://127.0.0.1:8080';
+const webPort = Number(runtimeEnvironment.PXEL_WEB_PORT ?? 5173);
+
 export default defineConfig({
+  resolve: { conditions: ['worker'] },
   server: {
-    port: 5173,
+    port: webPort,
     strictPort: true,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8080', ws: true },
-      '/healthz': 'http://127.0.0.1:8080',
-      '/readyz': 'http://127.0.0.1:8080',
+      '/api': { target: apiTarget, ws: true },
+      '/healthz': apiTarget,
+      '/readyz': apiTarget,
     },
   },
   worker: { format: 'es' },

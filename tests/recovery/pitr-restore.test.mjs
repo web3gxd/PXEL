@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
   appendFileSync,
-  cpSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -10,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import {
@@ -18,6 +18,7 @@ import {
   createDocument,
   getDocument,
   login,
+  mergeRangeCommand,
   releaseSessions,
   setCommand,
 } from '../helpers/client.mjs';
@@ -26,6 +27,29 @@ import { exe, freePort, killServer, run, startServer } from './private-postgres.
 const localRoot = resolve('.local');
 const configPath = (path) =>
   (process.platform === 'win32' ? path.replaceAll('\\', '\\\\') : path).replaceAll("'", "''");
+
+function secureDirectory(path) {
+  if (process.platform !== 'win32') return;
+  const script = `$ErrorActionPreference='Stop'; try { $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $acl=[System.Security.AccessControl.DirectorySecurity]::new(); $acl.SetAccessRuleProtection($true,$false); $acl.SetOwner($sid); foreach($value in @($sid.Value,'S-1-5-18','S-1-5-32-544')) { $identity=[System.Security.Principal.SecurityIdentifier]::new($value); $rule=[System.Security.AccessControl.FileSystemAccessRule]::new($identity,[System.Security.AccessControl.FileSystemRights]::FullControl,[System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[System.Security.AccessControl.PropagationFlags]::None,[System.Security.AccessControl.AccessControlType]::Allow); $acl.AddAccessRule($rule) }; Set-Acl -LiteralPath $env:PXEL_TEST_PRIVATE_DIR -AclObject $acl; exit 0 } catch { exit 1 }`;
+  execFileSync(
+    join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    { env: { SystemRoot: process.env.SystemRoot, PXEL_TEST_PRIVATE_DIR: path }, windowsHide: true },
+  );
+}
+
+function secureFile(path) {
+  if (process.platform !== 'win32') return;
+  const script = `$ErrorActionPreference='Stop'; try { $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $acl=[System.Security.AccessControl.FileSecurity]::new(); $acl.SetAccessRuleProtection($true,$false); $acl.SetOwner($sid); foreach($value in @($sid.Value,'S-1-5-18','S-1-5-32-544')) { $identity=[System.Security.Principal.SecurityIdentifier]::new($value); $rule=[System.Security.AccessControl.FileSystemAccessRule]::new($identity,[System.Security.AccessControl.FileSystemRights]::FullControl,[System.Security.AccessControl.AccessControlType]::Allow); $acl.AddAccessRule($rule) }; Set-Acl -LiteralPath $env:PXEL_TEST_PRIVATE_FILE -AclObject $acl; exit 0 } catch { exit 1 }`;
+  execFileSync(
+    join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      env: { SystemRoot: process.env.SystemRoot, PXEL_TEST_PRIVATE_FILE: path },
+      windowsHide: true,
+    },
+  );
+}
 
 function psql(port, sql, env) {
   return run(
@@ -36,21 +60,46 @@ function psql(port, sql, env) {
   );
 }
 
+function journalPayload(port, documentId, version, env) {
+  return psql(
+    port,
+    `SELECT encode(payload,'hex') FROM document_operations WHERE document_id='${documentId}' AND committed_version=${version}`,
+    env,
+  );
+}
+
 test(
   'PITR stops at a named restore point before the next committed operation',
-  { timeout: 180000 },
+  { timeout: 300000 },
   async () => {
     if (!process.env.PXEL_PG_BIN)
       throw new Error('PXEL_PG_BIN must point to private PostgreSQL binaries');
     mkdirSync(localRoot, { recursive: true });
     const root = mkdtempSync(join(localRoot, 'pg-pitr-'));
+    secureDirectory(root);
     const sourceData = join(root, 'source-db');
-    const backupData = join(root, 'backup-db');
     const sourceBlobs = join(root, 'source-blobs');
-    const backupBlobs = join(root, 'backup-blobs');
+    mkdirSync(sourceBlobs, { mode: 0o700 });
+    secureDirectory(sourceBlobs);
+    const restoreRoot = join(root, 'restored-root');
+    const backupData = join(restoreRoot, 'pgdata');
+    const backupBlobs = join(restoreRoot, 'blobs');
     const walArchive = join(root, 'wal-archive');
+    const encryptedBackup = join(root, 'encrypted-base.pxel');
+    const keyringSource = process.env.PXEL_KEYRING_FILE;
+    if (!keyringSource) throw new Error('PXEL_KEYRING_FILE must point to a private keyring');
+    const keyringPath = join(
+      dirname(keyringSource),
+      `pitr-keyring-${randomBytes(8).toString('hex')}.json`,
+    );
+    const keyringData = JSON.parse(readFileSync(keyringSource, 'utf8'));
+    const freshKeyId = `pitr-restore-${randomBytes(6).toString('hex')}`;
+    keyringData.keys.push({ id: freshKeyId, key_hex: randomBytes(32).toString('hex') });
+    writeFileSync(keyringPath, JSON.stringify(keyringData), { mode: 0o600 });
+    secureFile(keyringPath);
     const passwordFile = join(root, 'password');
-    mkdirSync(walArchive);
+    mkdirSync(walArchive, { mode: 0o700 });
+    secureDirectory(walArchive);
     const password = randomBytes(24).toString('hex');
     writeFileSync(passwordFile, password, { mode: 0o600 });
     const sourcePort = await freePort();
@@ -63,6 +112,7 @@ test(
       PXEL_DEV_AUTH: '1',
       PXEL_BIND: `127.0.0.1:${appPort}`,
       PXEL_SNAPSHOT_INTERVAL: '2',
+      PXEL_KEYRING_FILE: keyringPath,
     };
     const sourceEnv = {
       ...commonEnv,
@@ -118,13 +168,17 @@ test(
         ],
         sourceEnv,
       );
+      const serverBinary = resolve(
+        process.env.PXEL_TEST_SERVER_BIN ??
+          `target/debug/pxel-server${process.platform === 'win32' ? '.exe' : ''}`,
+      );
       const archiveCommand =
         process.platform === 'win32'
-          ? `copy /Y "%p" "${configPath(join(walArchive, '%f'))}"`
-          : `cp "%p" "${configPath(join(walArchive, '%f'))}"`;
+          ? `"${configPath(serverBinary)}" backup wal-archive "${configPath(walArchive)}" "${configPath(join(sourceData, '%p'))}" "%f"`
+          : `"${configPath(serverBinary)}" backup wal-archive "${configPath(walArchive)}" "${configPath(join(sourceData, '%p'))}" "%f"`;
       appendFileSync(
         join(sourceData, 'postgresql.conf'),
-        `\narchive_mode = on\narchive_command = '${archiveCommand}'\n`,
+        `\narchive_mode = on\narchive_command = '${archiveCommand}'\nlog_connections = on\nlog_disconnections = on\n`,
       );
       startPg(sourceData, sourcePort, 'source-postgres.log', sourceEnv);
       sourceRunning = true;
@@ -143,10 +197,17 @@ test(
           'committed',
         );
         const atTwo = await getDocument(base, firstCookie, snapshot.document_id);
-        assert.equal(
-          (await firstWriter.send(setCommand(firstWriter, atTwo, 'two', { sequence: 2 }))).case,
-          'committed',
+        const merged = await firstWriter.send(
+          mergeRangeCommand(firstWriter, atTwo, {
+            firstRow: 1,
+            lastRow: 2,
+            firstColumn: 1,
+            lastColumn: 2,
+            sequence: 2,
+          }),
         );
+        assert.equal(merged.case, 'committed');
+        assert.equal(merged.value.committedVersion, 3n);
       } finally {
         firstWriter.socket.terminate();
       }
@@ -164,34 +225,21 @@ test(
       await releaseSessions(base);
       await killServer(server);
       server = undefined;
-      cpSync(sourceBlobs, backupBlobs, { recursive: true, errorOnExist: true, force: false });
       run(
-        exe('pg_basebackup'),
-        [
-          '-h',
-          '127.0.0.1',
-          '-p',
-          String(sourcePort),
-          '-U',
-          'pxel',
-          '-D',
-          backupData,
-          '-Fp',
-          '-X',
-          'stream',
-          '-c',
-          'fast',
-        ],
+        serverBinary,
+        ['backup', 'create', encryptedBackup, '--maintenance-confirmed'],
         sourceEnv,
-        false,
+        true,
         120000,
       );
-      run(exe('pg_verifybackup'), ['-q', backupData], sourceEnv, false, 120000);
+      assert.equal(psql(sourcePort, 'SELECT 1', sourceEnv), '1');
+      run(serverBinary, ['backup', 'verify', encryptedBackup], sourceEnv);
 
       server = await startServer(sourceEnv, base, join(root, 'source-server.log'));
       const sourceCookie = await login(base);
       const writer = await connect(base, sourceCookie);
       let targetHash;
+      let targetPayload;
       try {
         const versionFour = await writer.send(
           setCommand(writer, atThree, 'restore target', { sequence: 1 }),
@@ -199,6 +247,12 @@ test(
         assert.equal(versionFour.case, 'committed');
         assert.equal(versionFour.value.committedVersion, 4n);
         targetHash = Buffer.from(versionFour.value.confirmedStateHash).toString('hex');
+        targetPayload = journalPayload(sourcePort, snapshot.document_id, 4, sourceEnv);
+        assert.match(
+          targetPayload,
+          /^5058454c454e430000010001[0-9a-f]+$/,
+          'PITR source event must be persisted as an authenticated encrypted envelope',
+        );
         const marker = psql(sourcePort, "SELECT pg_create_restore_point('pxel_v4')", sourceEnv);
         assert.match(marker, /^[0-9A-F]+\/[0-9A-F]+$/);
         const markerFile = psql(
@@ -213,8 +267,8 @@ test(
         assert.equal(versionFive.value.committedVersion, 5n);
         psql(sourcePort, 'SELECT pg_switch_wal()', sourceEnv);
         let archived = false;
-        for (let attempt = 0; attempt < 100; attempt++) {
-          if (existsSync(join(walArchive, markerFile))) {
+        for (let attempt = 0; attempt < 1800; attempt++) {
+          if (existsSync(join(walArchive, `${markerFile}.pxel`))) {
             archived = true;
             break;
           }
@@ -230,15 +284,29 @@ test(
       stopPg(sourceData, sourceEnv);
       sourceRunning = false;
 
-      const restoreCommand =
-        process.platform === 'win32'
-          ? `copy /Y "${configPath(join(walArchive, '%f'))}" "%p"`
-          : `cp "${configPath(join(walArchive, '%f'))}" "%p"`;
-      appendFileSync(
-        join(backupData, 'postgresql.conf'),
-        `\nrestore_command = '${restoreCommand}'\nrecovery_target_name = 'pxel_v4'\nrecovery_target_action = 'promote'\nrecovery_target_timeline = 'current'\n`,
+      const restoreCliEnv = {
+        ...restoredEnv,
+        PXEL_RESTORE_DATABASE_URL: restoredEnv.DATABASE_URL,
+      };
+      run(
+        serverBinary,
+        [
+          'backup',
+          'restore',
+          encryptedBackup,
+          restoreRoot,
+          '--to',
+          freshKeyId,
+          '--target-name',
+          'pxel_v4',
+          '--wal-archive-dir',
+          walArchive,
+          '--maintenance-confirmed',
+        ],
+        restoreCliEnv,
+        true,
+        120000,
       );
-      writeFileSync(join(backupData, 'recovery.signal'), '');
       startPg(backupData, restorePort, 'restored-postgres.log', restoredEnv);
       restoreRunning = true;
       let promoted = false;
@@ -257,7 +325,13 @@ test(
       const restored = await getDocument(base, restoredCookie, snapshot.document_id);
       assert.equal(restored.version, '4');
       assert.equal(restored.state_hash, targetHash);
+      assert.equal(
+        journalPayload(restorePort, snapshot.document_id, 4, restoredEnv),
+        targetPayload,
+        'PITR must retain the exact authenticated ciphertext for the acknowledged target event',
+      );
       assert.equal(restored.sheets[0].cells[0].value.value, 'restore target');
+      assert.deepEqual(restored.sheets[0].merges, atThree.sheets[0].merges);
       const recoveries = readFileSync(join(root, 'restored-server.log'), 'utf8')
         .split('\n')
         .filter(Boolean)
@@ -273,7 +347,9 @@ test(
         headers: { Origin: 'http://127.0.0.1:5173', Cookie: restoredCookie },
       });
       assert.equal(historical.status, 200);
-      assert.equal((await historical.json()).state_hash, atThree.state_hash);
+      const restoredVersionThree = await historical.json();
+      assert.equal(restoredVersionThree.state_hash, atThree.state_hash);
+      assert.deepEqual(restoredVersionThree.sheets[0].merges, atThree.sheets[0].merges);
       await releaseSessions(base);
     } finally {
       try {
@@ -285,6 +361,7 @@ test(
         } finally {
           if (sourceRunning) stopPg(sourceData, sourceEnv);
           if (restoreRunning) stopPg(backupData, restoredEnv);
+          if (process.env.PXEL_TEST_KEEP_RECOVERY !== '1') rmSync(keyringPath, { force: true });
           const safeRoot = resolve(root);
           if (!safeRoot.startsWith(localRoot + sep)) throw new Error('unsafe PITR cleanup target');
           if (process.env.PXEL_TEST_KEEP_RECOVERY !== '1')

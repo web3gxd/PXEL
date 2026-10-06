@@ -191,6 +191,90 @@ fn fixture() -> Result<(Workbook, CellAddress), DomainError> {
 }
 
 #[test]
+fn cell_batch_applies_values_and_alignment_and_undoes_together() -> TestResult {
+    let (book, first) = fixture()?;
+    let sheet = &book.sheets()[0];
+    let second = CellAddress {
+        row: sheet.rows()[1],
+        ..first
+    };
+    let content_writes = [first, second]
+        .into_iter()
+        .enumerate()
+        .map(|(index, address)| GuardedContentWrite {
+            address,
+            content: Some(CellContent::Value(CellValue::Text(format!("row {index}")))),
+            previous: None,
+        })
+        .collect();
+    let style_operation = prepare_style_write(
+        &book,
+        &[first, second],
+        &[StyleChange::Horizontal(Change::Set(
+            HorizontalAlignment::Center,
+        ))],
+        StyleWriteKind::Range,
+    )?;
+    let Operation::StyleWrite {
+        writes: style_writes,
+        ..
+    } = style_operation
+    else {
+        return Err("expected style preimages".into());
+    };
+    let authored = Operation::CellBatchWrite {
+        intent: spreadsheet_domain::workbook::CellBatchIntent::SetValues,
+        content_writes,
+        style_writes,
+        undoes: None,
+        undoes_version: None,
+    };
+    let applied = book.candidate(&authored, DocumentVersion::new(2)?)?;
+    assert_eq!(
+        applied.cell_content(first)?.map(CellContent::text_bytes),
+        Some(5)
+    );
+    assert_eq!(
+        applied.sheets()[0].styles()[&first].horizontal(),
+        HorizontalAlignment::Center
+    );
+
+    let Operation::CellBatchWrite {
+        content_writes,
+        style_writes,
+        ..
+    } = &authored
+    else {
+        return Err("expected cell batch".into());
+    };
+    let inverse = Operation::CellBatchWrite {
+        intent: spreadsheet_domain::workbook::CellBatchIntent::SetValues,
+        content_writes: content_writes
+            .iter()
+            .map(|write| GuardedContentWrite {
+                address: write.address,
+                content: write.previous.clone(),
+                previous: write.content.clone(),
+            })
+            .collect(),
+        style_writes: style_writes
+            .iter()
+            .map(|write| GuardedStyleWrite {
+                address: write.address,
+                previous: write.changes.clone(),
+                changes: write.previous.clone(),
+            })
+            .collect(),
+        undoes: Some(OperationId::from_bytes([9; 16])?),
+        undoes_version: Some(DocumentVersion::new(2)?),
+    };
+    let undone = applied.candidate(&inverse, DocumentVersion::new(3)?)?;
+    assert!(undone.cell_content(first)?.is_none());
+    assert!(undone.sheets()[0].styles().is_empty());
+    Ok(())
+}
+
+#[test]
 fn independent_properties_commute_but_stale_same_leaf_is_rejected() -> TestResult {
     let (book, a) = fixture()?;
     let bold = prepare_style_write(
@@ -287,7 +371,7 @@ fn defaults_keep_explicit_footprint_and_invalid_guards_are_atomic() -> TestResul
 }
 
 #[test]
-fn styled_axis_deletion_is_blocked_but_independent_axis_is_allowed() -> TestResult {
+fn styled_axis_deletion_undo_and_redo_preserve_exact_style_preimages() -> TestResult {
     let (book, a) = fixture()?;
     let op = prepare_style_write(
         &book,
@@ -300,13 +384,67 @@ fn styled_axis_deletion_is_blocked_but_independent_axis_is_allowed() -> TestResu
         sheet: a.sheet,
         rows: vec![a.row],
     };
-    assert!(matches!(
-        book.candidate(&delete, DocumentVersion::new(3)?),
-        Err(DomainError::UnsupportedStructuralDependency)
-    ));
-    assert!(
-        spreadsheet_domain::axis_edit::prepare_axis_edit(&book, &delete, DocumentVersion::new(3)?)
-            .is_err()
+    let delete =
+        spreadsheet_domain::axis_edit::prepare_axis_edit(&book, &delete, DocumentVersion::new(3)?)?;
+    let deleted = book.candidate(&delete, DocumentVersion::new(3)?)?;
+    assert!(deleted.sheets()[0].styles().is_empty());
+    let event = CommittedEvent {
+        document_id: book.document_id(),
+        operation_id: OperationId::from_bytes([30; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([31; 16])?),
+        version: deleted.version(),
+        operation: delete,
+        state_hash: deleted.hash(),
+    };
+    let inverse = spreadsheet_domain::axis_edit::prepare_axis_inverse(
+        &deleted,
+        &event,
+        DocumentVersion::new(4)?,
+    )?;
+    let restored = deleted.candidate(&inverse, DocumentVersion::new(4)?)?;
+    assert_eq!(restored.sheets()[0].styles(), book.sheets()[0].styles());
+    let undo_event = CommittedEvent {
+        document_id: restored.document_id(),
+        operation_id: OperationId::from_bytes([32; 16])?,
+        principal: event.principal,
+        version: restored.version(),
+        operation: inverse,
+        state_hash: restored.hash(),
+    };
+    let redo = spreadsheet_domain::axis_edit::prepare_axis_inverse(
+        &restored,
+        &undo_event,
+        DocumentVersion::new(5)?,
+    )?;
+    let redone = restored.candidate(&redo, DocumentVersion::new(5)?)?;
+    assert!(redone.sheets()[0].styles().is_empty());
+    let delete_column = spreadsheet_domain::axis_edit::prepare_axis_edit(
+        &book,
+        &Operation::DeleteColumns {
+            sheet: a.sheet,
+            columns: vec![a.column],
+        },
+        DocumentVersion::new(3)?,
+    )?;
+    let deleted_column = book.candidate(&delete_column, DocumentVersion::new(3)?)?;
+    assert!(deleted_column.sheets()[0].styles().is_empty());
+    let column_event = CommittedEvent {
+        document_id: book.document_id(),
+        operation_id: OperationId::from_bytes([33; 16])?,
+        principal: EventPrincipal::User(ActorId::from_bytes([31; 16])?),
+        version: deleted_column.version(),
+        operation: delete_column,
+        state_hash: deleted_column.hash(),
+    };
+    let column_undo = spreadsheet_domain::axis_edit::prepare_axis_inverse(
+        &deleted_column,
+        &column_event,
+        DocumentVersion::new(4)?,
+    )?;
+    let restored_column = deleted_column.candidate(&column_undo, DocumentVersion::new(4)?)?;
+    assert_eq!(
+        restored_column.sheets()[0].styles(),
+        book.sheets()[0].styles()
     );
     let next = book.candidate(
         &Operation::DeleteRows {

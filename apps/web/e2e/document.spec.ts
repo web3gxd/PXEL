@@ -1,3 +1,6 @@
+import { editorButton } from './editor-menu';
+import { createBookFromUi } from './create-book';
+import { copySelection, readClipboardText } from './clipboard';
 import { expect, test } from '@playwright/test';
 import { fromBinary } from '@bufbuild/protobuf';
 import { ClientEnvelopeSchema } from '../src/generated/pxel/wire/v1/session_pb';
@@ -6,8 +9,9 @@ test('first volatile formula calculates without manual recalc and renews context
   page,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   await bar.fill('=RAND()');
@@ -39,8 +43,9 @@ test('first volatile formula calculates without manual recalc and renews context
 test('active NOW updates from a durable heartbeat timer without user edits', async ({ page }) => {
   test.setTimeout(95_000);
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('=NOW()');
   await bar.press('Enter');
@@ -77,8 +82,9 @@ test('editing another cell advances RAND epoch automatically and survives reload
   page,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   const active = page.getByTestId('active-cell');
@@ -91,6 +97,7 @@ test('editing another cell advances RAND epoch automatically and survives reload
   await grid.focus();
   await page.keyboard.press('ArrowUp');
   await expect(active).toHaveText(/^A1: 0\./);
+  await expect(page.getByTestId('calculation-preview')).toHaveCount(0);
   const first = await active.textContent();
   await page.keyboard.press('ArrowRight');
   await expect(active).toHaveText(/^B1:/);
@@ -114,9 +121,10 @@ test('editing another cell advances RAND epoch automatically and survives reload
 
 test('volatile RAND preview stays separate and durable epoch survives reload', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
-  await page.getByTestId('recalculate').click();
+  await createBookFromUi(page);
+  await (await editorButton(page, 'Пересчитать')).click();
   const id = new URL(page.url()).searchParams.get('document');
   const state = async () => (await page.request.get(`/api/documents/${id}`)).json();
   await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('1');
@@ -140,7 +148,7 @@ test('volatile RAND preview stays separate and durable epoch survives reload', a
   expect((await state()).version).toBe('4');
   await bar.press('Escape');
   await expect(active).toHaveText(first!);
-  await page.getByTestId('recalculate').click();
+  await (await editorButton(page, 'Пересчитать')).click();
   await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('3');
   await expect(active).not.toHaveText(first!);
   await expect(active).toHaveText(/^A1: 0\./);
@@ -156,8 +164,9 @@ test('volatile RAND preview stays separate and durable epoch survives reload', a
 
 test('opening a second tab publishes the same renewed RAND to both clients', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('=RAND()');
   await bar.press('Enter');
@@ -270,8 +279,9 @@ for (const scenario of [
 ]) {
   test(`${scenario.name} follows dependent edits and survives reload`, async ({ page }) => {
     await page.goto('/');
+    await createBookFromUi(page);
     await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-    await page.getByRole('button', { name: 'Создать таблицу' }).click();
+    await createBookFromUi(page);
     const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
     const grid = page.getByRole('region', { name: 'Область таблицы' });
     const source = scenario.source;
@@ -304,8 +314,9 @@ for (const scenario of [
 
 test('ABS and MOD update a referenced input and survive reload', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   await bar.fill('-3');
@@ -370,13 +381,14 @@ test('persisted server context reaches real WASM initialization and survives rel
     };
   });
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('=1+2');
   await bar.press('Enter');
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await page.getByTestId('recalculate').click();
+  await (await editorButton(page, 'Пересчитать')).click();
   const id = new URL(page.url()).searchParams.get('document');
   const state = async () => (await page.request.get(`/api/documents/${id}`)).json();
   await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('1');
@@ -390,7 +402,7 @@ test('persisted server context reaches real WASM initialization and survives rel
     });
   await expect.poll(async () => (await latest())?.calculation_context).toEqual(context);
   expect(await latest()).toMatchObject({
-    schema_version: 4,
+    schema_version: 5,
     last_axis_change_version: '1',
     retired_row_ids: [],
     retired_column_ids: [],
@@ -437,8 +449,9 @@ test('delayed formula retains its target after another tab inserts a row', async
     });
   });
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   await bar.fill('11');
@@ -454,7 +467,7 @@ test('delayed formula retains its target after another tab inserts a row', async
   const other = await context.newPage();
   await other.goto(page.url());
   await expect(other.getByTestId('connection-status')).toHaveText('Подключено');
-  await other.getByRole('button', { name: 'Строка ↑', exact: true }).click();
+  await (await editorButton(other, 'Строка ↑')).click();
   const id = new URL(page.url()).searchParams.get('document');
   await expect
     .poll(async () => (await (await page.request.get(`/api/documents/${id}`)).json()).version)
@@ -492,8 +505,9 @@ function uuidV7() {
 
 test('owner downloads the confirmed scalar workbook as XLSX', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('23');
   await bar.press('Enter');
@@ -506,19 +520,21 @@ test('owner downloads the confirmed scalar workbook as XLSX', async ({ page }) =
     })
     .toBe('2');
   const downloadPromise = page.waitForEvent('download');
-  await page.getByTestId('export-xlsx').click();
+  await (await editorButton(page, 'Скачать XLSX')).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe('PXEL.xlsx');
   expect(await download.path()).toBeTruthy();
-  await expect(page.getByTestId('export-xlsx')).toBeEnabled();
+  await expect(await editorButton(page, 'Скачать XLSX')).toBeEnabled();
+  await page.keyboard.press('Escape');
 });
 
 test('recalculate retries a lost HTTP response without committing a second epoch', async ({
   page,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('=AND(TRUE,TRUE)');
   await bar.press('Enter');
@@ -536,7 +552,7 @@ test('recalculate retries a lost HTTP response without committing a second epoch
       await route.continue();
     }
   });
-  const button = page.getByTestId('recalculate');
+  const button = await editorButton(page, 'Пересчитать');
   await button.click();
   await expect.poll(async () => (await state()).version).toBe('3');
   await expect(button).toBeEnabled();
@@ -557,8 +573,9 @@ test('logical formula recalculates after editing its input and survives reload',
   page,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('2');
@@ -595,8 +612,9 @@ test('copying one formula shifts relative references in WASM and commits server-
 }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('2');
@@ -616,8 +634,8 @@ test('copying one formula shifts relative references in WASM and commits server-
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await grid.focus();
   await page.keyboard.press('ArrowUp');
-  await page.keyboard.press('ControlOrMeta+C');
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('A1');
+  await copySelection(page);
+  expect(await readClipboardText(page)).toContain('A1');
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ControlOrMeta+V');
@@ -637,8 +655,9 @@ test('copying one formula shifts relative references in WASM and commits server-
 
 test('TSV paste commits one durable batch and survives reload', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   await grid.focus();
@@ -685,8 +704,9 @@ test('keyboard range selection copies a sparse rectangle and pastes it in one ve
 }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   await expect(page.getByTestId('active-cell')).toHaveText('A1: ');
   await grid.focus();
@@ -698,8 +718,8 @@ test('keyboard range selection copies a sparse rectangle and pastes it in one ve
   await page.keyboard.press('Shift+ArrowRight');
   await page.keyboard.press('Shift+ArrowDown');
   await expect(page.getByTestId('selection-range')).toHaveText('Выделено A1:B2');
-  await page.keyboard.press('ControlOrMeta+C');
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('1\tTRUE\nx\t');
+  await copySelection(page);
+  expect(await readClipboardText(page)).toBe('1\tTRUE\nx\t');
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowDown');
@@ -736,8 +756,9 @@ test('mixed value and formula range copies atomically with shifted references', 
 }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('3');
@@ -757,7 +778,7 @@ test('mixed value and formula range copies atomically with shifted references', 
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('Shift+ArrowRight');
   await expect(page.getByTestId('selection-range')).toHaveText('Выделено A1:B1');
-  await page.keyboard.press('ControlOrMeta+C');
+  await copySelection(page);
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
@@ -815,8 +836,9 @@ test('mixed value and formula range copies atomically with shifted references', 
 test('pointer drag selects a rectangle without allocating DOM cells', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   await expect(page.getByTestId('active-cell')).toHaveText('A1: ');
   const box = await grid.boundingBox();
@@ -825,8 +847,8 @@ test('pointer drag selects a rectangle without allocating DOM cells', async ({ p
   await page.mouse.down();
   await page.mouse.move(box.x + 46 + 112 + 56, box.y + 28 + 28 + 14, { steps: 4 });
   await page.mouse.up();
-  await page.keyboard.press('ControlOrMeta+C');
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('\t\n\t');
+  await copySelection(page);
+  expect(await readClipboardText(page)).toBe('\t\n\t');
   expect(await page.locator('[role="gridcell"]').count()).toBe(0);
 });
 
@@ -835,8 +857,9 @@ test('missing WASM visibly disables preview while server calculation remains ava
 }) => {
   await page.route('**/*.wasm*', (route) => route.abort());
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('preview-status')).toHaveText('Предпросмотр недоступен');
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('=2+3');
@@ -858,8 +881,9 @@ test('WASM previews an unsaved draft and cancellation leaves the durable documen
       wasmResponses.push(response.status());
   });
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const id = new URL(page.url()).searchParams.get('document');
   const before = await page.evaluate(async (documentId) => {
@@ -884,7 +908,8 @@ test('WASM previews an unsaved draft and cancellation leaves the durable documen
   expect(after.version).toBe(before.version);
   expect(after.state_hash).toBe(before.state_hash);
   expect(after.sheets[0].cells).toEqual([]);
-  expect(wasmResponses).toEqual([200]);
+  // Home creation and editor creation each open a separate editor page.
+  expect(wasmResponses).toEqual([200, 200]);
 });
 
 test('formula results recalculate while editors preserve source across reload', async ({
@@ -896,8 +921,9 @@ test('formula results recalculate while editors preserve source across reload', 
       calculationHttpRequests.push(request.method());
   });
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
@@ -939,8 +965,9 @@ test('create, edit sparse cells, keyboard navigation, reload durable values', as
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page).toHaveURL(/document=[0-9a-f-]{36}/);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const grid = page.getByRole('region', { name: 'Область таблицы' });
@@ -984,8 +1011,9 @@ test('create, edit sparse cells, keyboard navigation, reload durable values', as
 
 test('adding a sheet persists stable tabs and reaches another browser', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const second = await page.context().newPage();
   try {
@@ -1006,8 +1034,9 @@ test('adding a sheet persists stable tabs and reaches another browser', async ({
 
 test('two browser tabs see each other’s committed cell after a head hint', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const second = await page.context().newPage();
   try {
@@ -1043,8 +1072,9 @@ test('multi-step undo redo of one cell converges in two tabs and new edits clear
   page,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const other = await page.context().newPage();
   try {
@@ -1101,8 +1131,9 @@ test('multi-step undo redo of one cell converges in two tabs and new edits clear
 
 test('one-step undo is a durable compensation broadcast to another browser', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const second = await page.context().newPage();
   try {
@@ -1134,8 +1165,9 @@ test('undo of an authored formula restores the previous formula and survives rel
   page,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   const grid = page.getByRole('region', { name: 'Область таблицы' });
@@ -1163,8 +1195,9 @@ test('formula undo renders a preimage transformed before the overwritten edit', 
   page,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   const grid = page.getByRole('region', { name: 'Область таблицы' });
@@ -1173,7 +1206,7 @@ test('formula undo renders a preimage transformed before the overwritten edit', 
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await grid.focus();
   await page.keyboard.press('ArrowUp');
-  await page.getByRole('button', { name: 'Строка ↑', exact: true }).click();
+  await (await editorButton(page, 'Строка ↑')).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(bar).toHaveValue('=(B2+1)');
   await bar.fill('=42');
@@ -1189,8 +1222,9 @@ test('formula undo renders a preimage transformed before the overwritten edit', 
 
 test('undo restores a formula overwritten by a plain value', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
   await bar.fill('=2+3');
@@ -1215,8 +1249,9 @@ test('undo restores a formula overwritten by a plain value', async ({ page }) =>
 
 test('one-step undo rejects a later edit by another user', async ({ page, browser }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const documentId = new URL(page.url()).searchParams.get('document');
   if (!documentId) throw new Error('Document ID missing');
@@ -1278,8 +1313,9 @@ test('one-step undo rejects a later edit by another user', async ({ page, browse
 
 test('scrolling near the end extends stable rows and updates both browsers', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const documentId = new URL(page.url()).searchParams.get('document');
   if (!documentId) throw new Error('Document ID missing');
@@ -1317,8 +1353,9 @@ test('insert row before selection keeps the authored value on its stable row aft
   page,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const id = new URL(page.url()).searchParams.get('document');
   if (!id) throw new Error('Document ID missing');
@@ -1330,7 +1367,7 @@ test('insert row before selection keeps the authored value on its stable row aft
   await bar.fill('42');
   await bar.press('Enter');
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await page.getByRole('button', { name: 'Строка ↑' }).click();
+  await (await editorButton(page, 'Строка ↑')).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect
     .poll(async () => {
@@ -1355,8 +1392,9 @@ test('insert row before selection keeps the authored value on its stable row aft
 
 test('insertion with formulas retains the formula on its stable row', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const id = new URL(page.url()).searchParams.get('document');
   if (!id) throw new Error('Document ID missing');
@@ -1364,7 +1402,7 @@ test('insertion with formulas retains the formula on its stable row', async ({ p
   await bar.fill('=1');
   await bar.press('Enter');
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await page.getByRole('button', { name: 'Строка ↑' }).click();
+  await (await editorButton(page, 'Строка ↑')).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const response = await page.request.get(`/api/documents/${id}`);
   expect(response.ok()).toBe(true);
@@ -1382,8 +1420,9 @@ test('insertion with formulas retains the formula on its stable row', async ({ p
 
 test('formula bar follows a shifted stable target after row insertion', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const grid = page.getByRole('region', { name: 'Область таблицы' });
   const bar = page.getByRole('textbox', { name: 'Значение ячейки' });
@@ -1399,7 +1438,7 @@ test('formula bar follows a shifted stable target after row insertion', async ({
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await grid.focus();
   await page.keyboard.press('ArrowUp');
-  await page.getByRole('button', { name: 'Строка ↑' }).click();
+  await (await editorButton(page, 'Строка ↑')).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(active).toHaveText('B2: 7');
   await expect(bar).toHaveValue('=A2');
@@ -1414,8 +1453,9 @@ test('formula bar follows a shifted stable target after row insertion', async ({
 
 test('deleting a referenced row shows REF and survives reload', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const id = new URL(page.url()).searchParams.get('document');
   if (!id) throw new Error('Document ID missing');
@@ -1439,7 +1479,7 @@ test('deleting a referenced row shows REF and survives reload', async ({ page })
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowLeft');
   await expect(active).toHaveText('A2: 7');
-  await page.getByRole('button', { name: 'Строка −' }).click();
+  await (await editorButton(page, 'Строка −')).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const response = await page.request.get(`/api/documents/${id}`);
   expect(response.ok()).toBe(true);
@@ -1461,8 +1501,9 @@ test('inserting a column keeps formula target stable and shifts its A1 display',
   page,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const id = new URL(page.url()).searchParams.get('document');
   if (!id) throw new Error('Document ID missing');
@@ -1480,7 +1521,7 @@ test('inserting a column keeps formula target stable and shifts its A1 display',
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await page.reload();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await page.getByRole('button', { name: 'Столбец ↑' }).click();
+  await (await editorButton(page, 'Столбец ↑')).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const response = await page.request.get(`/api/documents/${id}`);
   expect(response.ok()).toBe(true);
@@ -1499,8 +1540,9 @@ test('inserting a column keeps formula target stable and shifts its A1 display',
 
 test('deleting a referenced column shows REF and survives reload', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const id = new URL(page.url()).searchParams.get('document');
   if (!id) throw new Error('Document ID missing');
@@ -1517,7 +1559,7 @@ test('deleting a referenced column shows REF and survives reload', async ({ page
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await page.reload();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
-  await page.getByRole('button', { name: 'Столбец −' }).click();
+  await (await editorButton(page, 'Столбец −')).click();
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const response = await page.request.get(`/api/documents/${id}`);
   expect(response.ok()).toBe(true);
@@ -1537,8 +1579,9 @@ test('deleting a referenced column shows REF and survives reload', async ({ page
 
 test('two tabs converge after one tab is offline during a remote edit', async ({ page }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const documentUrl = page.url();
   const secondContext = await page
@@ -1600,8 +1643,9 @@ test('two different users see ephemeral presence without changing the saved vers
   browser,
 }) => {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const documentId = new URL(page.url()).searchParams.get('document');
   if (!documentId) throw new Error('Document ID missing');

@@ -3,11 +3,14 @@
 
 mod export;
 mod normalized;
+mod styles;
 
 pub use export::export_scalar_xlsx;
 pub use normalized::{
-    CompatibilityIssue, CompatibilityIssueCode, NormalizedCell, NormalizedCellValue,
-    NormalizedSheet, NormalizedWorkbook,
+    CompatibilityIssue, CompatibilityIssueCode, NormalizedBorder, NormalizedBorderLine,
+    NormalizedCell, NormalizedCellValue, NormalizedHorizontal, NormalizedMerge,
+    NormalizedNumberFormat, NormalizedSheet, NormalizedStyle, NormalizedUnderline,
+    NormalizedVertical, NormalizedWorkbook,
 };
 
 use quick_xml::{Reader, XmlVersion, events::Event};
@@ -37,6 +40,8 @@ const SHEET_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
 const SHARED_STRING_REL: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+const STYLES_REL: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 const WORKBOOK_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const OFFICE_REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
@@ -80,6 +85,7 @@ struct LoadedPackage {
     started: Instant,
     workbook_part: String,
     workbook_rels: HashMap<String, Relationship>,
+    styles_part: Option<String>,
 }
 
 pub fn inspect_file(path: &Path) -> Result<PackageInspection, XlsxError> {
@@ -236,6 +242,24 @@ fn load_package<R: Read + Seek>(input: R, source_len: u64) -> Result<LoadedPacka
             .get(&workbook_rels_part)
             .ok_or(XlsxError::InvalidPackage)?,
     )?;
+    let style_relationships = workbook_rels
+        .values()
+        .filter(|rel| rel.kind == STYLES_REL)
+        .collect::<Vec<_>>();
+    if style_relationships.len() > 1 {
+        return Err(XlsxError::InvalidPackage);
+    }
+    let workbook_base = workbook_part.rsplit_once('/').map_or("", |(base, _)| base);
+    let styles_part = style_relationships
+        .first()
+        .map(|rel| resolve_target(workbook_base, &rel.target))
+        .transpose()?;
+    if styles_part
+        .as_ref()
+        .is_some_and(|part| !parts.contains_key(part))
+    {
+        return Err(XlsxError::InvalidPackage);
+    }
     let sheets = parse_sheets(workbook, &workbook_part, &workbook_rels, &parts)?;
     Ok(LoadedPackage {
         inspection: PackageInspection {
@@ -247,6 +271,7 @@ fn load_package<R: Read + Seek>(input: R, source_len: u64) -> Result<LoadedPacka
         started,
         workbook_part,
         workbook_rels,
+        styles_part,
     })
 }
 
@@ -592,8 +617,9 @@ fn add_sheet(
 #[cfg(test)]
 mod tests {
     use super::{
-        CompatibilityIssue, CompatibilityIssueCode, NormalizedCellValue, XlsxError, inspect_reader,
-        normalize_reader,
+        CompatibilityIssue, CompatibilityIssueCode, NormalizedBorderLine, NormalizedCellValue,
+        NormalizedHorizontal, NormalizedMerge, NormalizedNumberFormat, NormalizedVertical,
+        XlsxError, inspect_reader, normalize_reader,
     };
     use std::io::{Cursor, Write};
     use zip::{ZipWriter, write::SimpleFileOptions};
@@ -628,6 +654,15 @@ mod tests {
             writer.write_all(body.as_bytes())?;
         }
         Ok(writer.finish()?.into_inner())
+    }
+
+    fn styled_package(sheet: &str, styles: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let rels = WORKBOOK_RELS.replace("</Relationships>", "<Relationship Id=\"styles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>");
+        package(&[
+            ("xl/_rels/workbook.xml.rels", &rels),
+            ("xl/styles.xml", styles),
+            ("xl/worksheets/sheet1.xml", sheet),
+        ])
     }
 
     fn inspect(bytes: Vec<u8>) -> Result<super::PackageInspection, XlsxError> {
@@ -700,6 +735,114 @@ mod tests {
     }
 
     #[test]
+    fn rejects_hostile_xml_depth_and_attribute_counts() -> Result<(), Box<dyn std::error::Error>> {
+        let nested = format!("{}{}", "<n>".repeat(65), "</n>".repeat(65));
+        assert_eq!(
+            inspect(package(&[("xl/worksheets/sheet1.xml", &nested)])?),
+            Err(XlsxError::LimitExceeded)
+        );
+
+        let attributes = (0..129)
+            .map(|index| format!(" a{index}=\"x\""))
+            .collect::<String>();
+        let xml = format!("<properties{attributes}/>");
+        assert_eq!(
+            inspect(package(&[("docProps/core.xml", &xml)])?),
+            Err(XlsxError::LimitExceeded)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_case_insensitive_duplicate_parts_and_entry_overflow()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let duplicate = package(&[("[content_types].xml", CONTENT_TYPES)])?;
+        assert_eq!(inspect(duplicate), Err(XlsxError::InvalidPackage));
+
+        let mut extras = Vec::with_capacity(251);
+        for index in 0..251 {
+            let name = format!("extra/{index}.bin");
+            extras.push((name, "".to_owned()));
+        }
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, body) in [
+            ("[Content_Types].xml".to_owned(), CONTENT_TYPES.to_owned()),
+            ("_rels/.rels".to_owned(), ROOT_RELS.to_owned()),
+            ("xl/workbook.xml".to_owned(), WORKBOOK.to_owned()),
+            (
+                "xl/_rels/workbook.xml.rels".to_owned(),
+                WORKBOOK_RELS.to_owned(),
+            ),
+            ("xl/worksheets/sheet1.xml".to_owned(), SHEET.to_owned()),
+            ("xl/worksheets/sheet2.xml".to_owned(), SHEET.to_owned()),
+        ]
+        .into_iter()
+        .chain(extras)
+        {
+            writer.start_file(name, options)?;
+            writer.write_all(body.as_bytes())?;
+        }
+        assert_eq!(
+            inspect(writer.finish()?.into_inner()),
+            Err(XlsxError::LimitExceeded)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_high_ratio_deflate_entries() -> Result<(), Box<dyn std::error::Error>> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        let stored =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, body) in [
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", ROOT_RELS),
+            ("xl/workbook.xml", WORKBOOK),
+            ("xl/_rels/workbook.xml.rels", WORKBOOK_RELS),
+            ("xl/worksheets/sheet1.xml", SHEET),
+            ("xl/worksheets/sheet2.xml", SHEET),
+        ] {
+            writer.start_file(name, stored)?;
+            writer.write_all(body.as_bytes())?;
+        }
+        let deflated =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        writer.start_file("extra/repetitive.bin", deflated)?;
+        writer.write_all("a".repeat(256 * 1024).as_bytes())?;
+        assert_eq!(
+            inspect(writer.finish()?.into_inner()),
+            Err(XlsxError::LimitExceeded)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_zip_symlink_entries() -> Result<(), Box<dyn std::error::Error>> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, body) in [
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", ROOT_RELS),
+            ("xl/workbook.xml", WORKBOOK),
+            ("xl/_rels/workbook.xml.rels", WORKBOOK_RELS),
+            ("xl/worksheets/sheet1.xml", SHEET),
+            ("xl/worksheets/sheet2.xml", SHEET),
+        ] {
+            writer.start_file(name, options)?;
+            writer.write_all(body.as_bytes())?;
+        }
+        writer.add_symlink("extra/link", "../../outside", options)?;
+        assert_eq!(
+            inspect(writer.finish()?.into_inner()),
+            Err(XlsxError::InvalidPackage)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn extracts_scalar_cells_and_formula_source_without_cached_result()
     -> Result<(), Box<dyn std::error::Error>> {
         let rels = WORKBOOK_RELS.replace("</Relationships>", "<Relationship Id=\"r3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>");
@@ -735,6 +878,28 @@ mod tests {
         assert_eq!(
             workbook.sheets[1].cells[0].value,
             NormalizedCellValue::Text("world!".into())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_bounded_ooxml_merge_ranges_and_rejects_duplicates()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let valid = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><mergeCells count="1"><mergeCell ref="A1:C2"/></mergeCells></worksheet>"#;
+        let workbook = normalize(package(&[("xl/worksheets/sheet1.xml", valid)])?)?;
+        assert_eq!(
+            workbook.sheets[0].merges,
+            vec![NormalizedMerge {
+                first_row: 1,
+                last_row: 2,
+                first_column: 1,
+                last_column: 3,
+            }]
+        );
+        let duplicate = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><mergeCells count="2"><mergeCell ref="A1:B2"/><mergeCell ref="A1:B2"/></mergeCells></worksheet>"#;
+        assert_eq!(
+            normalize(package(&[("xl/worksheets/sheet1.xml", duplicate)])?),
+            Err(XlsxError::InvalidPackage)
         );
         Ok(())
     }
@@ -793,8 +958,12 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let workbook = WORKBOOK.replace("</workbook>", "<definedNames/></workbook>");
         let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1" ht="30"><c r="A1" s="1"><v>3</v></c></row></sheetData><mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells></worksheet>"#;
+        let rels = WORKBOOK_RELS.replace("</Relationships>", "<Relationship Id=\"styles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>");
+        let styles = r#"<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><name val="Arial"/><sz val="10"/></font><font><b/><color theme="4"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/></border></borders><cellXfs count="2"><xf fontId="0" fillId="0" borderId="0" xfId="0"/><xf fontId="1" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>"#;
         let result = normalize(package(&[
             ("xl/workbook.xml", &workbook),
+            ("xl/_rels/workbook.xml.rels", &rels),
+            ("xl/styles.xml", styles),
             ("xl/worksheets/sheet1.xml", sheet),
             ("docProps/core.xml", "<properties/>"),
         ])?)?;
@@ -802,6 +971,7 @@ mod tests {
             result.sheets[0].cells[0].value,
             NormalizedCellValue::Number(3.0)
         );
+        assert_eq!(result.sheets[0].styles[0].bold, Some(true));
         assert_eq!(
             result.issues,
             vec![
@@ -812,10 +982,6 @@ mod tests {
                 CompatibilityIssue {
                     code: CompatibilityIssueCode::WorkbookMetadata,
                     sheet_index: None
-                },
-                CompatibilityIssue {
-                    code: CompatibilityIssueCode::WorksheetMetadata,
-                    sheet_index: Some(0)
                 },
                 CompatibilityIssue {
                     code: CompatibilityIssueCode::RowFormatting,
@@ -832,6 +998,120 @@ mod tests {
             .collect::<Vec<_>>()
         );
         assert!(result.validate().is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn parses_supported_style_properties_and_a_styled_blank_cell()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let styles = r#"<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/></numFmts><fonts count="2"><font><name val="Arial"/><sz val="10"/></font><font><name val="Calibri"/><sz val="12.5"/><b/><i/><u val="double"/><strike/><color rgb="FF112233"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFABCDEF"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/></border><border><left style="thin"><color rgb="FF010203"/></left><right style="medium"><color rgb="FF040506"/></right><top style="dashed"><color rgb="FF070809"/></top><bottom style="double"><color rgb="FF0A0B0C"/></bottom></border></borders><cellXfs count="4"><xf fontId="0" fillId="0" borderId="0" xfId="0"/><xf fontId="1" fillId="1" borderId="0" xfId="0"/><xf fontId="0" fillId="0" borderId="0" numFmtId="164" xfId="0"><alignment horizontal="center" vertical="top" wrapText="1"/></xf><xf fontId="1" fillId="0" borderId="1" numFmtId="2" xfId="0"/></cellXfs></styleSheet>"#;
+        let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1" t="inlineStr"><is><t>styled</t></is></c></row><row r="2"><c r="B2" s="2"/><c r="C2" s="3"><v>1</v></c></row></sheetData></worksheet>"#;
+        let workbook = normalize(styled_package(sheet, styles)?)?;
+        assert!(workbook.issues.is_empty());
+        assert_eq!(workbook.sheets[0].cells.len(), 2);
+        assert_eq!(workbook.sheets[0].styles.len(), 3);
+        assert_eq!(workbook.sheets[0].styles[0].bold, Some(true));
+        assert_eq!(
+            workbook.sheets[0].styles[0].font_color,
+            Some([0x11, 0x22, 0x33])
+        );
+        assert_eq!(workbook.sheets[0].styles[0].fill, Some([0xAB, 0xCD, 0xEF]));
+        assert_eq!(
+            workbook.sheets[0].styles[0].font_family.as_deref(),
+            Some("Calibri")
+        );
+        assert_eq!(
+            workbook.sheets[0].styles[0].font_size_hundredth_points,
+            Some(1250)
+        );
+        assert_eq!(workbook.sheets[0].styles[0].italic, Some(true));
+        assert_eq!(
+            workbook.sheets[0].styles[0].underline,
+            Some(super::NormalizedUnderline::Double)
+        );
+        assert_eq!(workbook.sheets[0].styles[0].strike, Some(true));
+        assert_eq!(
+            workbook.sheets[0].styles[1].horizontal,
+            Some(NormalizedHorizontal::Center)
+        );
+        assert_eq!(
+            workbook.sheets[0].styles[1].vertical,
+            Some(NormalizedVertical::Top)
+        );
+        assert_eq!(workbook.sheets[0].styles[1].wrap, Some(true));
+        assert_eq!(
+            workbook.sheets[0].styles[1].number_format,
+            Some(NormalizedNumberFormat::DateIso)
+        );
+        assert_eq!(
+            (
+                workbook.sheets[0].styles[1].row,
+                workbook.sheets[0].styles[1].column
+            ),
+            (2, 2)
+        );
+        assert_eq!(
+            workbook.sheets[0].styles[2]
+                .border_left
+                .ok_or("left border missing")?
+                .line,
+            NormalizedBorderLine::Thin
+        );
+        assert_eq!(
+            workbook.sheets[0].styles[2]
+                .border_right
+                .ok_or("right border missing")?
+                .line,
+            NormalizedBorderLine::Medium
+        );
+        assert_eq!(
+            workbook.sheets[0].styles[2]
+                .border_top
+                .ok_or("top border missing")?
+                .line,
+            NormalizedBorderLine::Dashed
+        );
+        assert_eq!(
+            workbook.sheets[0].styles[2]
+                .border_bottom
+                .ok_or("bottom border missing")?
+                .line,
+            NormalizedBorderLine::Double
+        );
+        assert_eq!(
+            workbook.sheets[0].styles[2].number_format,
+            Some(NormalizedNumberFormat::Decimal2)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_style_relationship_indices_counts_and_duplicate_formats_reject()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let styles = r#"<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font/></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellXfs count="1"><xf/></cellXfs></styleSheet>"#;
+        let invalid_index = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1"/></row></sheetData></worksheet>"#;
+        assert_eq!(
+            normalize(styled_package(invalid_index, styles)?),
+            Err(XlsxError::InvalidPackage)
+        );
+        let without_relationship = package(&[
+            ("xl/styles.xml", styles),
+            ("xl/worksheets/sheet1.xml", invalid_index),
+        ])?;
+        assert_eq!(
+            normalize(without_relationship),
+            Err(XlsxError::InvalidPackage)
+        );
+        let bad_count = styles.replace("fonts count=\"1\"", "fonts count=\"2\"");
+        assert_eq!(
+            normalize(styled_package(invalid_index, &bad_count)?),
+            Err(XlsxError::InvalidPackage)
+        );
+        let duplicate_formats = styles.replace("<fonts count=", "<numFmts count=\"2\"><numFmt numFmtId=\"164\" formatCode=\"0\"/><numFmt numFmtId=\"164\" formatCode=\"0.00\"/></numFmts><fonts count=");
+        assert_eq!(
+            normalize(styled_package(invalid_index, &duplicate_formats)?),
+            Err(XlsxError::InvalidPackage)
+        );
         Ok(())
     }
 }

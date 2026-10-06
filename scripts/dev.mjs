@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { ensureDevelopmentKeyring } from './keyring.mjs';
 
 const webRequire = createRequire(resolve('apps/web/package.json'));
 const vite = join(dirname(webRequire.resolve('vite/package.json')), 'bin/vite.js');
@@ -47,7 +48,7 @@ function start(command, args, env) {
 const file = resolve('.local/database-url');
 if (!process.env.DATABASE_URL && !existsSync(file))
   throw new Error('Run just infra-up (or just infra-native) first.');
-const env = { ...process.env, PXEL_DEV_AUTH: '1' };
+const env = { ...process.env, ...ensureDevelopmentKeyring(), PXEL_DEV_AUTH: '1' };
 if (!env.DATABASE_URL) env.DATABASE_URL = readFileSync(file, 'utf8').trim();
 const wasm = spawnSync(process.execPath, ['scripts/wasm.mjs'], {
   stdio: 'inherit',

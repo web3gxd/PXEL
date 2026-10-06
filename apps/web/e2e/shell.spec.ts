@@ -1,3 +1,4 @@
+import { createBookFromUi } from './create-book';
 import { expect, test } from '@playwright/test';
 
 test('real binary handshake, viewport Canvas and keyboard scroll', async ({ page }, testInfo) => {
@@ -7,6 +8,7 @@ test('real binary handshake, viewport Canvas and keyboard scroll', async ({ page
     if (message.type() === 'error') errors.push(message.text());
   });
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByRole('heading', { name: 'Новая таблица' })).toBeVisible();
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено', {
     timeout: 15_000,
@@ -42,8 +44,15 @@ test('real binary handshake, viewport Canvas and keyboard scroll', async ({ page
     contentType: 'application/json',
   });
   const viewport = page.getByRole('region', { name: 'Область таблицы' });
-  await page.getByRole('button', { name: 'Создать таблицу' }).focus();
-  await page.keyboard.press('Tab');
+  await page.getByRole('button', { name: 'Шифрование данных', exact: true }).focus();
+  for (const name of ['Файл', 'Правка', 'Вид', 'Вставка', 'Формат', 'Данные', 'Инструменты']) {
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name, exact: true })).toBeFocused();
+  }
+  for (let step = 0; step < 80; step++) {
+    if (await viewport.evaluate((element) => element === document.activeElement)) break;
+    await page.keyboard.press('Tab');
+  }
   await expect(viewport).toBeFocused();
   await page.keyboard.press('PageDown');
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
@@ -68,6 +77,7 @@ test('real binary handshake, viewport Canvas and keyboard scroll', async ({ page
 test('compact layout retains the viewport without horizontal page overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.locator('canvas')).toHaveAttribute('data-ready', 'true');
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено', {
     timeout: 15_000,

@@ -25,4 +25,6 @@ run(process.execPath, [
   'tests/recovery/axis-history-restart.test.mjs',
   'tests/recovery/history-discovery-restart.test.mjs',
   'tests/recovery/styles-restart.test.mjs',
+  'tests/recovery/disclosure-restart.test.mjs',
+  'tests/recovery/views-restart.test.mjs',
 ]);

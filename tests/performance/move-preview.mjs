@@ -133,7 +133,7 @@ try {
     assert.equal(output.complete, true);
     assert.equal(output.input_version, '9');
     assert.equal(output.pending_revision, String(revision));
-    assert.equal(output.formula_engine_version, 'pxel-formula-0.14.0');
+    assert.equal(output.formula_engine_version, 'pxel-formula-0.16.0');
     assert.equal(
       output.normalized_result_hash,
       baselineHash,
@@ -198,7 +198,7 @@ try {
   };
   const report = {
     schema_version: 1,
-    engine_version: 'pxel-formula-0.14.0',
+    engine_version: 'pxel-formula-0.16.0',
     initial_occupied_cells: cells.length,
     scalar_cells: 99000,
     dependent_formula_cells: 1000,

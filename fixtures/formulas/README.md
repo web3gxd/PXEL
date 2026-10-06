@@ -32,3 +32,17 @@ See [ADR-009](../../docs/adr/009-formula-slice.md).
 A verified Excel fixture must add Excel edition/build, OS, locale, date systems,
 exact inputs, observed output, observation date and verifier/provenance. Never
 change `verified_in_excel` just because our evaluator passes the expectation.
+
+`excel-criteria-2026-10-02.json` is a separate observed fixture for 15
+SUMIF/COUNTIF/SUMIFS/COUNTIFS results from Microsoft Excel 16.0.20326.20158.
+`tests/parity/formula.mjs` feeds its inputs to both native Rust and the actual
+browser WASM Worker, alongside `profile-v1.json`; that parity test checks our
+implementation against the recorded Excel results without marking the general
+derived corpus as Excel-verified.
+
+`excel-number-precision-2026-10-02.json` records 26 observations from Excel
+16.0.20430.20092: selected ROUND/ROUNDUP/ROUNDDOWN cases and numeric constants
+that Excel normalizes to at most 15 significant digits. The fixture includes
+Excel's normalized formula text, locale/build metadata and a one-ULP tolerance
+for one tiny value. Native unit coverage and `tests/parity/formula.mjs` compare
+these observations with Rust and the actual browser WASM Worker.

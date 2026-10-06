@@ -35,6 +35,7 @@ pub(super) fn legacy(command: &CommandPayload) -> Result<Operation, JournalError
     })
 }
 pub(super) async fn verified_projection(
+    db: &PgDatabase,
     tx: &mut Transaction<'_, Postgres>,
     document: DocumentId,
     head: DocumentVersion,
@@ -47,23 +48,28 @@ pub(super) async fn verified_projection(
         "SELECT committed_version, operation_id, actor_id, principal_kind, schema_version, payload, payload_checksum, canonical_event_hash FROM document_operations WHERE document_id=$1 AND committed_version=$2",
         uuid(document.as_bytes()), number(head.get())?
     ).fetch_optional(&mut **tx).await.map_err(error)?.ok_or(JournalError::Corrupt)?;
-    let terminal = verified_event(StoredEventRow {
-        document,
-        committed_version: row.committed_version,
-        operation_id: row.operation_id,
-        actor_id: row.actor_id,
-        principal_kind: &row.principal_kind,
-        schema_version: row.schema_version,
-        payload: &row.payload,
-        payload_checksum: &row.payload_checksum,
-        canonical_event_hash: &row.canonical_event_hash,
-    })?;
+    let terminal = verified_event(
+        db,
+        StoredEventRow {
+            document,
+            committed_version: row.committed_version,
+            operation_id: row.operation_id,
+            actor_id: row.actor_id,
+            principal_kind: &row.principal_kind,
+            schema_version: row.schema_version,
+            payload: &row.payload,
+            payload_checksum: &row.payload_checksum,
+            canonical_event_hash: &row.canonical_event_hash,
+        },
+    )
+    .await?;
     if projection.hash() != terminal.state_hash {
         return Err(JournalError::UndoConflict);
     }
     Ok(())
 }
 pub(super) async fn validate(
+    db: &PgDatabase,
     tx: &mut Transaction<'_, Postgres>,
     request: &CommitRequest,
     head: DocumentVersion,
@@ -73,7 +79,7 @@ pub(super) async fn validate(
         .inverse_projection
         .as_deref()
         .ok_or(JournalError::Corrupt)?;
-    verified_projection(tx, request.command.document_id, head, book).await?;
+    verified_projection(db, tx, request.command.document_id, head, book).await?;
     let expected = match (&request.event.operation, target) {
         (Operation::AxisEdit { .. }, None) => prepare_axis_edit(
             book,
@@ -105,23 +111,29 @@ pub(super) async fn validate(
         let mut bytes = 0usize;
         while let Some(row) = rows.try_next().await.map_err(error)? {
             bytes = bytes
-                .checked_add(row.payload.len())
+                .checked_add(encrypted_plaintext_length(row.payload.len())?)
                 .filter(|bytes| *bytes <= MAX_UNDO_TAIL_BYTES)
                 .ok_or(JournalError::UndoWindowExceeded)?;
             if tail.len() >= UNDO_WINDOW as usize {
                 return Err(JournalError::UndoWindowExceeded);
             }
-            tail.push(verified_event(StoredEventRow {
-                document: request.command.document_id,
-                committed_version: row.committed_version,
-                operation_id: row.operation_id,
-                actor_id: row.actor_id,
-                principal_kind: &row.principal_kind,
-                schema_version: row.schema_version,
-                payload: &row.payload,
-                payload_checksum: &row.payload_checksum,
-                canonical_event_hash: &row.canonical_event_hash,
-            })?);
+            tail.push(
+                verified_event(
+                    db,
+                    StoredEventRow {
+                        document: request.command.document_id,
+                        committed_version: row.committed_version,
+                        operation_id: row.operation_id,
+                        actor_id: row.actor_id,
+                        principal_kind: &row.principal_kind,
+                        schema_version: row.schema_version,
+                        payload: &row.payload,
+                        payload_checksum: &row.payload_checksum,
+                        canonical_event_hash: &row.canonical_event_hash,
+                    },
+                )
+                .await?,
+            );
         }
         drop(rows);
         super::style_guard::validate_axis_styles(

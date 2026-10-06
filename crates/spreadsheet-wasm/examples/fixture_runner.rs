@@ -1,5 +1,6 @@
 //! Native half of the shared native/browser differential harness.
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use std::io::{self, Read};
 
 #[derive(Deserialize)]
@@ -25,7 +26,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &request.source,
                 &serde_json::to_string(&request.input)?,
             )?;
-            Ok(serde_json::from_str::<serde_json::Value>(&value)?)
+            // Preserve the evaluator's exact JSON number spelling through the
+            // native harness; parsing and reserializing f64s here can shift a
+            // value by one ULP before the browser comparison sees it.
+            Ok(serde_json::from_str::<Box<RawValue>>(&value)?)
         })
         .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
     println!("{}", serde_json::to_string(&results)?);

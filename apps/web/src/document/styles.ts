@@ -2,6 +2,7 @@ import { create } from '@bufbuild/protobuf';
 import {
   StyleChangeSchema,
   StylePatchSchema,
+  StyleTextOverflow,
   type StyleChange as WireChange,
 } from '../generated/pxel/wire/v1/session_pb';
 
@@ -25,7 +26,7 @@ export type CellStyle = {
   border_left: Border | null;
   horizontal: 'general' | 'left' | 'center' | 'right';
   vertical: 'top' | 'center' | 'bottom';
-  wrap: boolean;
+  text_overflow: 'clip' | 'wrap' | 'overflow';
   number_format:
     'general' | 'integer' | 'decimal2' | 'percent0' | 'percent2' | 'scientific2' | 'date_iso';
 };
@@ -48,7 +49,7 @@ export const DEFAULT_STYLE: Readonly<CellStyle> = Object.freeze({
   border_left: null,
   horizontal: 'general',
   vertical: 'bottom',
-  wrap: false,
+  text_overflow: 'clip',
   number_format: 'general',
 });
 const properties = Object.keys(DEFAULT_STYLE) as (keyof CellStyle)[];
@@ -80,7 +81,13 @@ function border(value: unknown): Border | null {
 }
 export function decodeStyle(input: unknown): CellStyle {
   const v = object(input);
-  exact(v, properties);
+  const legacyWrap = Object.hasOwn(v, 'wrap') && !Object.hasOwn(v, 'text_overflow');
+  exact(
+    v,
+    legacyWrap
+      ? [...properties.filter((property) => property !== 'text_overflow'), 'wrap']
+      : properties,
+  );
   if (
     typeof v.font_family !== 'string' ||
     !v.font_family ||
@@ -95,8 +102,14 @@ export function decodeStyle(input: unknown): CellStyle {
     Number(v.font_size_hundredth_points) > 20000
   )
     throw invalid();
-  for (const key of ['font_bold', 'font_italic', 'font_strike', 'wrap'])
+  for (const key of ['font_bold', 'font_italic', 'font_strike'])
     if (typeof v[key] !== 'boolean') throw invalid();
+  if (
+    legacyWrap
+      ? typeof v.wrap !== 'boolean'
+      : !['clip', 'wrap', 'overflow'].includes(v.text_overflow as string)
+  )
+    throw invalid();
   for (const [key, options] of [
     ['font_underline', ['none', 'single', 'double']],
     ['horizontal', ['general', 'left', 'center', 'right']],
@@ -107,8 +120,9 @@ export function decodeStyle(input: unknown): CellStyle {
     ],
   ] as const)
     if (!options.includes(v[key] as never)) throw invalid();
-  return {
+  const decoded = {
     ...v,
+    text_overflow: legacyWrap ? (v.wrap ? 'wrap' : 'clip') : v.text_overflow,
     font_color: rgb(v.font_color),
     fill: rgb(v.fill),
     border_top: border(v.border_top),
@@ -116,6 +130,8 @@ export function decodeStyle(input: unknown): CellStyle {
     border_bottom: border(v.border_bottom),
     border_left: border(v.border_left),
   } as CellStyle;
+  if (legacyWrap) delete (decoded as CellStyle & { wrap?: boolean }).wrap;
+  return decoded;
 }
 export function applyStyle(base: Readonly<CellStyle>, changes: readonly StyleChange[]): CellStyle {
   if (!changes.length || changes.length > 16) throw invalid();
@@ -138,9 +154,9 @@ export function isDefaultStyle(style: CellStyle) {
   );
 }
 export type AuthoredMetadata = {
-  authored_projection_schema_version?: 4;
-  style_schema_version?: 1;
-  style_profile_version?: 1;
+  authored_projection_schema_version?: 4 | 5 | 6 | 7;
+  style_schema_version?: 1 | 2;
+  style_profile_version?: 1 | 2;
   last_axis_change_version?: string;
   retired_row_ids?: string[];
   retired_column_ids?: string[];
@@ -167,9 +183,14 @@ export function decodeAuthoredMetadata(
     return;
   }
   if (
-    p.authored_projection_schema_version !== 4 ||
-    p.style_schema_version !== 1 ||
-    p.style_profile_version !== 1
+    (p.authored_projection_schema_version !== 4 &&
+      p.authored_projection_schema_version !== 5 &&
+      p.authored_projection_schema_version !== 6 &&
+      p.authored_projection_schema_version !== 7) ||
+    !(
+      (p.style_schema_version === 1 && p.style_profile_version === 1) ||
+      (p.style_schema_version === 2 && p.style_profile_version === 2)
+    )
   )
     throw invalid();
   const version = (v: unknown) => {
@@ -179,7 +200,7 @@ export function decodeAuthoredMetadata(
   };
   const head = version(p.version),
     last = version(p.last_axis_change_version);
-  if (last < 1n || last > head) throw invalid();
+  if (last > head) throw invalid();
   const axis = (retired: unknown, floors: unknown, key: string, live: ReadonlySet<string>) => {
     if (
       !Array.isArray(retired) ||
@@ -243,13 +264,11 @@ export function encodeStylePatch(changes: readonly StyleChange[]) {
         break;
       case 'font_bold':
       case 'font_italic':
-      case 'font_strike':
-      case 'wrap': {
+      case 'font_strike': {
         const name = {
           font_bold: 'fontBold',
           font_italic: 'fontItalic',
           font_strike: 'fontStrike',
-          wrap: 'wrap',
         } as const;
         kind = {
           case: name[c.property],
@@ -257,6 +276,22 @@ export function encodeStylePatch(changes: readonly StyleChange[]) {
         } as WireChange['kind'];
         break;
       }
+      case 'text_overflow':
+        kind = {
+          case: 'textOverflow',
+          value: {
+            action: mapped(
+              reset
+                ? 0
+                : {
+                    clip: StyleTextOverflow.CLIP,
+                    wrap: StyleTextOverflow.WRAP,
+                    overflow: StyleTextOverflow.OVERFLOW,
+                  }[c.value],
+            ),
+          },
+        } as WireChange['kind'];
+        break;
       case 'font_color':
       case 'fill':
         kind = {
@@ -326,7 +361,7 @@ export function encodeStylePatch(changes: readonly StyleChange[]) {
     }
     return create(StyleChangeSchema, { kind });
   });
-  return create(StylePatchSchema, { schemaVersion: 1, profileVersion: 1, changes: wire });
+  return create(StylePatchSchema, { schemaVersion: 1, profileVersion: 2, changes: wire });
 }
 export function colorCss(color: Rgb) {
   return `#${color.map((v) => v.toString(16).padStart(2, '0')).join('')}`;

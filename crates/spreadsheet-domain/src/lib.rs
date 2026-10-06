@@ -2,9 +2,13 @@
 
 pub mod axis_edit;
 pub mod axis_history;
+pub mod axis_size;
 pub mod formula;
 pub mod lifecycle;
+pub mod merge;
 pub mod move_history;
+pub mod privacy;
+pub mod sort;
 pub mod style;
 pub mod workbook;
 
@@ -105,3 +109,5 @@ mod tests {
 }
 
 pub mod style_write;
+
+pub use merge::{MergeChange, MergeRange};

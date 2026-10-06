@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { ensureDevelopmentKeyring } from './keyring.mjs';
 
 const local = resolve('.local');
 mkdirSync(local, { recursive: true });
@@ -79,7 +80,7 @@ if (native) {
 }
 if (!process.argv.includes('--database-only')) {
   run('cargo', ['run', '-p', 'pxel-server', '--', 'migrate'], {
-    env: { ...process.env, DATABASE_URL: databaseUrl },
+    env: { ...process.env, ...ensureDevelopmentKeyring(), DATABASE_URL: databaseUrl },
   });
 }
 console.log(

@@ -3,6 +3,8 @@ import { create, fromBinary } from '@bufbuild/protobuf';
 import type { PreviewCell, PreviewResult, Reply, Request } from '../calculation/protocol';
 import {
   CellAddressSchema,
+  CalculatedCellSchema,
+  CalculatedValueSchema,
   ClientEnvelopeSchema,
   ServerEnvelopeSchema,
 } from '../generated/pxel/wire/v1/session_pb';
@@ -24,8 +26,8 @@ describe('independent optimistic formatting', () => {
   const authored = (state = projection()): Projection => ({
     ...state,
     authored_projection_schema_version: 4,
-    style_schema_version: 1,
-    style_profile_version: 1,
+    style_schema_version: 2,
+    style_profile_version: 2,
     last_axis_change_version: '1',
     retired_row_ids: [],
     retired_column_ids: [],
@@ -44,7 +46,7 @@ describe('independent optimistic formatting', () => {
     if (payload.case !== 'command') throw new Error('Missing formatting command');
     expect(payload.value.setCellStyle?.patch).toMatchObject({
       schemaVersion: 1,
-      profileVersion: 1,
+      profileVersion: 2,
       changes: [{ kind: { case: 'fontBold', value: { action: { case: 'set', value: true } } } }],
     });
     expect(payload.value.operation).toBeUndefined();
@@ -269,7 +271,7 @@ describe('independent optimistic formatting', () => {
             document_id: documentId,
             input_version: entry.request.data.input_version,
             pending_revision: entry.request.data.pending_revision,
-            formula_engine_version: 'pxel-formula-0.14.0',
+            formula_engine_version: 'pxel-formula-0.16.0',
             compatibility_profile: 'pxel-excel-subset-v1',
             normalized_result_hash: 'a'.repeat(64),
             normalized_authored_state_hash: hash,
@@ -376,7 +378,7 @@ describe('independent optimistic formatting', () => {
                 document_id: documentId,
                 input_version: request.data.input_version,
                 pending_revision: request.data.pending_revision,
-                formula_engine_version: 'pxel-formula-0.14.0',
+                formula_engine_version: 'pxel-formula-0.16.0',
                 compatibility_profile: 'pxel-excel-subset-v1',
                 normalized_result_hash: 'a'.repeat(64),
                 normalized_authored_state_hash: 'f'.repeat(64),
@@ -965,7 +967,7 @@ const previewContext = (
   utc_offset_minutes: 180,
   civil_day_since_unix_epoch: 1,
   random_seed: '01'.repeat(32),
-  engine_version: 'pxel-formula-0.14.0',
+  engine_version: 'pxel-formula-0.16.0',
   compatibility_profile: 'pxel-excel-subset-v1',
   reason: 'explicit',
 });
@@ -1074,7 +1076,7 @@ it('keeps draft WASM preview separate from authored and canonical state, then re
         document_id: documentId,
         input_version: request.data.input_version,
         pending_revision: request.data.pending_revision,
-        formula_engine_version: 'pxel-formula-0.14.0',
+        formula_engine_version: 'pxel-formula-0.16.0',
         compatibility_profile: 'pxel-excel-subset-v1',
         normalized_result_hash: 'a'.repeat(64),
         evaluated_cells: 1,
@@ -1161,7 +1163,7 @@ it('initializes every sheet once and addresses preview patches by the owning she
       document_id: documentId,
       input_version: '1',
       pending_revision: '0',
-      formula_engine_version: 'pxel-formula-0.14.0',
+      formula_engine_version: 'pxel-formula-0.16.0',
       compatibility_profile: 'pxel-excel-subset-v1',
       normalized_result_hash: 'a'.repeat(64),
       evaluated_cells: 1,
@@ -1365,7 +1367,7 @@ describe('isolated pending move preview', () => {
               preview: true,
               complete: true,
               full: entry.request.kind === 'init',
-              formula_engine_version: 'pxel-formula-0.14.0',
+              formula_engine_version: 'pxel-formula-0.16.0',
               compatibility_profile: 'pxel-excel-subset-v1',
               normalized_result_hash: 'a'.repeat(64),
               evaluated_cells: results.length,
@@ -2969,6 +2971,95 @@ describe('document projection and pending intents', () => {
     expect(store.selected.column).toBe(0);
     store.disconnected();
   });
+  it('an all-hidden personal filter cannot edit a hidden cell or grow the shared book', async () => {
+    const { store, sent } = await connectedStore();
+    const sheet = store.sheet!;
+    const before = store.projection?.version;
+    store.personalView = {
+      schema_version: 1,
+      revision: 1,
+      settings: {
+        filters: [
+          {
+            id: uuidV7(),
+            sheet_id: sheet.id,
+            first_row_id: sheet.rows[0]!,
+            last_row_id: sheet.rows[0]!,
+            first_column_id: sheet.columns[0]!,
+            last_column_id: sheet.columns[0]!,
+            header_row_id: null,
+            conditions: [
+              {
+                column_id: sheet.columns[0]!,
+                predicate: { kind: 'number', operator: 'eq', value: 10 },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    expect(store.filterState.hidden.size).toBe(1);
+    expect(store.allRowsHidden).toBe(true);
+    expect(store.canEdit).toBe(false);
+    expect(store.canCopy).toBe(false);
+    expect(store.extendRows()).toBe(false);
+    store.select({ row: 0, column: 25 });
+    expect(store.selected).toEqual({ row: 0, column: 0 });
+    store.begin();
+    expect(store.editing).toBeUndefined();
+    expect(store.pending).toHaveLength(0);
+    expect(sent).toHaveLength(0);
+    expect(store.projection?.version).toBe(before);
+    sheet.rows.push(uuidV7());
+    expect(store.allRowsHidden).toBe(false);
+    expect(store.canEdit).toBe(true);
+    expect(store.extendRows()).toBe(false);
+    expect(sent).toHaveLength(0);
+    store.personalView = { schema_version: 1, revision: 2, settings: { filters: [] } };
+    expect(store.allRowsHidden).toBe(false);
+    expect(store.canEdit).toBe(true);
+    expect(store.canCopy).toBe(true);
+    store.dispose();
+  });
+  it('sort freezes an explicit range and keys without optimistic content or selection changes', async () => {
+    const { store, sent } = await connectedStore();
+    const before = store.projection;
+    const bounds = { startRow: 0, endRow: 0, startColumn: 0, endColumn: 0 };
+    expect(store.sortRange(bounds, 0, [{ column: 0, descending: false }], '2')).toBe(false);
+    expect(store.sortRange(bounds, 0, [{ column: 0, descending: true }], '1')).toBe(true);
+    expect(store.projection).toBe(before);
+    expect(store.confirmed.size).toBe(0);
+    expect(store.selected).toEqual({ row: 0, column: 0 });
+    expect(store.pending).toHaveLength(1);
+    const payload = fromBinary(ClientEnvelopeSchema, sent[0]!).payload;
+    if (payload.case !== 'command') throw new Error('Missing sort command');
+    expect(payload.value.operation).toBeUndefined();
+    expect(payload.value.sortRange).toMatchObject({
+      schemaVersion: 1,
+      rows: 1,
+      columns: 1,
+      headerRows: 0,
+      keys: [{ descending: true }],
+    });
+    expect(store.sortRange(bounds, 0, [{ column: 0, descending: false }], '1')).toBe(false);
+    store.dispose();
+  });
+  it('sort reads live confirmed cells after a websocket write and waits for formula results', async () => {
+    const { store, sent } = await connectedStore();
+    const sheet = store.sheet!;
+    expect(sheet.cells).toEqual([]);
+    store.confirmed.set(`${sheet.rows[0]}/${sheet.columns[0]}`, {
+      type: 'formula',
+      value: { source: '=1' },
+    });
+    expect(store.confirmedCells(sheet)).toHaveLength(1);
+    const bounds = { startRow: 0, endRow: 0, startColumn: 0, endColumn: 0 };
+    expect(store.sortRange(bounds, 0, [{ column: 0, descending: false }], '1')).toBe(false);
+    expect(sent).toHaveLength(0);
+    store.calculatedVersion = '1';
+    expect(store.sortRange(bounds, 0, [{ column: 0, descending: false }], '1')).toBe(true);
+    store.dispose();
+  });
   it('queues one bounded row extension and refreshes axes after commit', async () => {
     const { store, sent } = await connectedStore();
     expect(store.extendRows()).toBe(true);
@@ -3370,6 +3461,38 @@ describe('document projection and pending intents', () => {
     expect(store.confirmed.size).toBe(1);
     store.disconnected();
   });
+  it('isolates new-book creation from old edits and retains its identity after a failed attempt', async () => {
+    const { store } = await connectedStore();
+    const assign = vi.fn();
+    vi.stubGlobal('location', { href: `http://localhost/?document=${documentId}`, assign });
+    let finish: ((response: unknown) => void) | undefined;
+    const fetch = vi.fn(
+      (_url: string, _init: RequestInit) =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const first = store.createDocument();
+    expect(store.canEdit).toBe(false);
+    expect(store.set({ row: 0, column: 0 }, { type: 'number', value: 9 })).toBe(false);
+    expect(store.pending).toHaveLength(0);
+    finish?.({ ok: false });
+    await first;
+    expect(store.canEdit).toBe(true);
+    expect(store.projection?.document_id).toBe(documentId);
+    const second = store.createDocument();
+    finish?.({ ok: true });
+    await second;
+    expect(fetch.mock.calls[0]?.[0]).toBe('/api/documents');
+    expect(fetch.mock.calls[1]?.[0]).toBe('/api/documents');
+    expect(fetch.mock.calls[0]?.[1].body).toEqual(fetch.mock.calls[1]?.[1].body);
+    expect(assign).toHaveBeenCalledOnce();
+    const url = new URL(String(assign.mock.calls[0]?.[0]));
+    expect(url.searchParams.get('document')).not.toBe(documentId);
+    expect(store.projection).toBeUndefined();
+    store.dispose();
+  });
   it('gates reconnect sends until snapshot loaded and ignores older HTTP responses', async () => {
     const { store, sent } = await connectedStore();
     store.disconnected();
@@ -3567,6 +3690,52 @@ it('snapshot boundary rejects malformed axes and nonfinite values', () => {
   expect(() => decodeProjection(invalid)).toThrow();
   expect(() => decodeProjection({})).toThrow();
 });
+it('validates schema-six merged ranges and rejects overlap or hidden covered cells', () => {
+  const state = projection();
+  const sheet = state.sheets[0]!;
+  const secondRow = uuidV7(),
+    secondColumn = uuidV7();
+  sheet.rows.push(secondRow);
+  sheet.columns.push(secondColumn);
+  const merged = {
+    ...state,
+    authored_projection_schema_version: 6 as const,
+    style_schema_version: 2 as const,
+    style_profile_version: 2 as const,
+    last_axis_change_version: '1',
+    retired_row_ids: [],
+    retired_column_ids: [],
+    row_activation_floors: [],
+    column_activation_floors: [],
+    sheets: [
+      {
+        ...sheet,
+        styles: [],
+        row_heights: [],
+        column_widths: [],
+        merges: [
+          {
+            first_row_id: sheet.rows[0]!,
+            last_row_id: secondRow,
+            first_column_id: sheet.columns[0]!,
+            last_column_id: secondColumn,
+          },
+        ],
+      },
+    ],
+  };
+  expect(decodeProjection(structuredClone(merged)).sheets[0]?.merges).toHaveLength(1);
+  const overlap = structuredClone(merged);
+  overlap.sheets[0]!.merges!.push({ ...overlap.sheets[0]!.merges![0]! });
+  expect(() => decodeProjection(overlap)).toThrow();
+  const hidden = structuredClone(merged);
+  hidden.sheets[0]!.cells.push({
+    row_id: secondRow,
+    column_id: sheet.columns[0]!,
+    value: { type: 'text', value: 'hidden' },
+  });
+  expect(() => decodeProjection(hidden)).toThrow();
+});
 it('selects sheets by stable ID and applies remote patches to hidden sheets', async () => {
   const second = {
     id: uuidV7(),
@@ -3667,9 +3836,20 @@ function formulaProjection(version = '2'): Projection {
 function calculation(
   version: string,
   value = 3,
-  options: { sequence?: number; final?: boolean; cells?: boolean; error?: number } = {},
+  options: {
+    sequence?: number;
+    final?: boolean;
+    cells?: boolean;
+    error?: number;
+    fullSnapshot?: boolean;
+    baseInputVersion?: bigint;
+    entries?: Array<{ rowId: string; value?: number }>;
+    evaluatedCells?: number;
+    dirtyCells?: number;
+  } = {},
 ) {
   const final = options.final ?? true;
+  const entries = options.entries ?? [{ rowId, value }];
   return create(ServerEnvelopeSchema, {
     protocolVersion: 1,
     payload: {
@@ -3678,7 +3858,7 @@ function calculation(
         documentId: uuidBytes(documentId),
         inputVersion: BigInt(version),
         calculationEpoch: 0n,
-        formulaEngineVersion: 'pxel-formula-0.14.0',
+        formulaEngineVersion: 'pxel-formula-0.16.0',
         compatibilityProfile: 'pxel-excel-subset-v1',
         contextId: uuidBytes(documentId),
         patchSequence: options.sequence ?? 0,
@@ -3688,17 +3868,20 @@ function calculation(
         cells:
           options.cells === false
             ? []
-            : [
-                {
-                  address: {
-                    sheetId: uuidBytes(sheetId),
-                    rowId: uuidBytes(rowId),
-                    columnId: uuidBytes(columnId),
-                  },
-                  value: { kind: { case: 'number', value } },
+            : entries.map((entry) => ({
+                address: {
+                  sheetId: uuidBytes(sheetId),
+                  rowId: uuidBytes(entry.rowId),
+                  columnId: uuidBytes(columnId),
                 },
-              ],
-        fullSnapshot: true,
+                ...(entry.value === undefined
+                  ? {}
+                  : { value: { kind: { case: 'number' as const, value: entry.value } } }),
+              })),
+        fullSnapshot: options.fullSnapshot ?? true,
+        baseInputVersion: options.baseInputVersion,
+        evaluatedCells: options.evaluatedCells ?? (options.error ? 0 : entries.length),
+        dirtyCells: options.dirtyCells ?? (options.error ? 0 : entries.length),
         errorCode: options.error ?? 0,
       },
     },
@@ -3748,7 +3931,7 @@ describe('formula intents and versioned server calculation', () => {
     expect(command.value.operation).toBeUndefined();
     expect(command.value.formulaCommand?.source).toBe('=1+2');
     expect(store.confirmed.size).toBe(0);
-    expect(store.display(cellPosition)).toBe('=1+2');
+    expect(store.display(cellPosition)).toBe('');
 
     const address = {
       sheetId: uuidBytes(sheetId),
@@ -3817,11 +4000,174 @@ describe('formula intents and versioned server calculation', () => {
     ).toEqual([2n, 3n]);
     await store.receive(calculation('2', 22));
     expect(store.calculatedVersion).toBeUndefined();
-    expect(store.display(cellPosition)).toBe('=1+2');
+    expect(store.display(cellPosition)).toBe('');
     await store.receive(calculation('3', 33));
     expect(store.calculatedVersion).toBe('3');
     expect(store.display(cellPosition)).toBe('33');
     expect(fetcher).not.toHaveBeenCalled();
+    store.disconnected();
+  });
+  it('requests a matching calculation delta, preserves untouched results, and clears removed formulas', async () => {
+    const { store, sent } = await connectedStore();
+    const secondRow = uuidV7();
+    const twoFormulas = formulaProjection('2');
+    twoFormulas.sheets[0]!.rows.push(secondRow);
+    twoFormulas.sheets[0]!.cells.push({
+      ...structuredClone(twoFormulas.sheets[0]!.cells[0]!),
+      row_id: secondRow,
+    });
+    store.load(twoFormulas);
+    await store.receive(
+      calculation('2', 3, {
+        entries: [
+          { rowId, value: 3 },
+          { rowId: secondRow, value: 4 },
+        ],
+      }),
+    );
+    expect(store.calculated.size).toBe(2);
+
+    const versionThree = structuredClone(twoFormulas);
+    versionThree.version = '3';
+    store.load(versionThree);
+    const deltaRequest = fromBinary(ClientEnvelopeSchema, sent.at(-1) ?? new Uint8Array()).payload;
+    if (deltaRequest.case !== 'requestCalculation') throw new Error('Missing delta request');
+    expect(deltaRequest.value.baseInputVersion).toBe(2n);
+    await store.receive(
+      calculation('3', 9, {
+        fullSnapshot: false,
+        baseInputVersion: 2n,
+        entries: [{ rowId, value: 9 }],
+        evaluatedCells: 1,
+        dirtyCells: 2,
+      }),
+    );
+    expect(store.calculated.size).toBe(2);
+    expect(store.calculated.get(`${rowId}/${columnId}`)).toEqual({ type: 'number', value: 9 });
+    expect(store.calculated.get(`${secondRow}/${columnId}`)).toEqual({
+      type: 'number',
+      value: 4,
+    });
+    expect(store.performanceMetrics.recalculatedCells).toBe(1);
+    expect(store.performanceMetrics.dirtyCells).toBe(2);
+
+    const versionFour = structuredClone(versionThree);
+    versionFour.version = '4';
+    versionFour.sheets[0]!.cells[0]!.value = { type: 'number', value: 7 };
+    store.load(versionFour);
+    await store.receive(
+      calculation('4', 0, {
+        fullSnapshot: false,
+        baseInputVersion: 3n,
+        entries: [{ rowId }],
+        evaluatedCells: 0,
+        dirtyCells: 1,
+      }),
+    );
+    expect(store.calculated.size).toBe(1);
+    expect(store.calculated.has(`${rowId}/${columnId}`)).toBe(false);
+    expect(store.calculated.get(`${secondRow}/${columnId}`)).toEqual({
+      type: 'number',
+      value: 4,
+    });
+    expect(store.display({ row: 0, column: 0 })).toBe('7');
+    store.disconnected();
+  });
+  it('rejects a delta with a stale base without replacing the last confirmed calculation', async () => {
+    const { store } = await connectedStore();
+    store.load(formulaProjection('2'));
+    await store.receive(calculation('2', 3));
+    const versionThree = formulaProjection('3');
+    store.load(versionThree);
+    await store.receive(
+      calculation('3', 99, {
+        fullSnapshot: false,
+        baseInputVersion: 1n,
+      }),
+    );
+    expect(store.calculationStatus).toBe('failed');
+    expect(store.calculatedVersion).toBe('2');
+    expect(store.calculated.get(`${rowId}/${columnId}`)).toEqual({ type: 'number', value: 3 });
+    expect(store.display(cellPosition)).toBe('3');
+
+    store.load(versionThree);
+    await store.receive(calculation('3', 5));
+    expect(store.calculationStatus).toBe('complete');
+    expect(store.calculatedVersion).toBe('3');
+    expect(store.display(cellPosition)).toBe('5');
+    store.disconnected();
+  });
+  it('rejects deltas with stale cache keys or an empty CalculatedValue message', async () => {
+    const { store } = await connectedStore();
+    const secondRow = uuidV7();
+    const thirdRow = uuidV7();
+    const twoFormulas = formulaProjection('2');
+    twoFormulas.sheets[0]!.rows.push(secondRow, thirdRow);
+    twoFormulas.sheets[0]!.cells.push({
+      ...structuredClone(twoFormulas.sheets[0]!.cells[0]!),
+      row_id: secondRow,
+    });
+    store.load(twoFormulas);
+    await store.receive(
+      calculation('2', 3, {
+        entries: [
+          { rowId, value: 3 },
+          { rowId: secondRow, value: 4 },
+        ],
+      }),
+    );
+
+    const shiftedFormulas = structuredClone(twoFormulas);
+    shiftedFormulas.version = '3';
+    shiftedFormulas.sheets[0]!.cells[0]!.value = { type: 'number', value: 7 };
+    shiftedFormulas.sheets[0]!.cells.push({
+      ...structuredClone(shiftedFormulas.sheets[0]!.cells[1]!),
+      row_id: thirdRow,
+    });
+    store.load(shiftedFormulas);
+    await store.receive(
+      calculation('3', 0, {
+        fullSnapshot: false,
+        baseInputVersion: 2n,
+        entries: [],
+        evaluatedCells: 0,
+        dirtyCells: 2,
+      }),
+    );
+    expect(store.calculationStatus).toBe('failed');
+    expect(store.calculatedVersion).toBe('2');
+
+    const scalarProjection = formulaProjection('3');
+    scalarProjection.sheets[0]!.rows.push(secondRow);
+    scalarProjection.sheets[0]!.cells.push({
+      ...structuredClone(scalarProjection.sheets[0]!.cells[0]!),
+      row_id: secondRow,
+    });
+    scalarProjection.sheets[0]!.cells[0]!.value = { type: 'number', value: 7 };
+    store.load(scalarProjection);
+    const malformed = calculation('3', 0, {
+      fullSnapshot: false,
+      baseInputVersion: 2n,
+      entries: [],
+      evaluatedCells: 0,
+      dirtyCells: 1,
+    });
+    if (malformed.payload.case !== 'calculationCommitted')
+      throw new Error('Missing calculation fixture');
+    malformed.payload.value.cells = [
+      create(CalculatedCellSchema, {
+        address: create(CellAddressSchema, {
+          sheetId: uuidBytes(sheetId),
+          rowId: uuidBytes(rowId),
+          columnId: uuidBytes(columnId),
+        }),
+        value: create(CalculatedValueSchema, {}),
+      }),
+    ];
+    await store.receive(malformed);
+    expect(store.calculationStatus).toBe('failed');
+    expect(store.calculatedVersion).toBe('2');
+    expect(store.calculated.has(`${rowId}/${columnId}`)).toBe(true);
     store.disconnected();
   });
   it('does not promote values attached to a failed calculation', async () => {
@@ -3831,7 +4177,7 @@ describe('formula intents and versioned server calculation', () => {
     expect(store.calculationStatus).toBe('failed');
     expect(store.calculated.size).toBe(0);
     expect(store.calculatedVersion).toBeUndefined();
-    expect(store.display(cellPosition)).toBe('=1+2');
+    expect(store.display(cellPosition)).toBe('');
     expect(store.value(cellPosition)?.type).toBe('formula');
     expect(store.calculationError).not.toBe('');
     store.disconnected();
@@ -3841,7 +4187,7 @@ describe('formula intents and versioned server calculation', () => {
     store.load(formulaProjection('2'));
     await store.receive(calculation('1', 99));
     expect(store.calculated.size).toBe(0);
-    expect(store.display(cellPosition)).toBe('=1+2');
+    expect(store.display(cellPosition)).toBe('');
     store.disconnected();
   });
   it('bounds waiting for calculation and clears staged chunks on disconnect', async () => {
@@ -3892,13 +4238,14 @@ describe('formula intents and versioned server calculation', () => {
     expect(store.calculated.size).toBe(0);
     store.disconnected();
   });
-  it('does not overlay an old confirmed result on a new pending formula', async () => {
+  it('retains the last result as presentation while the new formula remains pending', async () => {
     const { store } = await connectedStore();
     store.load(formulaProjection());
     await store.receive(calculation('2'));
     expect(store.calculationStatus).toBe('complete');
     store.set(cellPosition, parseInput('=4+5'));
-    expect(store.display(cellPosition)).toBe('=4+5');
+    expect(store.display(cellPosition)).toBe('3');
+    expect(store.value(cellPosition)).toEqual(parseInput('=4+5'));
     expect(store.calculatedVersion).toBe('2');
     expect(displayValue(store.confirmed.values().next().value)).toBe('=1+2');
     store.disconnected();

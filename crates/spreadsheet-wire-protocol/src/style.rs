@@ -5,7 +5,7 @@ use spreadsheet_domain::style::{self as d, Change, StyleChange};
 use thiserror::Error;
 
 pub const STYLE_SCHEMA_VERSION: u32 = 1;
-pub const STYLE_PROFILE_VERSION: u32 = 1;
+pub const STYLE_PROFILE_VERSION: u32 = 2;
 pub const MAX_STYLE_PATCH_BYTES: usize = 4096;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -119,10 +119,17 @@ change_decoder!(
     d::NumberFormat,
     shifted_enum::<d::NumberFormat>
 );
+change_decoder!(
+    text_overflow_change,
+    TextOverflowChange,
+    text_overflow_change,
+    d::TextOverflow,
+    shifted_enum::<d::TextOverflow>
+);
 
 pub fn decode_patch(patch: v1::StylePatch) -> Result<Vec<StyleChange>> {
     if patch.schema_version != STYLE_SCHEMA_VERSION
-        || patch.profile_version != STYLE_PROFILE_VERSION
+        || !matches!(patch.profile_version, 1 | STYLE_PROFILE_VERSION)
     {
         return Err(StyleCodecError::UnsupportedSchema);
     }
@@ -152,8 +159,18 @@ pub fn decode_patch(patch: v1::StylePatch) -> Result<Vec<StyleChange>> {
             K::BorderLeft(value) => StyleChange::BorderLeft(border_change(value)?),
             K::Horizontal(value) => StyleChange::Horizontal(horizontal_change(value)?),
             K::Vertical(value) => StyleChange::Vertical(vertical_change(value)?),
-            K::Wrap(value) => StyleChange::Wrap(bool_change(value)?),
+            K::Wrap(value) => match bool_change(value)? {
+                Change::Set(true) => StyleChange::TextOverflow(Change::Set(d::TextOverflow::Wrap)),
+                Change::Set(false) => StyleChange::TextOverflow(Change::Set(d::TextOverflow::Clip)),
+                Change::Reset => StyleChange::TextOverflow(Change::Reset),
+            },
             K::NumberFormat(value) => StyleChange::NumberFormat(format_change(value)?),
+            K::TextOverflow(value) => {
+                if patch.profile_version < STYLE_PROFILE_VERSION {
+                    return Err(StyleCodecError::Invalid);
+                }
+                StyleChange::TextOverflow(text_overflow_change(value)?)
+            }
         };
         if !seen.insert(change.property()) {
             return Err(StyleCodecError::Invalid);
@@ -343,7 +360,7 @@ mod tests {
     #[test]
     fn unknown_versions_empty_and_duplicate_properties_are_atomic_errors() {
         let valid = patch(vec![bold(true)]);
-        for (schema_version, profile_version) in [(0, 1), (2, 1), (1, 0), (1, 2)] {
+        for (schema_version, profile_version) in [(0, 1), (2, 1), (1, 0), (1, 3)] {
             assert_eq!(
                 decode_patch(v1::StylePatch {
                     schema_version,
@@ -365,6 +382,45 @@ mod tests {
         let mut missing = valid;
         missing.changes.push(v1::StyleChange { kind: None });
         assert_eq!(decode_patch(missing), Err(StyleCodecError::Invalid));
+    }
+
+    #[test]
+    fn legacy_wrap_and_profile_two_overflow_decode_to_the_same_style_leaf() {
+        use v1::style_change::Kind as K;
+        let legacy = v1::StylePatch {
+            schema_version: STYLE_SCHEMA_VERSION,
+            profile_version: 1,
+            changes: vec![v1::StyleChange {
+                kind: Some(K::Wrap(v1::BooleanStyleChange {
+                    action: Some(v1::boolean_style_change::Action::Set(true)),
+                })),
+            }],
+        };
+        assert_eq!(
+            decode_patch(legacy),
+            Ok(vec![StyleChange::TextOverflow(Change::Set(
+                d::TextOverflow::Wrap
+            ))])
+        );
+
+        let overflow = v1::StylePatch {
+            schema_version: STYLE_SCHEMA_VERSION,
+            profile_version: STYLE_PROFILE_VERSION,
+            changes: vec![v1::StyleChange {
+                kind: Some(K::TextOverflow(v1::TextOverflowChange {
+                    action: Some(v1::text_overflow_change::Action::Set(3)),
+                })),
+            }],
+        };
+        assert_eq!(
+            decode_patch(overflow.clone()),
+            Ok(vec![StyleChange::TextOverflow(Change::Set(
+                d::TextOverflow::Overflow
+            ))])
+        );
+        let mut downgraded = overflow;
+        downgraded.profile_version = 1;
+        assert_eq!(decode_patch(downgraded), Err(StyleCodecError::Invalid));
     }
 
     #[test]

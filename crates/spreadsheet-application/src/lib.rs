@@ -68,3 +68,4 @@ pub trait BlobStore: Send + Sync {
 
 pub mod history;
 pub mod journal;
+pub mod keys;

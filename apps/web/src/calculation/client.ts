@@ -14,6 +14,7 @@ import {
 } from './protocol';
 
 export type WorkerPort = Pick<Worker, 'postMessage' | 'terminate' | 'onmessage' | 'onerror'>;
+export const FORMULA_ENGINE_VERSION = 'pxel-formula-0.16.0';
 export type PreviewStatus = 'idle' | 'pending' | 'ready' | 'invalid' | 'failed' | 'unavailable';
 export class PreviewClient {
   private worker: WorkerPort | undefined;
@@ -43,7 +44,7 @@ export class PreviewClient {
   ) {}
   reset(data: PreviewInit) {
     this.dispose();
-    this.authoredProfile = data.schema_version === 4;
+    this.authoredProfile = data.schema_version >= 4;
     this.desired = data;
     try {
       this.worker = this.factory();
@@ -78,6 +79,14 @@ export class PreviewClient {
             value: toPreviewValue(cell.value, this.authoredProfile),
           })),
           ...(this.authoredProfile ? { styles: sheet.styles ?? [] } : {}),
+          ...(data.schema_version === 5
+            ? {
+                frozen_rows: sheet.frozen_rows ?? 0,
+                row_heights: sheet.row_heights ?? [],
+                column_widths: sheet.column_widths ?? [],
+                merges: sheet.merges ?? [],
+              }
+            : {}),
         })),
       },
     });
@@ -354,7 +363,7 @@ function validResult(result: PreviewResult) {
     result.preview === true &&
     result.complete === true &&
     typeof result.full === 'boolean' &&
-    result.formula_engine_version === 'pxel-formula-0.14.0' &&
+    result.formula_engine_version === FORMULA_ENGINE_VERSION &&
     result.compatibility_profile === 'pxel-excel-subset-v1' &&
     /^[0-9a-f]{64}$/.test(result.normalized_result_hash) &&
     Array.isArray(result.results) &&

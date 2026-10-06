@@ -12,6 +12,7 @@ fn state(version: u64) -> Result<Arc<CalculatedState>, DomainError> {
         document_id: DocumentId::from_bytes([3; 16])?,
         input_version: DocumentVersion::new(version)?,
         context: None,
+        base_input_version: None,
         outcome: calculation::CalculationOutcome::Failed(
             spreadsheet_formula::calculation::CalculationError::InvalidProjection,
         ),

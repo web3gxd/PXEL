@@ -53,6 +53,11 @@ pub fn plan_move_inverse_cancellable(
     check_cancel(&mut cancelled)?;
     let writes = match &target.operation {
         Operation::MoveRange { writes, .. } | Operation::MoveCompensation { writes, .. } => writes,
+        Operation::CellBatchWrite {
+            intent: CellBatchIntent::MoveRange { .. },
+            content_writes,
+            ..
+        } => content_writes,
         _ => return Err(MoveInverseError::NotUndoable),
     };
     if !matches!(target.principal, EventPrincipal::User(_)) {
@@ -159,6 +164,12 @@ pub fn plan_move_inverse_cancellable(
             if matches!(
                 entry.event.operation,
                 Operation::MoveRange { .. } | Operation::MoveCompensation { .. }
+            ) || matches!(
+                entry.event.operation,
+                Operation::CellBatchWrite {
+                    intent: CellBatchIntent::MoveRange { .. },
+                    ..
+                }
             ) {
                 return Err(MoveInverseError::Conflict);
             }
@@ -276,6 +287,11 @@ fn inverse_identity(operation: &Operation) -> Option<(OperationId, DocumentVersi
             kind: None,
             ..
         } => Some((*id, *version)),
+        Operation::CellBatchWrite {
+            undoes: Some(id),
+            undoes_version: Some(version),
+            ..
+        } => Some((*id, *version)),
         Operation::MoveCompensation {
             undoes,
             undoes_version,
@@ -303,6 +319,17 @@ fn history_writes(event: &CommittedEvent) -> Result<Vec<HistoryWrite<'_>>, MoveI
         | Operation::MoveRange { writes, .. }
         | Operation::MoveCompensation { writes, .. } => {
             for write in writes {
+                entries.push(HistoryWrite {
+                    event,
+                    address: write.address,
+                    content: write.content.as_ref(),
+                    previous: write.previous.as_ref(),
+                    formula: content_formula(write.content.as_ref()),
+                });
+            }
+        }
+        Operation::CellBatchWrite { content_writes, .. } => {
+            for write in content_writes {
                 entries.push(HistoryWrite {
                     event,
                     address: write.address,
@@ -354,6 +381,11 @@ fn visit_writes<'a>(
                 visit(write.address, content_formula(write.content.as_ref()))?;
             }
         }
+        Operation::CellBatchWrite { content_writes, .. } => {
+            for write in content_writes {
+                visit(write.address, content_formula(write.content.as_ref()))?;
+            }
+        }
         Operation::CreateWorkbook { .. }
         | Operation::AddSheet { .. }
         | Operation::ExtendRows { .. }
@@ -366,7 +398,10 @@ fn visit_writes<'a>(
         | Operation::AxisEdit { .. }
         | Operation::AxisCompensation { .. }
         | Operation::StyleWrite { .. }
-        | Operation::StyleCompensation { .. } => {}
+        | Operation::StyleCompensation { .. }
+        | Operation::AxisSizeWrite { .. }
+        | Operation::FrozenRowsWrite { .. }
+        | Operation::MergeWrite { .. } => {}
     }
     Ok(())
 }

@@ -19,6 +19,22 @@ pub fn check_command_activation(book: &Workbook, command: &Command) -> Result<()
         Ok(())
     };
     match &command.operation {
+        CommandPayload::SortRange { range } => {
+            let bounds = range.validate(book)?;
+            let sheet = book
+                .sheets()
+                .iter()
+                .find(|s| s.id() == range.source.sheet)
+                .ok_or(DomainError::MissingSheet)?;
+            for row in &sheet.rows()[bounds.row as usize..(bounds.row + range.rows) as usize] {
+                floor = floor.max(book.row_activation_floor(*row));
+            }
+            for column in
+                &sheet.columns()[bounds.column as usize..(bounds.column + range.columns) as usize]
+            {
+                floor = floor.max(book.column_activation_floor(*column));
+            }
+        }
         CommandPayload::SetRangeStyle { addresses, .. } => {
             for target in addresses {
                 address(*target)?;
@@ -37,6 +53,14 @@ pub fn check_command_activation(book: &Workbook, command: &Command) -> Result<()
         CommandPayload::SetCellValues { writes } => {
             for write in writes {
                 address(write.address)?;
+            }
+        }
+        CommandPayload::SetCellBatch { writes, styles } => {
+            for write in writes {
+                address(write.address)?;
+            }
+            for (target, _) in styles {
+                address(*target)?;
             }
         }
         CommandPayload::CopyRange {
@@ -66,10 +90,26 @@ pub fn check_command_activation(book: &Workbook, command: &Command) -> Result<()
                 floor = floor.max(book.column_activation_floor(*column));
             }
         }
+        CommandPayload::SetAxisSizes { writes, .. } => {
+            for (target, _) in writes {
+                floor = floor.max(match target {
+                    AxisSizeTarget::Row(id) => book.row_activation_floor(*id),
+                    AxisSizeTarget::Column(id) => book.column_activation_floor(*id),
+                });
+            }
+        }
+        CommandPayload::SetMergeRange { range, .. } => {
+            floor = floor
+                .max(book.row_activation_floor(range.first_row()))
+                .max(book.row_activation_floor(range.last_row()))
+                .max(book.column_activation_floor(range.first_column()))
+                .max(book.column_activation_floor(range.last_column()));
+        }
         CommandPayload::CreateWorkbook { .. }
         | CommandPayload::AddSheet { .. }
         | CommandPayload::ExtendRows { .. }
-        | CommandPayload::UndoCell { .. } => {}
+        | CommandPayload::UndoCell { .. }
+        | CommandPayload::SetFrozenRows { .. } => {}
     }
     if command.base_version < floor {
         Err(DomainError::VersionConflict)

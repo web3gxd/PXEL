@@ -1,3 +1,6 @@
+import { editorButton } from './editor-menu';
+import { createBookFromUi } from './create-book';
+import { copySelection, cutSelection } from './clipboard';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { create, fromBinary, toBinary, type MessageInitShape } from '@bufbuild/protobuf';
 import {
@@ -45,11 +48,11 @@ async function select(page: Page, row: number, column: number) {
     },
   });
 }
-async function committed(page: Page, action: () => Promise<unknown>) {
+async function committed(page: Page, action: () => Promise<unknown>, timeout = 5_000) {
   const before = await state(page);
   await action();
   await expect
-    .poll(async () => (await state(page)).version)
+    .poll(async () => (await state(page)).version, { timeout })
     .toBe(String(BigInt(before.version) + 1n));
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   return state(page);
@@ -62,13 +65,14 @@ async function workerMatches(page: Page) {
 }
 async function createDocument(page: Page) {
   await page.goto('/');
+  await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await page.getByRole('button', { name: 'Создать таблицу' }).click();
+  await createBookFromUi(page);
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(page.getByRole('button', { name: 'Полужирный', exact: true })).toBeEnabled();
 }
 
-test('styled export returns a typed refusal instead of dropping authored formatting', async ({
+test('styled XLSX browser download preserves authored formatting without changing the projection', async ({
   page,
 }) => {
   await createDocument(page);
@@ -77,11 +81,144 @@ test('styled export returns a typed refusal instead of dropping authored formatt
     page.getByRole('button', { name: 'Полужирный' }).click(),
   );
   expect(styled.sheets[0]?.styles).toHaveLength(1);
-  const documentId = new URL(page.url()).searchParams.get('document');
-  const response = await page.request.get(`/api/documents/${documentId}/export.xlsx`);
-  expect(response.status()).toBe(422);
-  expect(await response.json()).toEqual({ code: 'xlsx_styles_not_supported' });
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    (await editorButton(page, 'Скачать XLSX')).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('PXEL.xlsx');
   expect(await state(page)).toEqual(styled);
+});
+
+test('merged range is one hit target and survives reload, Undo and Redo', async ({ page }) => {
+  await createDocument(page);
+  await select(page, 0, 0);
+  await grid(page).focus();
+  await page.keyboard.press('Shift+ArrowDown');
+  await expect(page.getByTestId('selection-range')).toHaveText('Выделено A1:A2');
+  await committed(page, () => page.getByRole('button', { name: 'Объединить ячейки' }).click());
+  const merged = await state(page);
+  expect(merged.sheets[0]?.merges).toHaveLength(1);
+  await select(page, 1, 0);
+  await expect(page.getByTestId('active-cell')).toContainText('A1:');
+  await expect(undo(page)).toBeEnabled();
+  await committed(page, () => undo(page).click());
+  expect((await state(page)).sheets[0]?.merges).toHaveLength(0);
+  await expect(redo(page)).toBeEnabled();
+  await committed(page, () => redo(page).click());
+  await page.reload();
+  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
+  expect((await state(page)).sheets[0]?.merges).toHaveLength(1);
+});
+
+test('formula range copy includes sparse styles in one durable batch and Undo restores both', async ({
+  page,
+}) => {
+  await createDocument(page);
+  await select(page, 0, 0);
+  await write(page, '=A3+1');
+  await select(page, 2, 0);
+  await write(page, '4');
+  await select(page, 1, 0);
+  await write(page, 'row label');
+  await select(page, 0, 0);
+  await committed(page, () => page.getByRole('button', { name: 'Полужирный' }).click());
+  await select(page, 1, 0);
+  await committed(page, () => page.getByRole('button', { name: 'Курсив' }).click());
+
+  await select(page, 0, 0);
+  await grid(page).focus();
+  await page.keyboard.press('Shift+ArrowDown');
+  await expect(page.getByTestId('selection-range')).toHaveText('Выделено A1:A2');
+  await copySelection(page);
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowRight');
+  const beforeCopy = await state(page);
+  await page.keyboard.press('ControlOrMeta+V');
+  await expect
+    .poll(async () => (await state(page)).version)
+    .toBe(String(BigInt(beforeCopy.version) + 1n));
+  let copied = await state(page);
+  const sheet = copied.sheets[0]!;
+  const copiedFormula = sheet.cells.find(
+    (cell) => cell.row_id === sheet.rows[0] && cell.column_id === sheet.columns[1],
+  );
+  expect(copiedFormula?.value).toMatchObject({
+    type: 'formula',
+    value: { current_text: '=(B3+1)' },
+  });
+  expect(
+    sheet.cells.find((cell) => cell.row_id === sheet.rows[1] && cell.column_id === sheet.columns[1])
+      ?.value,
+  ).toMatchObject({ type: 'text', value: 'row label' });
+  expect(styleAt(copied, sheet.rows[0]!, sheet.columns[1]!)).toMatchObject({ font_bold: true });
+  expect(styleAt(copied, sheet.rows[1]!, sheet.columns[1]!)).toMatchObject({ font_italic: true });
+
+  await expect(undo(page)).toBeEnabled();
+  await committed(page, () => undo(page).click());
+  copied = await state(page);
+  expect(styleAt(copied, sheet.rows[0]!, sheet.columns[1]!)).toBeUndefined();
+  expect(styleAt(copied, sheet.rows[1]!, sheet.columns[1]!)).toBeUndefined();
+  expect(copied.sheets[0]?.cells.some((cell) => cell.column_id === sheet.columns[1])).toBe(false);
+});
+
+test('range cut moves all sparse styles in one durable batch and Undo restores both cells', async ({
+  page,
+}) => {
+  await createDocument(page);
+  await select(page, 0, 0);
+  await write(page, 'source');
+  await committed(page, () => page.getByRole('button', { name: 'Полужирный' }).click());
+  await select(page, 0, 1);
+  await write(page, 'destination');
+  await committed(page, () => page.getByRole('button', { name: 'Курсив' }).click());
+  const original = await state(page);
+  const [sourceRow, destinationColumn] = [
+    original.sheets[0]!.rows[0]!,
+    original.sheets[0]!.columns[1]!,
+  ];
+
+  await select(page, 0, 0);
+  await cutSelection(page);
+  await expect(page.getByTestId('cut-status')).toContainText('Исходные ячейки пока сохранены');
+  await select(page, 0, 1);
+  await page.keyboard.press('ControlOrMeta+V');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const moved = await state(page);
+  expect(styleAt(moved, sourceRow, original.sheets[0]!.columns[0]!)).toBeUndefined();
+  expect(styleAt(moved, sourceRow, destinationColumn)).toMatchObject({ font_bold: true });
+  expect(styleAt(moved, sourceRow, destinationColumn)).toMatchObject({ font_italic: false });
+
+  await reload(page);
+  expect(await state(page)).toEqual(moved);
+  await expect(undo(page)).toBeEnabled();
+  const restored = await committed(page, () => undo(page).click());
+  expect(restored.sheets).toEqual(original.sheets);
+  await expect(redo(page)).toBeEnabled();
+  const redone = await committed(page, () => redo(page).click());
+  expect(redone.sheets).toEqual(moved.sheets);
+});
+
+test('deleting a styled row preserves its styles through durable undo, reload, and redo', async ({
+  page,
+}) => {
+  await createDocument(page);
+  await select(page, 0, 0);
+  const original = await committed(page, () =>
+    page.getByRole('button', { name: 'Полужирный' }).click(),
+  );
+  const deleted = await committed(
+    page,
+    () => page.locator('button[title="Удалить выделенную строку"]').click(),
+    20_000,
+  );
+  expect(deleted.sheets[0]?.styles).toEqual([]);
+  await expect(undo(page)).toBeEnabled();
+  const restored = await committed(page, () => undo(page).click());
+  expect(restored.sheets[0]?.styles).toEqual(original.sheets[0]?.styles);
+  await reload(page);
+  await expect(redo(page)).toBeEnabled();
+  const redone = await committed(page, () => redo(page).click());
+  expect(redone.sheets[0]?.styles).toEqual([]);
 });
 
 async function reload(page: Page) {
@@ -310,6 +447,71 @@ test('styled blank renders real Canvas fill and survives reload Undo Redo and co
   }
 });
 
+test('overflow text paints across blank cells and respects blockers through reload and Undo', async ({
+  page,
+}) => {
+  await createDocument(page);
+  await select(page, 0, 0);
+  const value = 'Overflow reaches through two empty cells';
+  await write(page, value);
+  await select(page, 0, 0);
+  const styled = await committed(page, () =>
+    page.getByRole('combobox', { name: 'Режим текста' }).selectOption('overflow'),
+  );
+  const row = styled.sheets[0]!.rows[0]!,
+    column = styled.sheets[0]!.columns[0]!;
+  expect(styleAt(styled, row, column)?.text_overflow).toBe('overflow');
+
+  const darkPixelsInColumn = (targetColumn: number) =>
+    page.locator('canvas').evaluate((canvas: HTMLCanvasElement, columnIndex) => {
+      const context = canvas.getContext('2d');
+      if (!context) return 0;
+      const dpr = devicePixelRatio;
+      const left = Math.round((46 + columnIndex * 112 + 10) * dpr);
+      const top = Math.round(34 * dpr);
+      const width = Math.round(92 * dpr);
+      const height = Math.round(16 * dpr);
+      const image = context.getImageData(left, top, width, height).data;
+      let count = 0;
+      for (let index = 0; index < image.length; index += 4) {
+        if ((image[index] ?? 255) < 100 && (image[index + 1] ?? 255) < 100) count++;
+      }
+      return count;
+    }, targetColumn);
+  await expect.poll(() => darkPixelsInColumn(1)).toBeGreaterThan(2);
+  await expect.poll(() => darkPixelsInColumn(2)).toBeGreaterThan(2);
+  await workerMatches(page);
+
+  await reload(page);
+  await expect.poll(() => darkPixelsInColumn(1)).toBeGreaterThan(2);
+  await expect.poll(() => darkPixelsInColumn(2)).toBeGreaterThan(2);
+
+  await select(page, 0, 1);
+  const blocked = await write(page, 'occupied');
+  expect(blocked.sheets[0]?.cells).toHaveLength(2);
+  expect(styleAt(blocked, row, blocked.sheets[0]!.columns[1]!)).toBeUndefined();
+  await expect(page.locator('canvas')).toHaveAttribute('data-overflow-span-count', '0');
+  await expect.poll(() => darkPixelsInColumn(2)).toBe(0);
+
+  const unblocked = await committed(page, () => undo(page).click());
+  expect(unblocked.sheets[0]?.cells).toHaveLength(1);
+  await expect.poll(() => darkPixelsInColumn(2)).toBeGreaterThan(2);
+
+  const blankFormula = await write(page, '=""');
+  expect(blankFormula.sheets[0]?.cells).toHaveLength(2);
+  await expect.poll(() => darkPixelsInColumn(1)).toBe(0);
+  await expect.poll(() => darkPixelsInColumn(2)).toBe(0);
+  const formulaRemoved = await committed(page, () => undo(page).click());
+  expect(formulaRemoved.sheets[0]?.cells).toHaveLength(1);
+  await expect.poll(() => darkPixelsInColumn(2)).toBeGreaterThan(2);
+
+  const clipped = await committed(page, () => undo(page).click());
+  expect(styleAt(clipped, row, column)).toBeUndefined();
+  await expect.poll(() => darkPixelsInColumn(1)).toBe(0);
+  await reload(page);
+  await workerMatches(page);
+});
+
 test('frozen range styling keeps inserted row untouched through non-top Undo and Redo', async ({
   page,
 }) => {
@@ -325,8 +527,8 @@ test('frozen range styling keeps inserted row untouched through non-top Undo and
   const originalRows = styled.sheets[0]!.rows.slice(0, 2),
     column = styled.sheets[0]!.columns[0]!;
   await select(page, 1, 0);
-  const inserted = await committed(page, () =>
-    page.getByRole('button', { name: 'Строка ↑', exact: true }).click(),
+  const inserted = await committed(page, async () =>
+    (await editorButton(page, 'Строка ↑')).click(),
   );
   const middle = inserted.sheets[0]!.rows[1]!;
   expect(middle).not.toBe(originalRows[1]);

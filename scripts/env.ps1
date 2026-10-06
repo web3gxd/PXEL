@@ -36,3 +36,7 @@ if (Test-Path -LiteralPath $pxelPostgres) {
 if (Test-Path -LiteralPath (Join-Path $pxelRoot '.local\database-url')) {
     $env:DATABASE_URL = [IO.File]::ReadAllText((Join-Path $pxelRoot '.local\database-url')).Trim()
 }
+if (!$env:PXEL_KEYRING_FILE -and !$env:PXEL_KEYRING_JSON -and
+    (Test-Path -LiteralPath (Join-Path $pxelRoot '.local\keys\keyring.json'))) {
+    $env:PXEL_KEYRING_FILE = Join-Path $pxelRoot '.local\keys\keyring.json'
+}

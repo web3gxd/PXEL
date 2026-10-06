@@ -1,20 +1,338 @@
 # Roadmap и gates
 
+2026-10-06: операции осей находятся в «Ячейки» с вложенными русскими разделами
+и иконками; окна используют общий оформленный заголовок/поля/ошибки/footer.
+Локально прошли 32 Chromium сценария DPR1/DPR2, финальные 10 menu/modal +
+6 focus scenarios и 269 units, lint/build. Сдвиг ячеек, autofit/default width,
+visibility и rename/move/copy/tab colour листов остаются открытыми функциями;
+их пункты явно недоступны. Факты — RUNBOOK и ADR-117.
+
+2026-10-06: окно ПД получило центрированное закрытие, общие custom checkbox
+20 px, отступы между действиями, левое выравнивание совпадений и заголовок
+массовых исключений. Повторный анализ сохраняет актуальный выбор. Адресные
+14/14 Chromium DPR1/DPR2 (390/681/1440), 269 units, lint/build/format прошли;
+подробности и открытые gates записаны в RUNBOOK, решение — ADR-117.
+
+2026-10-06: ADR-117 организует команды в компактные меню и тулбар с иконками,
+общими стилями кнопок/диалогов и индикатором соединения. Guards и durable
+операции сохранены; навигация с незавершённым вводом и фокус окон проверяются
+в Chromium: 46 основных + 2 axis scenarios DPR1/DPR2, 269 frontend units,
+lint/typecheck/build прошли. Фактические результаты и ограничения — в RUNBOOK.
+
+2026-10-06: локальная маска ПД автоматически обновляется, использует прямоугольную
+заливку без рамки и обрезает текст при прокрутке вместе с ячейкой. Паспортный
+контекст охватывает всю строку/столбец; доступны массовые и диапазонные исключения.
+Адресные проверки и ограничения записаны в RUNBOOK и ADR-113.
+
+2026-10-06: все девять дополнений реализованы последовательными срезами
+ADR-108—116. Домашняя библиотека получила encrypted catalog metadata, personal
+favorites/recent, layout/search/current ACL, три рабочих шаблона и импорт.
+Native template/PG pagination-CAS/restart и 12 core + 8 keyboard browser cases
+прошли локально. Финальный combined check/sqlx/audit/parity/smoke прошёл:
+698 Rust tests, 266 frontend units, 77 API/integration, 9 hard-restart и
+318/318 Chromium DPR1/DPR2; результаты и ограничения записаны в RUNBOOK.
+Это не закрывает Linux/Compose/remote CI, production auth,
+целевое хранилище/deploy, browser XLSX upload или ручной NVDA.
+
+Текущий security-план: последовательные срезы шифрования хранения и защищённого
+шаринга. ADR-102—105 описывают зашифрованные envelopes, KEK rotation, физические
+backup/recovery и offline migration; ADR-106—107 фиксируют guest sharing и
+комментарии. На Windows пройдены локальные Rust/web, SQLx и dependency gates;
+Chromium DPR1/2 подтвердил создание comment-link, вход гостя, добавление
+комментария и закрытие idle-сессии после отзыва. Миграция на репрезентативной
+старой базе, production owner authentication,
+Linux/Compose/remote CI и целевой S3 остаются отдельными
+незакрытыми gates. Вложения и дисковый кеш экспорта отсутствуют; контракт их
+будущего шифрования зафиксирован, реализация не заявлена.
+
+Обновление 2026-10-05: Windows full `just check`, `just sqlx-check` и
+`just audit` прошли. После исправления переполнения sharing header финальный
+Chromium suite прошёл 198/198 при DPR1/DPR2; live integration прошли 77/77,
+recovery — 2/2. E2E теперь явно различает principal-specific `capabilities` и
+сохранённое состояние книги. Подробные команды, counts, допустимые dependency
+warnings и оставшиеся внешние gates записаны в [RUNBOOK](../RUNBOOK.md).
+
+Финальный exact `just smoke` 2026-10-05 прошёл на новой изолированной Windows
+PostgreSQL fixture: 77/77 integration, 2/2 recovery и 198/198 Chromium, exit 0.
+Гонка E2E после reload исправлена ожиданием загрузки projection отдельно от
+WebSocket connection. В накопленной acceptance БД с 1812 key generations
+исправлен N+1 запрос startup readiness: поколения читаются одним ordered LEFT
+JOIN stream, и каждая обёртка по-прежнему аутентифицируется. На той же БД
+recovery прошёл за 45.2 s, полный smoke — 77/77 integration, 2/2 recovery,
+198/198 Chromium. Отдельный performance SLA для ещё больших историй не задан.
+
 Статус: пользователь разрешил продолжать все оставшиеся стадии, 2026-09-28.
 Локальные проверки фазы 0 пройдены; реализация продолжается последовательными
 срезами по ADR-008. Linux/Compose/remote CI остаются открытым deployment gate.
 Каждая новая фаза проверяет собственные acceptance criteria; разрешение продолжать
 не означает, что будущие функции или совместимость уже подтверждены.
 
-Текущий срез — [ADR-087](adr/087-cell-formatting.md), sparse оформление с 16
-свойствами, durable Undo/Redo и отдельным WASM preview. Локальные unit/build,
-Clippy/SQLx, полный Rust workspace, 7 PostgreSQL style tests, codec/adapter suites
-и Playwright E2E 150/150 при DPR 1/2 прошли. Recovery test с двумя hard restarts
-проверил snapshot4, журнал и историю стилей. Native/browser corpus — 1027 книг /
-2037 patches с независимым authored hash. Runtime test при DPR 1/2 подтвердил,
-что styled XLSX получает typed 422 вместо потери оформления. Styles-aware
-round-trip остаётся следующим срезом. Весь MVP или всю фазу 4 этим не объявляем
-завершёнными.
+## Security-срезы 2026-10-03
+
+Гостевые ссылки поддерживают три роли, срок действия и ровно один PIN/пароль;
+секрет ссылки выдаётся однократно, в БД находятся его хеш и зашифрованный
+Argon2id verifier. Ограниченные worker permits, блокировка попыток, гостевые
+cookie с Path одной ссылки, владельческие уведомления и durable отзыв реализованы.
+Комментарии хранятся отдельным зашифрованным журналом и не меняют workbook hash.
+Guest transport ограничивает книгу и capabilities, не использует member endpoint
+для гостевой сессии и закрывает открытую сессию при отзыве.
+PostgreSQL отправляет committed access-epoch invalidations всем экземплярам;
+каждый сервер закрывает затронутые WebSocket, а shared row-lock lease не даёт
+отзыву завершиться посреди отправки payload. При потере LISTEN сервер закрывает
+активные подписки до восстановления listener.
+
+Проверка в Windows acceptance-окружении: полный `just check`, `just sqlx-check`
+и `just audit` прошли; all-features workspace tests, wasm32, proto, web lint,
+typecheck, 232 unit tests и build прошли. `RUST_TEST_THREADS=2` ограничивает
+одновременные SQLx PostgreSQL fixtures ниже общего лимита соединений. Share E2E
+прошёл в Chromium DPR1/2 (6/6): проверены клавиатура и ARIA, вставка PIN,
+clipboard, серверный expiry, бессрочное подтверждение и badge, возврат фокуса,
+системные светлая/тёмная палитры и отсутствие внешних asset-запросов. Глобальный
+Prettier сначала нашёл 25 уже
+изменённых файлов; они отформатированы точечно, после чего полный check прошёл.
+См. RUNBOOK для точных результатов и ограничений.
+
+После подъёма локального стека на ожидаемых портах live integration-набор прошёл
+80/80, включая три сетевых сценария по 100 durable writes каждый. Текущий
+all-features nextest прошёл 654/654; физическое восстановление, PITR и отдельная
+миграция также повторно проверены локально. Это закрывает указанные локальные
+acceptance gates, но не внешние deployment и representative-legacy gates.
+Дополнительно `just s3-contract` прошёл 8/8 на Moto 5.2.3 loopback; выбранный
+production S3 endpoint и Garage остаются непроверенными. `just
+share-log-redaction` прошёл на отдельном loopback процессе: synthetic PIN,
+password, ошибочный ввод, token, URL, session cookies и committed cell value не
+появились в application stdout/stderr и в добавленных строках лога изолированной
+acceptance PostgreSQL. Encrypted WAL archive/retry/restore CLI проверяет отсутствие
+synthetic WAL bytes в stdout/stderr отдельным 1/1 integration test. Production
+PostgreSQL logs не проверялись. Content-bearing migration CLI также сканирует
+stdout/stderr на cell marker и source/target/recovery URL; separate-cluster gate
+повторно прошёл.
+`just s3-encrypted-snapshot` также прошёл на Moto 5.2.3: отдельный объект S3
+содержит непосредственно AEAD envelope с совпадающими ciphertext checksum и
+размером в PostgreSQL, без plaintext style marker; после hard restart сервер
+восстановил активный snapshot и хвост событий. Локальный filesystem вариант
+этого же restart gate прошёл отдельно. Это не подтверждает совместимость с
+выбранным production S3 или Garage.
+`just distributed-share-revocation` прошёл с двумя живыми server process на
+общей изолированной PostgreSQL: revoke на первом закрыл idle guest WebSocket на
+втором, а повторный shared document read получил общий `404`.
+
+Linux CI теперь ограничивает SQLx fixture concurrency двумя процессами в
+libtest и nextest; workflow проверен `actionlint`, а точный nextest gate локально
+прошёл 652/652 (16 намеренно пропущены). Сам Ubuntu/Compose workflow ещё не
+запускался удалённо: у checkout нет Git remote, WSL и Docker на Windows host
+недоступны.
+
+Локальный encrypted physical recovery также прошёл на выделенном Windows
+PostgreSQL 18.6: AEAD backup/verify, tampered/truncated/wrong-key отказ,
+восстановление snapshot+Undo tail, проверка recovered head, новая write
+generation и KEK rotation. 2026-10-03 encrypted CLI PITR прошёл до named point:
+сохранены exact v4 ciphertext/hash и snapshot v3 + один event, v5 исключён;
+WAL helper проверил manifest/tag и безопасную замену существующего WAL target.
+Отдельно прошли plaintext physical restore и immediate-stop recovery. ADR-104
+фиксирует Windows reserved restore target names, utility-environment и
+private restore-config ограничения. Content-bearing legacy
+fixture прошёл через Storage API и настоящий `storage migrate-legacy` CLI,
+каждый в своей пустой базе отдельного целевого кластера относительно источника
+на Windows PostgreSQL 18.6: проверены journal,
+snapshot, export audit, rollback archive, recovery и проверка после restart.
+Head version, Undo history API, report counts и отсутствие plaintext в
+целевых ciphertext проверены; CLI дополнительно прошёл rollback recovery и
+post-restart verification. Репрезентативная старая база и подтверждение
+maintenance window на остановленном реальном сервисе остаются отдельным gate.
+
+Последние локально проверенные срезы: [ADR-087](adr/087-cell-formatting.md)
+(16 style properties including clip/overflow/wrap, durable Undo/Redo и WASM preview),
+[ADR-090](adr/090-stable-axis-size-overrides.md) (server-authoritative row
+heights/column widths, целый столбец),
+[ADR-091](adr/091-adaptive-axis-scrollbars.md), [ADR-092](adr/092-structural-style-preimages.md),
+[ADR-094](adr/094-styled-range-copy.md), [ADR-095](adr/095-styled-range-move.md),
+browser interoperability slice (quoted clipboard, Markdown AST import popup,
+shortcuts, render invalidation) и консервативный durable merge profile из
+[ADR-096](adr/096-merged-cells.md). Для
+bounded XLSX profile-1 round trip закрыт handoff:
+[XLSX styles roundtrip](handoff/xlsx-styles-roundtrip.md). Один и тот же
+PostgreSQL document прошёл XLSX import, hard restart и journal replay, styled
+browser download, export и повторный import с формулами, всеми 16 leaves и
+styled blank. [ADR-094](adr/094-styled-range-copy.md) and
+[ADR-095](adr/095-styled-range-move.md) add durable styled CopyRange and
+MoveRange batches. Typed style-specific 422 guard снят после локальных gates.
+Merge сохраняется в canonical hash/snapshot, проходит PostgreSQL commit/replay
+и guarded Undo/Redo, отображается как единая hit target область, а bounded OOXML
+merge import/export покрыт fixtures. См. [merge handoff](handoff/merged-cells.md)
+для точных тестов и ограничений. Отдельный XLSX golden fixture, сохранённый
+реальным Microsoft Excel 16, проверяет Unicode, многострочные значения,
+формулы, стили и merge, включая декодирование OOXML `_xHHHH_` и round-trip
+через экспорт PXEL. Это расширяет coverage одного ограниченного профиля, но не
+закрывает широкую Excel/OOXML совместимость или Excel formula parity.
+
+Shared formula groups из Excel теперь проходят streaming OOXML parser как
+master + ссылки на master для followers. При импорте сервер расширяет каждую
+формулу через общий `spreadsheet_formula::copy_formula_text`, после чего
+обычным порядком валидирует и связывает stable-ID ссылки. Нормализованный XLSX
+IR обновлён до schema 3; golden Excel 16 и round-trip fixture покрывают
+relative/mixed/absolute ссылки и текстовые литералы. Browser upload и широкий
+Excel corpus остаются открытыми. См. [ADR-098](adr/098-xlsx-shared-formulas.md).
+
+После ADR-097 локальная формульная идентичность повышена до
+`pxel-formula-0.15.0`: независимый Excel 16 golden зафиксировал 15 результатов
+`COUNTIF`/`SUMIF`/`COUNTIFS`/`SUMIFS` и закрыл два различия для пустого текста
+(`"<>"` и `"*"`). Остальные критерии, locale, Unicode collation и Excel
+совместимость остаются открытыми.
+
+Следующий формульный срез в [ADR-101](adr/101-excel-numeric-literal-precision.md)
+повышает identity до `pxel-formula-0.16.0`: Excel 16 golden подтверждает
+15-значащий лимит числовых констант формул и выбранные ROUND/ROUNDUP/ROUNDDOWN
+cases. Lexer применяет правило до binary64 parsing; один subnormal-scale
+результат имеет отдельный 1-ULP tolerance. Проверены formula crate и адресный
+native/browser-WASM parity corpus на 595 случаях. Это узкий подтверждённый
+профиль, а не общая Excel numeric parity.
+
+После identity bump выполнен новый application gate: PostgreSQL/WebSocket
+integration 80/80 и Chromium E2E 190/190 (DPR1/DPR2). Integration выявил, что
+ADR-095 нормализует MoveRange в `CellBatchWrite` intent, который не учитывался
+двумя history consumers; оба исправлены и покрыты stale-formula unit и живыми
+PostgreSQL regressions. Это локальная проверка Windows и не закрывает открытые
+Linux/Compose/remote CI, upload sandbox, broad OOXML, controlled-load или
+production gates. Результаты и фактические команды приведены в RUNBOOK.
+
+Последний combined local gate после ADR-096 (до ADR-097): full Rust workspace all-features
+и строгий Clippy прошли; web unit 216/216, typecheck/lint/proto/build прошли;
+S3 adapter contract на loopback Moto 8/8, focus merge browser 2/2 и полный
+seeded convergence 100×1000×3 прошли. Полный
+Chromium run сначала дал 189/190 из-за одного DPR1 Move Redo timeout на 5 s;
+после focused 11/11 тот же полный Chromium suite прошёл 190/190 при DPR1/DPR2
+за 14.6 минуты. Первый исход сохранён в RUNBOOK как невоспроизведённый timing
+failure.
+
+Фактическая проверка предыдущих срезов: полный Rust workspace all-features прошёл;
+frontend Vitest 205/205, typecheck/lint прошли; Playwright прошёл 174/174 при DPR
+1/2 (24.6 минуты); XLSX integration 6/6, recovery 1/1,
+typed-import/rollback и Canvas pixel check styled blank прошли. Это не закрывает
+весь MVP или фазу 4: остаются gated browser upload XLSX, Excel golden/широкая
+OOXML совместимость, representative sparse-style memory budget, stress и
+deployment gates. Process-memory замер теперь есть; его границы указаны ниже.
+
+После ADR-092 обновлённый полный Rust workspace all-features прошёл, включая
+storage-codec 58/58 и PostgreSQL storage 97 passed / 4 ignored; workspace Clippy
+с `-D warnings` прошёл. Frontend Vitest 215/215, typecheck, lint, production build
+и proto:check прошли. Полный Chromium suite прошёл 182/182 при DPR1/2. Vite
+сообщил bundle 506.63 kB выше порога warning 500 kB; отдельный bundle budget не
+настроен. Все точные команды и ограничения записаны в RUNBOOK.
+
+После ADR-093 импорт GFM alignment использует schema 28/29 составного
+content/style batch: значения и оформление сохраняются одной операцией, а Undo
+восстанавливает оба слоя. Полный Rust workspace all-features, workspace Clippy,
+215 web unit tests, lint, typecheck, production build, proto:check и полный
+Playwright suite 184/184 на Chromium DPR1/2 прошли локально. В 184 browser tests
+вошли Copy/Paste rectangularity, Markdown import/overwrite/undo, GFM alignment
+и atomic Undo, shortcuts, scrollbars, formula invalidation, durable history,
+XLSX и style regressions. Точные команды в RUNBOOK. Основной JS chunk остаётся
+чуть выше Vite advisory threshold 500 kB. Rich Copy/Move оформлены атомарными
+durable batch operations; verification ADR-094/095 ниже.
+
+После ADR-094/095 повторный full Rust workspace all-features и workspace Clippy
+прошли; приложение history включает regression на inverse `CellBatchWrite`.
+Browser cut/move, overlapping formula rewrite, чужие history guards и WASM
+preview прошли 22/22 при DPR1/2. Styled Move проверен отдельно: destination
+style replacement, reload, Undo и Redo прошли при DPR1/2. Обновлённые числа в
+этом параграфе относятся к последней проверке; предшествующие абзацы сохраняют
+исторические результаты своих срезов.
+
+## Smart scrollbars (ADR-091)
+
+Адаптивные scrollbar tracks локально проверены на реальной DOM scroll-модели.
+Used range учитывает значения, формулы и значимое оформление, а 95-й процентиль
+оставляет редкие дальние значения доступными через линейный хвост. Track drag и
+click используют непрерывное обратимое отображение; wheel/touchpad остаются
+линейными. Полный Playwright gate прошёл 180/180 на DPR 1/2, Vitest — 215/215,
+typecheck, lint и production build прошли. Тесты моделируют used ranges 20,
+1 000 и 100 000 строк; они не являются benchmark заполненной книги на 100 000
+значений.
+
+## Режимы отображения текста (ADR-087 profile 2)
+
+Канонический style leaf различает Clip, Wrap и Overflow, сохраняя чтение старого
+boolean encoding profile 1. Canvas расширяет текст только через видимые пустые
+ячейки со стилем по умолчанию и останавливается на содержимом, форматировании и
+объединениях. Dirty-region invalidation учитывает старую и новую ширину spill.
+Локальный browser regression проверяет реальные Canvas pixels, блокирующую
+ячейку, включая optimistic blocker и формулу с пустым результатом, Undo и reload
+на Chromium DPR1 и DPR2; profile transition покрыт domain, wire, storage-codec и
+WASM tests. Bounded XLSX style profile пока не сохраняет различие Clip и
+Overflow.
+
+## Дополнения редактора (план 2026-10-05)
+
+Срез политик выдачи, durable audit и предупреждений реализован в
+[ADR-108](adr/108-disclosure-policies-and-audit.md). Адресные PostgreSQL,
+Chromium DPR1/2 и hard-restart проверки прошли; общие проверки записываются
+в RUNBOOK. Обязательное обезличивание теперь использует отдельную безопасную
+проекцию ADR-113; отключённое распознавание блокирует такую выдачу.
+
+Закрепления/личные фильтры реализованы в ADR-109: адресные native/codec/WASM,
+PostgreSQL и hard restart прошли. Full Chromium после исправлений — 224/224 при DPR1/DPR2, включая новые виды,
+audit, clipboard, связанные формулы, 390/1440 light/dark и all-hidden regression.
+Baseline check/sqlx/audit/parity прошёл; integration 77/77, recovery 4/4.
+Финальный exact smoke после всех дополнений остаётся обязательным.
+
+SortRange реализован по ADR-110: native planner, candidate, codecs, PostgreSQL
+CAS/history и hard-restart проверены; Chromium — 12/12 DPR1/DPR2, frontend
+typecheck и Vitest — 247/247. Диагностика констант реализована по ADR-111:
+native/WASM/PG/restart прошли, Chromium 10/10, Vitest 249/249, typecheck/lint/Clippy.
+Профайлер ADR-112 реализован и локально проверен: отдельный fixed-version/context
+расчёт, no-bootstrap capture, 500/2000 graph limits; Chromium 12/12, native/
+executor/actor regression, frontend 251/251, typecheck/lint/Clippy прошли.
+ADR-113 реализован и локально проверен: opt-in scanner, encrypted policy CAS,
+потенциальные зависимости, отдельные safe scalar DTO/clipboard/XLSX/comments,
+atomic view/comment links и invalidation. Domain/server/PG/restart прошли,
+Chromium 10/10 DPR1/DPR2, Vitest 254/254 и Clippy/typecheck/lint прошли.
+ADR-114 реализован и локально проверен: owner journal pages, отдельный read-only
+historical/calculated DTO и stable-ID property diff; pure/PG/restart, 12/12
+Chromium, 257 frontend tests, typecheck/lint/Clippy прошли. Head/context/Undo
+при просмотре не изменяются. Общие финальные gates остаются открыты. Далее остаются
+домашняя библиотека. ADR-115 реализовал independent encrypted .pxel v1,
+full preview/atomic fresh-ID import, private settings и safe scalar guest file.
+Crypto/adapter/restart, Chromium 12+2, 259 frontend/type/lint/Clippy прошли локально.
+Их контракты и незавершённое
+состояние сохранены в [handoff](handoff/additions-20261005.md). Разрешение
+на все срезы действует; наличие этого списка не означает их реализацию.
+Реальный проход NVDA и Linux/Compose/remote CI остаются открытыми gates.
+
+## Следующие незакрытые срезы
+
+1. Browser XLSX upload только после OS sandbox, malware scanning policy и полного
+   import report для недоверенных файлов. Локальная process-tree termination
+   теперь покрывает Windows Job Object и Unix process group (ADR-099), но ещё
+   не задаёт hard CPU/RAM limits или filesystem/network isolation.
+2. Широкая OOXML/Excel golden совместимость и большой import/resource isolation
+   gate для browser XLSX upload. XLSX parser теперь имеет adversarial regressions
+   для expansion-ratio ZIP bomb, лимита entry count, case-insensitive duplicate
+   parts, symlink entries и пределов XML depth/attributes; DTD и external
+   relationships также проверяются. Это подтверждает существующие parser limits,
+   но не является полным hostile corpus или OS resource/filesystem/network sandbox.
+3. Скриптовый Windows reference budget для 100k sparse full styles задан как
+   16 MiB incremental private bytes и прошёл (12.40 MiB median за 3 процесса).
+   Один локальный mixed-load sample прошёл: 600 durable writes, 120 параллельных
+   HTTP reads и stalled subscriber без задержки/потери ACK. End-to-end
+   large-workbook memory, Linux reference, formula/multi-document/network-
+   impairment stress и production stage-level gates остаются открытыми
+   ([условия](benchmarks/2026-10-02-combined-stress-local.md)).
+4. Production S3 integration/configuration, Linux/Compose/remote CI,
+   backup/crash/deployment и
+   production authentication/sharing gates.
+
+Последние локальные sparse-style измерения: release Criterion зафиксировал
+apply/build/canonical encode; отдельный release process probe измерил private
+bytes и working set для 100k compact и 100k mixed full styles (все 16 leaves,
+четыре font family). Повторяемый Windows gate `scripts/verify-style-memory.ps1`
+проверяет не более 16 MiB incremental private bytes для этой модели; последний
+3-run результат — 12.40 MiB. Это закрывает локальный синтетический profile и
+reference threshold, но не заменяет Linux или end-to-end workbook/server
+measurement и combined load. Условия и ограничения:
+[отчёт 2026-10-02](benchmarks/2026-10-02-sparse-style-local.md).
+WSL в среде не установлен и Docker CLI отсутствует, поэтому Linux/Compose gates
+локально недоступны.
 
 Ниже сохранены записи предыдущих срезов. Формулировки «ещё не реализовано» внутри
 них относятся к соответствующему ADR; текущий статус уточняется последней записью.
@@ -378,6 +696,12 @@ SortRange не входит в ранний MVP. Будущий отдельны
 
 Ни одна запись этой roadmap сама по себе не означает реализованную или протестированную возможность.
 
+Calculation delivery теперь использует dependency-scoped delta при точном
+совпадении `base_input_version`; stale base получает полный snapshot. Это
+проверяется unit и browser regressions и документировано в ADR-100. Пересчёт
+hash полного result map и full-snapshot fallback остаются O(formula count); это
+ограничение не считается выполненным sublinear performance gate.
+
 ADR-057 добавляет ограниченный historical binding для задержанных формул:
 axes-only checkpoints, 10 000 версий / 16 MiB accounted cache, work budget.
 Native тесты и живой delayed insertion/deletion сценарий проверяют stable targets;
@@ -540,8 +864,8 @@ hash is independently bound to the locked durable head. UI acknowledged moves
 participate in100-entry own history. Full116Chromium,76HTTP/network/security and
 4hard-restart scenarios passed;6new real-PG move-history cases,40codec and16pure
 history tests passed. Existing5range and6scalar/formula PGguards passed too (timing
-harness ignored). Native/browser554formula fixtures and1010books/2020patches agree
-on current engine0.14.0; this is not Move worker preview/parity, which remains next.
+harness ignored). Native/browser554formula fixtures and1010books/2020patches agreed
+on engine0.14.0 at that time; this is not Move worker preview/parity, which remains next.
 Structural/style history, durable discovered history, richer styles/merges/XLSX,
 controlledlarge/stress metrics, Linux/Compose/remoteCI and production gates remain
 open. Detailed actual commands, failures and outcomes in RUNBOOK.
@@ -592,12 +916,21 @@ Worker init4 принимает точный bound AST и hash-covered identity 
 175 frontend units/typecheck/lint/build, workspace Clippy/SQLx, 7 PG style tests,
 56 codec tests, 27 native adapter tests, 3 domain preview tests и 8 focused browser
 cases прошли. [Реальный native/browser corpus](benchmarks/2026-09-30-style-worker-parity-local.md):
-1027 книг / 2037 patches. Общая завершающая регрессия и обновлённый runtime gate
-ещё не объявлены пройденными; итог и точные команды — в RUNBOOK.
+1027 книг / 2037 patches. Позднейшая combined regression для текущей ветки —
+174/174 browser tests при DPR 1/2; полный итог и точные команды в RUNBOOK.
 
-Следующие границы: структурные preimages оформления, rich Copy/Move, merges,
-styles-aware XLSX import/export/reimport и измерение sparse style memory. Пока
-Copy/Move переносят только содержимое, деструктивные axis операции без сохранения
-стиля отклоняются, а styled XLSX export получает typed HTTP 422 вместо тихой
-потери оформления. Production S3, Linux/Compose/CI, полный stress и подтверждённые
-Excel fixtures остаются самостоятельными gates.
+Этот исторический срез предшествовал ADR-092/094/095/096: structural style
+preimages, rich Copy/Move и bounded merged cells теперь реализованы и имеют
+durable Undo. Sparse-style process memory измерена, но representative budget
+и широкая Excel совместимость остаются открыты. Bounded
+styles-aware XLSX import/export/reimport локально проверен
+по [handoff](handoff/xlsx-styles-roundtrip.md); browser upload и Excel fixtures
+остаются самостоятельными gates. Production S3, Linux/Compose/CI и полный stress
+также остаются открытыми.
+
+ADR-090: переменные высоты строк и ширины столбцов сохраняются sparse
+overrides по stable axis ID, участвуют в authored hash и snapshot schema 5,
+доступны через drag и панель размера. Header click выделяет весь столбец. Общий
+Playwright suite прошёл 174/174 на DPR 1/2; миграция и persistence описаны в
+RUNBOOK. Тогда отдельная задача smart scrollbars ещё ожидала реализации; позже
+она была выполнена и проверена в ADR-091.

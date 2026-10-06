@@ -5,7 +5,11 @@ pub mod calculation;
 #[cfg(test)]
 mod context_head_tests;
 #[cfg(test)]
+mod copy_style_tests;
+#[cfg(test)]
 mod historical_recovery_tests;
+#[cfg(test)]
+mod move_style_tests;
 #[cfg(test)]
 mod watch_tests;
 use calculation::{CalculatedState, CalculationHandle};
@@ -13,10 +17,11 @@ use spreadsheet_application::journal::{
     AuthenticatedActor, CommitOutcome, CommitReceipt, CommitRequest, DocumentAccess, JournalError,
     OperationJournal, SystemCommitRequest,
 };
+use spreadsheet_domain::merge::MergeChange;
 use spreadsheet_domain::workbook::{
-    CalculationContext, CellContent, CellWriteKind, Command, CommandPayload, CommittedEvent,
-    DocumentId, DocumentVersion, DomainError, EventPrincipal, GuardedStyleWrite, Operation,
-    OperationId, StyleWriteKind, Workbook,
+    CalculationContext, CellBatchIntent, CellContent, CellWriteKind, Command, CommandPayload,
+    CommittedEvent, DocumentId, DocumentVersion, DomainError, EventPrincipal, GuardedStyleWrite,
+    Operation, OperationId, StyleWriteKind, Workbook,
 };
 use std::{
     collections::HashMap, future::Future, num::NonZeroU64, pin::Pin, sync::Arc, time::Duration,
@@ -43,6 +48,8 @@ pub enum SessionError {
     RebaseWindowExceeded,
     #[error("source version is no longer current for this operation")]
     SourceVersionChanged,
+    #[error("confirmed calculation is not available for sorting")]
+    CalculationUnavailable,
     #[error("move intersects an unsupported reference dependency")]
     UnsupportedMoveDependency,
     #[error("formula could not be normalized")]
@@ -82,6 +89,7 @@ enum Request {
     },
     Read {
         identity: AuthenticatedActor,
+        initialize_context: bool,
         reply: oneshot::Sender<Result<Workbook, SessionError>>,
     },
     Submit {
@@ -182,9 +190,28 @@ impl DocumentSession {
             .map_err(|_| SessionError::Unavailable)?
     }
     pub async fn read(&self, identity: AuthenticatedActor) -> Result<Workbook, SessionError> {
+        self.read_projection(identity, true).await
+    }
+    /// Captures the authorized durable projection without creating or renewing context.
+    /// Read-only analysis must use this method and keep derived results separate.
+    pub async fn read_confirmed(
+        &self,
+        identity: AuthenticatedActor,
+    ) -> Result<Workbook, SessionError> {
+        self.read_projection(identity, false).await
+    }
+    async fn read_projection(
+        &self,
+        identity: AuthenticatedActor,
+        initialize_context: bool,
+    ) -> Result<Workbook, SessionError> {
         let (reply, receiver) = oneshot::channel();
         self.sender
-            .try_send(Request::Read { identity, reply })
+            .try_send(Request::Read {
+                identity,
+                initialize_context,
+                reply,
+            })
             .map_err(queue_error)?;
         tokio::time::timeout(Duration::from_secs(10), receiver)
             .await
@@ -527,13 +554,19 @@ async fn run<J: OperationJournal>(
                     .map(|_| workbook.version());
                 let _ = reply.send(result);
             }
-            Request::Read { identity, reply } => {
+            Request::Read {
+                identity,
+                initialize_context,
+                reply,
+            } => {
                 let result = async {
                     refresh(&journal, identity, &mut workbook, &calculation, &mut axes).await?;
                     let before = workbook.version();
-                    bootstrap
-                        .ensure(&journal, identity, &mut workbook, &calculation, &mut axes)
-                        .await?;
+                    if initialize_context {
+                        bootstrap
+                            .ensure(&journal, identity, &mut workbook, &calculation, &mut axes)
+                            .await?;
+                    }
                     if workbook.version() > before {
                         maybe_snapshot(snapshots.as_ref(), &workbook);
                     }
@@ -772,6 +805,14 @@ async fn submit<J: OperationJournal>(
                 .ok_or(SessionError::InvalidCommand)?,
         )?;
         let operation = match &command.operation {
+            CommandPayload::SortRange { range } => {
+                if command.base_version != workbook.version() {
+                    return Err(SessionError::SourceVersionChanged);
+                }
+                calculation
+                    .prepare_sort(workbook.clone(), range.clone())
+                    .await?
+            }
             CommandPayload::UndoCell {
                 target_operation_id,
             } => {
@@ -797,6 +838,47 @@ async fn submit<J: OperationJournal>(
                         undoes: target.operation_id,
                         undoes_version: target.version,
                     }
+                } else if let Operation::CellBatchWrite {
+                    intent,
+                    content_writes,
+                    style_writes,
+                    ..
+                } = &target.operation
+                {
+                    let mut inverse_content = Vec::with_capacity(content_writes.len());
+                    for write in content_writes {
+                        match workbook.cell_content(write.address) {
+                            Err(
+                                DomainError::MissingSheet
+                                | DomainError::MissingRow
+                                | DomainError::MissingColumn,
+                            ) => {
+                                return Err(JournalError::UndoConflict.into());
+                            }
+                            Err(error) => return Err(error.into()),
+                            Ok(_) => {}
+                        }
+                        inverse_content.push(spreadsheet_domain::workbook::GuardedContentWrite {
+                            address: write.address,
+                            content: write.previous.clone(),
+                            previous: write.content.clone(),
+                        });
+                    }
+                    let inverse_styles = style_writes
+                        .iter()
+                        .map(|write| GuardedStyleWrite {
+                            address: write.address,
+                            previous: write.changes.clone(),
+                            changes: write.previous.clone(),
+                        })
+                        .collect();
+                    Operation::CellBatchWrite {
+                        intent: intent.clone(),
+                        content_writes: inverse_content,
+                        style_writes: inverse_styles,
+                        undoes: Some(target.operation_id),
+                        undoes_version: Some(target.version),
+                    }
                 } else if matches!(
                     target.operation,
                     Operation::AxisEdit { .. } | Operation::AxisCompensation { .. }
@@ -817,6 +899,17 @@ async fn submit<J: OperationJournal>(
                                 SessionError::Domain(error)
                             }
                         })?
+                } else if let Operation::MergeWrite { sheet, change, .. } = target.operation {
+                    Operation::MergeWrite {
+                        sheet,
+                        change: spreadsheet_domain::merge::MergeChange {
+                            range: change.range,
+                            merged: !change.merged,
+                            previous: change.merged,
+                        },
+                        undoes: Some(target.operation_id),
+                        undoes_version: Some(target.version),
+                    }
                 } else {
                     let writes = match &target.operation {
                         Operation::CellWrite {
@@ -1109,6 +1202,7 @@ fn normalize(
         },
     )?;
     let normalized = match &command.operation {
+        CommandPayload::SortRange { .. } => Err(SessionError::InvalidCommand),
         CommandPayload::AddSheet { sheet } => Ok(Operation::AddSheet {
             sheet: sheet.clone(),
         }),
@@ -1158,6 +1252,86 @@ fn normalize(
                 StyleWriteKind::Range,
             )?)
         }
+        CommandPayload::SetFrozenRows { sheet, rows } => {
+            let target = workbook
+                .sheets()
+                .iter()
+                .find(|s| s.id() == *sheet)
+                .ok_or(SessionError::InvalidCommand)?;
+            Ok(Operation::FrozenRowsWrite {
+                sheet: *sheet,
+                rows: *rows,
+                previous: target.frozen_rows(),
+            })
+        }
+        CommandPayload::SetAxisSizes { sheet, writes } => {
+            if writes.is_empty()
+                || writes.len() > spreadsheet_domain::axis_size::MAX_AXIS_SIZE_WRITES
+            {
+                return Err(SessionError::InvalidCommand);
+            }
+            let target_sheet = workbook
+                .sheets()
+                .iter()
+                .find(|item| item.id() == *sheet)
+                .ok_or(SessionError::InvalidCommand)?;
+            let mut seen = std::collections::BTreeSet::new();
+            let writes = writes
+                .iter()
+                .map(|(target, size)| {
+                    if !seen.insert(*target)
+                        || size.is_some_and(|value| {
+                            !spreadsheet_domain::axis_size::valid_size(*target, value)
+                        })
+                    {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    let previous = match target {
+                        spreadsheet_domain::workbook::AxisSizeTarget::Row(id) => {
+                            target_sheet.row_heights().get(id).copied()
+                        }
+                        spreadsheet_domain::workbook::AxisSizeTarget::Column(id) => {
+                            target_sheet.column_widths().get(id).copied()
+                        }
+                    };
+                    Ok(spreadsheet_domain::workbook::AxisSizeChange {
+                        target: *target,
+                        previous,
+                        size: *size,
+                    })
+                })
+                .collect::<Result<Vec<_>, SessionError>>()?;
+            Ok(Operation::AxisSizeWrite {
+                sheet: *sheet,
+                writes,
+            })
+        }
+        CommandPayload::SetMergeRange {
+            sheet,
+            range,
+            merged,
+        } => {
+            let current = workbook
+                .sheets()
+                .iter()
+                .find(|candidate| candidate.id() == *sheet)
+                .ok_or(DomainError::MissingSheet)?
+                .merges()
+                .contains(range);
+            if current == *merged {
+                return Err(SessionError::Domain(DomainError::MergeConflict));
+            }
+            Ok(Operation::MergeWrite {
+                sheet: *sheet,
+                change: MergeChange {
+                    range: *range,
+                    merged: *merged,
+                    previous: current,
+                },
+                undoes: None,
+                undoes_version: None,
+            })
+        }
         CommandPayload::SetCellValue { address, value } => {
             let value = value.normalized()?;
             Ok(Operation::CellWrite {
@@ -1187,6 +1361,53 @@ fn normalize(
             undoes: None,
             undoes_version: None,
         }),
+        CommandPayload::SetCellBatch { writes, styles } => {
+            if writes.is_empty() || writes.len() > 1_000 || styles.len() > 1_000 {
+                return Err(SessionError::InvalidCommand);
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            let content_writes = writes
+                .iter()
+                .map(|write| {
+                    if !seen.insert(write.address) {
+                        return Err(SessionError::InvalidCommand);
+                    }
+                    let value = write.value.clone().normalized()?;
+                    Ok(spreadsheet_domain::workbook::GuardedContentWrite {
+                        address: write.address,
+                        content: (value != spreadsheet_domain::workbook::CellValue::Blank)
+                            .then_some(CellContent::Value(value)),
+                        previous: workbook.cell_content(write.address)?.cloned(),
+                    })
+                })
+                .collect::<Result<Vec<_>, SessionError>>()?;
+            let mut style_addresses = std::collections::BTreeSet::new();
+            let mut style_writes = Vec::with_capacity(styles.len());
+            for (address, changes) in styles {
+                if !seen.contains(address) || !style_addresses.insert(*address) {
+                    return Err(SessionError::InvalidCommand);
+                }
+                match spreadsheet_domain::style_write::prepare_style_write(
+                    workbook,
+                    &[*address],
+                    changes,
+                    StyleWriteKind::Cell,
+                )? {
+                    Operation::StyleWrite { mut writes, .. } => {
+                        style_writes.append(&mut writes);
+                    }
+                    _ => return Err(SessionError::InvalidCommand),
+                }
+            }
+            style_writes.sort_by_key(|write| write.address);
+            Ok(Operation::CellBatchWrite {
+                intent: CellBatchIntent::SetValues,
+                content_writes,
+                style_writes,
+                undoes: None,
+                undoes_version: None,
+            })
+        }
         CommandPayload::CopyRange {
             source,
             destination,
@@ -1219,7 +1440,8 @@ fn normalize(
             let destination_column = sheet
                 .column_position(destination.column)
                 .ok_or(DomainError::MissingColumn)?;
-            let mut writes = Vec::with_capacity(count as usize);
+            let mut content_writes = Vec::with_capacity(count as usize);
+            let mut style_writes = Vec::with_capacity(count as usize);
             for row_offset in 0..*rows {
                 for column_offset in 0..*columns {
                     let sr = source_row
@@ -1278,24 +1500,62 @@ fn normalize(
                         }
                         None => None,
                     };
-                    writes.push(spreadsheet_domain::workbook::ContentWrite {
+                    content_writes.push(spreadsheet_domain::workbook::GuardedContentWrite {
                         address: destination_address,
                         content,
+                        previous: workbook.cell_content(destination_address)?.cloned(),
+                    });
+                    let source_style = sheet
+                        .styles()
+                        .get(&source_address)
+                        .cloned()
+                        .unwrap_or_default();
+                    let destination_style = sheet
+                        .styles()
+                        .get(&destination_address)
+                        .cloned()
+                        .unwrap_or_default();
+                    let properties = [
+                        spreadsheet_domain::style::StyleProperty::FontFamily,
+                        spreadsheet_domain::style::StyleProperty::FontSize,
+                        spreadsheet_domain::style::StyleProperty::FontBold,
+                        spreadsheet_domain::style::StyleProperty::FontItalic,
+                        spreadsheet_domain::style::StyleProperty::FontUnderline,
+                        spreadsheet_domain::style::StyleProperty::FontStrike,
+                        spreadsheet_domain::style::StyleProperty::FontColor,
+                        spreadsheet_domain::style::StyleProperty::Fill,
+                        spreadsheet_domain::style::StyleProperty::BorderTop,
+                        spreadsheet_domain::style::StyleProperty::BorderRight,
+                        spreadsheet_domain::style::StyleProperty::BorderBottom,
+                        spreadsheet_domain::style::StyleProperty::BorderLeft,
+                        spreadsheet_domain::style::StyleProperty::Horizontal,
+                        spreadsheet_domain::style::StyleProperty::Vertical,
+                        spreadsheet_domain::style::StyleProperty::TextOverflow,
+                        spreadsheet_domain::style::StyleProperty::NumberFormat,
+                    ];
+                    style_writes.push(GuardedStyleWrite {
+                        address: destination_address,
+                        previous: properties
+                            .iter()
+                            .map(|property| destination_style.change(*property))
+                            .collect(),
+                        changes: properties
+                            .iter()
+                            .map(|property| source_style.change(*property))
+                            .collect(),
                     });
                 }
             }
-            Ok(Operation::RangeWrite {
-                writes: writes
-                    .into_iter()
-                    .map(|w| {
-                        Ok(spreadsheet_domain::workbook::GuardedContentWrite {
-                            address: w.address,
-                            content: w.content,
-                            previous: workbook.cell_content(w.address)?.cloned(),
-                        })
-                    })
-                    .collect::<Result<_, SessionError>>()?,
-                kind: Some(spreadsheet_domain::workbook::RangeWriteKind::Copy),
+            style_writes.sort_by_key(|write| write.address);
+            Ok(Operation::CellBatchWrite {
+                intent: CellBatchIntent::CopyRange {
+                    source: *source,
+                    destination: *destination,
+                    rows: *rows,
+                    columns: *columns,
+                },
+                content_writes,
+                style_writes,
                 undoes: None,
                 undoes_version: None,
             })
@@ -1311,6 +1571,11 @@ fn normalize(
             }
             workbook.cell_content(*source)?;
             workbook.cell_content(*destination)?;
+            let sheet = workbook
+                .sheets()
+                .iter()
+                .find(|sheet| sheet.id() == source.sheet)
+                .ok_or(DomainError::MissingSheet)?;
             let plan = spreadsheet_formula::relocation::plan_move(
                 workbook,
                 spreadsheet_formula::relocation::MoveRequest {
@@ -1332,12 +1597,107 @@ fn normalize(
                 }
                 _ => SessionError::InvalidCommand,
             })?;
-            Ok(Operation::MoveRange {
-                source: *source,
-                destination: *destination,
-                rows: *rows,
-                columns: *columns,
-                writes: plan.writes,
+            let source_row = sheet
+                .row_position(source.row)
+                .ok_or(DomainError::MissingRow)?;
+            let source_column = sheet
+                .column_position(source.column)
+                .ok_or(DomainError::MissingColumn)?;
+            let destination_row = sheet
+                .row_position(destination.row)
+                .ok_or(DomainError::MissingRow)?;
+            let destination_column = sheet
+                .column_position(destination.column)
+                .ok_or(DomainError::MissingColumn)?;
+            let properties = [
+                spreadsheet_domain::style::StyleProperty::FontFamily,
+                spreadsheet_domain::style::StyleProperty::FontSize,
+                spreadsheet_domain::style::StyleProperty::FontBold,
+                spreadsheet_domain::style::StyleProperty::FontItalic,
+                spreadsheet_domain::style::StyleProperty::FontUnderline,
+                spreadsheet_domain::style::StyleProperty::FontStrike,
+                spreadsheet_domain::style::StyleProperty::FontColor,
+                spreadsheet_domain::style::StyleProperty::Fill,
+                spreadsheet_domain::style::StyleProperty::BorderTop,
+                spreadsheet_domain::style::StyleProperty::BorderRight,
+                spreadsheet_domain::style::StyleProperty::BorderBottom,
+                spreadsheet_domain::style::StyleProperty::BorderLeft,
+                spreadsheet_domain::style::StyleProperty::Horizontal,
+                spreadsheet_domain::style::StyleProperty::Vertical,
+                spreadsheet_domain::style::StyleProperty::TextOverflow,
+                spreadsheet_domain::style::StyleProperty::NumberFormat,
+            ];
+            let mut desired = std::collections::BTreeMap::new();
+            for row_offset in 0..*rows {
+                for column_offset in 0..*columns {
+                    let source_address = spreadsheet_domain::workbook::CellAddress {
+                        sheet: source.sheet,
+                        row: *sheet
+                            .rows()
+                            .get((source_row + row_offset) as usize)
+                            .ok_or(DomainError::MissingRow)?,
+                        column: *sheet
+                            .columns()
+                            .get((source_column + column_offset) as usize)
+                            .ok_or(DomainError::MissingColumn)?,
+                    };
+                    let destination_address = spreadsheet_domain::workbook::CellAddress {
+                        sheet: destination.sheet,
+                        row: *sheet
+                            .rows()
+                            .get((destination_row + row_offset) as usize)
+                            .ok_or(DomainError::MissingRow)?,
+                        column: *sheet
+                            .columns()
+                            .get((destination_column + column_offset) as usize)
+                            .ok_or(DomainError::MissingColumn)?,
+                    };
+                    let source_style = sheet
+                        .styles()
+                        .get(&source_address)
+                        .cloned()
+                        .unwrap_or_default();
+                    desired.insert(
+                        destination_address,
+                        properties
+                            .iter()
+                            .map(|property| source_style.change(*property))
+                            .collect::<Vec<_>>(),
+                    );
+                    desired.entry(source_address).or_insert_with(|| {
+                        let default = spreadsheet_domain::style::CellStyle::default();
+                        properties
+                            .iter()
+                            .map(|property| default.change(*property))
+                            .collect()
+                    });
+                }
+            }
+            let mut style_writes = Vec::with_capacity(desired.len());
+            for (address, changes) in desired {
+                let previous_style = sheet.styles().get(&address).cloned().unwrap_or_default();
+                style_writes.push(GuardedStyleWrite {
+                    address,
+                    previous: properties
+                        .iter()
+                        .map(|property| previous_style.change(*property))
+                        .collect(),
+                    changes,
+                });
+            }
+            let mut content_writes = plan.writes;
+            content_writes.sort_by_key(|write| write.address);
+            Ok(Operation::CellBatchWrite {
+                intent: CellBatchIntent::MoveRange {
+                    source: *source,
+                    destination: *destination,
+                    rows: *rows,
+                    columns: *columns,
+                },
+                content_writes,
+                style_writes,
+                undoes: None,
+                undoes_version: None,
             })
         }
         CommandPayload::ClearCell { address } => Ok(Operation::CellWrite {

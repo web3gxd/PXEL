@@ -371,16 +371,16 @@
           </div>
           <div class="doing">
             <b>06</b><span>XLSX</span
-            ><small>Scalar import/export; styled export отклоняется до расширения OOXML</small>
+            ><small>Scalar и bounded 16-leaf style import/export; browser upload впереди</small>
           </div>
         </div>
         <p class="roadmap-note">
           Это живой отчёт: выполненные срезы и замеры добавляются после проверки. Подробные
           ограничения, тесты и решения — в <a href="../RUNBOOK.md">RUNBOOK</a> и
           <a href="../docs/roadmap.md">roadmap</a>. Фазы 3–5 ещё не закрыты; локальный XLSX import
-          сохраняет несколько scalar-листов, редактор переключает вкладки и добавляет лист.
-          Оформление прошло 8 браузерных сценариев при DPR 1/2; общая регрессия ещё выполняется.
-          Веб-загрузка, styles-aware XLSX и Excel golden gate впереди.
+          сохраняет несколько листов, editor переключает вкладки и добавляет лист. Bounded style
+          round trip прошёл PostgreSQL recovery, download и reimport; браузерная регрессия прошла
+          174/174 при DPR 1/2. Browser upload и Excel golden gate впереди.
         </p>
         <div class="slide-footer">
           <span>Следующий шаг определяется проверяемым vertical slice</span><span>09 / 10</span>
@@ -393,15 +393,15 @@
         <p class="lead">
           Ввод, формулы, оси, cut/move и общая история автора после reload уже работают. Новый срез
           добавляет 16 свойств оформления, отдельный preview и Undo/Redo, включая отмену после
-          вставки строки и перезагрузки. Все 150 браузерных E2E прошли при DPR 1/2; отдельное
-          восстановление подтвердило snapshot4 и историю стилей после двух жёстких перезапусков.
-          Native/WASM style corpus: 1027 книг и 2037 patches. Copy/Move пока переносят только
-          содержимое. Живой экспорт оформленной книги возвращает typed 422 и не теряет данные.
-          Следующие границы — round-trip стилей в XLSX, объединения, совместный stress
-          формул/ACL/рестартов и production-развёртывание. Styled XLSX временно отклоняется, чтобы
-          не потерять оформление. Отдельный прежний release benchmark с PostgreSQL и файловым
-          snapshot восстановил 10 000 событий хвоста с p95 71–88 мс; полный replay дал p95 131–139
-          мс. Это тёплая книга с одной ячейкой без браузера, не новый замер стилей.
+          вставки строки и перезагрузки. Все 174 браузерных E2E прошли при DPR 1/2; recovery
+          проверил snapshot5, импортированные стили и round trip через hard restart. Native/WASM
+          style corpus: 1027 книг и 2037 patches. Copy/Move пока переносят только содержимое.
+          Bounded styled XLSX download сохраняет authored форматирование, а повторный import
+          сохраняет все 16 leaves и styled blank. Следующие границы — browser upload, Excel golden
+          tests, объединения, совместный stress формул/ACL/рестартов и production deployment.
+          Отдельный прежний release benchmark с PostgreSQL и файловым snapshot восстановил 10 000
+          событий хвоста с p95 71–88 мс; полный replay дал p95 131–139 мс. Это тёплая книга с одной
+          ячейкой без браузера, не новый замер стилей.
           <a href="../docs/benchmarks/2026-09-29-snapshot-replay-persisted-local.md">Условия</a>.
         </p>
         <div class="closing-links">

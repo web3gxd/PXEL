@@ -12,7 +12,45 @@ const require = createRequire(resolve(root, 'apps/web/package.json'));
 const { chromium } = require('@playwright/test');
 const corpus = JSON.parse(readFileSync(resolve(root, 'fixtures/formulas/profile-v1.json'), 'utf8'));
 assert.equal(corpus.schema_version, 1);
-const requests = corpus.cases.map((test) => {
+const excelGolden = JSON.parse(
+  readFileSync(resolve(root, 'fixtures/formulas/excel-criteria-2026-10-02.json'), 'utf8'),
+);
+assert.equal(excelGolden.verified_in_excel, true);
+const excelNumberGolden = JSON.parse(
+  readFileSync(resolve(root, 'fixtures/formulas/excel-number-precision-2026-10-02.json'), 'utf8'),
+);
+assert.equal(excelNumberGolden.verified_in_excel, true);
+const excelCases = excelGolden.cases.map((test, index) => ({
+  id: `excel-criteria-${index + 1}`,
+  formula: test.formula,
+  origin: 'Criteria!C1',
+  expected: { type: 'number', value: test.result },
+  cells: Object.fromEntries(
+    excelGolden.workbook.cells.map((cell) => {
+      let column = cell.column;
+      let columnName = '';
+      while (column > 0) {
+        const remainder = (column - 1) % 26;
+        columnName = String.fromCharCode(65 + remainder) + columnName;
+        column = Math.floor((column - 1) / 26);
+      }
+      return [`Criteria!${columnName}${cell.row}`, { type: cell.type, value: cell.value }];
+    }),
+  ),
+}));
+const excelNumberCases = excelNumberGolden.cases.map((test, index) => ({
+  id: `excel-number-precision-${index + 1}`,
+  formula: test.formula,
+  origin: 'Numbers!C1',
+  expected:
+    test.result_type === 'number'
+      ? { type: 'number', value: test.result }
+      : { type: 'error', value: test.result },
+  ...(typeof test.tolerance === 'number' ? { tolerance: test.tolerance } : {}),
+  cells: {},
+}));
+const allCases = [...corpus.cases, ...excelCases, ...excelNumberCases];
+const requests = allCases.map((test) => {
   const origin = test.origin.slice(0, test.origin.lastIndexOf('!'));
   const sheets = new Set([origin]);
   const cells = Object.entries(test.cells).map(([address, value]) => {
@@ -125,11 +163,19 @@ try {
   const started = performance.now();
   const result = await page.evaluate((requests) => window.runFixtures(requests), requests);
   const roundtrip = performance.now() - started;
-  assert.equal(result.results.length, corpus.cases.length);
-  assert.equal(nativeResults.length, corpus.cases.length);
-  for (let i = 0; i < corpus.cases.length; i++) {
-    const test = corpus.cases[i];
-    assert.deepEqual(nativeResults[i].result, test.expected, `Native expectation: ${test.id}`);
+  assert.equal(result.results.length, allCases.length);
+  assert.equal(nativeResults.length, allCases.length);
+  for (let i = 0; i < allCases.length; i++) {
+    const test = allCases[i];
+    if (typeof test.tolerance === 'number' && test.expected.type === 'number') {
+      assert.equal(nativeResults[i].result.type, 'number', `Native result type: ${test.id}`);
+      assert.ok(
+        Math.abs(nativeResults[i].result.value - test.expected.value) <= test.tolerance,
+        `Native expectation: ${test.id}`,
+      );
+    } else {
+      assert.deepEqual(nativeResults[i].result, test.expected, `Native expectation: ${test.id}`);
+    }
     assert.deepEqual(result.results[i], nativeResults[i], `WASM/native parity: ${test.id}`);
   }
   assert.equal(wasmLoads, 1);
@@ -151,7 +197,10 @@ try {
   const report = {
     schema_version: 1,
     profile: corpus.profile,
-    cases: corpus.cases.length,
+    cases: allCases.length,
+    excel_golden_cases: excelCases.length + excelNumberCases.length,
+    excel_criteria_cases: excelCases.length,
+    excel_number_precision_cases: excelNumberCases.length,
     wasm_loads: wasmLoads,
     worker_loads: workerLoads,
     native_wasm_parity: true,

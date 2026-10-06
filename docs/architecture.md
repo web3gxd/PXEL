@@ -25,7 +25,7 @@ flowchart LR
 Сейчас работают health/readiness, dev auth boundary, protobuf transport,
 Canvas editing, durable CAS journal, bounded actor, filesystem BlobStore и
 optional S3 adapter. Moto 5.2.3 contract и server restart проверены;
-Garage/российский S3 ещё не проверены.
+production Garage/российский S3 ещё не проверены.
 Формульное ядро/bound AST и native/browser parity harness реализованы.
 Сервер использует bounded calculation executor, а приложение — stateful WASM
 preview worker. Предварительные результаты остаются отдельно от серверного расчёта.
@@ -36,7 +36,7 @@ preview worker. Предварительные результаты остают
 
 Structural history (ADR085) uses frozen axis edits and own compensations with
 exact preimages. Revived stable IDs have durable activation floors, included in
-the domain hash and snapshot3. Journal admission independently verifies projection
+the domain hash and snapshot writer4. Journal admission independently verifies projection
 context and currentness after receipt lookup; no actor-only validation assumption
 is sufficient. Integration verification is recorded in RUNBOOK.
 
@@ -70,7 +70,7 @@ is sufficient. Integration verification is recorded in RUNBOOK.
 | spreadsheet-formula       | Lexer/parser/binder/evaluator/graph/scheduler/locale/diagnostics  | domain                                               | 2                                   |
 | spreadsheet-wasm          | Тонкий commands/patches adapter                                   | domain, formula, wire-protocol                       | 2                                   |
 | spreadsheet-testkit       | Общие seeded generators, virtual clients, fault injection         | Используемые domain/application/collab/formula       | При двух реальных потребителях      |
-| spreadsheet-xlsx          | Bounded OOXML reader и отдельная scalar IR; writer позднее        | Нет; только general-purpose ZIP/XML                  | 6                                   |
+| spreadsheet-xlsx          | Bounded OOXML reader и versioned scalar/style IR                  | Нет; только general-purpose ZIP/XML                  | 6                                   |
 | apps/server               | Composition root, transport/auth/runtime adapters                 | Только используемые crates                           | 0                                   |
 
 `storage` никогда не импортирует `collab`; `collab` никогда не импортирует SQLx/storage types. OperationJournal, AuthorizationRepository, SnapshotRepository и CalculationExecutor вводятся в application только вместе с потребителями. Clock/IdGenerator не создаются ради каталогов интерфейсов. SessionDirectory вводится с actor по прямому требованию масштабирования.
@@ -85,7 +85,7 @@ Workbook хранит ordered SheetIds, sheets, date system, engine/profile sett
 
 Axis: `ordered_ids: Vec<StableAxisId>`, `positions: HashMap<StableAxisId,u32>`, `visible_extent: u32`. Только allocated extent имеет IDs. Начало 1000×26 создает 1026 axis IDs и ноль Cell records. При приближении редактора к краю UI запрашивает atomic ExtendRows с 1000 новыми IDs; extent растет без ручного UX действия. Аналогичная колонная операция вводится с необходимостью. Удаление содержимого не уменьшает extent. Новые оси не получают ранее удалённые IDs; guarded компенсация может восстановить исходный ID с durable activation floor (ADR-085).
 
-Content и style — разные свойства. ClearCell очищает content, style меняется отдельной командой. Formula хранит source text, canonical text, versioned bound AST; результат — derived cache. Row/column sizes — defaults плюс sparse overrides. Merge и named ranges хранят stable anchors; personal selection/scroll/presence не входят в durable projection.
+Content и style — разные свойства. ClearCell очищает content, style меняется отдельной командой. Formula хранит source text, canonical text, versioned bound AST; результат — derived cache. Row/column sizes — defaults плюс sparse overrides. Merge range хранится по stable row/column IDs, входит в canonical hash и snapshot writer4; пересекающие merge structural edits и записи в covered non-anchor cells отклоняются. Поддержаны guarded merge/unmerge и ограниченный OOXML profile. Named ranges требуют отдельной реализации; personal selection/scroll/presence не входят в durable projection.
 
 Начальный нагрузочный профиль будущего редактора: до 100 000 заполненных ячеек, 100 000 rows, 1000 columns, 10 sheets, суммарно до миллиона allocated axis IDs. Это ограничение и объект benchmark, а не доказанная производительность.
 
@@ -95,7 +95,7 @@ Content и style — разные свойства. ClearCell очищает con
 
 Snapshot не заменяет журнал. Cacheless content hash использует собственную canonical encoding; SHA-256 protobuf bytes проверяет только целостность этих байтов. Будущее восстановление: последний пригодный ACTIVE snapshot + последовательный log tail, либо предыдущий ACTIVE generation/full replay. Неизвестный event не пропускается.
 
-CalculationCommitted существует отдельно от OperationCommitted. Сервер может объединять изменения и считать более новую версию, не публикуя промежуточный результат. Pure evaluator получает persisted context. Потеря calculation cache не является потерей authored state.
+CalculationCommitted существует отдельно от OperationCommitted. Сервер может объединять изменения и считать более новую версию, не публикуя промежуточный результат. Для точной `base_input_version` он передаёт changed/cleared calculation delta; при cache miss, rebuild или несовпавшей версии отправляет полный snapshot. Все chunks проверяются и публикуются атомарно, только для текущих input version/context/epoch. Pure evaluator получает persisted context. Потеря calculation cache не является потерей authored state. См. [ADR-100](adr/adr-100-versioned-calculation-deltas.md).
 
 ## Frontend
 
@@ -113,14 +113,15 @@ ACK или receipt требует discovery, даже если последне�
 уже включённый в загруженную историю, не добавляется повторно. Общая история
 автора не воспроизводит приватный стек каждой вкладки.
 
-Оформление проходит строгий typed projection decoder: authored projection schema 4,
+Оформление проходит строгий typed projection decoder: authored projection schema 6,
 style schema/profile 1. `confirmedStyles` и pending style overlay разделены;
 неопределённый результат commit сохраняет исходные bytes/ID. Canvas рисует только
 видимые оформленные ячейки, в том числе пустые; числовой формат меняет отображение,
 но не значение в редакторе, clipboard или evaluator. Начальный профиль использует
 Arial 10 pt, фиксированные цвета RGB и закрытые enum границ/выравнивания/форматов.
 Шрифты не загружаются по URL. Copy/Move сохраняют прежнюю семантику переноса
-содержимого; richer copy и axis preimages оформления требуют отдельного среза.
+содержимого; range copy/move переносят все sparse style leaves вместе с content
+в одной durable batch и поддерживают guarded Undo/Redo (ADR-094/095).
 
 Worker init 4 получает confirmed cells, sparse styles, retired IDs, activation
 floors, last axis change marker и необязательный CalculationContext. Формула

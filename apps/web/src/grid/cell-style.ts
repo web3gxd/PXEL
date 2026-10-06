@@ -9,20 +9,23 @@ export function drawCell(
   width: number,
   height: number,
   numeric: boolean,
+  overflowWidth = width,
 ) {
   context.save();
   context.beginPath();
-  context.rect(x + 1, y + 1, width - 2, height - 2);
+  const align = style.horizontal === 'general' ? (numeric ? 'right' : 'left') : style.horizontal;
+  const canOverflow = style.text_overflow === 'overflow' && !numeric && align === 'left';
+  const paintWidth = canOverflow ? Math.max(width, overflowWidth) : width;
+  context.rect(x + 1, y + 1, paintWidth - 2, height - 2);
   context.clip();
   context.font = canvasFont(style);
   context.fillStyle = colorCss(style.font_color);
-  const align = style.horizontal === 'general' ? (numeric ? 'right' : 'left') : style.horizontal;
   context.textAlign = align;
   context.textBaseline = 'top';
   const lineHeight = (style.font_size_hundredth_points / 75) * 1.2;
   const lines: string[] = [];
   const limit = Math.max(1, Math.ceil((height - 4) / lineHeight));
-  if (style.wrap) {
+  if (style.text_overflow === 'wrap') {
     let line = '';
     // Only visible lines are measured; long cells cannot cause unbounded wrapping.
     for (const point of text) {

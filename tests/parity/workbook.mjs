@@ -170,7 +170,7 @@ const contextTemplate = {
   utc_offset_minutes: 180,
   civil_day_since_unix_epoch: 1,
   random_seed: '01'.repeat(32),
-  engine_version: 'pxel-formula-0.14.0',
+  engine_version: 'pxel-formula-0.16.0',
   compatibility_profile: 'pxel-excel-subset-v1',
   reason: 'explicit',
 };

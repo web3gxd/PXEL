@@ -196,7 +196,12 @@ impl AxisHistory {
     ) {
         if matches!(
             operation,
-            Operation::MoveRange { .. } | Operation::MoveCompensation { .. }
+            Operation::MoveRange { .. }
+                | Operation::MoveCompensation { .. }
+                | Operation::CellBatchWrite {
+                    intent: CellBatchIntent::MoveRange { .. },
+                    ..
+                }
         ) {
             self.relocation_floor = book.version();
         }
@@ -509,6 +514,40 @@ mod tests {
         let prepared = history.prepare(&candidate, &operation);
         history.publish(&candidate, &operation, prepared);
         *book = candidate;
+        Ok(())
+    }
+    #[test]
+    fn normalized_move_advances_formula_binding_relocation_floor() -> ResultTest {
+        let (mut book, mut history, origin) = fixture()?;
+        let next = book.candidate(
+            &Operation::SetCellValue {
+                address: origin,
+                value: CellValue::Number(1.0),
+            },
+            DocumentVersion::new(2)?,
+        )?;
+        let operation = Operation::CellBatchWrite {
+            intent: CellBatchIntent::MoveRange {
+                source: origin,
+                destination: CellAddress {
+                    column: seed()?.columns[1],
+                    ..origin
+                },
+                rows: 1,
+                columns: 1,
+            },
+            content_writes: Vec::new(),
+            style_writes: Vec::new(),
+            undoes: None,
+            undoes_version: None,
+        };
+        history.publish(&next, &operation, None);
+        book = next;
+
+        assert!(matches!(
+            history.bind("=A1", &book, origin, DocumentVersion::new(1)?),
+            Err(SessionError::SourceVersionChanged)
+        ));
         Ok(())
     }
     fn axis_edit(

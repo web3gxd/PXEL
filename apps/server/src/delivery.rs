@@ -8,7 +8,7 @@ use tokio::sync::{Mutex, RwLock, watch};
 /// Process-local fencing for document payload sends and ACL mutations.
 /// A future distributed leader must replace this with cross-process fencing.
 pub struct DeliveryGate {
-    pub lock: RwLock<()>,
+    pub lock: Arc<RwLock<()>>,
     changes: watch::Sender<u64>,
 }
 
@@ -16,7 +16,7 @@ impl DeliveryGate {
     fn new() -> Self {
         let (changes, _) = watch::channel(0);
         Self {
-            lock: RwLock::new(()),
+            lock: Arc::new(RwLock::new(())),
             changes,
         }
     }
@@ -27,7 +27,14 @@ impl DeliveryGate {
 
     /// The caller holds the write lock until the durable transaction commits.
     pub fn committed_epoch(&self, epoch: u64) {
-        self.changes.send_replace(epoch);
+        self.changes.send_if_modified(|current| {
+            if epoch > *current {
+                *current = epoch;
+                true
+            } else {
+                false
+            }
+        });
     }
 }
 
@@ -52,6 +59,22 @@ impl DeliveryGates {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn duplicate_and_delayed_epochs_do_not_close_new_guest_subscriptions()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let gate = DeliveryGate::new();
+        gate.committed_epoch(4);
+        let mut changes = gate.watch();
+        gate.committed_epoch(4);
+        gate.committed_epoch(3);
+        assert!(!changes.has_changed()?);
+        gate.committed_epoch(5);
+        changes.changed().await?;
+        assert_eq!(*changes.borrow_and_update(), 5);
+        assert!(!changes.has_changed()?);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn mutation_waits_for_inflight_send_and_notifies_current_subscriber()
