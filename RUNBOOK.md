@@ -7564,3 +7564,7 @@ auth fixture без согласованного keyring получила genera
 Это подготовка публичного XLSX import. Hard CPU/memory caps, filesystem/network
 denial, malware policy, browser preview/selection/publication и остальные девять
 шагов остаются открытыми. OS sandbox этим изменением не заявляется.
+
+После commit07961b4/rebase main (up to date): real child CLI5/5 повторно PASS,
+fmt, strict default-feature server Clippy и docs Prettier PASS. Исходники после
+проверок не менялись; добавлена только запись результатов.
