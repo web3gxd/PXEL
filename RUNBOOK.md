@@ -50,6 +50,15 @@ Double-click вкладки открывает существующий rename d
   прочие55 прошли, включая export/guest privacy, разные размеры/themes,
   sparse style/copy/cut/axis-history и concurrent foreign style conflict.
 
+После rebase повторно прошли domain merge4/4, codec71/71, PG journal2/2,
+workspace Clippy/fmt. UI rerun13/14 выявил нестабильный hover в новом тесте:
+асинхронный banner сдвигал цель. Keyboard activation устранила потерю hover,
+но раздельные boundingBox давали несогласованные координаты (5/6 повторов).
+Геометрия veil и grid теперь читается атомарно одним evaluate; повторный
+reveal regression6/6 на DPR1/2 и lint/typecheck прошли. Это изменение теста,
+не ослабление проверок width/height/position/clipping.
+Финальный combined UI/merge rerun после rebase:14/14 green на DPR1/2 (56.4s).
+
 Read-only review codec/domain/journal/inverse и собственная проверка пяти
 осей качества не выявили оставшихся замечаний. Перед применением миграции
 сделан ignored pg_dump latest-before-merge-change.dump. Обновлён локальный

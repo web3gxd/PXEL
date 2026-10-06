@@ -66,21 +66,27 @@ test('revealing a long value keeps its veil inside the cell, including partial s
   await page.mouse.move(20, 20);
   const veil = page.getByRole('button', { name: 'Раскрыть данные A1', exact: true });
   await expect(veil).toBeVisible();
-  const hidden = await veil.boundingBox();
-  const hiddenArea = await page.locator('.grid-scroll').boundingBox();
-  expect(hidden).not.toBeNull();
-  await veil.hover();
+  const geometry = (target: typeof veil) =>
+    target.evaluate((element) => {
+      const cell = element.getBoundingClientRect();
+      const area = document.querySelector('.grid-scroll')!.getBoundingClientRect();
+      return { x: cell.x - area.x, y: cell.y - area.y, width: cell.width, height: cell.height };
+    });
+  const hidden = await geometry(veil);
+  // Keyboard activation keeps the reveal focused even if an async banner
+  // changes the viewport origin while policy analysis finishes.
+  await veil.press('Enter');
   const revealed = page.getByRole('button', { name: 'Скрыть данные A1', exact: true });
   await expect(revealed.locator('.privacy-veil-value')).toHaveText(
     'long.synthetic.address@example.invalid',
   );
-  const visible = await revealed.boundingBox();
-  const visibleArea = await page.locator('.grid-scroll').boundingBox();
-  expect(visible).not.toBeNull();
-  expect(visible!.width).toBeCloseTo(hidden!.width, 1);
-  expect(visible!.height).toBeCloseTo(hidden!.height, 1);
-  expect(visible!.x - visibleArea!.x).toBeCloseTo(hidden!.x - hiddenArea!.x, 1);
-  expect(visible!.y - visibleArea!.y).toBeCloseTo(hidden!.y - hiddenArea!.y, 1);
+  const visible = await geometry(revealed);
+  expect(visible.width).toBeCloseTo(hidden.width, 1);
+  expect(visible.height).toBeCloseTo(hidden.height, 1);
+  expect(visible.x).toBeCloseTo(hidden.x, 1);
+  expect(visible.y).toBeCloseTo(hidden.y, 1);
+  await revealed.press('Escape');
+  await page.locator('.grid-scroll').focus();
   await page.mouse.move(20, 20);
   await page.locator('.grid-scroll').evaluate((element) => {
     element.scrollLeft = 56;
@@ -88,7 +94,7 @@ test('revealing a long value keeps its veil inside the cell, including partial s
   const partial = page.getByRole('button', { name: 'Раскрыть данные A1', exact: true });
   await expect.poll(async () => (await partial.boundingBox())?.width).toBeLessThan(60);
   const clipped = await partial.boundingBox();
-  await partial.hover();
+  await partial.press('Enter');
   const clippedReveal = await page
     .getByRole('button', { name: 'Скрыть данные A1', exact: true })
     .boundingBox();
