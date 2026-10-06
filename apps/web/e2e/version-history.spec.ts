@@ -1,3 +1,4 @@
+import { selectValue } from './select';
 import { editorButton, editorTrigger } from './editor-menu';
 import { createBookFromUi } from './create-book';
 import { expect, test, type Page } from '@playwright/test';
@@ -83,14 +84,14 @@ test('owner activity historical formula results structural diff and untouched Un
   await dialog.getByRole('button', { name: 'Сравнить версии', exact: true }).click();
   const comparison = dialog.getByRole('region', { name: 'Сравнение версий' });
   await expect(comparison).toContainText('Ссылки формул сравниваются');
-  await comparison.getByLabel('Тип изменений').selectOption('formula');
+  await selectValue(comparison.getByLabel('Тип изменений'), 'formula');
   await expect(comparison).toContainText('Ссылка изменилась');
   await expect(comparison).toContainText('=(A1*2)');
   await expect(comparison).toContainText('=(A2*2)');
-  await comparison.getByLabel('Тип изменений').selectOption('calculated');
+  await selectValue(comparison.getByLabel('Тип изменений'), 'calculated');
   await expect(comparison.locator('.diff-before')).toContainText('14');
   await expect(comparison.locator('.diff-after')).toContainText('16');
-  await comparison.getByLabel('Тип изменений').selectOption('style');
+  await selectValue(comparison.getByLabel('Тип изменений'), 'style');
   await expect(comparison).toContainText('font_bold');
   await expect(comparison.locator('.diff-before')).toContainText('false');
   await expect(comparison.locator('.diff-after')).toContainText('true');

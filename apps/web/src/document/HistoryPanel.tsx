@@ -1,3 +1,4 @@
+import { Select, SelectOption } from '../ui/Select';
 import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../sharing/Modal';
 import { boundedJson } from '../sharing/api';
@@ -300,20 +301,21 @@ export function HistoryPanel({
             <h3>Версия {historical.projection.version} · Только чтение</h3>
             <label>
               Исторический лист
-              <select
+              <Select
+                aria-label="Исторический лист"
                 value={sheetIndex}
-                onChange={(e) => {
-                  setSheetIndex(Number(e.target.value));
+                onValueChange={(e) => {
+                  setSheetIndex(Number(e));
                   setRowPage(0);
                   setColumnPage(0);
                 }}
               >
                 {historical.projection.sheets.map((s, i) => (
-                  <option key={s.id} value={i}>
+                  <SelectOption key={s.id} value={i}>
                     {s.name}
-                  </option>
+                  </SelectOption>
                 ))}
-              </select>
+              </Select>
             </label>
             <p>
               Закреплено строк: {sheet.frozen_rows ?? 0}. Объединений: {sheet.merges?.length ?? 0}.
@@ -432,20 +434,21 @@ export function HistoryPanel({
             )}
             <label>
               Тип изменений
-              <select
+              <Select
+                aria-label="Тип изменений"
                 value={filter}
-                onChange={(e) => {
-                  setFilter(e.target.value);
+                onValueChange={(e) => {
+                  setFilter(e);
                   setDiffPage(0);
                 }}
               >
-                <option value="all">Все изменения</option>
+                <SelectOption value="all">Все изменения</SelectOption>
                 {diffCategories.map((c) => (
-                  <option key={c} value={c}>
+                  <SelectOption key={c} value={c}>
                     {categories[c]}
-                  </option>
+                  </SelectOption>
                 ))}
-              </select>
+              </Select>
             </label>
             <p role="status">
               Показано {Math.min(diffPage * 100 + 100, filtered.length) - diffPage * 100} из{' '}

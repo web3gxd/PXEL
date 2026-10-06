@@ -1,3 +1,107 @@
+## 2026-10-06 — пустые книги, выбор скроллбара и custom dropdowns
+
+Ветка feat/scrollbars-dropdowns; изучены roadmap, architecture и ADR-091/116/117.
+Инструменты/зависимости закреплены; новых зависимостей нет. ADR-122 фиксирует
+выбор smart/ordinary в Инструменты / Настройки и сохранение в браузере. Обычная
+шкала всегда линейная; смарт сохраняет прежнюю adaptive модель. Переключение
+не меняет offset или версию книги. Wheel/touchpad/keyboard остаются линейными.
+Исправлена stale used-range модель: incremental commits меняют confirmed map,
+а sheet.cells остаётся HTTP snapshot. Теперь cached projection учитывает текущие
+confirmed ячейки, sheet identity и committed version; pending/results не входят.
+Бегунки уменьшены до 8 px, радиус 3 px; 32 px minimum применяется только вдоль
+оси, устраняя прежнюю фактическую ширину вертикального бегунка 32 px.
+
+Новый ui/Select заменяет все native selects в StyleToolbar, ViewPanel, SortPanel,
+HistoryPanel, PxelPanel и DisclosurePanel. Опции имеют собственный listbox в
+HTML popover/top layer, оставаясь потомками исходного dialog и его disclosure
+boundary. Есть клавиатура, typeahead, Escape/Tab, outside dismissal, disabled
+guards и viewport placement. Опции создаются в DOM только при открытии.
+Настройки размещены в ShortcutPanel; App добавляет прямой пункт меню.
+E2E helpers используют настоящий popup вместо native selectOption.
+
+По явному ответу пользователя «В обеих базах» выполнена одноразовая очистка.
+Перед изменениями сняты приватные pg_dump archives и проверены pg_restore --list:
+old — 151246133 bytes, current — 96301168 bytes. Каталог private ACL:
+C:/projects/PXEL/.local/empty-books-20261006 (перенесён в основную папку,
+чтобы ignored backups сохранились независимо от worktree).
+Содержимое книг и credentials в отчёты не выводились.
+Пустота проверена по восстановленному authored state: нет cells/nondefault styles,
+merges/comment events. current: 3395 checked, 1647 empty, 1748 retained, 0 unreadable.
+old: 12360 checked, 1829 empty, 10523 retained, 8 unsupported legacy records retained.
+Первоначальный encrypted reader не подходит plaintext legacy БД; его ошибки
+ничего не меняли. Повторный legacy reader проверял payload checksums, canonical
+hashes, identities и replay/head versions. Миграция plaintext базы не запускалась.
+
+Так как product delete отсутствует и journals immutable, 3476 проверенных пустых
+книг переведены в существующий quarantined state: из активной библиотеки убраны,
+история/ключи/blobs сохранены для восстановления. Это НЕ физическое удаление.
+UPDATE выполнены в synchronous transactions под exclusive maintenance fence,
+с CAS head_version и increment access_epoch; current повторно проверяет comments.
+После commit обеих БД candidates_still_active=0. Итог active/quarantined:
+current 1748/1647, old 10531/1829. Первая COPY-команда имела пробел после end
+marker и полностью rolled back; исправленный повтор прошёл. Immutable triggers,
+existing checksums/migration metadata, .env и secrets не менялись. Временный Rust
+operator reader собран --locked; исходник и scripts сохранены только в ignored
+.local, production command/API не добавлялся.
+
+Первоначальный ordinary regression test был RED; после реализации прошёл.
+280/280 frontend units, typecheck, lint и production build прошли на финальном
+коде перед rebase. Сохраняется существующий build warning chunk > 500 kB.
+Первый Chromium run — 3/5: обнаружил stale mapping; второй failure был string
+version + 1 в новом test (исправлен Number без ослабления проверки одного commit).
+После исправления новый suite прошёл 10/10 DPR1/DPR2. Расширенный первый run
+остановлен: legacy getByLabel находил и combobox, и equally named listbox;
+helper теперь явно ограничивает role=combobox. Финальный последовательный
+combined browser run: 34/34 DPR1/DPR2, 7.4 min. Предыдущий expanded run упёрся
+в общий 30-second test budget длинных сценариев; финальный budget 90 seconds,
+condition assertions не ослаблялись. Дополнительный shell run обнаружил старое
+имя меню «Вставка» в test: актуальное «Ячейки»; locator исправлен,
+повторный shell run 4/4 прошёл, включая DOM budget и keyboard scrolling.
+Снимки popup 390/768/1440 получены; 390 DPR1 и 1440 DPR2 визуально просмотрены.
+Rebase на main 2a2a4cd сохранил AssistantPanel/FillHandle; конфликты касались
+только imports CanvasGrid и двух новых RUNBOOK entries, обе записи сохранены.
+На объединённом коде повторены Vitest 289/289, lint, typecheck, production build,
+Prettier затронутых файлов и git diff --check — прошли. Все пять осей review
+проверены: прежние action/capability guards сохранены, HTML не инжектируется,
+новых внешних данных или логов содержимого нет. Confirmed used-range cache
+изолирован от pending/results; dropdown options не раздувают закрытый DOM.
+Единый browser run после rebase: scrollbar-select + shell + smart-fill,
+28/28 DPR1/DPR2, 5.2 min, retries=0. Проверены совместно helper/autofill,
+popup/settings, DOM budget и keyboard scroll. Это адресный suite, не полный E2E.
+Временные backend/Vite на 18080/15173 остановлены. Первая DROP попытка
+попала в прежний PG instance, где fixture отсутствует, и ничего не изменила;
+после выбора правильного локального instance созданная тестовая база
+pxel_scrollbars_20261006 удалена. Рабочие базы этим cleanup не затрагивались.
+Перед merge main продвинулся до a1b6484 (axis resize). Второй rebase сохранил
+AxisLayout geometry overlay в SmartScrollbar/axisScrollMapping, добавив режим
+поверх прежней геометрии. Used-range content cache остаётся confirmed-only.
+Номер нашего ADR изменён на 122, чтобы сохранить уже слитый resize ADR-119.
+После второго rebase Vitest 293/293, lint, typecheck и build прошли.
+Ignored dependency links восстановлены offline/frozen install в основной папке;
+версии и lockfile не менялись. Для повторного browser check создан тот же
+изолированный пустой fixture; рабочие базы не использовались.
+Последний browser run был прерван служебным обновлением контекста; результат
+не засчитывался. Оно также остановило локальный PostgreSQL 59445. Прежний
+crypto-verification cluster восстановлен с прежними fsync/full_page_writes/
+synchronous_commit; accepting connections проверено. Контроль рабочих БД после
+recovery: current active/quarantined 1748/1647, old 10531/1829; SHA256 обоих
+приватных dumps совпал с исходным. Прерванный edit ADR восстановлен из Git,
+все изменённые текстовые файлы проверены на NUL; content не утрачен.
+Автоматическая проверка отклонила фоновый запуск app-стенда; вместо него
+backend/Vite запущены в отслеживаемых foreground exec sessions.
+Повтор после recovery обнаружил race тестового setup: paste отправлялся до
+готовности подключения и оставлял A1 blank. Новый fixture ожидает Canvas ready
+и статус Подключено перед действиями; product код не менялся, assertions
+содержимого/версии/offset не ослаблены. Незавершённый run остановлен;
+lint после изменения setup прошёл.
+Финальный единый run на актуальном main a1b6484: resize + scrollbar-select +
+shell, 18/18 DPR1/DPR2, 1.8 min, retries=0. Оба временных app процесса
+остановлены, fixture DB повторно удалена; восстановленный локальный PG оставлен
+работать. Основная папка чистая; новая зависимость или lockfile change отсутствуют.
+
+Linux/Compose/remote CI, production deployment, другие browser engines и
+ручной NVDA остаются открытыми gates.
+
 ## 2026-10-06 — отдельный локальный помощник и протягивание диапазона
 
 Ветка `feat/smart-fill`; перед работой изучены актуальные roadmap, architecture,

@@ -9,11 +9,12 @@ import type { Position } from '../document/store';
 import { parseHtmlTable } from '../clipboard/tabular';
 import { readInternalClipboard, writeSelectionClipboard } from '../clipboard/outbound';
 import { SmartScrollbar } from './SmartScrollbar';
-import { axisScrollMapping } from './scrollbar';
+import { axisScrollMapping, confirmedScrollSheet } from './scrollbar';
 import { PrivacyVeil } from './PrivacyVeil';
 import { visiblePrivacyRect } from './privacy-geometry';
 import { FillHandle } from './FillHandle';
 import { AssistantPanel } from '../assistant/AssistantPanel';
+import { useScrollbarMode } from '../ui/preferences';
 
 export function CanvasGrid({
   document,
@@ -28,6 +29,7 @@ export function CanvasGrid({
   onMarkdownPaste?: (text: string, file: boolean) => Promise<boolean>;
   importPreview?: { origin: Position; rows: number; columns: number } | undefined;
 }) {
+  const scrollbarMode = useScrollbarMode();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -91,22 +93,25 @@ export function CanvasGrid({
   const rowY = (row: number, top = scroll.top) =>
     (rowAxis?.offsetAt(row) ?? row * GRID.rowHeight) - (row < frozenCount ? 0 : top);
   const rowAt = (y: number, top: number) => rowAxis?.indexAt(y + (y < frozenHeight ? 0 : top)) ?? 0;
+  const scrollSheet = document && confirmedScrollSheet(document);
   const rowScrollMapping =
-    document?.sheet && rowAxis
+    scrollSheet && rowAxis
       ? axisScrollMapping(
-          document.sheet,
+          scrollSheet,
           'row',
           rowAxis,
           viewportSize.height - GRID.columnHeaderHeight,
+          scrollbarMode,
         )
       : undefined;
   const columnScrollMapping =
-    document?.sheet && columnAxis
+    scrollSheet && columnAxis
       ? axisScrollMapping(
-          document.sheet,
+          scrollSheet,
           'column',
           columnAxis,
           viewportSize.width - GRID.rowHeaderWidth,
+          scrollbarMode,
         )
       : undefined;
 
@@ -705,6 +710,7 @@ export function CanvasGrid({
       {document?.sheet && rowAxis && rowScrollMapping && (
         <SmartScrollbar
           axis="row"
+          mode={scrollbarMode}
           metrics={rowAxis}
           mapping={rowScrollMapping}
           offset={scroll.top}
@@ -717,6 +723,7 @@ export function CanvasGrid({
       {document?.sheet && columnAxis && columnScrollMapping && (
         <SmartScrollbar
           axis="column"
+          mode={scrollbarMode}
           metrics={columnAxis}
           mapping={columnScrollMapping}
           offset={scroll.left}

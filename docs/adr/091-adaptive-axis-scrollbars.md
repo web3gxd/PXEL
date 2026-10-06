@@ -2,6 +2,10 @@
 
 **Status:** Accepted; locally verified (2026-10-02)
 
+2026-10-06: ADR-122 adds an explicit smart/ordinary preference, live confirmed
+used-range cache invalidation and narrower thumbs. The adaptive formula and
+linear wheel/keyboard semantics below remain unchanged.
+
 ## Context
 
 The viewport is backed by stable axis IDs and variable-size prefix metrics. The

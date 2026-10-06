@@ -1,3 +1,4 @@
+import { selectValue } from './select';
 import { editorButton } from './editor-menu';
 import { createBookFromUi } from './create-book';
 import { copySelection, cutSelection } from './clipboard';
@@ -423,7 +424,7 @@ test('styled blank renders real Canvas fill and survives reload Undo Redo and co
   await write(page, '7.25');
   await select(page, 0, 0);
   const formatted = await committed(page, () =>
-    page.getByLabel('Числовой формат', { exact: true }).selectOption('percent2'),
+    selectValue(page.getByLabel('Числовой формат', { exact: true }), 'percent2'),
   );
   await expect(page.getByTestId('active-cell')).toHaveText('A1: 725.00%');
   await expect(page.getByRole('textbox', { name: 'Значение ячейки' })).toHaveValue('7.25');
@@ -456,7 +457,7 @@ test('overflow text paints across blank cells and respects blockers through relo
   await write(page, value);
   await select(page, 0, 0);
   const styled = await committed(page, () =>
-    page.getByRole('combobox', { name: 'Режим текста' }).selectOption('overflow'),
+    selectValue(page.getByRole('combobox', { name: 'Режим текста' }), 'overflow'),
   );
   const row = styled.sheets[0]!.rows[0]!,
     column = styled.sheets[0]!.columns[0]!;

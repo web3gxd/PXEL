@@ -2,6 +2,9 @@
 
 Status: ACCEPTED — implemented; local verification recorded in RUNBOOK.
 
+2026-10-06: ADR-122 replaces all native select controls with the shared custom
+combobox/listbox and adds Tools / Settings with the scrollbar-mode preference.
+
 The editor uses a compact title row, a seven-group disclosure navigation and one
 scrollable formatting toolbar. Groups are File, Edit, View, Cells, Format, Data
 and Tools. Existing actions keep their capability/pending/connection guards and

@@ -21,6 +21,7 @@ const groups: Record<string, string> = {
   'Проверка констант': 'Инструменты',
   Профайлер: 'Инструменты',
   'Горячие клавиши': 'Инструменты',
+  Настройки: 'Инструменты',
 };
 
 export async function editorButton(page: Page, label: string) {

@@ -45,7 +45,7 @@ test('real binary handshake, viewport Canvas and keyboard scroll', async ({ page
   });
   const viewport = page.getByRole('region', { name: 'Область таблицы' });
   await page.getByRole('button', { name: 'Шифрование данных', exact: true }).focus();
-  for (const name of ['Файл', 'Правка', 'Вид', 'Вставка', 'Формат', 'Данные', 'Инструменты']) {
+  for (const name of ['Файл', 'Правка', 'Вид', 'Ячейки', 'Формат', 'Данные', 'Инструменты']) {
     await page.keyboard.press('Tab');
     await expect(page.getByRole('button', { name, exact: true })).toBeFocused();
   }

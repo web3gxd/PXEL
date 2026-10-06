@@ -1,0 +1,118 @@
+.custom-select {
+  display: inline-flex;
+  min-width: 0;
+  vertical-align: middle;
+}
+.custom-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius, 6px);
+  background: var(--surface-raised);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.custom-select-trigger > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.custom-select-trigger > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.custom-select-trigger:not(:disabled):hover {
+  background: var(--control-hover);
+}
+.custom-select-trigger[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--control-pressed);
+}
+.custom-select-trigger:disabled {
+  opacity: 0.5;
+}
+.custom-select-list {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 4px;
+  width: max-content;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius, 6px);
+  background: var(--surface-raised);
+  color: var(--ink);
+  box-shadow: var(--popover-shadow);
+  font:
+    13px 'Segoe UI',
+    'Aptos',
+    sans-serif;
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
+}
+.custom-select-list [role='option'] {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.custom-select-list [role='option'] > span {
+  overflow-wrap: anywhere;
+}
+.custom-select-list [role='option'] > svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.custom-select-list [aria-selected='true'] {
+  color: var(--accent);
+}
+.custom-select-list .is-active {
+  background: var(--control-hover);
+}
+.custom-select-list [aria-disabled='true'] {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+}
+.modal-body > label > .custom-select {
+  display: flex;
+  width: 100%;
+}
+.modal-body > label > .custom-select > button {
+  width: 100%;
+}
+.workspace .custom-select-trigger.style-select {
+  display: inline-flex;
+  padding: 4px 6px;
+  background-image: none;
+}
+.scrollbar-setting {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+.scrollbar-setting p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (forced-colors: active) {
+  .custom-select-list .is-active {
+    outline: 2px solid Highlight;
+  }
+  .custom-select-list [aria-selected='true'] {
+    color: Highlight;
+  }
+}

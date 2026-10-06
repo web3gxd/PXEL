@@ -1,11 +1,26 @@
 import { isDefaultStyle } from '../document/styles';
-import type { Sheet } from '../document/store';
+import type { DocumentStore, Sheet } from '../document/store';
+import type { ScrollbarMode } from '../ui/preferences';
 import { type AxisLayout, AxisScrollMapping, robustUsedEnd } from './viewport';
 
 export type Axis = 'row' | 'column';
 
 type UsedEnds = { rows?: number; columns?: number };
 const usedEndCache = new WeakMap<Sheet, UsedEnds>();
+type ScrollSource = Pick<DocumentStore, 'sheet' | 'projection' | 'confirmedCells'>;
+const confirmedCache = new WeakMap<ScrollSource, { sheet: Sheet; version: string; value: Sheet }>();
+
+/** Live canonical writes live in confirmed, while sheet.cells is the last HTTP snapshot. */
+export function confirmedScrollSheet(document: ScrollSource): Sheet | undefined {
+  const sheet = document.sheet;
+  const version = document.projection?.version;
+  if (!sheet || version === undefined) return undefined;
+  const cached = confirmedCache.get(document);
+  if (cached?.sheet === sheet && cached.version === version) return cached.value;
+  const value = { ...sheet, cells: document.confirmedCells(sheet) };
+  confirmedCache.set(document, { sheet, version, value });
+  return value;
+}
 
 function usedEnds(sheet: Sheet): UsedEnds {
   const cached = usedEndCache.get(sheet);
@@ -43,9 +58,11 @@ export function axisScrollMapping(
   axis: Axis,
   metrics: AxisLayout,
   viewportSize: number,
+  mode: ScrollbarMode = 'smart',
 ) {
   const viewport = Math.max(0, Number.isFinite(viewportSize) ? viewportSize : 0);
   const totalOffset = Math.max(0, metrics.totalSize - viewport);
+  if (mode === 'ordinary') return new AxisScrollMapping(totalOffset, 0);
   const end = usedEnds(sheet)[axis === 'row' ? 'rows' : 'columns'];
   const usedEnd = end === undefined ? 0 : metrics.offsetAt(end + 1);
   const usedOffset = Math.max(0, Math.min(totalOffset, usedEnd - viewport));

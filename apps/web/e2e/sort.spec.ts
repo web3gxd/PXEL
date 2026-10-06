@@ -1,3 +1,4 @@
+import { selectValue } from './select';
 import { editorButton, editorTrigger } from './editor-menu';
 import { createBookFromUi } from './create-book';
 import { expect, test, type Page } from '@playwright/test';
@@ -76,13 +77,13 @@ test('confirmed multikey sort moves formulas and styles in one commit and surviv
   const dialog = page.getByRole('dialog', { name: 'Сортировка диапазона' });
   await expect(dialog.getByRole('button', { name: 'Сортировать', exact: true })).toBeDisabled();
   await dialog.getByLabel('Последняя строка', { exact: true }).fill('4');
-  await dialog.getByLabel('Последний столбец', { exact: true }).selectOption('2');
+  await selectValue(dialog.getByLabel('Последний столбец', { exact: true }), '2');
   await dialog.getByLabel('Есть заголовок', { exact: true }).check();
   await dialog.getByLabel('Строка заголовка', { exact: true }).fill('1');
-  await dialog.getByLabel('Столбец сортировки 1', { exact: true }).selectOption('2');
+  await selectValue(dialog.getByLabel('Столбец сортировки 1', { exact: true }), '2');
   await dialog.getByRole('button', { name: 'Добавить ключ', exact: true }).click();
-  await dialog.getByLabel('Столбец сортировки 2', { exact: true }).selectOption('1');
-  await dialog.getByLabel('Направление сортировки 2', { exact: true }).selectOption('desc');
+  await selectValue(dialog.getByLabel('Столбец сортировки 2', { exact: true }), '1');
+  await selectValue(dialog.getByLabel('Направление сортировки 2', { exact: true }), 'desc');
   await dialog.getByRole('checkbox', { name: /^Подтверждаю границы/ }).check();
   await dialog.getByRole('button', { name: 'Сортировать', exact: true }).click();
   await expect
@@ -124,13 +125,14 @@ test('range suggestion requires confirmation and sorting includes personally hid
   await (await editorButton(page, 'Вид листа')).click();
   const view = page.getByRole('dialog', { name: 'Вид листа' });
   await view.getByLabel('Последняя строка', { exact: true }).fill('4');
-  await view.getByLabel('Последний столбец', { exact: true }).selectOption('1');
+  await selectValue(view.getByLabel('Последний столбец', { exact: true }), '1');
   await view.getByLabel('Есть заголовок', { exact: true }).check();
   await view.getByRole('button', { name: 'Добавить условие', exact: true }).click();
-  await view
-    .getByLabel('Столбец условия 1', { exact: true })
-    .selectOption((await state(page)).sheets[0]!.columns[1]!);
-  await view.getByLabel('Тип условия 1', { exact: true }).selectOption('text');
+  await selectValue(
+    view.getByLabel('Столбец условия 1', { exact: true }),
+    (await state(page)).sheets[0]!.columns[1]!,
+  );
+  await selectValue(view.getByLabel('Тип условия 1', { exact: true }), 'text');
   await view.getByLabel('Значение условия 1', { exact: true }).fill('keep');
   await view.getByRole('button', { name: 'Сохранить фильтр', exact: true }).click();
   await expect(view.getByRole('status').last()).toContainText('Скрыто строк: 1');

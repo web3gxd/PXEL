@@ -1,3 +1,4 @@
+import { Select, SelectOption } from '../ui/Select';
 import { useState } from 'react';
 import { Modal } from '../sharing/Modal';
 import { columnLabel } from '../grid/viewport';
@@ -161,31 +162,31 @@ export function ViewPanel({ document, onClose }: { document: DocumentStore; onCl
           </label>
           <label>
             Первый столбец{' '}
-            <select
+            <Select
               aria-label="Первый столбец"
               value={left}
-              onChange={(e) => setLeft(Number(e.target.value))}
+              onValueChange={(e) => setLeft(Number(e))}
             >
               {sheet.columns.map((id, i) => (
-                <option key={id} value={i}>
+                <SelectOption key={id} value={i}>
                   {columnLabel(i)}
-                </option>
+                </SelectOption>
               ))}
-            </select>
+            </Select>
           </label>
           <label>
             Последний столбец{' '}
-            <select
+            <Select
               aria-label="Последний столбец"
               value={right}
-              onChange={(e) => setRight(Number(e.target.value))}
+              onValueChange={(e) => setRight(Number(e))}
             >
               {sheet.columns.map((id, i) => (
-                <option key={id} value={i}>
+                <SelectOption key={id} value={i}>
                   {columnLabel(i)}
-                </option>
+                </SelectOption>
               ))}
-            </select>
+            </Select>
           </label>
         </div>
         <p>
@@ -224,31 +225,29 @@ export function ViewPanel({ document, onClose }: { document: DocumentStore; onCl
               <legend>Условие {index + 1} · AND</legend>
               <label>
                 Столбец{' '}
-                <select
+                <Select
                   aria-label={`Столбец условия ${index + 1}`}
                   value={condition.column_id}
-                  onChange={(e) =>
+                  onValueChange={(e) =>
                     setConditions((previous) =>
-                      previous.map((c, i) =>
-                        i === index ? { ...c, column_id: e.target.value } : c,
-                      ),
+                      previous.map((c, i) => (i === index ? { ...c, column_id: e } : c)),
                     )
                   }
                 >
                   {columns.map((c) => (
-                    <option key={c.id} value={c.id}>
+                    <SelectOption key={c.id} value={c.id}>
                       {columnLabel(c.index)}
-                    </option>
+                    </SelectOption>
                   ))}
-                </select>
+                </Select>
               </label>
               <label>
                 Тип{' '}
-                <select
+                <Select
                   aria-label={`Тип условия ${index + 1}`}
                   value={predicate.kind}
-                  onChange={(e) => {
-                    const kind = e.target.value;
+                  onValueChange={(e) => {
+                    const kind = e;
                     change(
                       index,
                       kind === 'text'
@@ -261,24 +260,24 @@ export function ViewPanel({ document, onClose }: { document: DocumentStore; onCl
                     );
                   }}
                 >
-                  <option value="values" disabled={values.length > 500}>
+                  <SelectOption value="values" disabled={values.length > 500}>
                     Выбранные значения
-                  </option>
-                  <option value="blank">Пустые</option>
-                  <option value="nonblank">Непустые</option>
-                  <option value="text">Текст</option>
-                  <option value="number">Числа</option>
-                </select>
+                  </SelectOption>
+                  <SelectOption value="blank">Пустые</SelectOption>
+                  <SelectOption value="nonblank">Непустые</SelectOption>
+                  <SelectOption value="text">Текст</SelectOption>
+                  <SelectOption value="number">Числа</SelectOption>
+                </Select>
               </label>
               {(predicate.kind === 'text' || predicate.kind === 'number') && (
                 <>
                   <label>
                     Сравнение{' '}
-                    <select
+                    <Select
                       aria-label={`Сравнение условия ${index + 1}`}
                       value={predicate.operator}
-                      onChange={(e) =>
-                        change(index, { ...predicate, operator: e.target.value } as FilterPredicate)
+                      onValueChange={(e) =>
+                        change(index, { ...predicate, operator: e } as FilterPredicate)
                       }
                     >
                       {(predicate.kind === 'text'
@@ -296,11 +295,11 @@ export function ViewPanel({ document, onClose }: { document: DocumentStore; onCl
                             ['lte', '≤'],
                           ]
                       ).map(([value, label]) => (
-                        <option key={value} value={value}>
+                        <SelectOption key={value} value={value}>
                           {label}
-                        </option>
+                        </SelectOption>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                   <label>
                     Значение{' '}

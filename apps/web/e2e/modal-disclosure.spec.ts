@@ -1,3 +1,4 @@
+import { selectValue } from './select';
 import { editorButton } from './editor-menu';
 import { createBookFromUi } from './create-book';
 import { expect, test, type Page } from '@playwright/test';
@@ -30,7 +31,7 @@ async function condition(page: Page, kind: 'values' | 'text') {
   await (await editorButton(page, 'Вид листа')).click();
   const dialog = page.getByRole('dialog', { name: 'Вид листа', exact: true });
   await dialog.getByRole('button', { name: 'Добавить условие', exact: true }).click();
-  await dialog.getByLabel('Тип условия 1', { exact: true }).selectOption(kind);
+  await selectValue(dialog.getByLabel('Тип условия 1', { exact: true }), kind);
   return dialog;
 }
 test('modal data copy and input cut obey policy and allowed cut persists the controlled filter value', async ({
@@ -60,7 +61,7 @@ test('modal data copy and input cut obey policy and allowed cut persists the con
   expect((await response).status()).toBe(403);
   await expect(dialog.getByRole('alert')).toContainText('Копирование запрещено');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Keep clipboard');
-  await dialog.getByLabel('Тип условия 1', { exact: true }).selectOption('text');
+  await selectValue(dialog.getByLabel('Тип условия 1', { exact: true }), 'text');
   let value = dialog.getByLabel('Значение условия 1', { exact: true });
   await value.fill('ABCDE');
   await value.press('Control+A');
@@ -132,12 +133,13 @@ test('unmapped modal text cannot issue a formula-derived scalar when anonymizati
   await grid.press('Control+Home');
   await (await editorButton(page, 'Вид листа')).click();
   const dialog = page.getByRole('dialog', { name: 'Вид листа', exact: true });
-  await dialog.getByLabel('Последний столбец', { exact: true }).selectOption('1');
+  await selectValue(dialog.getByLabel('Последний столбец', { exact: true }), '1');
   await dialog.getByRole('button', { name: 'Добавить условие', exact: true }).click();
-  await dialog
-    .getByLabel('Столбец условия 1', { exact: true })
-    .selectOption(head.sheets[0].columns[1]);
-  await dialog.getByLabel('Тип условия 1', { exact: true }).selectOption('values');
+  await selectValue(
+    dialog.getByLabel('Столбец условия 1', { exact: true }),
+    head.sheets[0].columns[1],
+  );
+  await selectValue(dialog.getByLabel('Тип условия 1', { exact: true }), 'values');
   await dialog.getByText('16', { exact: true }).evaluate((element) => {
     const range = document.createRange();
     range.selectNodeContents(element);

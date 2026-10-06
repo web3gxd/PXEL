@@ -449,35 +449,35 @@ h1 {
 .smart-scrollbar-row {
   top: 3px;
   right: 2px;
-  bottom: 15px;
-  width: 12px;
+  bottom: 12px;
+  width: 10px;
   cursor: ns-resize;
 }
 .smart-scrollbar-column {
   left: 49px;
-  right: 15px;
+  right: 12px;
   bottom: 2px;
-  height: 12px;
+  height: 10px;
   cursor: ew-resize;
 }
 .smart-scrollbar-thumb {
   position: absolute;
   display: block;
   box-sizing: border-box;
-  min-width: 32px;
-  min-height: 32px;
   border: 1px solid #fff;
-  border-radius: 999px;
+  border-radius: 3px;
   background: #82978a;
   box-shadow: 0 1px 4px #18291d35;
 }
 .smart-scrollbar-row .smart-scrollbar-thumb {
   left: 1px;
-  width: 10px;
+  width: 8px;
+  min-height: 32px;
 }
 .smart-scrollbar-column .smart-scrollbar-thumb {
   top: 1px;
-  height: 10px;
+  height: 8px;
+  min-width: 32px;
 }
 .smart-scrollbar:hover .smart-scrollbar-thumb,
 .smart-scrollbar:focus-visible .smart-scrollbar-thumb,

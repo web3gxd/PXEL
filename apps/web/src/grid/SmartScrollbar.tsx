@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type PointerEvent, type KeyboardEvent } from 'react';
 import { type AxisLayout, AxisScrollMapping, columnLabel } from './viewport';
+import type { ScrollbarMode } from '../ui/preferences';
 
 type Props = {
   axis: 'row' | 'column';
+  mode: ScrollbarMode;
   metrics: AxisLayout;
   mapping: AxisScrollMapping;
   offset: number;
@@ -12,7 +14,15 @@ type Props = {
 
 const MIN_THUMB = 32;
 
-export function SmartScrollbar({ axis, metrics, mapping, offset, viewportSize, onOffset }: Props) {
+export function SmartScrollbar({
+  axis,
+  mode,
+  metrics,
+  mapping,
+  offset,
+  viewportSize,
+  onOffset,
+}: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; grabOffset: number } | undefined>(undefined);
   const [trackLength, setTrackLength] = useState(0);
@@ -139,6 +149,7 @@ export function SmartScrollbar({ axis, metrics, mapping, offset, viewportSize, o
         aria-valuenow={Math.min(metrics.count, ariaIndex)}
         aria-valuetext={label}
         data-scroll-mode={mapping.isAdaptive ? 'adaptive' : 'linear'}
+        data-scrollbar-mode={mode}
         data-used-scroll-offset={mapping.usedOffset}
         data-scroll-limit={mapping.totalOffset}
         data-testid={`smart-scrollbar-${axis}`}

@@ -1,3 +1,4 @@
+import { Select, SelectOption } from '../ui/Select';
 import { useEffect, useState } from 'react';
 import type { DocumentStore } from '../document/store';
 import { boundedJson, listShares, type Share } from './api';
@@ -124,21 +125,26 @@ export function DisclosurePanel({
       </p>
       <label className="sharing-label">
         Политика для
-        <select value={scope} disabled={busy} onChange={(event) => setScope(event.target.value)}>
-          <option value="">Книги</option>
+        <Select
+          aria-label="Политика для"
+          value={scope}
+          disabled={busy}
+          onValueChange={(event) => setScope(event)}
+        >
+          <SelectOption value="">Книги</SelectOption>
           {shares
             .filter((share) => share.status === 'active')
             .map((share, index) => (
-              <option key={share.link_id} value={share.link_id}>
+              <SelectOption key={share.link_id} value={share.link_id}>
                 Ссылка {index + 1} ·{' '}
                 {share.permission === 'view'
                   ? 'Просмотр'
                   : share.permission === 'comment'
                     ? 'Комментарии'
                     : 'Редактирование'}
-              </option>
+              </SelectOption>
             ))}
-        </select>
+        </Select>
       </label>
       {!rules ? (
         <p role="status">Загружаем политику…</p>

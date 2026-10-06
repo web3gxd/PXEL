@@ -1,3 +1,4 @@
+import { selectValue } from './select';
 import { editorButton, editorTrigger } from './editor-menu';
 import { createBookFromUi } from './create-book';
 import { expect, test, type Page } from '@playwright/test';
@@ -79,7 +80,7 @@ test('password file UI round trip preserves formula style personal filter and cr
   expect((await (await page.request.get('/api/documents/' + id)).json()).state_hash).toBe(
     head.state_hash,
   );
-  await dialog.getByLabel('Действие').selectOption('import');
+  await selectValue(dialog.getByLabel('Действие'), 'import');
   await dialog.getByLabel('Файл .pxel').setInputFiles(path!);
   expect(
     await dialog

@@ -457,7 +457,7 @@ test('Ctrl+/ opens searchable shortcuts and bindings can be reassigned', async (
   const dialog = page.locator('dialog.command-dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('textbox', { name: 'Найти команду' })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Настроить' }).click();
+  await dialog.getByRole('button', { name: 'Настройки' }).click();
   const assign = dialog.getByRole('button', { name: 'Назначить: Полужирный' });
   await assign.click();
   await page.keyboard.press('Control+Shift+K');

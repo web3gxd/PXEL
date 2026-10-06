@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_STYLE } from '../document/styles';
-import type { Sheet } from '../document/store';
-import { axisScrollMapping } from './scrollbar';
+import type { DocumentStore, Sheet } from '../document/store';
+import { axisScrollMapping, confirmedScrollSheet } from './scrollbar';
 import { AxisMetrics } from './viewport';
 
 const sheet = (): Sheet => ({
@@ -28,6 +28,45 @@ const sheet = (): Sheet => ({
 });
 
 describe('used-range-aware scrollbar model', () => {
+  it('refreshes the used range from live confirmed cells on each committed version', () => {
+    const data = { ...sheet(), cells: [], styles: [] };
+    let cells = [] as Sheet['cells'];
+    const document: Pick<DocumentStore, 'sheet' | 'projection' | 'confirmedCells'> = {
+      sheet: data,
+      projection: { version: '1' } as DocumentStore['projection'],
+      confirmedCells: () => cells,
+    };
+    const first = confirmedScrollSheet(document)!;
+    const metrics = new AxisMetrics(data.rows, undefined, 28);
+    expect(axisScrollMapping(first, 'row', metrics, 280).isAdaptive).toBe(false);
+    cells = sheet().cells;
+    // Pending/UI redraws must keep the current canonical mapping.
+    expect(confirmedScrollSheet(document)).toBe(first);
+    document.projection = { ...document.projection!, version: '2' };
+    const committed = confirmedScrollSheet(document)!;
+    expect(committed).not.toBe(first);
+    expect(committed.cells).toBe(cells);
+    expect(axisScrollMapping(committed, 'row', metrics, 280).isAdaptive).toBe(true);
+    document.projection = { ...document.projection!, version: '3' };
+    cells = [];
+    expect(axisScrollMapping(confirmedScrollSheet(document)!, 'row', metrics, 280).isAdaptive).toBe(
+      false,
+    );
+  });
+  it('keeps ordinary mode linear on a sparse populated sheet for both axes', () => {
+    const data = sheet();
+    for (const axis of ['row', 'column'] as const) {
+      const metrics = new AxisMetrics(axis === 'row' ? data.rows : data.columns, undefined, 28);
+      const mapping = axisScrollMapping(data, axis, metrics, 280, 'ordinary');
+      expect(mapping.isAdaptive).toBe(false);
+      expect(mapping.offsetAt(0.5)).toBe(mapping.totalOffset / 2);
+      expect(mapping.positionAt(mapping.totalOffset / 2)).toBe(0.5);
+    }
+    expect(
+      axisScrollMapping(data, 'row', new AxisMetrics(data.rows, undefined, 28), 280, 'smart')
+        .isAdaptive,
+    ).toBe(true);
+  });
   it('counts values, formulas and meaningful styles but keeps distant outliers on the linear tail', () => {
     const data = sheet();
     const rows = new AxisMetrics(data.rows, undefined, 28);

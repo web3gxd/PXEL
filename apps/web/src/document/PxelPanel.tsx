@@ -1,3 +1,4 @@
+import { Select, SelectOption } from '../ui/Select';
 import { useState } from 'react';
 import { Modal } from '../sharing/Modal';
 import type { DocumentStore } from './store';
@@ -98,19 +99,20 @@ export function PxelPanel({
       {document && !document.isGuest && (
         <label>
           Действие
-          <select
+          <Select
+            aria-label="Действие"
             disabled={busy}
             value={mode}
-            onChange={(e) => {
-              setMode(e.target.value as typeof mode);
+            onValueChange={(e) => {
+              setMode(e as typeof mode);
               setComposition(undefined);
               setError('');
               setPassword('');
             }}
           >
-            <option value="export">Экспорт</option>
-            <option value="import">Импорт новой книги</option>
-          </select>
+            <SelectOption value="export">Экспорт</SelectOption>
+            <SelectOption value="import">Импорт новой книги</SelectOption>
+          </Select>
         </label>
       )}
       <p>

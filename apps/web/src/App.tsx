@@ -561,6 +561,11 @@ function SpreadsheetApp({
                           ]
                         : []),
                       {
+                        label: 'Настройки',
+                        icon: Keyboard,
+                        run: () => commands.open('settings'),
+                      },
+                      {
                         label: 'Горячие клавиши',
                         icon: Keyboard,
                         run: () => commands.open('help'),

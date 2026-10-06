@@ -9,6 +9,8 @@ import type { DocumentStore, Position } from '../document/store';
 import { columnLabel } from '../grid/viewport';
 import { bindingOf, type ShortcutRegistry } from './registry';
 import type { GridNavigation } from './spreadsheet';
+import { scrollbarPreference, useScrollbarMode } from '../ui/preferences';
+import { Select, SelectOption } from '../ui/Select';
 
 export function ShortcutPanel({
   registry,
@@ -20,6 +22,7 @@ export function ShortcutPanel({
   navigation: GridNavigation;
 }) {
   useSyncExternalStore(registry.subscribe, registry.snapshot);
+  const scrollbarMode = useScrollbarMode();
   const dialog = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState('');
   const [assigning, setAssigning] = useState<string>();
@@ -63,7 +66,9 @@ export function ShortcutPanel({
       className="command-dialog"
       ref={dialog}
       onClose={() => registry.open(undefined)}
-      aria-label={panel === 'find' ? 'Поиск на листе' : 'Горячие клавиши'}
+      aria-label={
+        panel === 'find' ? 'Поиск на листе' : panel === 'settings' ? 'Настройки' : 'Горячие клавиши'
+      }
     >
       {panel && (
         <>
@@ -76,7 +81,9 @@ export function ShortcutPanel({
                   ? 'Вставить'
                   : panel === 'delete'
                     ? 'Удалить'
-                    : 'Горячие клавиши'}
+                    : panel === 'settings'
+                      ? 'Настройки'
+                      : 'Горячие клавиши'}
             </h2>
             <button
               className="tool"
@@ -92,8 +99,29 @@ export function ShortcutPanel({
                 Все сочетания
               </button>
               <button aria-pressed={panel === 'settings'} onClick={() => registry.open('settings')}>
-                Настроить
+                Настройки
               </button>
+            </div>
+          )}
+          {panel === 'settings' && (
+            <div className="scrollbar-setting">
+              <label>
+                Скроллбар{' '}
+                <Select
+                  aria-label="Режим скроллбара"
+                  value={scrollbarMode}
+                  onValueChange={(mode) => scrollbarPreference.set(mode as 'smart' | 'ordinary')}
+                >
+                  <SelectOption value="smart">Смарт</SelectOption>
+                  <SelectOption value="ordinary">Обычный</SelectOption>
+                </Select>
+              </label>
+              <p>
+                {scrollbarMode === 'smart'
+                  ? 'Смарт: точнее в заполненной области, свободный край остаётся доступным.'
+                  : 'Обычный: равномерная шкала по всей длине листа.'}{' '}
+                Колесо и тачпад прокручивают линейно в обоих режимах.
+              </p>
             </div>
           )}
           {['help', 'settings', 'find'].includes(panel) && (

@@ -1,3 +1,4 @@
+import { selectValue } from './select';
 import { editorButton, editorTrigger } from './editor-menu';
 import { createBookFromUi } from './create-book';
 import { expect, test } from '@playwright/test';
@@ -36,10 +37,10 @@ test('personal filter survives reload without a document commit and navigation s
   await (await editorButton(page, 'Вид листа')).click();
   const dialog = page.getByRole('dialog', { name: 'Вид листа' });
   await dialog.getByLabel('Последняя строка', { exact: true }).fill('4');
-  await dialog.getByLabel('Последний столбец', { exact: true }).selectOption('1');
+  await selectValue(dialog.getByLabel('Последний столбец', { exact: true }), '1');
   await dialog.getByLabel('Есть заголовок', { exact: true }).check();
   await dialog.getByRole('button', { name: 'Добавить условие' }).click();
-  await dialog.getByLabel('Тип условия 1', { exact: true }).selectOption('text');
+  await selectValue(dialog.getByLabel('Тип условия 1', { exact: true }), 'text');
   await dialog.getByLabel('Значение условия 1', { exact: true }).fill('Москва');
   await dialog.getByRole('button', { name: 'Сохранить фильтр', exact: true }).click();
   await expect(dialog.getByRole('status').last()).toContainText('Скрыто строк: 1');
@@ -75,9 +76,9 @@ test('a filter hiding every row exposes no hidden active cell and never extends 
   await (await editorButton(page, 'Вид листа')).click();
   const dialog = page.getByRole('dialog', { name: 'Вид листа' });
   await dialog.getByLabel('Последняя строка', { exact: true }).fill('1000');
-  await dialog.getByLabel('Последний столбец', { exact: true }).selectOption('0');
+  await selectValue(dialog.getByLabel('Последний столбец', { exact: true }), '0');
   await dialog.getByRole('button', { name: 'Добавить условие' }).click();
-  await dialog.getByLabel('Тип условия 1', { exact: true }).selectOption('text');
+  await selectValue(dialog.getByLabel('Тип условия 1', { exact: true }), 'text');
   await dialog.getByLabel('Значение условия 1', { exact: true }).fill('Несуществующий город');
   await dialog.getByRole('button', { name: 'Сохранить фильтр', exact: true }).click();
   await expect(dialog.getByRole('status').last()).toContainText('Скрыто строк: 1000');

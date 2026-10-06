@@ -1,3 +1,4 @@
+import { Select, SelectOption } from '../ui/Select';
 import { useEffect, useMemo, useState } from 'react';
 import { Modal } from '../sharing/Modal';
 import { columnLabel } from '../grid/viewport';
@@ -126,31 +127,31 @@ export function SortPanel({
           </label>
           <label>
             Первый столбец{' '}
-            <select
+            <Select
               aria-label="Первый столбец"
               value={bounds.startColumn}
-              onChange={(e) => change({ ...bounds, startColumn: Number(e.target.value) })}
+              onValueChange={(e) => change({ ...bounds, startColumn: Number(e) })}
             >
               {sheet.columns.map((id, index) => (
-                <option key={id} value={index}>
+                <SelectOption key={id} value={index}>
                   {columnLabel(index)}
-                </option>
+                </SelectOption>
               ))}
-            </select>
+            </Select>
           </label>
           <label>
             Последний столбец{' '}
-            <select
+            <Select
               aria-label="Последний столбец"
               value={bounds.endColumn}
-              onChange={(e) => change({ ...bounds, endColumn: Number(e.target.value) })}
+              onValueChange={(e) => change({ ...bounds, endColumn: Number(e) })}
             >
               {sheet.columns.map((id, index) => (
-                <option key={id} value={index}>
+                <SelectOption key={id} value={index}>
                   {columnLabel(index)}
-                </option>
+                </SelectOption>
               ))}
-            </select>
+            </Select>
           </label>
         </div>
         <label>
@@ -185,40 +186,36 @@ export function SortPanel({
           <div className="view-range" key={index}>
             <label>
               Столбец {index + 1}
-              <select
+              <Select
                 aria-label={`Столбец сортировки ${index + 1}`}
                 value={key.column}
-                onChange={(e) =>
+                onValueChange={(e) =>
                   setKeys((previous) =>
-                    previous.map((k, i) =>
-                      i === index ? { ...k, column: Number(e.target.value) } : k,
-                    ),
+                    previous.map((k, i) => (i === index ? { ...k, column: Number(e) } : k)),
                   )
                 }
               >
                 {columns.map(({ id, index }) => (
-                  <option key={id} value={index}>
+                  <SelectOption key={id} value={index}>
                     {columnLabel(index)}
-                  </option>
+                  </SelectOption>
                 ))}
-              </select>
+              </Select>
             </label>
             <label>
               Направление {index + 1}
-              <select
+              <Select
                 aria-label={`Направление сортировки ${index + 1}`}
                 value={key.descending ? 'desc' : 'asc'}
-                onChange={(e) =>
+                onValueChange={(e) =>
                   setKeys((previous) =>
-                    previous.map((k, i) =>
-                      i === index ? { ...k, descending: e.target.value === 'desc' } : k,
-                    ),
+                    previous.map((k, i) => (i === index ? { ...k, descending: e === 'desc' } : k)),
                   )
                 }
               >
-                <option value="asc">По возрастанию</option>
-                <option value="desc">По убыванию</option>
-              </select>
+                <SelectOption value="asc">По возрастанию</SelectOption>
+                <SelectOption value="desc">По убыванию</SelectOption>
+              </Select>
             </label>
             <button
               type="button"

@@ -1,3 +1,4 @@
+import { Select, SelectOption } from '../ui/Select';
 import { useEffect, useRef, useState } from 'react';
 import {
   PaintBucket,
@@ -52,26 +53,26 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
   return (
     <>
       <div className="style-toolbar">
-        <select
+        <Select
           className="style-select style-font"
           aria-label="Шрифт"
           value={style.font_family}
           disabled={disabled}
-          onChange={(event) => send({ property: 'font_family', value: event.target.value })}
+          onValueChange={(event) => send({ property: 'font_family', value: event })}
         >
           {[
             ...new Set(['Arial', 'Calibri', 'Times New Roman', 'Courier New', style.font_family]),
           ].map((font) => (
-            <option key={font}>{font}</option>
+            <SelectOption key={font}>{font}</SelectOption>
           ))}
-        </select>
-        <select
+        </Select>
+        <Select
           className="style-select style-size"
           aria-label="Размер шрифта"
           value={style.font_size_hundredth_points}
           disabled={disabled}
-          onChange={(event) =>
-            send({ property: 'font_size_hundredth_points', value: Number(event.target.value) })
+          onValueChange={(event) =>
+            send({ property: 'font_size_hundredth_points', value: Number(event) })
           }
         >
           {[
@@ -89,11 +90,11 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
           ]
             .sort((a, b) => a - b)
             .map((size) => (
-              <option value={size} key={size}>
+              <SelectOption value={size} key={size}>
                 {size / 100}
-              </option>
+              </SelectOption>
             ))}
-        </select>
+        </Select>
         <button
           type="button"
           className="tool"
@@ -155,26 +156,26 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
         </button>
         <label className="style-overflow" title="Режим текста">
           <TextAlignJustify size={18} aria-hidden="true" />
-          <select
+          <Select
             className="style-select"
             aria-label="Режим текста"
             value={
               document.selectionStyle('text_overflow') === 'mixed' ? 'mixed' : style.text_overflow
             }
             disabled={disabled}
-            onChange={(event) =>
-              event.target.value !== 'mixed' &&
+            onValueChange={(event) =>
+              event !== 'mixed' &&
               send({
                 property: 'text_overflow',
-                value: event.target.value as CellStyle['text_overflow'],
+                value: event as CellStyle['text_overflow'],
               })
             }
           >
-            <option value="mixed">Смешанный</option>
-            <option value="clip">Обрезать</option>
-            <option value="wrap">Переносить</option>
-            <option value="overflow">Выходить в пустые ячейки</option>
-          </select>
+            <SelectOption value="mixed">Смешанный</SelectOption>
+            <SelectOption value="clip">Обрезать</SelectOption>
+            <SelectOption value="wrap">Переносить</SelectOption>
+            <SelectOption value="overflow">Выходить в пустые ячейки</SelectOption>
+          </Select>
         </label>
         <label className="style-color" title="Цвет текста">
           <TextAa size={18} aria-hidden="true" />
@@ -220,24 +221,24 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
             <AlignmentIcon size={18} aria-hidden="true" />
           </button>
         ))}
-        <select
+        <Select
           className="style-select style-format"
           aria-label="Числовой формат"
           value={style.number_format}
           disabled={disabled}
-          onChange={(event) =>
+          onValueChange={(event) =>
             send({
               property: 'number_format',
-              value: event.target.value as CellStyle['number_format'],
+              value: event as CellStyle['number_format'],
             })
           }
         >
           {formats.map(({ value, label }) => (
-            <option key={value} value={value}>
+            <SelectOption key={value} value={value}>
               {label}
-            </option>
+            </SelectOption>
           ))}
-        </select>
+        </Select>
         <button
           type="button"
           className="tool"
@@ -302,37 +303,39 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
               </label>
               <label>
                 Подчёркивание
-                <select
+                <Select
+                  aria-label="Подчёркивание"
                   value={style.font_underline}
                   disabled={disabled}
-                  onChange={(event) =>
+                  onValueChange={(event) =>
                     send({
                       property: 'font_underline',
-                      value: event.target.value as CellStyle['font_underline'],
+                      value: event as CellStyle['font_underline'],
                     })
                   }
                 >
-                  <option value="none">Нет</option>
-                  <option value="single">Одинарное</option>
-                  <option value="double">Двойное</option>
-                </select>
+                  <SelectOption value="none">Нет</SelectOption>
+                  <SelectOption value="single">Одинарное</SelectOption>
+                  <SelectOption value="double">Двойное</SelectOption>
+                </Select>
               </label>
               <label>
                 По вертикали
-                <select
+                <Select
+                  aria-label="По вертикали"
                   value={style.vertical}
                   disabled={disabled}
-                  onChange={(event) =>
+                  onValueChange={(event) =>
                     send({
                       property: 'vertical',
-                      value: event.target.value as CellStyle['vertical'],
+                      value: event as CellStyle['vertical'],
                     })
                   }
                 >
-                  <option value="top">Сверху</option>
-                  <option value="center">По центру</option>
-                  <option value="bottom">Снизу</option>
-                </select>
+                  <SelectOption value="top">Сверху</SelectOption>
+                  <SelectOption value="center">По центру</SelectOption>
+                  <SelectOption value="bottom">Снизу</SelectOption>
+                </Select>
               </label>
               <label className="style-check">
                 <input
@@ -345,26 +348,27 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
               </label>
               <label>
                 Режим отображения текста
-                <select
+                <Select
+                  aria-label="Режим отображения текста"
                   value={
                     document.selectionStyle('text_overflow') === 'mixed'
                       ? 'mixed'
                       : style.text_overflow
                   }
                   disabled={disabled}
-                  onChange={(event) =>
-                    event.target.value !== 'mixed' &&
+                  onValueChange={(event) =>
+                    event !== 'mixed' &&
                     send({
                       property: 'text_overflow',
-                      value: event.target.value as CellStyle['text_overflow'],
+                      value: event as CellStyle['text_overflow'],
                     })
                   }
                 >
-                  <option value="mixed">Смешанный</option>
-                  <option value="clip">Обрезать</option>
-                  <option value="wrap">Переносить</option>
-                  <option value="overflow">Выходить в пустые ячейки</option>
-                </select>
+                  <SelectOption value="mixed">Смешанный</SelectOption>
+                  <SelectOption value="clip">Обрезать</SelectOption>
+                  <SelectOption value="wrap">Переносить</SelectOption>
+                  <SelectOption value="overflow">Выходить в пустые ячейки</SelectOption>
+                </Select>
               </label>
               {(['top', 'right', 'bottom', 'left'] as const).map((edge, index) => {
                 const property = `border_${edge}` as const,
@@ -373,17 +377,17 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
                   <label key={edge}>
                     Граница {['сверху', 'справа', 'снизу', 'слева'][index]}
                     <span className="style-border-controls">
-                      <select
+                      <Select
                         aria-label={`Граница ${['сверху', 'справа', 'снизу', 'слева'][index]}`}
                         value={border?.line ?? ''}
                         disabled={disabled}
-                        onChange={(event) =>
+                        onValueChange={(event) =>
                           send(
-                            event.target.value
+                            event
                               ? {
                                   property,
                                   value: {
-                                    line: event.target.value as Border['line'],
+                                    line: event as Border['line'],
                                     color: border?.color ?? [0, 0, 0],
                                   },
                                 }
@@ -391,10 +395,10 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
                           )
                         }
                       >
-                        <option value="">Нет</option>
+                        <SelectOption value="">Нет</SelectOption>
                         {(['thin', 'medium', 'thick', 'dashed', 'dotted', 'double'] as const).map(
                           (line, i) => (
-                            <option key={line} value={line}>
+                            <SelectOption key={line} value={line}>
                               {
                                 [
                                   'Тонкая',
@@ -405,10 +409,10 @@ export function StyleToolbar({ document, online }: { document: DocumentStore; on
                                   'Двойная',
                                 ][i]
                               }
-                            </option>
+                            </SelectOption>
                           ),
                         )}
-                      </select>
+                      </Select>
                       <input
                         type="color"
                         aria-label={`Цвет границы ${['сверху', 'справа', 'снизу', 'слева'][index]}`}
