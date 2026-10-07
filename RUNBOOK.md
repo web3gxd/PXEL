@@ -7730,3 +7730,16 @@ limit setup fail-closed, suspended-before-assignment launch, cancellation guards
 version-probe caps and unchanged domain/storage/wire boundaries. Exact7 new locked
 packages are recorded; no prior version upgraded. Native operator behavior stays
 compatible. Public readiness/concurrency and browser publication remain open.
+
+After commit1b276c9/rebase main (up to date): exact isolated just check PASS,
+exit0. Latest log segment (starting at final cargo fmt) proves Rust750/750,
+17ignored, both Clippy profiles, native/WASM/protocol/format/ESLint/TypeScript,
+334/334 Vitest and build PASS. The earlier format-failure segment is retained
+and is not treated as a pass. Actual runtime/backend15/15 PASS again (10.73s).
+Private combined log: .local/csv-acceptance-WiBJqQ/xlsx-host-workspace-check.log.
+
+processkit3.3.4 and its exact locked dependency graph now have combined local
+verification for this Windows CLI slice. Source is unchanged since checks;
+only verification records/status docs are updated. Linux/cgroup execution,
+public upload readiness/concurrency/selection/publication, production auth and
+external deployment gates remain open. No persistence/wire changes or push.

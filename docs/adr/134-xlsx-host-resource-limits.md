@@ -1,6 +1,6 @@
 # ADR-134: XLSX host-process resource limits
 
-Status: locally verified Windows CLI candidate, 2026-10-07.
+Status: accepted for locally verified Windows CLI execution, 2026-10-07.
 
 ADR-131 guest limits do not bound Wasmtime's host allocations. For configured
 WASI parsing use a kernel-owned process container with 512 MiB committed memory,
@@ -25,8 +25,9 @@ The complete component checks now pass: 750 Rust tests/17 ignored, both Clippy
 profiles, native/WASM/protocol builds, 334 frontend tests and lint/typecheck/build,
 plus five adapter tests with allocation canaries and 15 real runtime/backend
 checks. The initial exact just check stopped at RUNBOOK formatting; formatting
-was fixed and its remaining frontend commands passed. Exact post-rebase recipe
-verification is recorded separately in RUNBOOK. Linux/public upload remain open.
+was fixed and its remaining frontend commands passed. Exact post-rebase just
+check subsequently passed, and real runtime/backend15/15 passed again. Results
+are recorded separately in RUNBOOK. Linux/public upload remain open.
 
 Linux requires enforceable cgroup v2 limits and must fail closed where unavailable;
 Linux pids.max counts threads, so its cap is 32 tasks to permit bounded runtime

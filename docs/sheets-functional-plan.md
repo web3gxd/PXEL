@@ -90,6 +90,6 @@ complete OS sandbox, malware policy or browser XLSX publication.
 ADR-131's standalone WASI guest boundary has Windows tests, including native
 fixture parity and positive capability controls. The operator CLI adapter is
 integrated (ADR-132), active-content part rejection is extended (ADR-133), and
-host resource caps are a verification candidate (ADR-134). Browser XLSX upload
+Windows host resource caps are locally verified (ADR-134). Browser XLSX upload
 is still not enabled; readiness/concurrency, sheet selection and atomic
 publication remain open.

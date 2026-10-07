@@ -3,7 +3,7 @@
 2026-10-07: ADR-132 подключает pinned WASI adapter к operator CLI;
 ADR-133 отклоняет ActiveX/контролы/macro/dialog sheet parts. ADR-134 добавляет
 host resource limits с локальными Windows mechanism/backend tests.
-Все component checks прошли; exact post-rebase recipe отмечается в RUNBOOK. Browser XLSX publication,
+Полный post-rebase just check и runtime/backend15/15 прошли; результаты — RUNBOOK. Browser XLSX publication,
 readiness/concurrency и Linux gates остаются открытыми.
 
 2026-10-07: ADR-131 добавляет standalone WASI XLSX worker и shared protocol5.
