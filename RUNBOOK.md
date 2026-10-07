@@ -7794,3 +7794,14 @@ no new persistence/wire/dependency edges or native public fallback. Corrected
 the stale architecture introduction to distinguish public WASI preview from
 operator native CLI and still-open publication/Linux gates. Rebase/final checks
 are next; no full-ten-step completion claim.
+
+Committed a6cb643, rebase main was up to date. Post-rebase exact isolated
+just check PASS again, exit0:751 Rust/17ignored,336 Vitest, both Clippy profiles,
+native/WASM/protocol/format/lint/typecheck/build PASS. Private log:
+.local/xlsx-combined-oX25U7/check.log. Actual runtime/backend15/15 PASS again
+(10.12s); final isolated PostgreSQL/server/Chromium preview1/1 PASS (30.87s),
+including sheet-selector switching, admission/cancel and restart without
+manifest. Final390/DPR1 and1440/DPR2 screenshots inspected after CSS transitions.
+No source changed after these checks. Test servers/PostgreSQL/browser stopped;
+existing demo untouched. Preview slice ready for local fast-forward merge;
+XLSX publication and the full ten-step objective remain open.
