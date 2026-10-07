@@ -180,21 +180,42 @@ test(
       }
       assert.equal((await call({ ...input, runtime_path: 'private-marker' })).status, 422);
       assert.equal((await call({ ...input, file_base64: '' })).status, 413);
-      assert.equal(
-        (
-          await call({
-            ...input,
-            file_base64: Buffer.alloc(32 * 1024 * 1024 + 1).toString('base64'),
-          })
-        ).status,
-        413,
-        'decoded source above 32MiB rejected',
-      );
-      assert.equal(
-        (await call({ ...input, file_base64: 'A'.repeat(48 * 1024 * 1024) })).status,
-        413,
-        'JSON request body above 48MiB rejected',
-      );
+      const oversizedSource = await call({
+        ...input,
+        file_base64: Buffer.alloc(32 * 1024 * 1024 + 1).toString('base64'),
+      }).catch((cause) => {
+        throw new Error('Decoded source boundary transport failed', { cause });
+      });
+      assert.equal(oversizedSource.status, 413, 'decoded source above 32MiB rejected');
+      assert.equal((await oversizedSource.json()).code, 'xlsx_limit');
+      const oversizedBodyStatus = await new Promise((resolve, reject) => {
+        const request = httpRequest(base + '/api/imports/xlsx/preview', {
+          method: 'POST',
+          agent: false,
+          headers: {
+            Origin: origin,
+            Cookie: cookie,
+            'Content-Type': 'application/json',
+            'Content-Length': String(48 * 1024 * 1024 + 1),
+            Expect: '100-continue',
+          },
+        });
+        request.once('response', (response) => {
+          const status = response.statusCode;
+          response.resume();
+          response.once('end', () => {
+            resolve(status);
+            request.destroy();
+          });
+        });
+        request.once('continue', () => request.destroy(new Error('Oversized body was admitted')));
+        request.once('error', reject);
+        request.setTimeout(30000, () =>
+          request.destroy(new Error('Oversized body rejection timed out')),
+        );
+        request.flushHeaders();
+      });
+      assert.equal(oversizedBodyStatus, 413, 'body above 48MiB refused before upload');
       // Hold an authorized upload before EOF: other imports must not start.
       const slow = httpRequest(base + '/api/imports/xlsx/preview', {
         method: 'POST',
@@ -257,13 +278,27 @@ test(
         preview_digest: publicationPreview.preview_digest,
         accept_reported: false,
       };
-      const publish = (payload) =>
+      const publish = (payload, session = cookie, requestOrigin = origin) =>
         fetch(base + '/api/imports/xlsx', {
           method: 'POST',
-          headers: { Origin: origin, Cookie: cookie, 'Content-Type': 'application/json' },
+          headers: {
+            Origin: requestOrigin,
+            'Content-Type': 'application/json',
+            ...(session ? { Cookie: session } : {}),
+          },
           body: JSON.stringify(payload),
           signal: AbortSignal.timeout(60000),
         });
+      assert.equal(
+        (await publish(null, '')).status,
+        401,
+        'publication authorizes before DTO parsing',
+      );
+      assert.equal(
+        (await publish(publication, cookie, 'https://foreign.example')).status,
+        403,
+        'publication rejects a foreign origin',
+      );
       assert.equal((await publish({ ...publication, preview_digest: '0'.repeat(64) })).status, 409);
       assert.equal((await publish({ ...publication, title: 'Изменено' })).status, 409);
       assert.equal((await publish({ ...publication, schema_version: 2 })).status, 400);

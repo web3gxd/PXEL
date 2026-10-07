@@ -7938,3 +7938,34 @@ failure was fixture cookie path/ambiguity, not weakened auth or a product fix.
 Fixture services stopped. ADR-136 now records local Windows implementation and
 verification; final post-rebase/deployment gates and the full ten-step objective
 remain open. Commit and rebase follow; no push.
+
+Commit7d2fc3f rebase main was up to date. Post-rebase exact isolated just check
+PASS, exit0:757 Rust/17ignored,337 Vitest and all recipe gates; private log
+.local/xlsx-combined-N0xoeM/check.log. Actual just xlsx-wasi-check16/16 PASS
+(13.93s), with unchanged pinned artifacts and5B bounded fuel.
+
+The following E2E failed after17.35s with fetch ECONNRESET, so the post-rebase
+publication gate did not pass and no merge occurred. The oversized Content-Length
+request can be refused before fetch finishes writing its48MiB body, racing HTTP
+413 against connection teardown. Replaced only that fixture request with native
+HTTP Expect:100-continue, asserting413 before upload and failing if100Continue is
+received. The actual decoded32MiB+1 source request remains, now draining/asserting
+its typed xlsx_limit response and labeling transport failure for diagnosis.
+No product limits/auth/protocol were relaxed. Full-profile rerun is required.
+
+Revised full-profile E2E1/1 PASS (125.43s), exit0: actual32MiB+1 source returns
+typed xlsx_limit413; native Expect:100-continue observes413 before body upload,
+without accepting100Continue. All full-profile browser/style/formula/merge/retry
+and hard-recovery checks passed; fixtures stopped. No product source changed.
+Direct publication401-before-DTO and foreign-origin403 cases were then added and
+await their own default E2E run before the fixture/report correction commit.
+Next-step analysis is ignored .local/number-format-review.md; it preserves full
+step2 scope and does not change the ten-step objective or current source baseline.
+
+Expanded default E2E1/1 PASS (68.67s), exit0, including direct publication401
+before malformed DTO parsing and foreign-origin403, reliable oversized refusal,
+all conformance/browser/retry and hard-recovery cases. Full-profile125.43s pass
+is separate evidence for100000-cell editor loading/recovery. Product source is
+identical to7d2fc3f, whose post-rebase combined757/337 and WASI16 gates passed.
+Commit the fixture/report correction, rebase main and rerun full-profile E2E;
+no merge or overall step completion until the final result is observed.
