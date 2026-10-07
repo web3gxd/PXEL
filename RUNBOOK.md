@@ -7969,3 +7969,16 @@ is separate evidence for100000-cell editor loading/recovery. Product source is
 identical to7d2fc3f, whose post-rebase combined757/337 and WASI16 gates passed.
 Commit the fixture/report correction, rebase main and rerun full-profile E2E;
 no merge or overall step completion until the final result is observed.
+
+2026-10-07 final publication gate: fixture/report correction committed6ceb6f5;
+rebase main up to date. Prettier PASS, final PXEL_XLSX_LARGE=1 real
+HTTP/PostgreSQL/Chromium E2E1/1 PASS (122.88s), exit0. Large preview/publication
+38.96s;100000-cell browser navigation/reload,100001 rejection, direct401/403,
+source/body limits, style/shared-formula/merge conformance, lost committed
+response/retry and hard PostgreSQL recovery passed. Fixture services stopped.
+Previous unchanged-production combined757 Rust/17ignored+337 frontend and
+WASI16/16 passes remain applicable. Audit additionally reran domain/formula
+tests,337 frontend units, ESLint/typecheck and cargo fmt, all PASS.
+README now describes actual browser publication. Linux/Compose/remote CI,
+production auth/deployment/manual NVDA and overall ten-step completion remain
+open. No dependency, secret, remote or existing demo service changed.

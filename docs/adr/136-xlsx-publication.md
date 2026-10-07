@@ -1,6 +1,6 @@
 # ADR-136: retry-stable XLSX candidate and publication
 
-Status: implemented and locally verified on Windows, 2026-10-07; final post-rebase/deployment gates remain.
+Status: implemented and post-rebase verified on Windows, 2026-10-07; Linux and production deployment gates remain.
 
 Convert independently validated XLSX IR to the existing positional Book adapter.
 Preserve selected sheet names/order, scalar types, bound formulas, shared-formula
@@ -56,3 +56,14 @@ its128-target event shape, preserving its retry contract. Both XLSX preview and
 publication use the same XLSX preparation profile. HTTP fixture preview timeout
 now matches the existing browser60s budget; performance/recovery must pass before
 claiming the full profile usable.
+
+Final post-rebase verification: isolated combined workspace check passed with
+757 Rust tests (17 ignored),337 frontend tests and format/lint/type/build gates;
+actual WASI/runtime checks16/16 passed. After the test-only oversized-request
+transport correction and direct publication authorization cases, the final
+full-profile HTTP/PostgreSQL/Chromium recovery E2E passed1/1 in122.88s.
+It includes100000-cell editor loading/reload,100001 refusal,401/403 guards,
+exact styles/shared formulas/merges, lost committed response/retry and immediate
+PostgreSQL crash/restart. Synthetic large preview/publication took38.96s;
+this is measured evidence, not a performance SLA. Linux cgroup enforcement,
+production authentication/deployment and manual NVDA remain unverified.

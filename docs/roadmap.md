@@ -5,7 +5,8 @@ preview, отчётом неподдерживаемых функций и ст�
 Полный локальный E2E прошёл: свойства стилей/shared formulas/merges,100000-cell
 profile, отказ100001, браузер390/DPR1 и1440/DPR2, потеря commit-ответа и жёсткий
 перезапуск PostgreSQL с прежними hash/version. Финальный combined/post-rebase
-gate ещё выполняется; весь step1 и остальные девять шагов не объявляются
+gate завершён на Windows:757 Rust/337 frontend,16 runtime checks и финальный
+full-profile E2E1/1 за122,88с. Весь step1 и остальные девять шагов не объявляются
 завершёнными. Linux/production authentication/deployment/NVDA остаются открытыми.
 
 2026-10-07: ADR-135 добавляет authenticated browser XLSX preview с выбором

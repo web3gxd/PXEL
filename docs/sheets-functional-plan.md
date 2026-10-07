@@ -106,6 +106,7 @@ acceptance passed with exact styles/shared formulas/merges,100000-cell profile,
 100001 rejection, lost committed response/retry and hard PostgreSQL recovery of
 all conformance hashes/versions. Finite guest fuel is5B; scalar-only candidate
 batches use the existing1000-target domain budget while formula/style batches
-retain128 targets. Final combined/post-rebase gates remain pending; Linux/public
+retain128 targets. Final combined/post-rebase Windows gates passed (757 Rust,
+337 frontend,16 runtime checks and full-profile E2E1/1 in122.88s); Linux/public
 release and all ten-step completion remain unproven. See RUNBOOK for actual
 results and failures; do not treat this sub-slice as the entire objective.
