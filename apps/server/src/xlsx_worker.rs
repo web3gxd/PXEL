@@ -136,13 +136,23 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
     if let Some(system_root) = std::env::var_os("SystemRoot") {
         command.env("SystemRoot", system_root);
     }
-    let mut command = CommandWrap::from(command);
-    command.wrap(KillOnDrop);
-    #[cfg(unix)]
-    command.wrap(ProcessGroup::leader());
-    #[cfg(windows)]
-    command.wrap(JobObject);
-    let mut child = WorkerProcessGuard::new(command.spawn().map_err(|_| WorkerError::Process)?);
+    let resource_group = if sandbox.is_some() {
+        Some(crate::xlsx_sandbox::resource_group().map_err(|_| WorkerError::Sandbox)?)
+    } else {
+        None
+    };
+    let process: Box<dyn ChildWrapper> = if let Some(group) = &resource_group {
+        Box::new(group.spawn(command).map_err(|_| WorkerError::Sandbox)?)
+    } else {
+        let mut command = CommandWrap::from(command);
+        command.wrap(KillOnDrop);
+        #[cfg(unix)]
+        command.wrap(ProcessGroup::leader());
+        #[cfg(windows)]
+        command.wrap(JobObject);
+        command.spawn().map_err(|_| WorkerError::Process)?
+    };
+    let mut child = WorkerProcessGuard::new(process);
     let mut stdin = child.child.stdin().take().ok_or(WorkerError::Process)?;
     let mut stdout = child.child.stdout().take().ok_or(WorkerError::Process)?;
     let transfer = tokio::time::timeout(WORKER_TIMEOUT, async {

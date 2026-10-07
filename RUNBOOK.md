@@ -7674,3 +7674,59 @@ supported workbook semantics. Host resource and browser E2E gates remain open.
 
 After commit1fc4194/rebase main (up to date): parser30/30, strict XLSX Clippy,
 fmt and real WASI/backend14/14 PASS (8.02s). No source changed after verification.
+
+## 2026-10-07 — host resource limiter candidate (ADR-134), in progress
+
+feat/xlsx-host-resource-limits: ignored standalone processkit3.3.4 safe-Rust
+prototype confirmed synthetic 128MiB allocation fails with a64MiB Windows job
+cap and passes with only the cap raised to256MiB. Existing process-wrap exposes
+no resource-limit setter. Added exact processkit3.3.4/limits to server candidate,
+with seven new locked packages; no existing package version changed. Configured
+WASI transfer uses a512MiB job memory cap, one live process, one core CPU quota
+and retains container until transfer completion. Limit setup/spawn failure is
+redacted Sandbox error without native fallback. Native operator path is retained.
+
+cargo check dev-auth PASS. cargo deny advisories/bans/licenses/sources PASS;
+cargo audit PASS with one allowed yanked yoke-derive0.8.3 warning. Prototype
+is mechanism evidence only; backend tests, full caps/cancellation tests and
+combined verification remain pending. Build/test handle62512 and Clippy53172
+were live at this note; do not claim their result before observing completion.
+Linux cgroup enforcement and browser XLSX publication remain open.
+
+Candidate backend build and real configured CLI4/4 PASS (10.83s): valid two-sheet
+preview, four active-content refusals, invalid manifest pin failures and failing
+Wasm module with no native fallback. This confirms existing backend behavior
+under configured caps, not actual production cap-violation acceptance.
+
+Host limiter tests5/5 PASS (3.06s): fixed production container rejects a second
+process and dropping it terminates an already-ready/live blocked child with pipe
+EOF. Windows job close can return exit0, so the initial nonzero-exit assertion
+was incorrect; replaced it with readiness/liveness/wait/EOF evidence. No product
+limit was relaxed. Synthetic128MiB allocation refuses at64MiB and succeeds at
+256MiB; the final test additionally checks canaries before/after allocation to
+exclude startup failure. Measured Job CPU accounting over1.5s stays below300ms
+at0.05core and exceeds300ms at1core, with >3x positive-control separation.
+The final canary strengthening awaits its targeted rerun after combined check.
+
+Version probing now uses the same bounded host container. Linux pids.max counts
+threads, so cap32tasks is explicitly chosen there, with cgroup memory.max rather
+than Windows commit semantics; Linux remains unverified. Full isolated just check
+handle60559 is running: both Clippy profiles passed; server86/86 and other Rust
+suites have passed so far, storage tests are still executing. No final full-check
+claim yet. A configured looping-module CLI regression is added and awaits run.
+
+Combined components completed: isolated Rust750/750 PASS (17 ignored), both
+workspace Clippy profiles, native/WASM/protocol/WASM bindings PASS. The first
+exact just check stopped only at RUNBOOK Prettier; fixed added-note formatting,
+then format:check/ESLint/TypeScript/Vitest334/334/build PASS. Vite >500kB warning
+remains. This records combined component evidence, not a successful exact recipe.
+
+Final strengthened host tests5/5 PASS again (3.06s), including allocation canaries
+that exclude process startup failure. Real just xlsx-wasi-check15/15 PASS
+(11.34s), including a correctly pinned looping module terminating through the
+actual configured backend without content output/native fallback. Strict final
+all-feature server Clippy/fmt PASS. Source review confirms pinned-only execution,
+limit setup fail-closed, suspended-before-assignment launch, cancellation guards,
+version-probe caps and unchanged domain/storage/wire boundaries. Exact7 new locked
+packages are recorded; no prior version upgraded. Native operator behavior stays
+compatible. Public readiness/concurrency and browser publication remain open.

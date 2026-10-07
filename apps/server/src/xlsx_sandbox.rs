@@ -149,6 +149,23 @@ fn clean_command(path: &Path) -> tokio::process::Command {
     command
 }
 
+fn resource_group_with_memory(bytes: u64) -> Result<processkit::ProcessGroup, SandboxError> {
+    // Linux pids.max counts threads as well as processes; Wasmtime needs its
+    // bounded compiler/epoch threads. Windows counts only live processes.
+    let tasks = if cfg!(target_os = "linux") { 32 } else { 1 };
+    processkit::ProcessGroup::with_options(
+        processkit::ProcessGroupOptions::default()
+            .max_memory(bytes)
+            .max_processes(tasks)
+            .cpu_quota(1.0),
+    )
+    .map_err(|_| SandboxError)
+}
+
+pub fn resource_group() -> Result<processkit::ProcessGroup, SandboxError> {
+    resource_group_with_memory(512 * 1024 * 1024)
+}
+
 impl Sandbox {
     pub async fn load(path: PathBuf) -> Result<Self, SandboxError> {
         let sandbox = tokio::task::spawn_blocking(move || read_manifest(&path))
@@ -160,7 +177,8 @@ impl Sandbox {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let mut child = command.spawn().map_err(|_| SandboxError)?;
+        let group = resource_group()?;
+        let mut child = group.spawn(command).map_err(|_| SandboxError)?;
         let stdout = child.stdout.take().ok_or(SandboxError)?;
         let mut version = Vec::new();
         let status = tokio::time::timeout(Duration::from_secs(2), async {
@@ -210,6 +228,157 @@ impl Sandbox {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_resource_probe() -> Result<(), Box<dyn std::error::Error>> {
+        match std::env::var("PXEL_HOST_RESOURCE_PROBE").as_deref() {
+            Ok("allocate") => {
+                use std::io::Write;
+                println!("PXEL_ALLOCATION_READY");
+                std::io::stdout().flush()?;
+                let mut bytes = Vec::<u8>::new();
+                bytes.try_reserve_exact(128 * 1024 * 1024)?;
+                bytes.resize(128 * 1024 * 1024, 1);
+                std::hint::black_box(&bytes);
+                println!("PXEL_ALLOCATION_COMPLETE");
+            }
+            Ok("hold") => {
+                use std::io::Write;
+                println!("PXEL_RESOURCE_READY");
+                std::io::stdout().flush()?;
+                let mut buffer = [0_u8; 1];
+                std::io::stdin().read_exact(&mut buffer)?;
+            }
+            Ok("busy") => {
+                use std::io::Write;
+                println!("PXEL_RESOURCE_READY");
+                std::io::stdout().flush()?;
+                let mut value = 1_u64;
+                loop {
+                    value = std::hint::black_box(value.wrapping_mul(17).wrapping_add(1));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn probe_command(mode: &str) -> Result<tokio::process::Command, std::io::Error> {
+        let mut command = clean_command(&std::env::current_exe()?);
+        command
+            .args([
+                "--exact",
+                "xlsx_sandbox::tests::host_resource_probe",
+                "--nocapture",
+            ])
+            .env("PXEL_HOST_RESOURCE_PROBE", mode)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        Ok(command)
+    }
+
+    #[tokio::test]
+    async fn memory_cap_has_an_independent_positive_control()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (limit, expected) in [(64, false), (256, true)] {
+            let group = resource_group_with_memory(limit * 1024 * 1024)?;
+            let child = group.spawn(probe_command("allocate")?)?;
+            let output =
+                tokio::time::timeout(Duration::from_secs(10), child.wait_with_output()).await??;
+            let stdout = std::str::from_utf8(&output.stdout)?;
+            assert!(stdout.contains("PXEL_ALLOCATION_READY"));
+            assert_eq!(stdout.contains("PXEL_ALLOCATION_COMPLETE"), expected);
+            assert_eq!(output.status.success(), expected);
+        }
+        assert!(resource_group_with_memory(0).is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn process_cap_and_container_drop_are_enforced() -> Result<(), Box<dyn std::error::Error>>
+    {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let group = resource_group()?;
+        let mut child = group.spawn(probe_command("hold")?)?;
+        let stdout = child.stdout.take().ok_or("probe stdout unavailable")?;
+        let mut reader = BufReader::new(stdout);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).await? == 0 {
+                    return Err(std::io::Error::other("probe exited before readiness"));
+                }
+                if line.trim_end() == "PXEL_RESOURCE_READY" {
+                    break;
+                }
+            }
+            Ok::<(), std::io::Error>(())
+        })
+        .await??;
+        assert!(group.spawn(probe_command("allocate")?).is_err());
+        assert!(child.try_wait()?.is_none());
+        drop(group);
+        // Closing a Windows job can terminate with exit code zero. Readiness,
+        // prior liveness and pipe EOF establish cancellation independently.
+        tokio::time::timeout(Duration::from_secs(10), child.wait()).await??;
+        let mut remaining = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), reader.read_to_end(&mut remaining)).await??;
+        assert!(remaining.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cpu_quota_has_a_measured_positive_control() -> Result<(), Box<dyn std::error::Error>> {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let mut measured = Vec::new();
+        for cores in [0.05, 1.0] {
+            let group = processkit::ProcessGroup::with_options(
+                processkit::ProcessGroupOptions::default()
+                    .max_memory(512 * 1024 * 1024)
+                    .max_processes(1)
+                    .cpu_quota(cores),
+            )?;
+            let mut child = group.spawn(probe_command("busy")?)?;
+            let stdout = child.stdout.take().ok_or("probe stdout unavailable")?;
+            let mut reader = BufReader::new(stdout);
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    if reader.read_line(&mut line).await? == 0 {
+                        return Err(std::io::Error::other("CPU probe exited before readiness"));
+                    }
+                    if line.trim_end() == "PXEL_RESOURCE_READY" {
+                        break;
+                    }
+                }
+                Ok::<(), std::io::Error>(())
+            })
+            .await??;
+            let start = group
+                .stats()?
+                .total_cpu_time
+                .ok_or("CPU accounting unavailable")?;
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let finish = group
+                .stats()?
+                .total_cpu_time
+                .ok_or("CPU accounting unavailable")?;
+            measured.push(
+                finish
+                    .checked_sub(start)
+                    .ok_or("CPU counter went backwards")?,
+            );
+            drop(group);
+            tokio::time::timeout(Duration::from_secs(10), child.wait()).await??;
+        }
+        assert!(measured[0] < Duration::from_millis(300));
+        assert!(measured[1] > Duration::from_millis(300));
+        assert!(measured[1] > measured[0] * 3);
+        Ok(())
+    }
 
     #[test]
     fn verified_artifact_blocks_modification_until_guard_is_released()

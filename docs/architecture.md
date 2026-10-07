@@ -18,6 +18,13 @@ serde/JSON and typed errors, never domain/application/storage. The parent still
 validates IR before constructing an authorized candidate. WASI guest-boundary
 tests do not imply that backend sandbox integration or public upload is ready.
 
+ADR-132 integrates an operator-pinned WASI runtime into CLI preview/import,
+and ADR-134 adds candidate host kernel limits for configured execution and its
+version probe. processkit3.3.4 is restricted to the server runtime adapter;
+domain/application/formula/storage dependencies remain unchanged. Windows uses
+a capped Job Object; Linux needs an enforceable cgroup v2 and remains unverified.
+Public upload/readiness/concurrency and browser publication are still open.
+
 ```mermaid
 flowchart LR
   UI[React / Canvas / DOM editor] <--> Client[Confirmed projection + pending intents]

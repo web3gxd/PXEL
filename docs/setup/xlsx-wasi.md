@@ -45,3 +45,11 @@ Each CLI preview/import verifies the artifact hashes and runtime version before
 execution. Configured failures never fall back to native parsing. Without the
 manifest, the existing operator-only CLI still uses its native child. This does
 not enable browser uploads or establish a startup readiness/public-upload gate.
+
+ADR-134's locally verified Windows backend adds processkit3.3.4 kernel limits to both the
+runtime-version probe and configured parsing: 512 MiB host-process memory,
+one live process on Windows, one core CPU quota. The independent guest cap
+remains 256 MiB. Linux requires enforceable cgroup v2 and permits 32 tasks
+because pids.max counts runtime threads; Linux remains unverified. Limit setup
+failure refuses configured execution. RUNBOOK records whether the candidate's
+combined verification has completed; do not infer public-upload readiness.

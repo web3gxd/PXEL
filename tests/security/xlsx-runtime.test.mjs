@@ -85,3 +85,25 @@ test('a correctly pinned failing WASI module cannot fall back to the native pars
   assert.equal(output.stdout, '');
   assert.doesNotMatch(output.stderr, /hello|empty\.wasm/);
 });
+
+test('configured backend bounds a looping WASI module without native fallback', () => {
+  const loopingModule = join(root, 'loop.wasm');
+  // Trusted synthetic core Wasm: exported _start loops indefinitely.
+  writeFileSync(
+    loopingModule,
+    Buffer.from(
+      '0061736d0100000001040160000003020100070a01065f737461727400000a0901070003400c000b0b',
+      'hex',
+    ),
+  );
+  const output = preview({
+    ...manifest,
+    module_path: loopingModule,
+    module_sha256: digest(loopingModule),
+  });
+  assert.equal(output.error, undefined, 'parent execution exceeded the test deadline');
+  assert.notEqual(output.status, 0);
+  assert.equal(output.stdout, '');
+  assert.match(output.stderr, /XLSX worker (protocol failed|exceeded its deadline)/);
+  assert.doesNotMatch(output.stderr, /loop\.wasm|hello/);
+});

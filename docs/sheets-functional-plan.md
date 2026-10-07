@@ -88,5 +88,8 @@ paths to bounded package bytes. Local unit/child CLI checks passed; it does not
 complete OS sandbox, malware policy or browser XLSX publication.
 
 ADR-131's standalone WASI guest boundary has Windows tests, including native
-fixture parity and positive capability controls. Server integration and host
-resource policy remain open; browser XLSX upload is still not enabled.
+fixture parity and positive capability controls. The operator CLI adapter is
+integrated (ADR-132), active-content part rejection is extended (ADR-133), and
+host resource caps are a verification candidate (ADR-134). Browser XLSX upload
+is still not enabled; readiness/concurrency, sheet selection and atomic
+publication remain open.
