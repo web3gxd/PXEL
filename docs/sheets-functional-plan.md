@@ -93,3 +93,10 @@ integrated (ADR-132), active-content part rejection is extended (ADR-133), and
 Windows host resource caps are locally verified (ADR-134). Browser XLSX upload
 is still not enabled; readiness/concurrency, sheet selection and atomic
 publication remain open.
+
+ADR-135 adds authenticated browser preview and selection with strict bounded
+response decoding. The real isolated PostgreSQL/server/Chromium path is locally
+verified, including active-content refusal and pending-body admission/cancel.
+This does not complete XLSX atomic publication, candidate/formula compatibility,
+retry receipts or step1. Combined local workspace verification passed; results
+and remaining external gates are in RUNBOOK.

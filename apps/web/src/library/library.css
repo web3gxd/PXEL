@@ -9,6 +9,16 @@
   max-width: 100%;
   overflow: auto;
 }
+.xlsx-sheet-list {
+  display: grid;
+  gap: 8px;
+}
+.xlsx-sheet-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
 .csv-preview table {
   border-collapse: collapse;
   font-size: 12px;

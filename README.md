@@ -377,6 +377,12 @@ MinIO/Garage не запускаются; локальные snapshots отно�
 Fixture проверяет CSV-импорт и экспорт, browser roundtrip и аварийный restart.
 План всех десяти улучшений: [functional plan](docs/sheets-functional-plan.md).
 
+В библиотеке доступен «Предпросмотр XLSX»: файл до32МиБ, выбор листов,
+образцы ячеек и замечания парсера. Нужен настроенный pinned WASI manifest
+из [руководства](docs/setup/xlsx-wasi.md); при его отсутствии сервер отказывает
+без native fallback. Создание XLSX-книги пока недоступно. Проверка с отдельными
+PostgreSQL/server/Chromium: `node --test tests/recovery/xlsx-preview.test.mjs`.
+
 - `apps/server`, `apps/web` — executable adapters и UI.
 - `crates/spreadsheet-domain` — workbook, stable IDs, sparse cells и операции.
 - `crates/spreadsheet-application` — используемые persistence и blob ports.

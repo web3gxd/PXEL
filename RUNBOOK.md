@@ -7743,3 +7743,54 @@ verification for this Windows CLI slice. Source is unchanged since checks;
 only verification records/status docs are updated. Linux/cgroup execution,
 public upload readiness/concurrency/selection/publication, production auth and
 external deployment gates remain open. No persistence/wire changes or push.
+
+## 2026-10-07 — browser XLSX preview (ADR-135), in progress
+
+feat/xlsx-browser-preview: authenticated preview endpoint requires the pinned
+WASI sandbox, reads bounded package bytes in memory, validates IR and reports
+sheet metadata/samples/parser compatibility with a source/selection digest.
+Public requests cannot fall back to the native parser. Added library modal with
+typed response validation, sparse cell addresses, sheet selection and explicit
+preview-only status. No publication, persistence, codec or dependency changes.
+
+New decoder tests first failed for missing implementation, then2/2 PASS.
+Frontend336/336, lint/typecheck/build and Rust fmt PASS; existing Vite >500kB
+warning remains. Server preview unit1/1 and strict all-feature server Clippy
+PASS. Real native/WASI/backend regression15/15 PASS (10.26s).
+
+Isolated PostgreSQL/server/Chromium test PASS (30.82s): authorization before
+malformed JSON, foreign origin denial, exact selection digest, invalid fields/
+versions/selections/base64, empty upload, active content rejection, zero catalog
+publication and unavailable manifest after server restart. Pending upload owns
+the import/export permit; cancellation releases it. Initial admission fixture
+assumed request scheduling order and failed; allowed the streamed request to
+reach the handler before checking competing requests, then passed without
+changing product limits. Chromium390px/DPR1 and1440px/DPR2 checked selection,
+revalidation, empty-selection disable, active-content error, Escape/focus return
+and absence of page errors. Private screenshots visually reviewed; tightened
+sheet checkbox spacing. Fixture services stopped; existing demo untouched.
+
+Full combined/post-rebase check still pending. Browser XLSX publication,
+candidate formula compatibility, retry receipts and all remaining functional
+steps remain open. Linux/Compose/remote CI/production authentication/deploy
+and manual NVDA remain unverified. No push.
+
+First isolated exact just check failed in the existing auth reconnect test:
+the ad hoc fixture had not activated its new storage write lineage. Both Clippy
+profiles passed and87 server tests ran (86 passed); this is not a passed gate.
+Updated only ignored fixture setup to create its own private keyring and perform
+normal server readiness startup/shutdown before tests, as the established CSV
+fixture does. Encryption/activation guards and product code were not relaxed.
+Second isolated combined check is running; its result must be observed.
+
+Second exact isolated just check PASS, exit0:751 Rust tests,17ignored,
+both Clippy profiles, native/WASM/protocol checks, Prettier, ESLint/TypeScript,
+336 Vitest and frontend build PASS. Private log:
+.local/xlsx-combined-XrzmmD/check.log. Browser E2E with actual sheet-selector
+switching PASS (41.05s). Final screenshot capture now waits for checkbox CSS
+transitions to finish rather than photographing a transient checked background;
+this test-only adjustment awaits the final runtime/browser rerun. Review found
+no new persistence/wire/dependency edges or native public fallback. Corrected
+the stale architecture introduction to distinguish public WASI preview from
+operator native CLI and still-open publication/Linux gates. Rebase/final checks
+are next; no full-ten-step completion claim.

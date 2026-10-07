@@ -29,6 +29,7 @@ mod storage_migration;
 mod storage_restore;
 mod templates_api;
 mod views_api;
+mod xlsx_api;
 #[cfg(feature = "dev-auth")]
 mod xlsx_import;
 mod xlsx_sandbox;
@@ -934,6 +935,14 @@ async fn main() -> anyhow::Result<()> {
                 .layer(axum::extract::DefaultBodyLimit::max(24 * 1024 * 1024))
                 .layer(tower_http::limit::RequestBodyLimitLayer::new(
                     24 * 1024 * 1024,
+                )),
+        )
+        .merge(
+            Router::new()
+                .route("/api/imports/xlsx/preview", post(xlsx_api::preview))
+                .layer(axum::extract::DefaultBodyLimit::max(48 * 1024 * 1024))
+                .layer(tower_http::limit::RequestBodyLimitLayer::new(
+                    48 * 1024 * 1024,
                 )),
         )
         .layer(middleware::from_fn(security_headers))

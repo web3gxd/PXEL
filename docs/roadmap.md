@@ -1,5 +1,11 @@
 # Roadmap и gates
 
+2026-10-07: ADR-135 добавляет authenticated browser XLSX preview с выбором
+листов и отчётом парсера. Изолированный PostgreSQL/server/Chromium сценарий
+прошёл на390px/DPR1 и1440px/DPR2, включая отмену загрузки и освобождение
+permit. Публикация книги, candidate/formula compatibility и retry receipts
+остаются открыты; локальный combined check прошёл. Результаты — RUNBOOK.
+
 2026-10-07: ADR-132 подключает pinned WASI adapter к operator CLI;
 ADR-133 отклоняет ActiveX/контролы/macro/dialog sheet parts. ADR-134 добавляет
 host resource limits с локальными Windows mechanism/backend tests.

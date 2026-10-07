@@ -1,6 +1,6 @@
-//! A bounded local process boundary for XLSX parsing. OS sandbox adapters are
-//! operator-configured WASI execution denies guest filesystem/network access.
-//! Host resource and public-upload policies remain open gates.
+//! A bounded process boundary for XLSX parsing. Operator-configured WASI
+//! execution denies guest filesystem/network access and caps host resources.
+//! Public publication and Linux verification remain open gates.
 
 #[cfg(windows)]
 use process_wrap::tokio::JobObject;
@@ -108,7 +108,6 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
     if source.is_empty() || source.len() > MAX_SOURCE_BYTES {
         return Err(WorkerError::InvalidInput);
     }
-    let source_len = u32::try_from(source.len()).map_err(|_| WorkerError::InvalidInput)?;
     let sandbox = match std::env::var_os("PXEL_XLSX_SANDBOX_MANIFEST") {
         Some(path) => Some(
             crate::xlsx_sandbox::Sandbox::load(path.into())
@@ -117,6 +116,25 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
         ),
         None => None,
     };
+    transfer(&source, sandbox.as_ref()).await
+}
+
+/// Public upload callers must provide a verified isolated executor.
+pub async fn load_isolated(
+    source: &[u8],
+    sandbox: &crate::xlsx_sandbox::Sandbox,
+) -> Result<NormalizedWorkbook, WorkerError> {
+    transfer(source, Some(sandbox)).await
+}
+
+async fn transfer(
+    source: &[u8],
+    sandbox: Option<&crate::xlsx_sandbox::Sandbox>,
+) -> Result<NormalizedWorkbook, WorkerError> {
+    if source.is_empty() || source.len() > MAX_SOURCE_BYTES {
+        return Err(WorkerError::InvalidInput);
+    }
+    let source_len = u32::try_from(source.len()).map_err(|_| WorkerError::InvalidInput)?;
     let mut command = if let Some(sandbox) = &sandbox {
         sandbox.command()
     } else {
@@ -169,7 +187,7 @@ pub async fn load(path: &Path) -> Result<NormalizedWorkbook, WorkerError> {
             .await
             .map_err(|_| WorkerError::Protocol)?;
         stdin
-            .write_all(&source)
+            .write_all(source)
             .await
             .map_err(|_| WorkerError::Protocol)?;
         stdin.shutdown().await.map_err(|_| WorkerError::Protocol)?;
