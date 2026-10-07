@@ -2,8 +2,9 @@
 
 Изолированный WASI XLSX worker проверяется `just xlsx-wasi-check`;
 установка закреплённого Wasmtime и ограничения —
-[XLSX WASI verification](docs/setup/xlsx-wasi.md). Backend ещё не использует
-этот worker для публичных загрузок; sandbox/malware/browser XLSX gates открыты.
+[XLSX WASI verification](docs/setup/xlsx-wasi.md). Публичный preview и импорт
+требуют проверенного WASI manifest; без него загрузка недоступна. Windows
+проверен локально; Linux и deployment gates остаются открытыми.
 
 Самописанный collaborative spreadsheet. Работают создание документа, sparse
 Canvas, ввод значений, durable PostgreSQL CAS commit и восстановление после
@@ -102,7 +103,10 @@ cargo run --locked -q -p pxel-server -- xlsx-preview fixtures/xlsx/minimal_scala
 
 Команда запускает отдельный дочерний процесс, принимает от него bounded IR,
 повторно проверяет модель в родителе и печатает только количество листов и
-ячеек. OS sandbox и загрузка XLSX в редактор ещё не реализованы. Владелец документа
+ячеек. Браузерный импорт использует обязательный WASI sandbox с ограничениями ресурсов,
+выбором листов, проверкой candidate и атомарным созданием новой книги (ADR-136).
+Повтор после потери ответа использует прежние request/document IDs. Неподдерживаемые
+функции и потери парсера требуют явного принятия; полная совместимость Excel не заявлена. Владелец документа
 может скачать подтверждённую книгу кнопкой «Скачать XLSX» или через
 `GET /api/documents/{id}/export.xlsx`; права и durable audit проверяются до ответа.
 По умолчанию экспорт доступен владельцу. «Выдача и аудит» задаёт правила книги

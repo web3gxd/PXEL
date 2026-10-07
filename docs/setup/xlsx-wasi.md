@@ -53,3 +53,34 @@ remains 256 MiB. Linux requires enforceable cgroup v2 and permits 32 tasks
 because pids.max counts runtime threads; Linux remains unverified. Limit setup
 failure refuses configured execution. RUNBOOK records whether the candidate's
 combined verification has completed; do not infer public-upload readiness.
+
+## Public preview/publication and full-profile verification (ADR-135/136)
+
+Public HTTP uploads require the verified manifest; missing or unusable sandbox
+returns503 without native fallback. Authentication/origin, source32MiB/body48MiB,
+selection/title, candidate validation and explicit compatibility acceptance are
+checked before durable creation. The normalized content is the only published
+input; the original package is neither stored nor passed through to exports.
+This is content disarm and active-content refusal, not a general antivirus claim.
+
+The finite guest fuel cap is5B after full100000-cell profile testing;256MiB guest
+memory/5s deadline and512MiB host/one-core/task caps remain. WASI/backend positive
+controls still independently prove fuel/timeout/capability enforcement.
+
+For the isolated full-profile HTTP/PostgreSQL/Chromium acceptance on Windows:
+
+```powershell
+. ./scripts/env.ps1
+just xlsx-wasi-check
+$env:PXEL_XLSX_LARGE = '1'
+node --test tests/recovery/xlsx-preview.test.mjs
+Remove-Item Env:PXEL_XLSX_LARGE
+```
+
+This owns its PostgreSQL/server/browser fixtures and free ports, uses synthetic
+files and a private keyring, and leaves existing demo services unchanged. It
+checks100000-cell publication/100001 refusal, style/formula/merge conformance,
+editor loading/reload, retries and hard PostgreSQL recovery. The environment
+flag controls the additional large case only; default runs still check actual
+oversized source/body rejection. Linux/cgroup, production authentication,
+deployment and manual accessibility remain separate unverified gates.

@@ -204,7 +204,7 @@ impl Sandbox {
             "-C",
             "cache=n",
             "-W",
-            "fuel=500000000",
+            "fuel=5000000000",
             "-W",
             "max-memory-size=268435456",
             "-W",

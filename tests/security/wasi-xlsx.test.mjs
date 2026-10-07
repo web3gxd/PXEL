@@ -18,7 +18,7 @@ const settings = [
   '-C',
   'cache=n',
   '-W',
-  'fuel=500000000',
+  'fuel=5000000000',
   '-W',
   'max-memory-size=268435456',
   '-W',
@@ -107,7 +107,7 @@ test('fuel terminates an infinite loop', () => {
   const output = run(
     Buffer.alloc(0),
     resolve('fixtures/wasi-sandbox/infinite-loop.wat'),
-    settings.map((v) => (v === 'fuel=500000000' ? 'fuel=10000' : v)),
+    settings.map((v) => (v === 'fuel=5000000000' ? 'fuel=10000' : v)),
   );
   assert.equal(output.status, 3);
   assert.match(output.stderr.toString(), /fuel/);
@@ -117,7 +117,7 @@ test('execution timeout terminates a loop independently of fuel exhaustion', () 
     Buffer.alloc(0),
     resolve('fixtures/wasi-sandbox/infinite-loop.wat'),
     settings.map((v) =>
-      v === 'fuel=500000000' ? 'fuel=100000000000000' : v === 'timeout=5s' ? 'timeout=20ms' : v,
+      v === 'fuel=5000000000' ? 'fuel=100000000000000' : v === 'timeout=5s' ? 'timeout=20ms' : v,
     ),
   );
   assert.equal(output.status, 3);

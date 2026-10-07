@@ -100,3 +100,12 @@ verified, including active-content refusal and pending-body admission/cancel.
 This does not complete XLSX atomic publication, candidate/formula compatibility,
 retry receipts or step1. Combined local workspace verification passed; results
 and remaining external gates are in RUNBOOK.
+
+ADR-136 adds browser atomic XLSX publication. Full local HTTP/PostgreSQL/Chromium
+acceptance passed with exact styles/shared formulas/merges,100000-cell profile,
+100001 rejection, lost committed response/retry and hard PostgreSQL recovery of
+all conformance hashes/versions. Finite guest fuel is5B; scalar-only candidate
+batches use the existing1000-target domain budget while formula/style batches
+retain128 targets. Final combined/post-rebase gates remain pending; Linux/public
+release and all ten-step completion remain unproven. See RUNBOOK for actual
+results and failures; do not treat this sub-slice as the entire objective.

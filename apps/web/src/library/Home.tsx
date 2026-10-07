@@ -441,7 +441,7 @@ export function Home({ onOpen }: { onOpen: (id: string, markdown?: string) => vo
       </div>
       {pxel && <PxelPanel onClose={() => setPxel(false)} onImported={(id) => onOpen(id)} />}
       {csv && <CsvImportPanel onClose={() => setCsv(false)} onImported={(id) => onOpen(id)} />}
-      {xlsx && <XlsxImportPanel onClose={() => setXlsx(false)} />}
+      {xlsx && <XlsxImportPanel onClose={() => setXlsx(false)} onImported={(id) => onOpen(id)} />}
     </main>
   );
 }

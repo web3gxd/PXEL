@@ -1,5 +1,6 @@
-import { expect, it, vi } from 'vitest';
-import { decodeXlsxPreview, readXlsxFile } from './xlsx-import';
+import { afterEach, expect, it, vi } from 'vitest';
+import { decodeXlsxPreview, readXlsxFile, publishXlsx } from './xlsx-import';
+afterEach(() => vi.unstubAllGlobals());
 
 const preview = {
   schema_version: 1,
@@ -26,6 +27,8 @@ it('validates typed sparse samples and refuses unknown semantics and inconsisten
     { ...preview, selected_sheets: [1] },
     { ...preview, selected_sheets: [0, 0] },
     { ...preview, preview_digest: 'not-a-digest' },
+    { ...preview, formula_issues: [{ sheet_index: 1, function: 'FILTER', cells: 1 }] },
+    { ...preview, formula_issues: [{ sheet_index: 0, function: '<script>', cells: 1 }] },
     { ...preview, issues: [{ code: 'Unknown', sheet_index: null }] },
     { ...preview, issues: [{ code: 'CellFormatting', sheet_index: 1 }] },
     {
@@ -44,6 +47,29 @@ it('validates typed sparse samples and refuses unknown semantics and inconsisten
     },
   ])
     expect(() => decodeXlsxPreview(value)).toThrow('предпросмотр');
+});
+it('preserves publication identity on retry and refuses a foreign receipt', async () => {
+  const payload = {
+    ...(await readXlsxFile(new File(['xlsx'], 'Импорт.xlsx'))),
+    selected_sheets: [0],
+    preview_digest: 'a'.repeat(64),
+    accept_reported: false,
+  };
+  const fetch = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('network'))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ document_id: payload.document_id, version: '1' })),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ document_id: payload.request_id, version: '1' })),
+    );
+  vi.stubGlobal('fetch', fetch);
+  const signal = new AbortController().signal;
+  await expect(publishXlsx(payload, signal)).rejects.toThrow('network');
+  expect(await publishXlsx(payload, signal)).toBe(payload.document_id);
+  expect(fetch.mock.calls[0]?.[1]?.body).toBe(fetch.mock.calls[1]?.[1]?.body);
+  await expect(publishXlsx(payload, signal)).rejects.toThrow('подтверждение');
 });
 it('encodes exact bytes and refuses oversized files before reading', async () => {
   await expect(readXlsxFile(new File([], 'empty.xlsx'))).rejects.toThrow('32 МиБ');

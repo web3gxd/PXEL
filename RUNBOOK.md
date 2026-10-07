@@ -7805,3 +7805,136 @@ manifest. Final390/DPR1 and1440/DPR2 screenshots inspected after CSS transitions
 No source changed after these checks. Test servers/PostgreSQL/browser stopped;
 existing demo untouched. Preview slice ready for local fast-forward merge;
 XLSX publication and the full ten-step objective remain open.
+
+## 2026-10-07 — XLSX candidate publication (ADR-136), in progress
+
+feat/xlsx-publication adds authenticated atomic fresh-book creation through the
+existing positional candidate adapter and PostgreSQL transaction. Browser title,
+selection, compatibility acceptance and stable request/document identities are
+frozen for retries. Unsupported formula names are reported without evaluating
+uploaded arguments; formulas remain authored input. No new dependencies/codecs.
+
+Publication preview now binds exact converted Book and both compatibility reports
+as well as uploaded source/selection, using streaming JSON into SHA-256. Legacy
+preview without title retains ADR-135 digest and is not a publication receipt.
+Digest regressions2/2 PASS; strict all-feature server Clippy PASS; frontend
+TypeScript and changed Markdown/JS Prettier checks PASS. Prettier was accidentally
+asked to parse Rust and reported no parser; Rust uses cargo fmt, which passed.
+
+Real isolated PostgreSQL/server/WASI/Chromium publication E2E1/1 PASS (57.96s),
+then expanded hard PostgreSQL immediate-stop/restart E2E1/1 PASS (62.56s).
+Checks cover digest/title/version rejection, unknown-function consent, selected
+missing-reference refusal, stable publication receipts, lost committed HTTP
+response with browser retry, reload, crash recovery with identical hash/version
+and durable retry receipt, and unavailable sandbox without native fallback.
+Fixture services stopped; existing demo untouched. This is not the full step1
+acceptance gate or combined workspace verification.
+
+Candidate tests4/4 PASS, covering shared formula/style conversion, retry IDs,
+selection/missing targets, evaluator capability probing and empty reference axis
+expansion/domain overflow. Initial new empty-reference fixture failed because IR
+formula source incorrectly included '='; corrected synthetic input to the IR
+contract, without relaxing product validation. Complete style/merge conformance,
+large-profile acceptance, combined/post-rebase verification and commit/merge
+remain pending. All ten functional steps and external deployment gates remain
+open.
+
+Expanded XLSX conformance checks assert every styled-profile property, all four
+borders, the styled empty cell, actual relative/absolute shared-formula targets
+and exact merge coordinates. Initial E2E failed only because copies use the
+existing canonical formatter's explicit parentheses; adjusted expected copied
+sources to that documented semantic contract. A first replacement missed the
+single-line assertion, causing the same failure again; corrected it before the
+next run. No formula transformation implementation was weakened.
+
+Full100000-cell acceptance initially failed preview503. Independent synthetic
+ZIP CRC/count validation passed. Direct WASI probes proved500M and2B fuel
+exhaustion;5B passed in572ms with unchanged256MiB guest memory/5s timeout.
+ADR-136 raises only the finite fuel cap to5B. All16 actual WASI/backend tests
+PASS (16.16s), including full100000-cell configured-backend success, malicious
+loop fuel/timeout and host-pinned no-fallback cases. Strict final server Clippy
+and changed-file Prettier PASS. Full-profile HTTP/PG test handle1919 subsequently failed on the fixture30s
+preview timeout; it did not prove publication/crash acceptance. Fixture services
+were stopped by finally cleanup.
+
+Isolated exact just check handle48461 completed exit0:756 Rust tests/17ignored,
+337 Vitest, both Clippy profiles, native/WASM/protocol/format/lint/typecheck/build
+PASS. Private log: .local/xlsx-combined-zVuhQr/check.log. Fuel/test changes landed
+while this recipe was running, after initial Rust checks; therefore this is
+component evidence, not the final unchanged-source/post-rebase gate. Final
+combined verification must be repeated before commit/merge. Current work stays
+on feat/xlsx-publication; no push or broader step completion claim.
+
+Investigated the full-profile preparation timeout:128-target scalar batches
+repeatedly validate/hash the growing workbook. Added XLSX-specific preparation
+with up to1000 unstyled scalar targets using the existing domain budget; heavy
+formula/style batches remain128 targets/256KiB text and every event still passes
+durable codec validation. Existing PXEL/operator128-target preparation is
+unchanged, avoiding mutation of its established retry event shape. Both public
+XLSX preview/publication use the same preparation profile. HTTP preview fixture
+now matches browser60s timeout. Targeted Rust/build/full-profile E2E handle20120
+is running; no final success claim yet. Combined/post-rebase checks remain open.
+
+XLSX-specific preparation targeted Rust21/21 PASS, including host resource
+mechanisms and existing operator semantics. New mixed2000-target scalar/formula
+candidate regression5/5 PASS with the rest of xlsx_candidate tests: heavy events
+stay128 targets, scalar events use at most1000, all durable codecs validate.
+Full-profile HTTP E2E observed100000-cell preview/publication and last-address
+value preservation, plus100001-cell rejection (40.78s combined). All detailed
+style/shared-formula/merge HTTP conformance assertions passed before this point.
+Browser/crash-recovery tail is still live on20120 and not yet a full E2E pass.
+
+Final expanded full-profile HTTP/PostgreSQL/Chromium E2E1/1 PASS (118.80s), exit0.
+Exact property/shared-formula/merge conformance,100000 accepted/100001 refused,
+last-cell value, browser390/DPR1 and1440/DPR2, lost committed response/retry,
+reload and immediate PostgreSQL crash/restart all passed. Every conformance book,
+including100000 cells, retained identical hash/version after recovery. Private
+screenshots .local/xlsx-preview-bcfOV6 inspected at both viewport/DPR settings.
+Fixture browser/server/PostgreSQL stopped; existing demo untouched. Strict server
+Clippy PASS after scalar-batch change. Final unchanged-source combined check
+handle51800 is running; commit/rebase/merge and full ten-step completion remain
+open.
+
+Added authenticated oversized source32MiB+1 and JSON body48MiB boundary requests;
+both must refuse413 before catalog publication. Expanded default E2E handle76894
+is live; final combined handle51800 is live on isolated log
+.local/xlsx-combined-gP3ZXw/check.log. No final results assumed from partial logs.
+Source/ADR/status docs updated for publication; previous historical preview notes
+remain historical. No commit/merge or step completion yet.
+
+Expanded default HTTP/PostgreSQL/Chromium E2E1/1 PASS (87.91s), exit0, including
+actual decoded source32MiB+1 and JSON body48MiB requests refused413 without
+catalog publication. Full-profile118.80s pass remains separate recorded evidence.
+Both fixture service sets stopped. Review confirms member/origin checks before
+body processing, verified WASI-only public path, permit lifetime through commit,
+strict candidate-bound digest, unchanged retries, durable receipt and separation
+of authored/calculated state. Legacy positional preparation remains128-target.
+Final combined51800 still executing PostgreSQL tests; not yet a passed gate.
+
+Final isolated exact just check51800 PASS, exit0:757 Rust/17ignored,337 Vitest,
+both workspace Clippy profiles, native/WASM/protocol/format/lint/typecheck/build
+PASS. Private log .local/xlsx-combined-gP3ZXw/check.log. Production source stayed
+unchanged during this gate; documented E2E negative boundary additions were
+formatted before its frontend checks. Existing Vite >500KiB warning remains.
+
+Added full-profile browser loading check after review: inject only this fixture's
+own member cookie in memory, open its100000-cell book in Chromium, navigate to
+SF200/value100000 and repeat after reload with no page errors. Full-profile E2E
+handle55479 is running; do not infer that API success proves editor loading.
+Commit/rebase/final verification/merge remain pending; all ten steps remain open.
+
+Full-profile browser-loading addition first failed waiting for connection after
+164.40s; this is not a passed editor-loading gate. Review found fixture cookie
+injected at Path=/, while real dev-auth cookie has Path=/api. Normal bootstrap
+refresh then creates a second same-name cookie; strict auth correctly rejects
+ambiguous cookies. Corrected only fixture injection to actual /api + Strict
+contract and added an owning-session HTTP200 precondition. Product cookie/auth
+validation remains unchanged. Full-profile rerun required before commit/merge.
+
+Corrected full-profile editor E2E1/1 PASS (119.42s), exit0: owning-session HTTP200,
+100000-cell Chromium loading, navigation toSF200/value100000 before/after reload,
+no page errors, all previous size/conformance/retry/recovery checks passed. The
+failure was fixture cookie path/ambiguity, not weakened auth or a product fix.
+Fixture services stopped. ADR-136 now records local Windows implementation and
+verification; final post-rebase/deployment gates and the full ten-step objective
+remain open. Commit and rebase follow; no push.

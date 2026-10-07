@@ -4,6 +4,7 @@ import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
+import { scalarXlsx } from '../helpers/xlsx-profile.mjs';
 
 const target = process.env.CARGO_TARGET_DIR ?? 'target';
 const binary = resolve(
@@ -43,6 +44,15 @@ test('configured WASI backend previews existing fixture without content output',
   const output = preview(manifest);
   assert.equal(output.status, 0);
   assert.equal(output.stdout.trim(), 'XLSX preview: 2 sheets, 5 cells');
+  assert.equal(output.stderr, '');
+});
+
+test('configured bounded WASI backend accepts the full 100000-cell scalar profile', () => {
+  const path = join(root, 'full-scalar-profile.xlsx');
+  writeFileSync(path, scalarXlsx(100000));
+  const output = preview(manifest, path);
+  assert.equal(output.status, 0);
+  assert.equal(output.stdout.trim(), 'XLSX preview: 1 sheets, 100000 cells');
   assert.equal(output.stderr, '');
 });
 

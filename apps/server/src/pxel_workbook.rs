@@ -160,6 +160,29 @@ pub fn prepare(
     request: Uuid,
     digest: &[u8],
 ) -> Result<Prepared, FileError> {
+    prepare_with_scalar_limit(input, document, actor, request, digest, 128)
+}
+
+/// Public XLSX profile: scalar-only batches use the existing 1000-target budget.
+/// Formula/style batches retain the bounded 128-target preparation profile.
+pub fn prepare_xlsx(
+    input: &Book,
+    document: DocumentId,
+    actor: ActorId,
+    request: Uuid,
+    digest: &[u8],
+) -> Result<Prepared, FileError> {
+    prepare_with_scalar_limit(input, document, actor, request, digest, 1000)
+}
+
+fn prepare_with_scalar_limit(
+    input: &Book,
+    document: DocumentId,
+    actor: ActorId,
+    request: Uuid,
+    digest: &[u8],
+    scalar_limit: usize,
+) -> Result<Prepared, FileError> {
     if !matches!(input.schema_version, 1 | 2) {
         return Err(FileError::Version);
     }
@@ -268,19 +291,29 @@ pub fn prepare(
             .map(|s| ((s.row, s.column), s))
             .collect();
         let positions: BTreeSet<_> = cells.keys().chain(styles.keys()).copied().collect();
-        // 128 targets also bound aggregate AST memory and encoded event size.
+        // Heavy batches retain 128 targets; unstyled scalars can use the domain limit.
         let mut chunks: Vec<Vec<(u32, u32)>> = Vec::new();
         let mut chunk = Vec::new();
         let mut text_bytes = 0;
+        let mut heavy = false;
         for position in positions {
+            let next_heavy = styles.contains_key(&position)
+                || matches!(cells.get(&position), Some(Content::Formula(_)));
             let bytes = match cells.get(&position) {
                 Some(Content::Text(s) | Content::Formula(s)) => s.len(),
                 _ => 0,
             };
-            if !chunk.is_empty() && (chunk.len() == 128 || text_bytes + bytes > 256 * 1024) {
+            let limit = if heavy || next_heavy {
+                128
+            } else {
+                scalar_limit
+            };
+            if !chunk.is_empty() && (chunk.len() >= limit || text_bytes + bytes > 256 * 1024) {
                 chunks.push(std::mem::take(&mut chunk));
                 text_bytes = 0;
+                heavy = false;
             }
+            heavy |= next_heavy;
             chunk.push(position);
             text_bytes += bytes;
         }

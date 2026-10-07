@@ -7,7 +7,7 @@ Foundation: **ACCEPTED FOR PHASE 0**, 2026-09-28. Последующее пор�
 
 ## Границы системы
 
-MVP — modular monolith: один основной Axum binary, PostgreSQL как источник истины и переключаемый BlobStore (локальный filesystem или optional S3 feature). XLSX parsing выполняется в отдельном процессе с ограниченным framed protocol: operator CLI допускает native worker, а публичный preview требует pinned WASI runtime с guest/host limits (ADR-132—135). Windows execution проверен локально; Linux остаётся открытым gate. Redis, NATS, Kafka, микросервисы и distributed leader election не нужны.
+MVP — modular monolith: один основной Axum binary, PostgreSQL как источник истины и переключаемый BlobStore (локальный filesystem или optional S3 feature). XLSX parsing выполняется в отдельном процессе с ограниченным framed protocol: operator CLI допускает native worker, а публичные preview/publication требуют pinned WASI runtime с guest/host limits (ADR-132—136). Windows execution проверен локально; Linux остаётся открытым gate. Redis, NATS, Kafka, микросервисы и distributed leader election не нужны.
 
 Сервер определяет порядок, canonical operations и результаты формул. Клиент хранит confirmed projection отдельно от pending intents; WASM preview остается предварительным. Никакой ACK committed до durable COMMIT. Все публичные и сохраненные форматы versioned; неизвестная обязательная семантика отклоняется целиком.
 
