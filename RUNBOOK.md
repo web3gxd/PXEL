@@ -8286,3 +8286,16 @@ review, ESLint, TypeScript and formatting passed; the two affected cases passed
 all4 real Chromium runs across DPR1/2. The diagnostic browser run was stopped
 for these changes; its partial output is not claimed as a full-suite pass.
 The preceding Linux run confirmed that both originally failing auth tests pass.
+
+The next diagnostic browser run exposed stale fixtures after ADR-128/129.
+The restored-history conflict test filled7 over an existing7, so no input change
+or foreign operation existed. It now authors an explicit same-value input and
+requires head+1 with identical sheets before testing UndoConflict. Existing
+refusal, unchanged workbook/version and reload assertions remain intact.
+Four book-policy requests in modal-disclosure/privacy/pxel-file tests spread
+default rules containing CSV but still sent schema1; they now send schema2.
+Valid legacy-format policies and intentional schema1+CSV rejection are unchanged.
+Both fixtures passed independent review. All10 affected real Chromium cases
+passed at DPR1/2; full ESLint, TypeScript, formatting and diff checks passed.
+The diagnostic full-browser run was stopped for this combined fixture update;
+the complete428-case and Linux gates still require their final runs.

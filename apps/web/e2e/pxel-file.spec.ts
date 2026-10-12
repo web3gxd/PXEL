@@ -254,7 +254,7 @@ test('anonymous guest PXEL obeys both policies and imports only safe scalar valu
       await page.request.put(path + '/disclosure-policy', {
         headers: { Origin: origin },
         data: {
-          schema_version: 1,
+          schema_version: 2,
           expected_revision: bookPolicy.revision,
           rules: { ...bookPolicy.rules, allow_participant_export: true },
         },
@@ -355,7 +355,7 @@ test('anonymous guest PXEL obeys both policies and imports only safe scalar valu
         await ownerRequest.put(path + '/disclosure-policy', {
           headers: { Origin: origin },
           data: {
-            schema_version: 1,
+            schema_version: 2,
             expected_revision: currentPolicy.revision,
             rules: { ...currentPolicy.rules, allow_copy: false },
           },

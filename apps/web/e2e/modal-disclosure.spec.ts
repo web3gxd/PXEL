@@ -16,7 +16,7 @@ async function policy(page: Page, id: string, allow: boolean, anonymous = false)
       await page.request.put(path, {
         headers: { Origin: new URL(page.url()).origin },
         data: {
-          schema_version: 1,
+          schema_version: 2,
           expected_revision: current.revision,
           rules: { ...current.rules, allow_copy: allow, require_anonymization: anonymous },
         },

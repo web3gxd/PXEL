@@ -194,7 +194,7 @@ test('recognition safe clipboard XLSX and anonymous guest channels preserve orig
       await page.request.put(`${path}/disclosure-policy`, {
         headers: { Origin: origin },
         data: {
-          schema_version: 1,
+          schema_version: 2,
           expected_revision: bookPolicy.revision,
           rules: { ...bookPolicy.rules, allow_participant_export: true },
         },

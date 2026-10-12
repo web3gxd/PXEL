@@ -203,8 +203,18 @@ test('restored own history still refuses a foreign same-value overwrite without 
   try {
     await expect(undo(editor)).toBeDisabled();
     await editor.bringToFront();
-    await write(editor, 0, 0, '7');
+    const beforeOverwrite = await state(editor);
+    await select(editor, 0, 0);
+    // Force an input change before restoring the same persisted value.
+    await bar(editor).fill('');
+    await bar(editor).fill('7');
+    await bar(editor).press('Enter');
+    await expect
+      .poll(async () => (await state(editor)).version)
+      .toBe(String(BigInt(beforeOverwrite.version) + 1n));
+    await expect(editor.getByTestId('save-status')).toHaveText('Сохранено');
     const canonical = await state(editor);
+    expect(canonical.sheets).toEqual(beforeOverwrite.sheets);
     expect(canonical.capabilities).toMatchObject({ can_edit: true, can_share: false });
     await page.bringToFront();
     await reload(page, 'undo');
