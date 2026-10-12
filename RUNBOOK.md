@@ -8223,3 +8223,36 @@ Local Rust formatting, default/all-feature workspace Clippy, nine restore tests,
 the binary-stdout unit test and publication checks3/3 passed. Final source/artifact
 scan checked993 files with0 unexpected identity matches, excluding the two blocked
 original report/script files and the separately retained original Git archives.
+
+## 2026-10-13 — Actions checks without developer key configuration
+
+Run38289136015 passed publication and Clippy, then failed two auth tests with
+Keys(InvalidConfiguration). The tests used PgDatabase::connect, which correctly
+requires operator key configuration even though these tests only exercise
+session persistence. An isolated native PostgreSQL fixture reproduced both
+failures with PXEL_KEYRING_FILE and PXEL_KEYRING_JSON absent. The development
+sessions integration test reproduced a third failure from the same dependency.
+
+Both auth tests now share an explicit test-only LocalKeyProvider fixture;
+the storage integration test likewise passes its own test key provider through
+connect_with_keys. Real PostgreSQL pools, persistent session queries, revocation
+assertions and targeted cleanup remain intact. Production connect and strict
+environment/file key validation were not changed. Independent security review
+approved both final patches.
+
+The smoke parent previously passed its original environment to runtime/recovery
+tests while only the development child loaded the local database URL/keyring.
+It now prepares one environment for the development stack and all test children,
+preserving explicit operator overrides. A real-script subprocess-boundary
+regression failed before this fix and passes both local-file and explicit-env
+cases afterward. The new test is included in repository:check for Linux CI.
+No credentials, request bodies or response bodies were added to output.
+
+Fresh-DB RED/GREEN verification passed: auth changed from3 pass/2 failures to5/5,
+and development sessions from0 pass/1 failure to1/1, with both external key sources
+absent throughout. Publication tests5/5, path hygiene,64-package notices,
+default/all-feature workspace Clippy, Rust formatting, JavaScript formatting,
+syntax and diff checks passed. The complete all-feature Rust workspace passed
+764 tests with0 failures and17 existing explicit ignores against the isolated
+PostgreSQL fixture without external key configuration. Remote Actions remains
+pending a fresh run; local verification does not close the Linux deployment gate.

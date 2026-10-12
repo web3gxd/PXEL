@@ -341,6 +341,17 @@ pub fn valid_origin(headers: &HeaderMap, allowed: &[String]) -> bool {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+    use spreadsheet_storage::LocalKeyProvider;
+    use std::sync::Arc;
+
+    async fn database() -> Result<PgDatabase, Box<dyn std::error::Error>> {
+        // Session tests use real PostgreSQL without a developer's encryption keys.
+        let keys = Arc::new(LocalKeyProvider::from_keyring_json(
+            r#"{"schema_version":1,"active_kek_id":"auth-test","keys":[{"id":"auth-test","key_hex":"0101010101010101010101010101010101010101010101010101010101010101"}]}"#,
+        )?);
+        Ok(PgDatabase::connect_with_keys(&std::env::var("DATABASE_URL")?, 2, keys).await?)
+    }
+
     #[test]
     fn local_cookie_parser_rejects_ambiguous_or_malformed_bearers()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -404,7 +415,7 @@ mod tests {
 
     #[tokio::test]
     async fn disabled_auth_cannot_issue_a_principal() -> Result<(), Box<dyn std::error::Error>> {
-        let database = PgDatabase::connect(&std::env::var("DATABASE_URL")?, 2).await?;
+        let database = database().await?;
         let auth = Auth::new(false, database);
         assert!(auth.authenticate(&HeaderMap::new()).await?.is_none());
         #[cfg(feature = "dev-auth")]
@@ -416,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn reconnect_reuses_session_and_duplicate_cookie_is_rejected()
     -> Result<(), Box<dyn std::error::Error>> {
-        let database = PgDatabase::connect(&std::env::var("DATABASE_URL")?, 2).await?;
+        let database = database().await?;
         let auth = Auth::new(true, database.clone());
         let value = auth
             .issue(&HeaderMap::new())

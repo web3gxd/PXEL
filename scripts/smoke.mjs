@@ -1,7 +1,16 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
+import { ensureDevelopmentKeyring } from './keyring.mjs';
+
+const localDatabase = resolve('.local/database-url');
+if (!process.env.DATABASE_URL && !existsSync(localDatabase))
+  throw new Error('Run just infra-up (or just infra-native) first.');
+// Runtime/recovery tests must use the same database and keys as the dev stack.
+const env = { ...process.env, ...ensureDevelopmentKeyring() };
+if (!env.DATABASE_URL) env.DATABASE_URL = readFileSync(localDatabase, 'utf8').trim();
 
 const webRequire = createRequire(resolve('apps/web/package.json'));
 const playwright = join(dirname(webRequire.resolve('@playwright/test/package.json')), 'cli.js');
@@ -14,6 +23,7 @@ const serverBinary = resolve(
     ),
 );
 const dev = spawn(process.execPath, ['scripts/dev.mjs'], {
+  env,
   stdio: 'inherit',
   windowsHide: true,
   detached: process.platform !== 'win32',
@@ -67,7 +77,7 @@ try {
       stdio: 'inherit',
       windowsHide: true,
       env: {
-        ...process.env,
+        ...env,
         PXEL_TEST_SERVER_BINARY: process.env.PXEL_TEST_SERVER_BINARY ?? serverBinary,
         PXEL_RECOVERY_SERVER_BINARY: process.env.PXEL_RECOVERY_SERVER_BINARY ?? serverBinary,
       },
