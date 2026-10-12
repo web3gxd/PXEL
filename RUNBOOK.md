@@ -8050,7 +8050,7 @@ Publication: complete unmodified GNU AGPL text, NOTICE, official-schema-validate
 CITATION.cff, Cargo/npm license metadata, SECURITY/CONTRIBUTING, concise README,
 self-hosting guide and historical development notes. Scientific citation is a
 request, not an extra license term. Browser license/source/warranty links and
-66-package locked production dependency notices are included. Buf's npm package
+64-package locked production dependency notices are included. Buf's npm package
 omits standalone license texts, so its exact2.15.0 Apache/BSD texts are retained
 under docs/licenses and checked by the reproducible notices generator.
 
@@ -8123,3 +8123,18 @@ tests2/2,917-path check and66-package notices check passed. Full Git history aft
 the source commit(196 commits) passed redacted Gitleaks with0 findings. The local
 main merge remains blocked by the unrelated dirty primary worktree; publishing
 this isolated source commit as the new GitHub main does not merge local main.
+
+Published2bcabd8 as GitHub main; GitHub recognized AGPL-3.0 and started foundation
+CI. Its first Linux publication job reproduced a tooling discrepancy: the outer
+local pnpm12 script resolved nested `pnpm licenses` from PATH to system pnpm11.25,
+whose production list also included dev-only has-flag/supports-color. Thus the
+earlier66-package notice checks passed locally but differed from pinned Linux
+pnpm12's64-package output. This did not omit runtime licenses or change the lock.
+The notices generator now invokes the parent npm_execpath without a shell,
+supports native/JS CLI entry points and checks its version against packageManager
+before collecting licenses. Scripts no longer use a nested PATH-based pipeline.
+Pinned-parent --check first reproduced stale notices locally; regenerate64 and
+--check then passed despite system pnpm11 on PATH. Explicit pnpm11 was rejected.
+Only the two extraneous MIT sections were removed. Frontend build and formatting
+passed; no runtime source or dependency version changed. The next CI run must
+verify Linux publication; the full production deployment gate remains open.

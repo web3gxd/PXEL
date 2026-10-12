@@ -20,8 +20,8 @@
     "test:network-convergence": "node --test tests/integration/network-convergence.test.mjs",
     "test:recovery": "node scripts/recovery.mjs",
     "repository:check": "node --test tests/security/repository.test.mjs && node scripts/repository-check.mjs",
-    "notices:generate": "pnpm licenses list --prod --json | node scripts/third-party-notices.mjs",
-    "notices:check": "pnpm licenses list --prod --json | node scripts/third-party-notices.mjs --check"
+    "notices:generate": "node scripts/third-party-notices.mjs",
+    "notices:check": "node scripts/third-party-notices.mjs --check"
   },
   "devDependencies": {
     "@bufbuild/buf": "1.73.0",

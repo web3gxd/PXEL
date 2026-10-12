@@ -1,8 +1,21 @@
-// Input: pnpm licenses list --prod --json. Keep local installation paths out of the output.
+// Use the invoking pinned pnpm, not another pnpm found on PATH.
+// Keep local installation paths out of the output.
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const groups = JSON.parse(readFileSync(0, 'utf8'));
+const manager = process.env.npm_execpath;
+if (!manager) throw new Error('Run pnpm notices:generate or pnpm notices:check.');
+const nodeEntry = /\.(?:cjs|mjs|js)$/i.test(manager);
+const command = nodeEntry ? process.execPath : manager;
+const prefix = nodeEntry ? [manager] : [];
+const options = { encoding: 'utf8', windowsHide: true, maxBuffer: 8 * 1024 * 1024 };
+const expected = JSON.parse(readFileSync('package.json', 'utf8')).packageManager;
+const version = execFileSync(command, [...prefix, '--version'], options).trim();
+if (`pnpm@${version}` !== expected) throw new Error(`Use the pinned ${expected}.`);
+const groups = JSON.parse(
+  execFileSync(command, [...prefix, 'licenses', 'list', '--prod', '--json'], options),
+);
 const packages = Object.values(groups)
   .flat()
   .sort((a, b) => a.name.localeCompare(b.name, 'en'));
