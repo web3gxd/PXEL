@@ -8165,3 +8165,20 @@ An isolated nativePG fixture moved from0 tables to all52 applied migrations,
 including snapshots/local_accounts/operations; no credentials appeared in its
 log and the fixture was stopped. Formatting/syntax/diff checks passed. This
 cached-build Windows check does not replace the next clean Linux/Compose run.
+
+The authorized identity rewrite completed in12 local common repositories:
+515 commit payloads were validated against the original trees, mapped parents,
+dates, messages and unaffected authors. All26 worktrees and5647 dirty/untracked
+files were preserved, including both PXEL stash entries. Annotated tags and
+reflog ordering/actors/timestamps were validated. Every rewritten repository
+passed fsck and a raw retained commit/tag scan after old objects were pruned.
+Other writers and automatic fetch were paused with explicit user confirmation.
+The retired remote in the local faceit_bot project was disconnected while its
+refs were retained. One ordinary archived note was redacted; protected account
+files, HAR captures and Codex context were left intact as requested.
+
+The exact historical Gitleaks suppression must follow the rewritten commit ID;
+the updated fingerprint passed a full198-commit scan with0 findings. No broader
+rule suppression was added. A final sweep of all local repositories and fresh
+GitHub repository publication follows; rollback copies remain private until
+verification completes and are then removed so they do not retain old identity.

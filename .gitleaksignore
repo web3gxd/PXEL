@@ -1,3 +1,3 @@
 # Reviewed false positive: ordinary prose about formula locale tokenization.
 # Exact historical finding only; do not suppress the generic-api-key rule.
-04e946096ec0f69fb15561796918f4fb889215e3:docs/formula-semantics.md:generic-api-key:39
+3df4e9e387fc73870be7d0a3cde191e8c963cea9:docs/formula-semantics.md:generic-api-key:39
