@@ -137,7 +137,10 @@ test('multi-sheet XLSX is committed, replayed and exported with both sheets', as
         await grid.focus();
         for (let index = 0; index < 25; index++) await page.keyboard.press('ArrowRight');
         for (let index = 0; index < 3; index++) await page.keyboard.press('ArrowDown');
-        assert.equal(await page.locator('.cell-address').textContent(), 'Z4');
+        assert.equal(
+          await page.getByRole('textbox', { name: 'Ячейка или диапазон' }).inputValue(),
+          'Z4',
+        );
         assert.equal(
           await page.getByRole('textbox', { name: 'Значение ячейки' }).inputValue(),
           'world!',

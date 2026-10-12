@@ -8256,3 +8256,11 @@ syntax and diff checks passed. The complete all-feature Rust workspace passed
 764 tests with0 failures and17 existing explicit ignores against the isolated
 PostgreSQL fixture without external key configuration. Remote Actions remains
 pending a fresh run; local verification does not close the Linux deployment gate.
+
+The additional live smoke run passed76 of77 integration scenarios and exposed
+one stale XLSX browser assertion. ADR-126 changed the address display into an
+input, whose textContent is always empty; the assertion now reads inputValue
+through the accessible textbox name. The expected Z4 address, keyboard navigation,
+world! cell value and both DPR variants remain unchanged. Three isolated original
+test runs reproduced the failure before the assertion change. Linux verification
+and the complete smoke result remain pending their reruns.
