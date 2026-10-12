@@ -1,4 +1,7 @@
 [package]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
 name = "spreadsheet-xlsx"
 version.workspace = true
 edition.workspace = true

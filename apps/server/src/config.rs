@@ -6,6 +6,7 @@ pub struct Config {
     pub blob_root: PathBuf,
     pub allowed_origins: Vec<String>,
     pub dev_auth: bool,
+    pub bootstrap_token_hash: Option<[u8; 32]>,
     pub snapshot_interval: NonZeroU64,
     pub snapshot_cleanup_retention: Duration,
     pub snapshot_active_retention: Duration,
@@ -51,6 +52,10 @@ impl Config {
         if dev_auth && !address.ip().is_loopback() {
             anyhow::bail!("development authentication requires a loopback bind");
         }
+        let bootstrap_token_hash = match std::env::var_os("PXEL_BOOTSTRAP_TOKEN_FILE") {
+            None => None,
+            Some(path) => Some(read_bootstrap_token(std::path::Path::new(&path))?),
+        };
         let origins = std::env::var("PXEL_ALLOWED_ORIGINS").unwrap_or_else(|_|
             "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080".into());
         let allowed_origins: Vec<String> = origins
@@ -105,6 +110,7 @@ impl Config {
             address,
             allowed_origins,
             dev_auth,
+            bootstrap_token_hash,
             snapshot_interval,
             snapshot_cleanup_retention,
             snapshot_active_retention,
@@ -115,6 +121,29 @@ impl Config {
                 .unwrap_or_else(|| PathBuf::from(".local/blobs")),
         })
     }
+}
+
+fn read_bootstrap_token(path: &std::path::Path) -> anyhow::Result<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = crate::storage_maintenance::private_secret_file(path).map_err(|_| {
+        anyhow::anyhow!("bootstrap token file must be a private regular file with one link")
+    })?;
+    let mut bytes = zeroize::Zeroizing::new(Vec::new());
+    file.by_ref()
+        .take(66)
+        .read_to_end(&mut bytes)
+        .map_err(|_| anyhow::anyhow!("bootstrap token file is unreadable"))?;
+    // Exactly the tool's 64 lowercase hexadecimal bytes, with optional LF.
+    let token = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
+    if token.len() != 64
+        || !token
+            .iter()
+            .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
+    {
+        anyhow::bail!("bootstrap token file must contain 64 lowercase hexadecimal characters");
+    }
+    Ok(Sha256::digest(token).into())
 }
 
 fn parse_snapshot_active_days(raw: &str) -> anyhow::Result<Duration> {

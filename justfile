@@ -40,6 +40,12 @@ e2e:
 smoke:
     node scripts/smoke.mjs
 
+# Separate fresh-instance acceptance; requires native PostgreSQL 18 binaries in PXEL_PG_BIN.
+selfhost-check:
+    cargo build --locked -p pxel-server
+    pnpm build
+    node --test --test-concurrency=1 tests/recovery/local-auth.test.mjs tests/recovery/selfhost-browser.test.mjs
+
 bench-formula-rebase:
     cargo test --locked --release -p spreadsheet-collab --lib axis_history::tests::historical_formula_binding_benchmark -- --ignored --exact --nocapture
 

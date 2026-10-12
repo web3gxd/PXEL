@@ -8,6 +8,32 @@ concurrency:
   group: foundation-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  publication:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - name: Publication hygiene and licenses
+        run: |
+          npm install --global pnpm@12.6.0
+          pnpm install --frozen-lockfile
+          pnpm repository:check
+          pnpm notices:check
+          cmp LICENSE apps/web/public/license.txt
+      - name: Scan full Git history for secrets
+        run: |
+          mkdir -p .tools/gitleaks
+          curl --fail --location --silent --show-error https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o .tools/gitleaks/archive.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  .tools/gitleaks/archive.tar.gz' | sha256sum --check --strict
+          tar -xzf .tools/gitleaks/archive.tar.gz -C .tools/gitleaks gitleaks
+          .tools/gitleaks/gitleaks git --log-opts=--all --redact=100 --no-banner
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 40

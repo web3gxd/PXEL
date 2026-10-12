@@ -38,6 +38,9 @@ import { HistoryPanel } from './document/HistoryPanel';
 import { PxelPanel } from './document/PxelPanel';
 import { CsvExportPanel } from './document/CsvExportPanel';
 import { Home } from './library/Home';
+import { AuthGate } from './auth/AuthGate';
+import { Legal } from './auth/Legal';
+import { Modal } from './sharing/Modal';
 import { BookTitle } from './library/BookTitle';
 import { LibraryNavigation } from './library/LibraryNavigation';
 import './sharing/sharing.css';
@@ -115,18 +118,22 @@ export function App() {
   );
   return route ? (
     <SharedEntry route={route}>{(guest) => <SpreadsheetApp guest={guest} />}</SharedEntry>
-  ) : documentRoute ? (
-    <SpreadsheetApp initialMarkdown={initialMarkdown} />
   ) : (
-    <Home
-      onOpen={(id, markdown) => {
-        if (markdown !== undefined) {
-          history.replaceState(null, '', '/?document=' + encodeURIComponent(id));
-          setInitialMarkdown(markdown);
-          setDocumentRoute(true);
-        } else location.assign('/?document=' + encodeURIComponent(id));
-      }}
-    />
+    <AuthGate>
+      {documentRoute ? (
+        <SpreadsheetApp initialMarkdown={initialMarkdown} />
+      ) : (
+        <Home
+          onOpen={(id, markdown) => {
+            if (markdown !== undefined) {
+              history.replaceState(null, '', '/?document=' + encodeURIComponent(id));
+              setInitialMarkdown(markdown);
+              setDocumentRoute(true);
+            } else location.assign('/?document=' + encodeURIComponent(id));
+          }}
+        />
+      )}
+    </AuthGate>
   );
 }
 
@@ -153,6 +160,7 @@ function SpreadsheetApp({
   const [historyPanel, setHistoryPanel] = useState(false);
   const [pxelPanel, setPxelPanel] = useState(false);
   const [csvExportPanel, setCsvExportPanel] = useState(false);
+  const [about, setAbout] = useState(false);
   const previewSort = useCallback(
     (bounds?: SortBounds) => document.previewSortBounds(bounds),
     [document],
@@ -898,10 +906,20 @@ function SpreadsheetApp({
           {document.sheet?.rows.length ?? 1_000} строк × {document.sheet?.columns.length ?? 26}{' '}
           столбцов
         </span>
-        <span className="footer-wordmark" aria-hidden="true">
+        <button
+          type="button"
+          className="footer-wordmark"
+          onClick={() => setAbout(true)}
+          aria-label="О PXEL и лицензии"
+        >
           PXEL
-        </span>
+        </button>
       </footer>
+      {about && (
+        <Modal title="О PXEL" onClose={() => setAbout(false)}>
+          <Legal />
+        </Modal>
+      )}
     </main>
   );
 }

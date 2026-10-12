@@ -7982,3 +7982,144 @@ tests,337 frontend units, ESLint/typecheck and cargo fmt, all PASS.
 README now describes actual browser publication. Linux/Compose/remote CI,
 production auth/deployment/manual NVDA and overall ten-step completion remain
 open. No dependency, secret, remote or existing demo service changed.
+
+## 2026-10-12 — self-hosted accounts and open-source publication (ADR-137)
+
+User decisions: AGPL-3.0-only, author/account web3gxd, public PXEL repository;
+source preparation with explicit deployment gates. The subsequent self-hosting
+request adds first-run master creation, master-issued ordinary accounts and full
+master access to every instance book. No production server/domain was selected.
+
+Implemented a PostgreSQL singleton local instance/workspace, atomic fresh-only
+bootstrap, private 256-bit bootstrap code file, local accounts and independent
+hashed opaque sessions. Initial setup refuses existing documents. A database
+trigger limits new documents to the instance workspace and adds the master owner
+permission alongside another creator's owner permission. Existing OwnerImmutable
+guards protect the master; ordinary users keep document ACL boundaries.
+
+Passwords reuse Argon2id64MiB/t3/p1 and two bounded workers; no runtime dependency
+was added. Temporary passwords require a distinct first-login password before
+workbook/WS/admin access. Sessions have an absolute8h TTL and credential epochs;
+password change/reset/disable revoke them. Durable5-attempt/15min lockout applies
+to login and wrong current-password attempts. HTTP credentials use bounded4KiB
+bodies/5s deadline with admission before reads; local auth throttles at60/minute.
+Dev session routes retain the prior64/s bucket. Local cookies are always Secure,
+HttpOnly, SameSiteStrict, Path=/api; no insecure LAN HTTP bypass was added.
+
+Frontend includes two-step welcome/master setup, login, forced password change,
+own password/logout controls and master create/reset/enable/disable UI. Credentials
+remain in form inputs/POST bodies and are cleared after submission; they are not
+stored in localStorage. Auth failures/focus refresh the gate, and identity changes
+recreate the protected subtree. Guest-link routes retain their separate flow.
+Mobile checks found and fixed intrinsic grid overflow, inherited nowrap headings,
+scrolling of tall forms and the editor's hidden mobile legal link.
+
+Independent security subagent findings and fixes:
+
+- `.pxel` preview/import previously read large JSON before authentication and
+  export admission. Member/origin checks and the shared permit now precede bounded
+  JSON reads with a15s timeout; blocking decode retains admission through commit.
+  Real RED: anonymous malformed body returned400 instead of401. GREEN recovery
+  1/1 passed18.57s, including401/403 before malformed/incomplete32MiB reads,429
+  saturation,408 deadline, password import/export and durable restart/retry.
+- Physical restore could revive an old local session retained in its snapshot.
+  `crypto/restore.rs` now deletes account_sessions in the synchronous final
+  activation transaction alongside guest invalidation. Real PostgreSQL RED1/1
+  failed at old-session resurrection; GREEN1/1 passed4.03s, preserving accounts
+  and PHCs and allowing fresh login. Passwords/enabled/ACL still revert to the
+  snapshot; operators must audit/reset them before reopening a recovered service.
+
+Backend focused checks: three real-PG storage tests passed5.87s (bootstrap race,
+master/ordinary ACL, owner protection, reset CAS, disable/lockout, existing-book
+refusal); two auth body/cookie units and one cookie ambiguity unit passed. Server/
+storage Clippy and default server check passed. Independent production-mode
+HTTP/WS acceptance passed1/1 including CSRF/schema/body checks, secure cookies,
+forced-change HTTP/WS denial, ordinary-admin denial, master commit in another
+user's book, ordinary foreign-book denial, reset/disable/logout socket closure,
+restart-persistent lockout and absence of synthetic secrets/content in logs.
+
+Root checks: frontend340/340 (34files), ESLint/typecheck, locked frontend build,
+generated-protobuf check and full Prettier passed. Existing Vite>500kB chunk
+warning remains; no performance certification is claimed. Browser first-run
+acceptance passed1/1 in35.17s on privatePG18/real Chromium,1440px/DPR2 and390px:
+master setup/user creation, mandatory password change, user book creation, master
+library/read access, mobile AGPL/source dialog and disable-to-login refresh.
+Screenshots were visually inspected; artifacts remain private under ignored.local.
+
+Publication: complete unmodified GNU AGPL text, NOTICE, official-schema-validated
+CITATION.cff, Cargo/npm license metadata, SECURITY/CONTRIBUTING, concise README,
+self-hosting guide and historical development notes. Scientific citation is a
+request, not an extra license term. Browser license/source/warranty links and
+66-package locked production dependency notices are included. Buf's npm package
+omits standalone license texts, so its exact2.15.0 Apache/BSD texts are retained
+under docs/licenses and checked by the reproducible notices generator.
+
+Pinned transitive source-map-js1.2.2 fixes GHSA-68fv-2mgg-jv7q; pnpm12.6.0 frozen
+install and audit passed with0 known vulnerabilities. Repository hygiene tests2/2,
+path/metadata check and generated notices check passed. Gitleaks8.30.1 full history
+195commits and staged source scan found no secrets. The sole historical formula
+locale prose false positive is suppressed by exact commit/file/rule/line only;
+an initial staged finding in its explanatory comment was removed by rewording,
+without adding any broader suppression.
+
+GitHub CLI login used the user's completed device flow and OS credential store.
+Public https://github.com/web3gxd/PXEL was created and private vulnerability
+reporting enabled. No credential was written into the repository. CI adds an
+independent publication/license/Gitleaks job with pinned actions/tool archive.
+`just selfhost-check` runs fresh-instance nativePG HTTP/browser acceptance
+separately from the existing Compose smoke suite.
+
+Final combined Rust/default/all-feature Clippy and final UI regressions are
+recorded in the continuation below after actual completion. An initial combined
+Rust build attempt hit a Windows executable lock in the ignored reviewer fixture
+before tests began; copying the server into the fixture fixes the harness.
+Linux/Compose/remote CI, Linux WASI enforcement, trusted deployment HTTPS/proxy,
+load, operational backup/PITR/master recovery, upgrade/rollback and screen-reader
+acceptance remain open gates. No production deployment was performed.
+
+Local main merge is gated: the primary worktree C:/projects/PXEL contains
+uncommitted data-validation work. Those files and running demo data were not
+modified. Publication uses the isolated feat/open-source-release branch; no local
+main merge or backup tag is claimed while the primary worktree is dirty.
+
+Final frozen-source acceptance: HTTP/WebSocket plus first-run browser tests2/2
+passed88.88s against the freshly rebuilt server. Classic library, editor chrome,
+shell and sharing browser regressions passed36/36 at DPR1/DPR2 in1.7min. Two
+initial failures came from an obsolete automatic-dark-theme assertion: the
+existing fixed light palette was introduced in586e422 and documented inADR-117.
+The assertion now verifies that palette under both OS preferences; no theme
+behavior was changed. The independent reviewer confirmed the contract correction.
+
+RustSec cargo-audit0.22.2 reported0 vulnerabilities across396 locked dependencies;
+its informational yanked-package warning for yoke-derive0.8.3 remains recorded.
+No unverified dependency graph update was made. cargo-deny0.20.2 passed advisories,
+bans, licenses and sources. Existing duplicate-version warnings remain advisory.
+The combined Windows test fixture initially overwrote PATH using JavaScript's
+case-sensitive property lookup although the inherited key was Path. Its missing
+PowerShell executable caused one private-ACL test failure; the isolated test passed.
+The ignored harness now preserves the inherited path case-insensitively. This
+environment repair does not weaken product ACL checks or change product code.
+
+Corrected private-PG combined Rust gate passed: cargo test --locked --workspace
+--all-features,764 passed/0 failed/17 ignored, including169 storage and96 server
+tests. The17 existing ignored cases need separate backup fixtures(2), external
+S3 endpoints/credentials(8), or release timing/stress harnesses(7); they are not
+reported as passed. Independent review found no remaining concrete blocking
+P1/P2 in the checked auth/ACL/import/restore scope. This is source-release
+evidence, not verification of the remaining deployment gates above.
+
+Workspace Clippy --all-targets -D warnings passed in both default and
+--all-features configurations(74s/79s). Final Prettier, repository metadata/path
+check,66-package notices check, git diff whitespace checks and staged391KB
+Gitleaks scan also passed. The only migration edit after the runtime suite was
+removing a redundant trailing blank line; fresh-instance post-rebase acceptance
+exercised its current embedded checksum before remote source publication.
+
+Post-commit rebase onto main was up to date. Rebuilt the server without dev-auth
+from the current migration in65s; fresh private-PG HTTP/WS and Chromium first-run
+acceptance passed2/2 in40.25s, including master administration and forced password
+change. Fixtures stopped. Repeated frontend340/340, ESLint/typecheck, publication
+tests2/2,917-path check and66-package notices check passed. Full Git history after
+the source commit(196 commits) passed redacted Gitleaks with0 findings. The local
+main merge remains blocked by the unrelated dirty primary worktree; publishing
+this isolated source commit as the new GitHub main does not merge local main.

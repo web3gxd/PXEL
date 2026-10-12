@@ -1,5 +1,13 @@
 # Roadmap и gates
 
+2026-10-12: ADR-137 добавляет self-hosted onboarding с единственным master,
+локальные аккаунты, принудительную смену временного пароля, отзыв сессий и master
+доступ ко всем книгам. AGPL-3.0-only, автор web3gxd и CITATION.cff подготовлены
+для open-source публикации. Реальные проверки перечислены в RUNBOOK; Linux,
+Compose, operational deployment/restore/load и accessibility gates остаются
+открытыми. Исторические записи о недостающей production authentication ниже
+не описывают новый local-account срез и не закрывают остальные стадии.
+
 2026-10-07: ADR-136 добавляет atomic browser XLSX publication с candidate-bound
 preview, отчётом неподдерживаемых функций и стабильными retry receipts.
 Полный локальный E2E прошёл: свойства стилей/shared formulas/merges,100000-cell

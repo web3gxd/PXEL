@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { request as httpRequest } from 'node:http';
+import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import {
   api,
@@ -39,8 +41,51 @@ test(
     let server, client;
     try {
       server = await startServer(environment, base, join(fixture, 'before.log'));
-      const cookie = await login(base),
-        { snapshot } = await createDocument(base, cookie);
+      const cookie = await login(base);
+      for (const endpoint of ['/api/imports/pxel/preview', '/api/imports/pxel']) {
+        for (const [session, requestOrigin, expected] of [
+          [undefined, origin, 401],
+          [cookie, 'https://foreign.invalid', 403],
+        ]) {
+          const response = await fetch(base + endpoint, {
+            method: 'POST',
+            headers: {
+              Origin: requestOrigin,
+              'Content-Type': 'application/json',
+              ...(session ? { Cookie: session } : {}),
+            },
+            body: '{',
+            signal: AbortSignal.timeout(5000),
+          });
+          assert.equal(response.status, expected, 'authorization must precede JSON parsing');
+          const pending = incompleteImport(base, endpoint, session, requestOrigin, 5000);
+          try {
+            assert.equal(await pending.response, expected, 'rejected bodies must not be read');
+          } finally {
+            pending.request.destroy();
+          }
+        }
+      }
+      const pending = incompleteImport(base, '/api/imports/pxel/preview', cookie, origin, 20000);
+      try {
+        let busy;
+        for (let attempt = 0; attempt < 50; attempt++) {
+          busy = await fetch(base + '/api/imports/pxel', {
+            method: 'POST',
+            headers: { Origin: origin, Cookie: cookie, 'Content-Type': 'application/json' },
+            body: '{',
+            signal: AbortSignal.timeout(5000),
+          });
+          if (busy.status === 429) break;
+          assert.equal(busy.status, 400);
+          await delay(20);
+        }
+        assert.equal(busy?.status, 429, 'body reads must hold the shared import permit');
+        assert.equal(await pending.response, 408, 'incomplete authenticated bodies must time out');
+      } finally {
+        pending.request.destroy();
+      }
+      const { snapshot } = await createDocument(base, cookie);
       client = await connect(base, cookie);
       assert.equal((await client.send(setCommand(client, snapshot, 7))).case, 'committed');
       let current = await getDocument(base, cookie, snapshot.document_id);
@@ -112,3 +157,29 @@ test(
     }
   },
 );
+
+function incompleteImport(base, endpoint, cookie, requestOrigin, timeout) {
+  let request;
+  const response = new Promise((resolveResponse, reject) => {
+    request = httpRequest(
+      base + endpoint,
+      {
+        method: 'POST',
+        headers: {
+          Origin: requestOrigin,
+          'Content-Type': 'application/json',
+          'Content-Length': String(32 * 1024 * 1024),
+          ...(cookie ? { Cookie: cookie } : {}),
+        },
+        signal: AbortSignal.timeout(timeout),
+      },
+      (incoming) => {
+        incoming.resume();
+        resolveResponse(incoming.statusCode);
+      },
+    );
+    request.on('error', reject);
+    request.write('{');
+  });
+  return { request, response };
+}

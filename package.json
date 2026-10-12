@@ -18,12 +18,21 @@
     "proto:check": "node scripts/proto.mjs --check",
     "test:integration": "node --test --test-concurrency=1 tests/integration/server.test.mjs tests/integration/document.test.mjs tests/integration/history.test.mjs tests/integration/move.test.mjs tests/integration/network-convergence.test.mjs",
     "test:network-convergence": "node --test tests/integration/network-convergence.test.mjs",
-    "test:recovery": "node scripts/recovery.mjs"
+    "test:recovery": "node scripts/recovery.mjs",
+    "repository:check": "node --test tests/security/repository.test.mjs && node scripts/repository-check.mjs",
+    "notices:generate": "pnpm licenses list --prod --json | node scripts/third-party-notices.mjs",
+    "notices:check": "pnpm licenses list --prod --json | node scripts/third-party-notices.mjs --check"
   },
   "devDependencies": {
     "@bufbuild/buf": "1.73.0",
     "@bufbuild/protoc-gen-es": "2.15.0",
     "prettier": "3.9.9",
     "ws": "8.22.0"
+  },
+  "license": "AGPL-3.0-only",
+  "author": "web3gxd",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/web3gxd/PXEL.git"
   }
 }

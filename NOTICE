@@ -1,0 +1,19 @@
+PXEL
+Copyright (C) 2026 web3gxd
+https://github.com/web3gxd/PXEL
+
+PXEL's original code and documentation are licensed under the GNU Affero
+General Public License, version 3 only (SPDX: AGPL-3.0-only). See LICENSE.
+PXEL is provided without warranty, to the extent permitted by applicable law.
+
+Preserve applicable copyright and license notices when redistributing PXEL.
+For modified network versions, comply with AGPL section 13 and offer users
+the Corresponding Source. The license text, rather than this summary,
+defines your rights and obligations.
+
+Please credit PXEL and cite CITATION.cff when using it in research or a
+publication. This citation request does not impose an additional license term.
+
+Third-party dependencies, generated protocol runtime code and attributed test
+fixtures retain their own licenses and notices. Their licenses are not replaced
+by PXEL's license. Browser runtime notices: apps/web/public/third-party-notices.txt.

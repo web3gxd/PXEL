@@ -14,6 +14,7 @@ mod documents;
 #[cfg(test)]
 mod head_history_tests;
 mod history_api;
+mod local_auth_api;
 mod outbound;
 mod presence;
 mod privacy_api;
@@ -82,6 +83,9 @@ struct AppState {
     history_reads: Arc<Semaphore>,
     rate: Mutex<(Instant, u32)>,
     passwords: share_password::PasswordWorkers,
+    bootstrap_token_hash: Option<[u8; 32]>,
+    auth_admission: Arc<Semaphore>,
+    auth_rate: Mutex<(Instant, u32)>,
     share_admission: Arc<Semaphore>,
     sessions: spreadsheet_collab::InProcessSessionDirectory<PgDatabase>,
     delivery: delivery::DeliveryGates,
@@ -649,6 +653,14 @@ async fn main() -> anyhow::Result<()> {
         .encryption_readiness()
         .await
         .map_err(|_| anyhow::anyhow!("encrypted storage or retained keys are not ready"))?;
+    if config.dev_auth
+        && database
+            .local_instance_initialized()
+            .await
+            .map_err(|_| anyhow::anyhow!("local account readiness failed"))?
+    {
+        anyhow::bail!("development authentication cannot use an initialized local instance");
+    }
     if let Some(target) = key_rotation_target {
         let report = database.rotate_keys(&target).await.map_err(|_| {
             anyhow::anyhow!(
@@ -756,6 +768,9 @@ async fn main() -> anyhow::Result<()> {
         history_reads: Arc::new(Semaphore::new(2)),
         rate: Mutex::new((Instant::now(), 0)),
         passwords: share_password::PasswordWorkers::new().await?,
+        bootstrap_token_hash: config.bootstrap_token_hash,
+        auth_admission: Arc::new(Semaphore::new(2)),
+        auth_rate: Mutex::new((Instant::now(), 0)),
         share_admission: Arc::new(Semaphore::new(2)),
     });
     tokio::spawn(share_expiry_worker(state.clone()));
@@ -766,6 +781,25 @@ async fn main() -> anyhow::Result<()> {
             get(|| async { Json(Status { status: "alive" }) }),
         )
         .route("/readyz", get(ready))
+        .route("/api/auth/status", get(local_auth_api::status))
+        .route(
+            "/api/auth/session",
+            get(local_auth_api::status)
+                .post(local_auth_api::session)
+                .delete(local_auth_api::logout),
+        )
+        .route("/api/auth/logout", post(local_auth_api::logout))
+        .route("/api/auth/setup", post(local_auth_api::setup))
+        .route("/api/auth/login", post(local_auth_api::login))
+        .route("/api/auth/password", post(local_auth_api::password))
+        .route(
+            "/api/admin/accounts",
+            get(local_auth_api::accounts).post(local_auth_api::create_account),
+        )
+        .route(
+            "/api/admin/accounts/{user}",
+            post(local_auth_api::update_account),
+        )
         .route("/api/ws", get(websocket))
         .route("/api/shared/{link}/ws", get(shared_websocket))
         .route(

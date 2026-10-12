@@ -4,6 +4,7 @@ import { ServerEnvelopeSchema } from '../generated/pxel/wire/v1/session_pb';
 import type { DocumentStore } from '../document/store';
 import { boundedJson, decodeGuest, guestPath, type GuestSession } from '../sharing/api';
 import { decodeWelcome, encodeHello, reconnectDelay, SessionProtocolError } from './protocol';
+import { refreshAccount } from '../auth/sessionEvents';
 
 type ConnectionKind =
   'connecting' | 'online' | 'reconnecting' | 'offline' | 'unauthorized' | 'incompatible' | 'closed';
@@ -25,7 +26,7 @@ export function sessionEndpoints(guest?: Pick<GuestSession, 'linkId'>) {
         method: 'GET',
         websocket: `${guestPath(guest.linkId)}/ws`,
       }
-    : { session: '/api/dev/session', method: 'POST', websocket: '/api/ws' };
+    : { session: '/api/auth/session', method: 'POST', websocket: '/api/ws' };
 }
 export function useSession(document?: DocumentStore, guest = document?.transport.guest) {
   const [state, setState] = useState<ConnectionState>(CONNECTING);
@@ -97,6 +98,7 @@ export function useSession(document?: DocumentStore, guest = document?.transport
           return;
         }
         setState({ kind: 'unauthorized', label: 'Требуется авторизация' });
+        if (response.status === 401) refreshAccount();
         return;
       }
       if (!response.ok) {
@@ -210,6 +212,7 @@ export function useSession(document?: DocumentStore, guest = document?.transport
             closeAccess();
             return;
           }
+          if (unauthorized) refreshAccount();
           setState(
             unauthorized
               ? { kind: 'unauthorized', label: 'Требуется авторизация' }

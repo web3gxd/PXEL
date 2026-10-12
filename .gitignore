@@ -18,3 +18,10 @@ coverage/
 __pycache__/
 build/
 .DS_Store
+Thumbs.db
+*.key
+*.pem
+*.p12
+*.pfx
+*.dump
+*.backup

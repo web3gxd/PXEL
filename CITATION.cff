@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: 'If you use PXEL in research or a publication, please cite this software.'
+type: software
+title: PXEL
+authors:
+  - family-names: web3gxd
+    alias: web3gxd
+repository-code: 'https://github.com/web3gxd/PXEL'
+url: 'https://github.com/web3gxd/PXEL'
+license: AGPL-3.0-only
+abstract: 'Self-hosted collaborative spreadsheets with a Rust engine, PostgreSQL journal and browser interface.'
+keywords:
+  - spreadsheets
+  - self-hosted
+  - collaboration
+  - rust

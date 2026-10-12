@@ -377,6 +377,12 @@ impl PgDatabase {
                 .await
                 .map_err(|_error| CryptoError::KeyConflict)?;
         }
+        // A backup can contain sessions revoked after its snapshot. Require a
+        // fresh login before publishing the restored instance, atomically with
+        // activation of its new write lineage and invalidation of guest shares.
+        sqlx::query("DELETE FROM account_sessions")
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("INSERT INTO crypto_key_state(singleton,active_kek_id,rotated_at) VALUES(true,$1,clock_timestamp()) ON CONFLICT(singleton) DO UPDATE SET active_kek_id=EXCLUDED.active_kek_id,rotated_at=EXCLUDED.rotated_at")
             .bind(to).execute(&mut *tx).await?;
         let changed = sqlx::query("UPDATE crypto_restore_runs SET state='COMPLETE',completed_at=clock_timestamp() WHERE run_id=$1 AND target_kek_id=$2 AND target_physical_key_id=$3 AND state='PENDING'")
@@ -517,6 +523,33 @@ mod tests {
         sqlx::query_scalar("SELECT active_kek_id FROM crypto_key_state WHERE singleton=true")
             .fetch_one(&db.pool)
             .await
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn restore_activation_revokes_local_sessions_without_removing_accounts(
+        pool: sqlx::PgPool,
+    ) -> TestResult {
+        let db = database(pool).await?;
+        let phc = Zeroizing::new("$argon2id$v=19$m=65536,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned());
+        let master = db
+            .bootstrap_local_instance("master", phc, [101; 32])
+            .await?;
+        assert!(db.local_session([101; 32]).await?.is_some());
+        db.renew_write_generations_after_restore("fresh").await?;
+        assert!(
+            db.local_session([101; 32]).await?.is_none(),
+            "restored backup must not revive a previously revoked session"
+        );
+        let credential = db.local_credential("master").await?;
+        let logged_in = db
+            .complete_local_login(credential.as_ref(), true, [102; 32])
+            .await?
+            .ok_or("account missing after restore")?;
+        assert_eq!(logged_in.user_id, master.user_id);
+        assert!(logged_in.is_master);
+        assert!(db.local_session([102; 32]).await?.is_some());
+        db.encryption_readiness().await?;
+        Ok(())
     }
 
     #[sqlx::test(migrations = false)]

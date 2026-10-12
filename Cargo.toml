@@ -14,6 +14,9 @@ members = [
 ]
 
 [workspace.package]
+license = "AGPL-3.0-only"
+authors = ["web3gxd"]
+repository = "https://github.com/web3gxd/PXEL"
 version = "0.1.0"
 edition = "2024"
 publish = false

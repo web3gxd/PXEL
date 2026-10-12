@@ -26,6 +26,9 @@ import { XlsxImportPanel } from './XlsxImportPanel';
 import { parseMarkdownInWorker } from '../clipboard/markdown-worker-client';
 import { uuidV7 } from '../document/store';
 import './library.css';
+import { AccountControls } from '../auth/AccountControls';
+import { Legal } from '../auth/Legal';
+import { refreshAccount } from '../auth/sessionEvents';
 const templates = [
   {
     id: 'budget',
@@ -76,7 +79,8 @@ export function Home({ onOpen }: { onOpen: (id: string, markdown?: string) => vo
     setLoading(true);
     setError('');
     try {
-      const session = await fetch('/api/dev/session', { method: 'POST', signal });
+      const session = await fetch('/api/auth/session', { method: 'POST', signal });
+      if (session.status === 401) refreshAccount();
       if (!session.ok) throw new Error('Требуется авторизация для открытия библиотеки.');
       if (signal.aborted || run !== generation.current) return;
       setReady(true);
@@ -203,6 +207,7 @@ export function Home({ onOpen }: { onOpen: (id: string, markdown?: string) => vo
           </span>
           PXEL
         </a>
+        <AccountControls />
         <details
           className="library-storage library-encryption"
           onKeyDown={(event) => {
@@ -438,6 +443,7 @@ export function Home({ onOpen }: { onOpen: (id: string, markdown?: string) => vo
             передавайте отдельно.
           </p>
         </footer>
+        <Legal />
       </div>
       {pxel && <PxelPanel onClose={() => setPxel(false)} onImported={(id) => onOpen(id)} />}
       {csv && <CsvImportPanel onClose={() => setCsv(false)} onImported={(id) => onOpen(id)} />}

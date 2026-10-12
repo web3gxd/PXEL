@@ -1,6 +1,7 @@
 import { boundedJson, isUuid7, decodeDisclosureStamp, type DisclosureStamp } from '../sharing/api';
 import { authorizeClipboard } from '../sharing/disclosure';
 import { uuidV7 } from '../document/store';
+import { refreshAccount } from '../auth/sessionEvents';
 export type Metadata = { schema_version: 1; revision: number; title: string };
 export type Preference = {
   schema_version: 1;
@@ -100,6 +101,7 @@ async function request(
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: signal ?? AbortSignal.timeout(20_000),
   });
+  if (response.status === 401) refreshAccount();
   if (!response.ok)
     throw new Error(
       response.status === 409

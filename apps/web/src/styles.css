@@ -1632,6 +1632,15 @@ h1 {
   font-weight: 700;
   letter-spacing: 1px;
 }
+button.footer-wordmark {
+  display: inline-block;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
 .sr-only {
   width: 1px;
   height: 1px;

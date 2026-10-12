@@ -2,7 +2,7 @@
 use crate::{AppState, auth, documents::ApiError, pxel_file, pxel_workbook};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{FromRequest, Path, State},
     http::{HeaderMap, StatusCode},
     response::Response,
 };
@@ -259,7 +259,15 @@ async fn prepared(
     state: &Arc<AppState>,
     principal: &auth::Principal,
     mut input: ImportRequest,
-) -> Result<(pxel_workbook::Prepared, Composition), ApiError> {
+    import_permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<
+    (
+        pxel_workbook::Prepared,
+        Composition,
+        tokio::sync::OwnedSemaphorePermit,
+    ),
+    ApiError,
+> {
     if input.schema_version != 1 {
         return Err(ApiError(StatusCode::BAD_REQUEST, "pxel_version"));
     }
@@ -268,11 +276,6 @@ async fn prepared(
     if input.file_base64.len() > pxel_file::MAX_FILE.div_ceil(3) * 4 {
         return Err(error(pxel_file::FileError::Limit));
     }
-    let bytes = Zeroizing::new(
-        STANDARD
-            .decode(&input.file_base64)
-            .map_err(|_| error(pxel_file::FileError::Invalid))?,
-    );
     let doc = DocumentId::from_bytes(*uuid(&input.document_id)?.as_bytes())
         .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid_identity"))?;
     let request = uuid(&input.request_id)?;
@@ -281,14 +284,13 @@ async fn prepared(
         .passwords
         .admit()
         .map_err(|_| ApiError(StatusCode::TOO_MANY_REQUESTS, "password_busy"))?;
-    let import_permit = state
-        .exports
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| ApiError(StatusCode::TOO_MANY_REQUESTS, "import_busy"))?;
     tokio::task::spawn_blocking(move || {
         let _p = permit;
-        let _i = import_permit;
+        let bytes = Zeroizing::new(
+            STANDARD
+                .decode(&input.file_base64)
+                .map_err(|_| pxel_file::FileError::Invalid)?,
+        );
         let input = pxel_file::decrypt(&bytes, &secret)?;
         let digest = Sha256::digest(&*bytes);
         let prepared = pxel_workbook::prepare(&input, doc, actor, request, &digest)?;
@@ -320,19 +322,41 @@ async fn prepared(
             ],
             omitted_filters: input.settings.omitted_stale_filters,
         };
-        Ok((prepared, composition))
+        Ok((prepared, composition, import_permit))
     })
     .await
     .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "pxel_unavailable"))?
     .map_err(error)
 }
+
+async fn input(
+    state: &Arc<AppState>,
+    request: axum::extract::Request,
+) -> Result<(ImportRequest, tokio::sync::OwnedSemaphorePermit), ApiError> {
+    // Authentication precedes buffering; the permit also bounds pending uploads.
+    let permit = state
+        .exports
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError(StatusCode::TOO_MANY_REQUESTS, "import_busy"))?;
+    let Json(input) = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        Json::<ImportRequest>::from_request(request, state),
+    )
+    .await
+    .map_err(|_| ApiError(StatusCode::REQUEST_TIMEOUT, "pxel_request_timeout"))?
+    .map_err(|rejection| ApiError(rejection.status(), "pxel_options"))?;
+    Ok((input, permit))
+}
+
 pub async fn preview(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(input): Json<ImportRequest>,
+    request: axum::extract::Request,
 ) -> Result<Json<Composition>, ApiError> {
     let principal = member(&state, &headers).await?;
-    let (_, composition) = prepared(&state, &principal, input).await?;
+    let (input, permit) = input(&state, request).await?;
+    let (_, composition, _permit) = prepared(&state, &principal, input, permit).await?;
     if !matches!(state.auth.active(&principal).await, Ok(true)) {
         return Err(ApiError(StatusCode::UNAUTHORIZED, "unauthorized"));
     }
@@ -341,10 +365,11 @@ pub async fn preview(
 pub async fn import(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(input): Json<ImportRequest>,
+    request: axum::extract::Request,
 ) -> Result<(StatusCode, Json<crate::documents::Created>), ApiError> {
     let principal = member(&state, &headers).await?;
-    let (prepared, composition) = prepared(&state, &principal, input).await?;
+    let (input, permit) = input(&state, request).await?;
+    let (prepared, composition, _permit) = prepared(&state, &principal, input, permit).await?;
     if !matches!(state.auth.active(&principal).await, Ok(true)) {
         return Err(ApiError(StatusCode::UNAUTHORIZED, "unauthorized"));
     }

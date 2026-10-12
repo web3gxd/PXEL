@@ -42,6 +42,26 @@ impl Auth {
         share_cookie(token, link_id, remaining, !self.enabled)
     }
 
+    pub fn development_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub async fn local_session(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<Option<spreadsheet_storage::LocalSession>, DatabaseError> {
+        if self.enabled || contains_share_cookie(headers) {
+            return Ok(None);
+        }
+        let Some(hash) = local_session_hash(headers) else {
+            return Ok(None);
+        };
+        self.database
+            .local_session(hash)
+            .await
+            .map_err(|_| DatabaseError::SchemaNotReady)
+    }
+
     #[cfg(feature = "dev-auth")]
     pub async fn revoke(&self, headers: &HeaderMap) -> Result<(), DatabaseError> {
         if self.enabled
@@ -56,7 +76,13 @@ impl Auth {
 
     #[cfg(feature = "dev-auth")]
     pub async fn issue(&self, headers: &HeaderMap) -> Result<Option<String>, DatabaseError> {
-        if !self.enabled {
+        if !self.enabled
+            || self
+                .database
+                .local_instance_initialized()
+                .await
+                .map_err(|_| DatabaseError::SchemaNotReady)?
+        {
             return Ok(None);
         }
         let selected_account = headers.get("x-pxel-dev-account");
@@ -114,6 +140,28 @@ impl Auth {
             return Ok(None);
         }
         if !self.enabled {
+            let Some(session) = self.local_session(headers).await? else {
+                return Ok(None);
+            };
+            if session.account.must_change_password {
+                return Ok(None);
+            };
+            let Some(session_token_hash) = local_session_hash(headers) else {
+                return Ok(None);
+            };
+            return Ok(Some(Principal {
+                identity: session.identity,
+                expires_at: Instant::now() + Duration::from_secs(session.remaining_seconds),
+                session_token_hash,
+                scope: PrincipalScope::Member,
+            }));
+        }
+        if self
+            .database
+            .local_instance_initialized()
+            .await
+            .map_err(|_| DatabaseError::SchemaNotReady)?
+        {
             return Ok(None);
         }
         let Some(token) = session_token(headers) else {
@@ -161,11 +209,29 @@ impl Auth {
             return Ok(false);
         }
         match &principal.scope {
-            PrincipalScope::Member => Ok(self
+            PrincipalScope::Member if !self.enabled => Ok(self
                 .database
-                .find_development_session(principal.session_token_hash)
-                .await?
-                .is_some_and(|session| session.identity == principal.identity)),
+                .local_session(principal.session_token_hash)
+                .await
+                .map_err(|_| DatabaseError::SchemaNotReady)?
+                .is_some_and(|session| {
+                    session.identity == principal.identity && !session.account.must_change_password
+                })),
+            PrincipalScope::Member => {
+                if self
+                    .database
+                    .local_instance_initialized()
+                    .await
+                    .map_err(|_| DatabaseError::SchemaNotReady)?
+                {
+                    return Ok(false);
+                };
+                Ok(self
+                    .database
+                    .find_development_session(principal.session_token_hash)
+                    .await?
+                    .is_some_and(|session| session.identity == principal.identity))
+            }
             PrincipalScope::ShareGuest {
                 session,
                 token_hash,
@@ -188,8 +254,26 @@ fn cookie(token: &str, remaining: u64) -> String {
     format!("pxel_dev_session={token}; HttpOnly; SameSite=Strict; Path=/api; Max-Age={remaining}")
 }
 
-fn token_hash(token: &str) -> [u8; 32] {
+pub(super) fn token_hash(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
+}
+
+pub(super) fn local_session_hash(headers: &HeaderMap) -> Option<[u8; 32]> {
+    let mut values = headers.get_all(header::COOKIE).iter();
+    let cookies = values.next()?.to_str().ok()?;
+    if values.next().is_some() {
+        return None;
+    };
+    let mut tokens = cookies
+        .split(';')
+        .filter_map(|cookie| cookie.trim().strip_prefix("pxel_session="));
+    let token = tokens.next()?;
+    (tokens.next().is_none() && token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| token_hash(token))
+}
+
+pub(super) fn local_cookie(token: &str) -> String {
+    format!("pxel_session={token}; HttpOnly; Secure; SameSite=Strict; Path=/api; Max-Age=28800")
 }
 
 fn session_token(headers: &HeaderMap) -> Option<&str> {
@@ -257,6 +341,35 @@ pub fn valid_origin(headers: &HeaderMap, allowed: &[String]) -> bool {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+    #[test]
+    fn local_cookie_parser_rejects_ambiguous_or_malformed_bearers()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let token = "a".repeat(64);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("other=1; pxel_session={token}"))?,
+        );
+        assert_eq!(local_session_hash(&headers), Some(token_hash(&token)));
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("pxel_session={token}; pxel_session={token}"))?,
+        );
+        assert!(local_session_hash(&headers).is_none());
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("pxel_session={token}"))?,
+        );
+        headers.append(header::COOKIE, HeaderValue::from_static("other=1"));
+        assert!(local_session_hash(&headers).is_none());
+        headers.clear();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_static("pxel_session=short"),
+        );
+        assert!(local_session_hash(&headers).is_none());
+        Ok(())
+    }
     #[test]
     fn guest_cookie_is_scoped_and_secure_outside_development() {
         let link = uuid::Uuid::now_v7();

@@ -171,7 +171,9 @@ test('sharing dialog supports keyboard, paste, clipboard, and indefinite confirm
   expect(externalRequests).toEqual([]);
 });
 
-test('sharing surfaces follow light and dark system palettes', async ({ page }) => {
+test('sharing surfaces keep the light design palette for either system preference', async ({
+  page,
+}) => {
   await page.goto('/');
   await createBookFromUi(page);
   await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
@@ -182,6 +184,7 @@ test('sharing surfaces follow light and dark system palettes', async ({ page }) 
   const lightSurface = await dialog.evaluate(
     (element) => getComputedStyle(element).backgroundColor,
   );
+  await expect(dialog).toHaveCSS('color-scheme', 'light');
   await dialog.getByRole('slider', { name: 'Срок доступа' }).press('End');
   const lightWarning = await dialog
     .locator('.sharing-warning')
@@ -191,9 +194,10 @@ test('sharing surfaces follow light and dark system palettes', async ({ page }) 
   const darkWarning = await dialog
     .locator('.sharing-warning')
     .evaluate((element) => getComputedStyle(element).backgroundColor);
-  expect(darkSurface).not.toBe(lightSurface);
-  expect(darkWarning).not.toBe(lightWarning);
-  await expect(dialog).toHaveCSS('color-scheme', 'dark');
+  expect(darkSurface).toBe(lightSurface);
+  expect(darkWarning).toBe(lightWarning);
+  expect(lightWarning).not.toBe(lightSurface);
+  await expect(dialog).toHaveCSS('color-scheme', 'light');
   await page.emulateMedia({ colorScheme: 'light' });
-  await expect(dialog).toHaveCSS('color-scheme', 'light dark');
+  await expect(dialog).toHaveCSS('color-scheme', 'light');
 });

@@ -1,5 +1,12 @@
 # Архитектура PXEL
 
+2026-10-12: [ADR-137](adr/137-self-hosted-local-accounts-and-open-source.md)
+добавляет self-hosted master/user accounts, first-run onboarding и AGPL-3.0-only.
+Мастер имеет полный доступ ко всем книгам инстанса; обычные пользователи сохраняют
+document ACL. PostgreSQL, границы crates и commit/calculation contracts сохранены.
+Deployment gates — [self-hosting](self-hosting.md); описания dev-only auth ниже
+относятся к исторической foundation до этого среза.
+
 Foundation: **ACCEPTED FOR PHASE 0**, 2026-09-28. Последующее поручение
 продолжать все стадии записано в ADR-008; первый формульный профиль — в ADR-009.
 Это разрешение на реализацию не заменяет отдельных gates формул и collaboration.
@@ -38,7 +45,7 @@ flowchart LR
   Server --> Blob[BlobStore: local filesystem / S3]
 ```
 
-Сейчас работают health/readiness, dev auth boundary, protobuf transport,
+Сейчас работают health/readiness, self-hosted local accounts и dev auth boundary, protobuf transport,
 Canvas editing, durable CAS journal, bounded actor, filesystem BlobStore и
 optional S3 adapter. Moto 5.2.3 contract и server restart проверены;
 production Garage/российский S3 ещё не проверены.

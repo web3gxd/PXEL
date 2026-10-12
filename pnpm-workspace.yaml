@@ -2,3 +2,6 @@ packages:
   - apps/web
 allowBuilds:
   '@bufbuild/buf@1.73.0': true
+overrides:
+  # GHSA-68fv-2mgg-jv7q; keep the transitive build dependency on the fixed patch.
+  source-map-js: 1.2.2

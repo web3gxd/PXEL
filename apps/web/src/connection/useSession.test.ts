@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { sessionEndpoints } from './useSession';
 describe('session routing', () => {
-  it('keeps the existing member routes and authenticates guest reconnects without dev login', () => {
+  it('uses member authentication and keeps guest reconnects separate', () => {
     expect(sessionEndpoints()).toEqual({
-      session: '/api/dev/session',
+      session: '/api/auth/session',
       method: 'POST',
       websocket: '/api/ws',
     });

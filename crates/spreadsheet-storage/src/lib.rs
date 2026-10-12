@@ -25,6 +25,11 @@ pub use postgres::{AccessEpochChange, AccessEpochListener, DatabaseError, PgData
 pub use s3::S3BlobStore;
 
 mod development_sessions;
+mod local_accounts;
+pub use local_accounts::{
+    LocalAccount, LocalAccountError, LocalCredential, LocalSession, valid_local_password,
+    valid_local_username,
+};
 mod disclosure;
 mod personal_views;
 mod privacy;
