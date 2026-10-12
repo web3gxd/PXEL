@@ -8138,3 +8138,30 @@ Pinned-parent --check first reproduced stale notices locally; regenerate64 and
 Only the two extraneous MIT sections were removed. Frontend build and formatting
 passed; no runtime source or dependency version changed. The next CI run must
 verify Linux publication; the full production deployment gate remains open.
+
+## 2026-10-12 — Git identity cleanup and clean publication
+
+The user explicitly authorized rewriting the retired identity in all local Git
+repositories and every repository owned by web3gxd. Private XMAS account files,
+HAR captures and saved Codex context must be preserved. Global Git identity and
+PXEL's local override now use web3gxd and its public GitHub noreply address.
+Inventory found12 affected common repositories. Read-only independent review
+checked511 stored commits,9 tag objects and5049 historical blobs(339282557bytes):
+no retired identity occurs in file contents or commit/tag messages, and no
+signatures, nonstandard headers, historical gitlinks, replace refs, grafts or
+alternates require special migration. Source trees therefore remain unchanged.
+The rewrite must preserve all worktrees, dirty files/indexes, both PXEL stashes,
+reflog ordering and timestamps. Preparation uses isolated mirrors and private
+rollback copies; validation precedes replacing refs and cleaning old objects.
+
+The previous Linux publication job passed hygiene, licenses and full-history
+Gitleaks. Its full verify job then exposed an existing fresh-DB bootstrap defect:
+infra.mjs set DATABASE_URL before compiling the migration binary, so SQLx tried
+online query validation against an unmigrated schema and failed with69 errors.
+Bootstrap cargo now sets SQLX_OFFLINE=true to use checked-in query metadata;
+runtime migration retains the real DATABASE_URL. A subprocess regression first
+failed on inherited SQLX_OFFLINE=false, then passed as part of publication3/3.
+An isolated nativePG fixture moved from0 tables to all52 applied migrations,
+including snapshots/local_accounts/operations; no credentials appeared in its
+log and the fixture was stopped. Formatting/syntax/diff checks passed. This
+cached-build Windows check does not replace the next clean Linux/Compose run.

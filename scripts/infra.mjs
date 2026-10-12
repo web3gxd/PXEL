@@ -80,7 +80,14 @@ if (native) {
 }
 if (!process.argv.includes('--database-only')) {
   run('cargo', ['run', '-p', 'pxel-server', '--', 'migrate'], {
-    env: { ...process.env, ...ensureDevelopmentKeyring(), DATABASE_URL: databaseUrl },
+    // The database is still empty while Cargo compiles query! macros. Use the
+    // checked-in metadata for compilation, then migrate the real runtime URL.
+    env: {
+      ...process.env,
+      ...ensureDevelopmentKeyring(),
+      DATABASE_URL: databaseUrl,
+      SQLX_OFFLINE: 'true',
+    },
   });
 }
 console.log(
