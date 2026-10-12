@@ -8174,7 +8174,7 @@ reflog ordering/actors/timestamps were validated. Every rewritten repository
 passed fsck and a raw retained commit/tag scan after old objects were pruned.
 Other writers and automatic fetch were paused with explicit user confirmation.
 The retired remote in the local faceit_bot project was disconnected while its
-refs were retained. One ordinary archived note was redacted; protected account
+refs were retained. Two copies of an ordinary archived note were redacted; protected account
 files, HAR captures and Codex context were left intact as requested.
 
 The exact historical Gitleaks suppression must follow the rewritten commit ID;
@@ -8182,3 +8182,24 @@ the updated fingerprint passed a full198-commit scan with0 findings. No broader
 rule suppression was added. A final sweep of all local repositories and fresh
 GitHub repository publication follows; rollback copies remain private until
 verification completes and are then removed so they do not retain old identity.
+
+Final independent privacy sweep passed for all39 discovered common repositories,
+including five legacy Cline repositories whose old worktree paths no longer
+exist. It checked9781 retained commit/tag objects,215 common/worktree reflog files
+and58 Git config files/origins with0 retired identity matches and0 errors.
+The final gap was51 clone/fetch actor records in8 otherwise unaffected dependency/
+tool repositories. Those actors were replaced atomically after SHA256 equality
+checks; object IDs, messages, timestamps/timezones and ordering were preserved.
+No third-party commit history or source content was rewritten for those records.
+
+GitHub PXEL was deleted and recreated at the same URL after verified private
+backups and explicit delete_repo device authorization. The new repository ID is
+1415941539; its public main contains the rewritten history, contributors API lists
+only web3gxd, and an original historical commit lookup returns HTTP422/no commit.
+AGPL detection, topics and private vulnerability reporting are restored. New
+Linux publication hygiene/license/full-history Gitleaks CI passed; the full
+Linux/Compose verify job remains in progress and is not claimed passed.
+Neutral commit-ID maps are retained privately under ignored.local/identity-maps;
+original Git archives and auxiliary backups are removed after verification.
+Uncommitted primary-worktree data-validation work remains unchanged; no local
+main merge or production deployment was performed.
