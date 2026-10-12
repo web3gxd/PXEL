@@ -8272,3 +8272,15 @@ parity and audits. The verify job budget is raised from40 to60 minutes while all
 gates and test-level deadlines remain intact. Independent review approved this
 preventative budget adjustment; no CI deadline failure has been reproduced.
 The publication job keeps its10-minute budget.
+
+The repeated native smoke completed all77 live integration scenarios and all9
+restart/recovery scenarios. Its browser phase exposed two stale document.spec
+expectations: WASM initialization is schema6 under ADR-119, while the test still
+expected5; retrying recalculation reused a menu-button locator after the menu
+had closed. Both assertions now follow the current contracts. The lost-response
+test still requires exactly two requests with one operation ID, head3/epoch1,
+and correct restored formula/results without an optimistic preview. Independent
+review, ESLint, TypeScript and formatting passed; the two affected cases passed
+all4 real Chromium runs across DPR1/2. The diagnostic browser run was stopped
+for these changes; its partial output is not claimed as a full-suite pass.
+The preceding Linux run confirmed that both originally failing auth tests pass.

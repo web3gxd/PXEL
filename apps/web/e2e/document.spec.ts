@@ -402,7 +402,7 @@ test('persisted server context reaches real WASM initialization and survives rel
     });
   await expect.poll(async () => (await latest())?.calculation_context).toEqual(context);
   expect(await latest()).toMatchObject({
-    schema_version: 5,
+    schema_version: 6,
     last_axis_change_version: '1',
     retired_row_ids: [],
     retired_column_ids: [],
@@ -552,13 +552,14 @@ test('recalculate retries a lost HTTP response without committing a second epoch
       await route.continue();
     }
   });
-  const button = await editorButton(page, 'Пересчитать');
-  await button.click();
+  await (await editorButton(page, 'Пересчитать')).click();
   await expect.poll(async () => (await state()).version).toBe('3');
-  await expect(button).toBeEnabled();
-  await button.click();
+  const retryButton = await editorButton(page, 'Пересчитать');
+  await expect(retryButton).toBeEnabled();
+  await retryButton.click();
   await expect.poll(() => requests.length).toBe(2);
-  await expect(button).toBeEnabled();
+  await expect(await editorButton(page, 'Пересчитать')).toBeEnabled();
+  await page.keyboard.press('Escape');
   expect(requests[1]).toBe(requests[0]);
   const confirmed = await state();
   expect(confirmed.version).toBe('3');
