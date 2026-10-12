@@ -8198,8 +8198,28 @@ backups and explicit delete_repo device authorization. The new repository ID is
 only web3gxd, and an original historical commit lookup returns HTTP422/no commit.
 AGPL detection, topics and private vulnerability reporting are restored. New
 Linux publication hygiene/license/full-history Gitleaks CI passed; the full
-Linux/Compose verify job remains in progress and is not claimed passed.
-Neutral commit-ID maps are retained privately under ignored.local/identity-maps;
-original Git archives and auxiliary backups are removed after verification.
+Linux/Compose verification remains an open deployment gate; no successful full
+Linux run is recorded for this release yet.
+Neutral commit-ID maps are retained privately under ignored `.local/identity-maps`.
+Automatic safety review rejected removal of `.local/identity-cleanup`, the private
+needle inventory script and the original Gitleaks report with "blocked by policy",
+including a retry using individually verified literal Windows paths. These ignored,
+private original artifacts still contain the retired identity and require manual
+removal before machine-wide cleanup can be considered complete. Live Git
+repositories and the published GitHub repository passed their identity checks.
 Uncommitted primary-worktree data-validation work remains unchanged; no local
 main merge or production deployment was performed.
+
+The first recreated-repository Linux verify run passed fresh PostgreSQL bootstrap
+and protobuf checks, then failed Clippy on two platform-specific warnings in
+physical recovery: an unnecessary outer mutable DirBuilder binding on Unix, and
+a Windows stdout-normalization helper compiled into the non-test Linux binary.
+The outer binding is now immutable while the inner builder still sets mode0700.
+The helper uses cfg(any(windows,test)), preserving its cross-platform unit test.
+Independent read-only review found no changes to Windows normalization, process
+flags, lifecycle hooks or Unix permissions. Full Linux verification still requires
+a successful rerun; the warning fix does not itself close that gate.
+Local Rust formatting, default/all-feature workspace Clippy, nine restore tests,
+the binary-stdout unit test and publication checks3/3 passed. Final source/artifact
+scan checked993 files with0 unexpected identity matches, excluding the two blocked
+original report/script files and the separately retained original Git archives.

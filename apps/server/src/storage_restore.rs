@@ -439,7 +439,7 @@ async fn create_directory(path: &Path) -> Result<(), MaintenanceError> {
     tokio::task::spawn_blocking(move || {
         let builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
-        let mut builder = {
+        let builder = {
             use std::os::unix::fs::DirBuilderExt;
             let mut builder = builder;
             builder.mode(0o700);

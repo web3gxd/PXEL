@@ -1338,6 +1338,7 @@ pub(super) async fn pg_binary() -> Result<PathBuf, MaintenanceError> {
     Ok(binary)
 }
 
+#[cfg(any(windows, test))]
 fn restore_windows_binary_stdout(
     input: &[u8],
     pending_carriage_return: &mut bool,
