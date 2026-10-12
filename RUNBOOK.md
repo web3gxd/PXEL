@@ -8264,3 +8264,11 @@ through the accessible textbox name. The expected Z4 address, keyboard navigatio
 world! cell value and both DPR variants remain unchanged. Three isolated original
 test runs reproduced the failure before the assertion change. Linux verification
 and the complete smoke result remain pending their reruns.
+
+The cold Linux run spent roughly11 minutes installing pinned tools and reached
+Rust tests around17 minutes after job startup. Remaining gates include full Rust
+tests, nextest, WASM/frontend/SQLx builds, live recovery and282 Chromium cases,
+parity and audits. The verify job budget is raised from40 to60 minutes while all
+gates and test-level deadlines remain intact. Independent review approved this
+preventative budget adjustment; no CI deadline failure has been reproduced.
+The publication job keeps its10-minute budget.
