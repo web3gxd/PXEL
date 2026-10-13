@@ -8299,3 +8299,16 @@ Both fixtures passed independent review. All10 affected real Chromium cases
 passed at DPR1/2; full ESLint, TypeScript, formatting and diff checks passed.
 The diagnostic full-browser run was stopped for this combined fixture update;
 the complete428-case and Linux gates still require their final runs.
+
+The continuing browser diagnostic reproduced a Chromium DevTools response-body
+failure after a successful CSV download and another ADR-128 same-value fixture
+in move-history. The two CSV download cases now read the completed Playwright
+Download file; filename, exact bytes, formula escaping, reimport, sheet selection
+and unchanged workbook hash assertions remain intact. The move conflict fixture
+now requires a real foreign same-value operation with head+1 and identical sheets
+before asserting the unchanged UndoConflict behavior. No production code or
+dependencies changed. Independent review, full ESLint, TypeScript, formatting
+and diff checks passed. All6 targeted Chromium cases passed across DPR1/2.
+The continuing diagnostic includes earlier failures from its original source;
+it is not a final full-suite pass. A fresh Linux run on this commit is required
+to close the full-suite and deployment gates.

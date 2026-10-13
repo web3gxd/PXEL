@@ -1,6 +1,21 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Download, type Page } from '@playwright/test';
 import { uuidV7 } from '../src/document/store';
 import { selectValue } from './select';
+
+const fs = (
+  globalThis as unknown as {
+    process: {
+      getBuiltinModule(name: 'fs'): {
+        readFileSync(path: string, encoding: 'utf8'): string;
+      };
+    };
+  }
+).process.getBuiltinModule('fs');
+async function downloadText(download: Download) {
+  const path = await download.path();
+  if (!path) throw new Error('download path unavailable');
+  return fs.readFileSync(path, 'utf8');
+}
 
 const faults = new WeakMap<Page, string[]>();
 test.beforeEach(async ({ page, context }) => {
@@ -75,14 +90,11 @@ test('selected sheet CSV downloads confirmed formula values and reimports litera
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: test.info().outputPath('csv-export.png') });
   await expect(panel.getByLabel('Экранировать текст, похожий на формулу')).toBeChecked();
-  const firstResponse = page.waitForResponse((r) =>
-    new URL(r.url()).pathname.endsWith('/export.csv'),
-  );
   const firstDownload = page.waitForEvent('download');
   await panel.getByRole('button', { name: 'Скачать CSV', exact: true }).click();
-  const first = await firstResponse;
-  expect((await firstDownload).suggestedFilename()).toBe('PXEL.csv');
-  expect((await first.text()).replace(/^\uFEFF/, '')).toBe(
+  const first = await firstDownload;
+  expect(first.suggestedFilename()).toBe('PXEL.csv');
+  expect((await downloadText(first)).replace(/^\uFEFF/, '')).toBe(
     '"001","a, ""b"""\r\n"\'=SUM(A1)","true"\r\n"3","6"\r\n',
   );
   await panel.getByLabel('Экранировать текст, похожий на формулу').uncheck();
@@ -274,11 +286,9 @@ test('sheet selection exports the requested stable sheet without changing the bo
     [head.sheets[1], 'other sheet', '001'],
   ]) {
     await selectValue(panel.getByLabel('Лист', { exact: true }), sheet.id);
-    const response = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith('/export.csv'));
     const downloaded = page.waitForEvent('download');
     await panel.getByRole('button', { name: 'Скачать CSV', exact: true }).click();
-    const text = await (await response).text();
-    await downloaded;
+    const text = await downloadText(await downloaded);
     expect(text).toContain(expected);
     expect(text).not.toContain(omitted);
     await expect(panel.getByRole('button', { name: 'Скачать CSV', exact: true })).toBeEnabled();

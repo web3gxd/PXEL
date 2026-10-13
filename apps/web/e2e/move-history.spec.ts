@@ -216,8 +216,18 @@ for (const conflict of [
       await editor.bringToFront();
       await select(editor, 1, 3);
       await expect(active(editor)).toHaveText('D2: 7');
-      if (conflict === 'equal destination value') await write(editor, 1, 3, '7');
-      else await write(editor, 0, 7, conflict === 'new direct reference' ? '=D2+1' : '=SUM(C1:E3)');
+      if (conflict === 'equal destination value') {
+        const beforeOverwrite = await state(editor);
+        await bar(editor).fill('');
+        await bar(editor).fill('7');
+        await bar(editor).press('Enter');
+        await expect
+          .poll(async () => (await state(editor)).version)
+          .toBe(String(BigInt(beforeOverwrite.version) + 1n));
+        await expect(editor.getByTestId('save-status')).toHaveText('Сохранено');
+        expect((await state(editor)).sheets).toEqual(beforeOverwrite.sheets);
+      } else
+        await write(editor, 0, 7, conflict === 'new direct reference' ? '=D2+1' : '=SUM(C1:E3)');
       const before = await state(page);
       await page.bringToFront();
       await grid(page).focus();
