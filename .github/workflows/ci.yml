@@ -36,7 +36,7 @@ jobs:
           .tools/gitleaks/gitleaks git --log-opts=--all --redact=100 --no-banner
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
       RUST_TEST_THREADS: '2'
       NEXTEST_TEST_THREADS: '2'

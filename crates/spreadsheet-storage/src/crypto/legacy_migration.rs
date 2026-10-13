@@ -1401,12 +1401,28 @@ mod tests {
                     let data_root = PathBuf::from(data_root);
                     let source = data_root.join("content-source-blobs");
                     let target = data_root.join("content-migration-output");
-                    std::fs::create_dir(&source)?;
-                    std::fs::create_dir(&target)?;
+                    let directories = std::fs::DirBuilder::new();
+                    #[cfg(unix)]
+                    let directories = {
+                        use std::os::unix::fs::DirBuilderExt;
+                        let mut directories = directories;
+                        directories.mode(0o700);
+                        directories
+                    };
+                    directories.create(&source)?;
+                    directories.create(&target)?;
                     (source, None, target, None)
                 } else {
-                    let source = tempfile::tempdir()?;
-                    let target = tempfile::tempdir()?;
+                    let directories = tempfile::Builder::new();
+                    #[cfg(unix)]
+                    let directories = {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut directories = directories;
+                        directories.permissions(std::fs::Permissions::from_mode(0o700));
+                        directories
+                    };
+                    let source = directories.tempdir()?;
+                    let target = directories.tempdir()?;
                     (
                         source.path().to_owned(),
                         Some(source),

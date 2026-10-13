@@ -8312,3 +8312,38 @@ and diff checks passed. All6 targeted Chromium cases passed across DPR1/2.
 The continuing diagnostic includes earlier failures from its original source;
 it is not a final full-suite pass. A fresh Linux run on this commit is required
 to close the full-suite and deployment gates.
+
+Linux Actions38326279878 then exposed5 legacy-migration fixture failures:
+UnsafePath from LocalFilesystemBlobStore before migration assertions ran.
+Pinned tempfile3.27 creates directories with0777 masked by umask, while the
+storage root contract requires no group/other access. The test-only fixture now
+creates both temporary roots with0700 on Unix; the optional CLI fixture likewise
+sets0700 on its fresh directories at creation. Production permission and symlink
+guards, migration activation, encrypted rollback checks and assertions remain
+unchanged. Independent review approved the final cross-platform cfg blocks.
+The earlier browser diagnostic completed426/428 with only its2 pre-fix failures;
+the affected cases passed separately6/6 and again at DPR2. A fresh full-browser
+run and a fresh Linux run are still required for their final combined results.
+
+Measured startup and partial Linux verification took25.2 minutes before that
+storage failure; the native428-case browser run took43.1 minutes. Together these
+consume68.3 minutes before remaining builds, nextest, SQLx, HTTP/recovery, parity
+and audits. The verify budget is therefore raised75→90 minutes, preserving every
+gate, test deadline and concurrency rule. Independent review approved this
+preventative adjustment; an actual CI timeout has not been reproduced.
+
+The final Unix fixture patch passed all5 affected migration tests on native
+PostgreSQL, Rust formatting and all-target/all-feature storage Clippy without
+warnings. Unix permission behavior still requires the fresh Linux run.
+
+The fresh native browser run exposed another timing-dependent assertion: the
+draft-preview test counted every application/wasm response and expected exactly2.
+The failure trace shows two workbook Worker loads followed by a legitimate third
+load from FormulaSyntax's120ms-debounced diagnostics Worker after the invalid
+draft. Each book creation now independently waits for its WASM200 and completed
+response before editing; the diagnostics load cannot affect those assertions.
+Preview5, unconfirmed status, Escape cancellation, empty cells and exact durable
+version/hash checks are preserved. Independent review, full ESLint, TypeScript,
+formatting and diff checks passed. Three repetitions at both DPRs passed6/6.
+The continuing full diagnostic retains its earlier count failure; the fresh Linux
+run on this combined commit remains the final full-suite verification gate.

@@ -876,15 +876,17 @@ test('missing WASM visibly disables preview while server calculation remains ava
 test('WASM previews an unsaved draft and cancellation leaves the durable document unchanged', async ({
   page,
 }) => {
-  const wasmResponses: number[] = [];
-  page.on('response', (response) => {
-    if (response.headers()['content-type']?.startsWith('application/wasm'))
-      wasmResponses.push(response.status());
-  });
   await page.goto('/');
-  await createBookFromUi(page);
-  await expect(page.getByTestId('connection-status')).toHaveText('Подключено');
-  await createBookFromUi(page);
+  // Each editor loads its workbook Worker before formula diagnostics can load another WASM copy.
+  for (let book = 0; book < 2; book++) {
+    const wasmResponse = page.waitForResponse((response) =>
+      Boolean(response.headers()['content-type']?.startsWith('application/wasm')),
+    );
+    await createBookFromUi(page);
+    const response = await wasmResponse;
+    expect(response.status()).toBe(200);
+    expect(await response.finished()).toBeNull();
+  }
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   const id = new URL(page.url()).searchParams.get('document');
   const before = await page.evaluate(async (documentId) => {
@@ -909,8 +911,6 @@ test('WASM previews an unsaved draft and cancellation leaves the durable documen
   expect(after.version).toBe(before.version);
   expect(after.state_hash).toBe(before.state_hash);
   expect(after.sheets[0].cells).toEqual([]);
-  // Home creation and editor creation each open a separate editor page.
-  expect(wasmResponses).toEqual([200, 200]);
 });
 
 test('formula results recalculate while editors preserve source across reload', async ({
