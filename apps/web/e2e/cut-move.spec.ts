@@ -89,9 +89,20 @@ test('cut in one tab moves a formula range in another tab and updates inbound re
   await expect(bar(page)).toHaveValue('=(B2+1)');
   await second.reload();
   await expect(second.getByTestId('connection-status')).toHaveText('Подключено');
-  const restored = await (await second.request.get(`/api/documents/${id}`)).json();
+  await expect(second.locator('canvas')).toHaveAttribute(
+    'data-confirmed-state-hash',
+    /^[0-9a-f]{64}$/,
+  );
+  await expect(second.getByTestId('save-status')).toHaveText('Сохранено');
+  const restoredResponse = await second.request.get(`/api/documents/${id}`);
+  expect(restoredResponse.status()).toBe(200);
+  const restored = await restoredResponse.json();
   expect(restored.version).toBe('5');
   expect(restored.sheets[0].cells).toHaveLength(3);
+  await expect(second.locator('canvas')).toHaveAttribute(
+    'data-confirmed-state-hash',
+    restored.state_hash,
+  );
   expect(errors).toEqual([]);
   await second.close();
 });

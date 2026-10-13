@@ -17,11 +17,19 @@ async function fixture(page: import('@playwright/test').Page) {
       new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }),
     );
   });
-  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect(page.getByTestId('active-cell')).toHaveText('A1: Город');
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
+  const id = new URL(page.url()).searchParams.get('document')!;
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/documents/${id}`);
+      expect(response.status()).toBe(200);
+      const state = await response.json();
+      return { version: state.version, cells: state.sheets[0].cells.length };
+    })
+    .toEqual({ version: '2', cells: 8 });
   await expect(await editorButton(page, 'Вид листа')).toBeEnabled();
   await page.keyboard.press('Escape');
-  const id = new URL(page.url()).searchParams.get('document')!;
   return { grid, id, state: async () => (await page.request.get(`/api/documents/${id}`)).json() };
 }
 

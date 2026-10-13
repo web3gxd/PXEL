@@ -10,6 +10,7 @@ export async function cutSelection(page: Page) {
 }
 
 async function writeSelection(page: Page, key: 'C' | 'X') {
+  await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   const sentinel = `PXEL clipboard pending ${Date.now()}`;
   await page.evaluate((text) => navigator.clipboard.writeText(text), sentinel);

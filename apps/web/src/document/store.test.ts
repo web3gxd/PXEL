@@ -1995,6 +1995,39 @@ const historyResponse = (overrides: Record<string, unknown> = {}) => ({
   truncation_reason: null,
   ...overrides,
 });
+describe('privacy finding invalidation', () => {
+  it('ignores empty analysis refreshes while updating real finding hit targets', async () => {
+    const { store } = await connectedStore();
+    const state = projection(),
+      secondRow = uuidV7();
+    state.sheets[0]!.rows.push(secondRow);
+    store.load(state);
+    const initialRevision = store.privacyFindingRevision;
+    const first = { sheet_id: sheetId, row_id: rowId, column_id: columnId };
+    const second = { ...first, row_id: secondRow };
+    store.privacyFindings = [];
+    expect(store.privacyFindingRevision).toBe(initialRevision);
+    expect(store.privacyFindingAt({ row: 0, column: 0 })).toBe(false);
+    expect(store.privacyFindingAt({ row: 1, column: 0 })).toBe(false);
+    store.privacyFindings = [first];
+    expect(store.privacyFindingRevision).toBe(initialRevision + 1);
+    expect(store.privacyFindingAt({ row: 0, column: 0 })).toBe(true);
+    expect(store.privacyFindingAt({ row: 1, column: 0 })).toBe(false);
+    store.privacyFindings = [second];
+    expect(store.privacyFindingRevision).toBe(initialRevision + 2);
+    expect(store.privacyFindingAt({ row: 0, column: 0 })).toBe(false);
+    expect(store.privacyFindingAt({ row: 1, column: 0 })).toBe(true);
+    store.privacyFindings = [];
+    expect(store.privacyFindingRevision).toBe(initialRevision + 3);
+    expect(store.privacyFindingAt({ row: 0, column: 0 })).toBe(false);
+    expect(store.privacyFindingAt({ row: 1, column: 0 })).toBe(false);
+    store.privacyFindings = [];
+    expect(store.privacyFindingRevision).toBe(initialRevision + 3);
+    expect(store.privacyFindingAt({ row: 1, column: 0 })).toBe(false);
+    store.dispose();
+  });
+});
+
 describe('drag autofill', () => {
   it('keeps the last masked view during refresh without allowing stale originals or fill', async () => {
     const { store } = await connectedStore();

@@ -4,6 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import {
   ClientEnvelopeSchema,
+  RejectionCode,
   ServerEnvelopeSchema,
 } from '../src/generated/pxel/wire/v1/session_pb';
 import { uuidV7, type Projection } from '../src/document/store';
@@ -52,6 +53,7 @@ async function formulas(page: Page, start: number, count: number) {
       },
     }),
   );
+  const operationIds = Array.from({ length: count }, () => bytes(uuidV7()));
   const commands = Array.from({ length: count }, (_, offset) => {
     const row = start + offset;
     return [
@@ -64,7 +66,7 @@ async function formulas(page: Page, start: number, count: number) {
             value: {
               actorId: bytes(identity.actor_id),
               documentId: bytes(before.document_id),
-              operationId: bytes(uuidV7()),
+              operationId: operationIds[offset]!,
               baseVersion: BigInt(before.version) + BigInt(offset),
               clientSequence: BigInt(offset + 1),
               formulaCommand: {
@@ -81,45 +83,93 @@ async function formulas(page: Page, start: number, count: number) {
       ),
     ];
   });
-  const frames = await page.evaluate(
-    ({ hello, commands }) =>
-      new Promise<number[][]>((resolve, reject) => {
+  const deadline = Date.now() + 20000;
+  const socket = await page.evaluateHandle(
+    (hello) =>
+      new Promise<WebSocket>((resolve, reject) => {
         const url = new URL('/api/ws', location.href);
-        url.protocol = 'ws:';
+        url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const socket = new WebSocket(url);
         socket.binaryType = 'arraybuffer';
-        const frames: number[][] = [];
-        let welcomed = false;
         const timer = setTimeout(() => {
           socket.close();
           reject(new Error('Diagnostic fixture timed out'));
         }, 20000);
         socket.onopen = () => socket.send(new Uint8Array(hello));
-        socket.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-          if (!welcomed) {
-            welcomed = true;
-            socket.send(new Uint8Array(commands[0]!));
-            return;
-          }
-          frames.push([...new Uint8Array(event.data)]);
-          if (frames.length < commands.length)
-            socket.send(new Uint8Array(commands[frames.length]!));
-          else {
-            clearTimeout(timer);
-            socket.close();
-            resolve(frames);
-          }
+        socket.onmessage = () => {
+          clearTimeout(timer);
+          resolve(socket);
         };
         socket.onerror = () => {
           clearTimeout(timer);
           socket.close();
           reject(new Error('Diagnostic fixture connection failed'));
         };
+        socket.onclose = () => {
+          clearTimeout(timer);
+          reject(new Error('Diagnostic fixture connection closed'));
+        };
       }),
-    { hello: [...hello], commands },
+    [...hello],
   );
-  for (const frame of frames)
-    expect(fromBinary(ServerEnvelopeSchema, new Uint8Array(frame)).payload.case).toBe('committed');
+  try {
+    for (const [offset, command] of commands.entries()) {
+      for (let attempt = 0; ; attempt++) {
+        const timeout = deadline - Date.now();
+        expect(timeout, 'Diagnostic fixture deadline exceeded').toBeGreaterThan(0);
+        const frame = await socket.evaluate(
+          (socket, { command, timeout }) =>
+            new Promise<number[]>((resolve, reject) => {
+              const timer = setTimeout(
+                () => reject(new Error('Diagnostic fixture timed out')),
+                timeout,
+              );
+              socket.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+                clearTimeout(timer);
+                resolve([...new Uint8Array(event.data)]);
+              };
+              socket.onerror = () => {
+                clearTimeout(timer);
+                reject(new Error('Diagnostic fixture connection failed'));
+              };
+              socket.onclose = () => {
+                clearTimeout(timer);
+                reject(new Error('Diagnostic fixture connection closed'));
+              };
+              socket.send(new Uint8Array(command));
+            }),
+          { command, timeout },
+        );
+        const response = fromBinary(ServerEnvelopeSchema, new Uint8Array(frame));
+        expect(response.protocolVersion).toBe(1);
+        const payload = response.payload;
+        if (payload.case === 'rejected') {
+          expect(payload.value.documentId).toEqual(bytes(before.document_id));
+          expect(payload.value.operationId).toEqual(operationIds[offset]);
+          expect(payload.value.code).toBe(RejectionCode.RETRYABLE_CONFLICT);
+          expect(payload.value.retryable).toBe(true);
+          expect(payload.value.resyncRequired).toBe(true);
+          expect(attempt).toBeLessThan(5);
+          // A rejected command does not advance the head. Retry its exact bytes
+          // before sending the next command with the next base version.
+          const remaining = deadline - Date.now();
+          expect(remaining, 'Diagnostic fixture deadline exceeded').toBeGreaterThan(0);
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.min(100 * 2 ** attempt, remaining)),
+          );
+          continue;
+        }
+        expect(payload.case).toBe('committed');
+        if (payload.case !== 'committed') throw new Error('Missing committed diagnostic fixture');
+        expect(payload.value.documentId).toEqual(bytes(before.document_id));
+        expect(payload.value.operationId).toEqual(operationIds[offset]);
+        expect(payload.value.committedVersion).toBe(BigInt(before.version) + BigInt(offset + 1));
+        break;
+      }
+    }
+  } finally {
+    await socket.evaluate((socket) => socket.close()).finally(() => socket.dispose());
+  }
   await expect
     .poll(async () => (await book(page)).version)
     .toBe(String(BigInt(before.version) + BigInt(count)));

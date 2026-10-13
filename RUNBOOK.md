@@ -8362,3 +8362,38 @@ guest/comment and revocation checks are unchanged. Both patches passed independe
 review, full ESLint, TypeScript, formatting and diff checks. All6 sharing repetitions
 at DPR1/2 passed as well. No production code or dependencies changed; a fresh
 Linux run remains required.
+
+Linux Actions38330629350 completed every Chromium case:422/428 passed and6
+failed in56.8 minutes. HTTP/integration77/77 and recovery9/9 passed; both Clippy
+profiles, all Rust/frontend tests and builds, and SQLx checks passed earlier.
+Smoke exited1 after assertions; this was not a timeout. The job took89m54s before
+parity/audit, so its budget is raised90→120 minutes with all gates unchanged.
+
+The first diagnostics fixture rejection was typed RETRYABLE_CONFLICT; advancing
+the fixture after that rejection caused cascading BASE_VERSION_AHEAD failures.
+It now retries the exact serialized command only for that typed retryable/resync
+response, at most5 times with bounded backoff within the original20s deadline.
+Every committed response must match operation/document IDs and exact committed
+version before the next command; the99/100 threshold and unchanged history/hash
+checks remain intact. The precise underlying database conflict is not logged.
+
+Clipboard copy/cut fixtures now wait for the selected content's save status
+before requesting durable authorization. The views paste fixture previously
+read its initial saved status before asynchronous paste submission; it now waits
+after the optimistic cell and requires the exact durable version2/eight cells
+before taking a baseline. Cut-move reload waits for a confirmed canvas hash and
+completed loading before a strict HTTP200/version5/three-cell/hash comparison.
+Its prior GET returned an error-shaped object; the exact HTTP status is unknown,
+so no HTTP error retries were added and no429/503 cause is claimed.
+
+The single-cell paint test exposed a real unnecessary full redraw: a delayed
+disabled privacy analysis assigned an empty finding list over an already empty
+list, incrementing the overlay revision and replacing the one-cell metrics.
+The setter now treats only empty→empty as a no-op. A new public hit-target test
+failed before the fix and passed afterward; adding, moving and removing real
+findings still invalidates targets. Exact browser dirty1/paint3136 assertions,
+privacy mask and clipboard security checks remain unchanged. Independent review
+approved the focused patches. All341 frontend unit tests, ESLint, TypeScript
+and formatting passed; the production frontend build passed as well.
+All6 affected browser scenarios passed3 repetitions at
+each DPR:36/36 in4.0 minutes. A fresh full Linux run remains required.

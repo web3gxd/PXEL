@@ -1300,6 +1300,7 @@ export class DocumentStore {
     return this.privacyFindingList;
   }
   set privacyFindings(value: { sheet_id: string; row_id: string; column_id: string }[]) {
+    if (!value.length && !this.privacyFindingList.length) return;
     this.privacyFindingList = value;
     this.privacyFindingKeys = new Set(value.map((f) => `${f.sheet_id}/${f.row_id}/${f.column_id}`));
     this.privacyFindingRevision++;
