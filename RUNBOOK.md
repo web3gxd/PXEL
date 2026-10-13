@@ -8397,3 +8397,32 @@ approved the focused patches. All341 frontend unit tests, ESLint, TypeScript
 and formatting passed; the production frontend build passed as well.
 All6 affected browser scenarios passed3 repetitions at
 each DPR:36/36 in4.0 minutes. A fresh full Linux run remains required.
+
+Linux Actions38339045342 on9abf022 completed in81m56s: publication and the
+combined formatting/lint/unit/database/build checks passed, including760 Rust
+tests (17 ignored) and760 nextest tests (17 skipped), plus341 frontend tests
+in both runs. HTTP/integration77/77 and recovery9/9 passed. Chromium passed
+426/428 in53.0 minutes; all6 previously failing scenarios passed. Two new
+fixture failures exited smoke1, so parity/audit did not run. A separate fresh
+native full browser run on the same commit passed428/428 in42.0 minutes.
+
+RAND's preview fixture captured an earlier displayed result after the server's
+epoch had advanced, before the browser received the matching calculation.
+It now requires confirmed version4/epoch2/hash and a complete calculation with
+the same input version, epoch and context. It selects A1 by sheet/row/column IDs
+and waits for exact UI/result equality before capturing the preview baseline.
+The exact RAND+1, unconfirmed preview, unchanged version, Escape restoration
+and later durable/reload epoch assertions remain intact.
+
+The profiler's successful UI POST200 could no longer be read through Chromium's
+response-body cache. The fixture still verifies that request's exact schema1
+and version and the successfully decoded UI report, then reads a repeated
+fixed-context analysis through APIRequestContext. The read-only analysis does
+not advance context or commit; all formula/cycle/dependency/result/hash/history,
+stale-report and focus assertions remain. Independent review approved both
+test-only changes; no production code or dependencies changed.
+
+All12 targeted browser checks passed in1.4 minutes: both scenarios repeated3
+times at each DPR. Full ESLint, TypeScript, formatting and diff checks passed;
+publication tests5/5, hygiene918 paths and notices64 packages passed. The new
+full Linux run remains required, including parity/audit after smoke.

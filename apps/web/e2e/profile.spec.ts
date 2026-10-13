@@ -61,7 +61,19 @@ test('fixed context profiling preserves results and head and exposes potential b
   await (await editorButton(page, 'Профайлер')).click();
   const response = await responsePromise;
   expect(response.status()).toBe(200);
-  const report = await response.json();
+  expect(response.request().postDataJSON()).toEqual({
+    schema_version: 1,
+    document_version: before.version,
+  });
+  const dialog = page.getByRole('dialog', { name: 'Профайлер формул' });
+  await expect(dialog.getByRole('status').first()).toContainText('Формул: 5');
+  // Read the same fixed-context analysis independently of Chromium's response-body cache.
+  const analysis = await page.request.post(`${path}/profile`, {
+    headers: { Origin: new URL(page.url()).origin },
+    data: { schema_version: 1, document_version: before.version },
+  });
+  expect(analysis.status()).toBe(200);
+  const report = await analysis.json();
   expect(report.formula_count).toBe(5);
   expect(report.document_version).toBe(before.version);
   expect(report.context_id).toBe(before.calculation_context!.context_id);
@@ -70,8 +82,6 @@ test('fixed context profiling preserves results and head and exposes potential b
   expect(
     report.formulas.filter((formula: { cycle_or_blocked: boolean }) => formula.cycle_or_blocked),
   ).toHaveLength(2);
-  const dialog = page.getByRole('dialog', { name: 'Профайлер формул' });
-  await expect(dialog.getByRole('status').first()).toContainText('Формул: 5');
   await dialog.getByRole('button', { name: 'Лист 1!C1', exact: true }).click();
   await expect(
     dialog.getByRole('button', { name: 'Выбрать цепочку Лист 1!A2', exact: true }),

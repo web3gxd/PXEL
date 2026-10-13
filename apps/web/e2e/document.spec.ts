@@ -135,9 +135,50 @@ test('volatile RAND preview stays separate and durable epoch survives reload', a
   await bar.press('Enter');
   await expect(page.getByTestId('save-status')).toHaveText('Сохранено');
   await expect.poll(async () => (await state()).calculation_context?.epoch).toBe('2');
+  const confirmed = await state();
+  expect(confirmed.version).toBe('4');
+  expect(confirmed.calculation_context.epoch).toBe('2');
+  await expect(page.locator('canvas')).toHaveAttribute(
+    'data-confirmed-state-hash',
+    confirmed.state_hash,
+  );
+  const sheet = confirmed.sheets[0];
+  let authoritativeA1 = Number.NaN;
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/documents/${id}/calculation`);
+      expect([200, 202]).toContain(response.status());
+      const calculated = await response.json();
+      const a1 = calculated.values?.find(
+        (cell: {
+          sheet_id: string;
+          row_id: string;
+          column_id: string;
+          value: { type: string; value: number };
+        }) =>
+          cell.sheet_id === sheet.id &&
+          cell.row_id === sheet.rows[0] &&
+          cell.column_id === sheet.columns[0],
+      );
+      authoritativeA1 = a1?.value.value ?? Number.NaN;
+      return {
+        status: calculated.status,
+        version: calculated.input_version,
+        epoch: calculated.calculation_epoch,
+        context: calculated.context_id,
+        valueType: a1?.value.type,
+      };
+    })
+    .toEqual({
+      status: 'complete',
+      version: confirmed.version,
+      epoch: confirmed.calculation_context.epoch,
+      context: confirmed.calculation_context.context_id,
+      valueType: 'number',
+    });
   await grid.focus();
   await page.keyboard.press('ArrowUp');
-  await expect(active).toHaveText(/^A1: 0\./);
+  await expect(active).toHaveText(`A1: ${authoritativeA1}`);
   const first = await active.textContent();
   const number = Number(first?.slice(4));
   expect(number).toBeGreaterThanOrEqual(0);
