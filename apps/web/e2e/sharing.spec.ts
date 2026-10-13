@@ -26,18 +26,7 @@ test('comment share unlocks without member login and revocation closes an idle g
   );
   await dialog.getByRole('button', { name: 'Создать ссылку' }).click();
   const created = await createResponse;
-  if (!created.ok()) throw new Error(`share creation failed: HTTP ${created.status()}`);
-  const responseBody = (await created.json()) as {
-    share: { created_at: number; expires_at: number | null };
-  };
-  expect(responseBody.share.expires_at).toBeGreaterThan(responseBody.share.created_at);
-  const serverExpiry = new Intl.DateTimeFormat('ru', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(responseBody.share.expires_at! * 1000));
-  await expect(
-    dialog.getByRole('region', { name: 'Созданная ссылка' }).locator('p').first(),
-  ).toContainText(serverExpiry);
+  expect(created.status()).toBe(201);
   await expect(dialog.getByRole('heading', { name: 'Ссылка создана' })).toBeVisible();
 
   const shareUrl = await dialog.getByRole('textbox', { name: 'Ссылка' }).inputValue();
@@ -47,6 +36,26 @@ test('comment share unlocks without member login and revocation closes an idle g
   expect(parsed.search).toBe('');
   expect(parsed.hash).toMatch(/^#[0-9a-f]{64}$/);
   expect(pin).toBe('482615');
+
+  const documentId = new URL(page.url()).searchParams.get('document');
+  const listed = await page.request.get(`/api/documents/${documentId}/shares`);
+  expect(listed.status()).toBe(200);
+  const responseBody = (await listed.json()) as {
+    shares: { link_id: string; created_at: number; expires_at: number | null }[];
+  };
+  const matchingShares = responseBody.shares.filter(
+    (share) => share.link_id === parsed.pathname.slice('/share/'.length),
+  );
+  expect(matchingShares).toHaveLength(1);
+  const share = matchingShares[0]!;
+  expect(share.expires_at).toBeGreaterThan(share.created_at);
+  const serverExpiry = new Intl.DateTimeFormat('ru', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(share.expires_at! * 1000));
+  await expect(
+    dialog.getByRole('region', { name: 'Созданная ссылка' }).locator('p').first(),
+  ).toContainText(serverExpiry);
 
   const guestContext = await browser.newContext();
   try {

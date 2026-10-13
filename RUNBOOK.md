@@ -8347,3 +8347,18 @@ version/hash checks are preserved. Independent review, full ESLint, TypeScript,
 formatting and diff checks passed. Three repetitions at both DPRs passed6/6.
 The continuing full diagnostic retains its earlier count failure; the fresh Linux
 run on this combined commit remains the final full-suite verification gate.
+
+The continuing browser run exposed two more test observation races. Privacy
+veil baseline label/grid rectangles were measured in separate browser turns;
+the temporary privacy-analysis header disappeared between them and shifted the
+grid by15px. The test now measures both rectangles atomically and polls the
+same exact relative scroll offsets(-56/-98, precision0). Clipping, local reveal,
+exclusions and durable version/hash assertions remain intact. All6 repetitions
+at DPR1/2 passed. Sharing's POST201 browser response body was unavailable through
+CDP; the trace does not establish a causal navigation. The test now checks POST201,
+successful UI creation and a unique matching committed link_id from the owner
+shares endpoint, then compares its server expiry against the UI. PIN/token,
+guest/comment and revocation checks are unchanged. Both patches passed independent
+review, full ESLint, TypeScript, formatting and diff checks. All6 sharing repetitions
+at DPR1/2 passed as well. No production code or dependencies changed; a fresh
+Linux run remains required.

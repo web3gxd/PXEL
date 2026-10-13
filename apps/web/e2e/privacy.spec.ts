@@ -348,8 +348,16 @@ test('automatic rectangular veil reveals only locally and excludes checked findi
   );
   await expect(page.getByText('test@example.com', { exact: true })).toHaveCount(0);
   const veil = page.getByRole('button', { name: 'Раскрыть данные B4', exact: true });
-  const fullLabel = (await veil.locator('.privacy-veil-label').boundingBox())!;
-  const fullArea = (await page.locator('.grid-scroll').boundingBox())!;
+  const labelOffset = () =>
+    veil.locator('.privacy-veil-label').evaluate((element) => {
+      const area = element.closest('.grid-surface')?.querySelector('.grid-scroll');
+      if (!area) throw new Error('Grid scroll area is missing');
+      // Read both rectangles together: the privacy-analysis status can resize the header.
+      const label = element.getBoundingClientRect();
+      const grid = area.getBoundingClientRect();
+      return { x: label.x - grid.x, y: label.y - grid.y };
+    });
+  const fullOffset = await labelOffset();
   await veil.hover();
   await expect(
     page.locator('.privacy-veil-value').filter({ hasText: 'test@example.com' }),
@@ -368,9 +376,8 @@ test('automatic rectangular veil reveals only locally and excludes checked findi
     area = (await page.locator('.grid-scroll').boundingBox())!;
   expect(clipped.x).toBeGreaterThanOrEqual(area.x + GRID.rowHeaderWidth);
   expect(clipped.y).toBeGreaterThanOrEqual(area.y + GRID.columnHeaderHeight);
-  const scrollingLabel = (await veil.locator('.privacy-veil-label').boundingBox())!;
-  expect(scrollingLabel.x - area.x).toBeCloseTo(fullLabel.x - fullArea.x - 56, 0);
-  expect(scrollingLabel.y - area.y).toBeCloseTo(fullLabel.y - fullArea.y - 98, 0);
+  await expect.poll(async () => (await labelOffset()).x).toBeCloseTo(fullOffset.x - 56, 0);
+  await expect.poll(async () => (await labelOffset()).y).toBeCloseTo(fullOffset.y - 98, 0);
   await page.screenshot({ path: `../../.local/privacy-veil-partial-${info.project.name}.png` });
   await page.locator('.grid-scroll').evaluate((element) => {
     element.scrollLeft = 0;
